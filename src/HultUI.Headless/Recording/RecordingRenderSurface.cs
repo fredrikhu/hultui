@@ -1,4 +1,6 @@
 using HultUI.Core.Rendering;
+using HultUI.Rendering.Skia;
+using SkiaSharp;
 
 namespace HultUI.Headless.Recording;
 
@@ -7,7 +9,7 @@ namespace HultUI.Headless.Recording;
 /// <see cref="RenderLog"/> while still rendering normally through the inner
 /// surface — snapshot and pixel capture can be used together.
 /// </summary>
-internal sealed class RecordingRenderSurface : IRenderSurface
+internal sealed class RecordingRenderSurface : IRenderSurface, ISkiaFrameCapture
 {
     private readonly IRenderSurface _inner;
     private readonly RecordingRenderContext _context;
@@ -35,6 +37,14 @@ internal sealed class RecordingRenderSurface : IRenderSurface
         => _inner.Resize(widthPx, heightPx, scaleFactor);
 
     public void Present() => _inner.Present();
+
+    /// <summary>The inner surface's frame: recording draws nothing of its own.</summary>
+    public SKImage PresentCapturing()
+    {
+        if (_inner is ISkiaFrameCapture capture) return capture.PresentCapturing();
+        _inner.Present();
+        throw new NotSupportedException("The recorded surface cannot hand over its frame.");
+    }
 
     public void Dispose() => _inner.Dispose();
 }

@@ -479,7 +479,11 @@ public sealed partial class LayoutEngine
             // so as tall as that width makes it: measured at that width, or it would be measured
             // from its content — a box with none at no height — and Phase 6 would force that.
             // The line it is on is then that wide, so Phase 6 stretches it to the same width.
-            float? stretchedWidth = !isRow && StretchesAcross(child, containerAlign, crossAvailable)
+            // So is a box with side margins: Phase 6 forces it to its line less those margins, and
+            // offered the whole line here its content — a wrapping row, wrapping text — was laid
+            // out wider, on fewer lines, than it is drawn (the next item then sat on its last line).
+            float? stretchedWidth = !isRow && (StretchesAcross(child, containerAlign, crossAvailable)
+                    || StretchesInsideMargins(child, containerAlign, crossAvailable))
                 ? float.MaxNative(0f, crossAvailable - childBox.Margin.Horizontal)
                 : null;
             if (stretchedWidth is not null)
@@ -1748,6 +1752,16 @@ public sealed partial class LayoutEngine
         RatioOf(child) > 0f
         && child.BoxRead.Width.IsAuto
         && child.BoxRead.Height.IsAuto
+        && !LayoutSpace.IsUnbounded(crossAvailable)
+        && ResolveAlignSelf(child.FlexRead.AlignSelf, containerAlign) == AlignItems.Stretch;
+
+    /// <summary>Whether a column stretches <paramref name="child"/>, of auto width with side
+    /// margins, across the room it has: Phase 6 forces it to its line less those margins, so the
+    /// measure pass has to measure it at that width (a box without margins is measured at the
+    /// line's width unforced, which comes to the same).</summary>
+    private static bool StretchesInsideMargins(Element child, AlignItems containerAlign, float crossAvailable) =>
+        child.BoxRead.Margin.Horizontal > 0f
+        && child.BoxRead.Width.IsAuto
         && !LayoutSpace.IsUnbounded(crossAvailable)
         && ResolveAlignSelf(child.FlexRead.AlignSelf, containerAlign) == AlignItems.Stretch;
 

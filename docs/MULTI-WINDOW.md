@@ -109,6 +109,23 @@ window.Closed += () =>
 - **A changed desktop is handled.** Bounds are fitted to the monitors there are now (`WindowPlacement.FitTo`): a window whose monitor is gone is centred on the nearest one, one hanging off an edge slides back, one larger than its monitor shrinks to it. A window counts as reachable while 100 px of its top edge, with the 32 px caption band below it, is on some monitor — a custom title bar out of reach cannot be dragged back.
 - **Headless and hosted windows.** Under a `HeadlessSession` the placement is recorded and read back, not applied, so an app's save-and-restore wiring is testable without a desktop; the maximized flag is applied. A WinForms-hosted control returns null: its form owns its placement.
 
+### Monitors
+
+`Application.Monitors` lists the desktop's monitors as `MonitorInfo` records: `Bounds`, `WorkArea` (less the task bar), `Scale` and `Dpi`, `Orientation` (portrait when taller than wide), `IsPrimary`, `RefreshRate`, a stable-while-connected `Id` and a `Name`. They are in the same desktop units as `WindowPlacement` — physical pixels on Windows, SDL window coordinates elsewhere — and in no particular order: `MonitorInfo.InReadingOrder` sorts them left to right.
+
+```csharp
+var monitors = MonitorInfo.InReadingOrder(app.Monitors);
+var images = app.CreateWindow("Images", 1600, 1000);
+images.MoveToMonitor(monitors[1]);                          // maximized over its work area
+viewer.MoveToMonitor(monitors[2], MonitorFit.Fullscreen);   // the whole monitor, no chrome
+app.MonitorsChanged += Rearrange;                           // a monitor plugged, unplugged, rotated
+```
+
+- **`Window.MoveToMonitor(monitor, fit)`** maximizes the window on the monitor (`MonitorFit.Maximized`, the default), covers it (`Fullscreen`), or centres it at its current size (`Centered`). It is built on `Placement`, so the restored bounds land on the monitor too, and it works before `Run` to open a window in place.
+- **`Window.Monitor`** is the monitor the window's placement overlaps most; `MonitorInfo.For(rect, monitors)` answers the same for any rectangle.
+- **`Application.MonitorsChanged`** fires on the UI thread from the event pump, once per batch of display events; `Monitors` already holds the new list. The OS has moved windows off a monitor that went — an app that arranged windows by monitor re-arranges them here.
+- **Headless.** `HeadlessOptions.Monitors` gives a session a simulated desktop (`HeadlessMonitors.Row((1920, 1080), (2560, 1440), (1440, 2560))`); placements then move and resize the window's surface, so each window can be captured at its monitor's size, and `HeadlessSession.SetMonitors` simulates a hot-plug. See [HEADLESS.md](HEADLESS.md).
+
 ### Single instance
 
 `SingleInstance` keeps one running copy of an app per person: a later launch hands its command line to the copy already running and exits. Claim before building anything, listen once the app exists:

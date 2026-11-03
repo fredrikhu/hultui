@@ -117,49 +117,57 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
     //    Each call names the interface the COM method returns, so the caller
     //    gets the matching tear-off (see NativeProvider.As). ──
 
-    /// <summary>The cached native root object (bridge-owned reference).</summary>
-    private IntPtr RootNativePrimary()
+    // Looked up and AddRef'd under _nativeLock, the lock Drop and Dispose take to remove and
+    // release the bridge's reference: done outside it, a UIA thread could read the pointer, the UI
+    // thread release the last reference and free the object, and the AddRef write freed memory.
+
+    /// <summary>The root as tear-off <paramref name="which"/>, AddRef'd; Zero once disposed.</summary>
+    private IntPtr RootRef(NativeProvider.As which)
     {
-        IntPtr p = Volatile.Read(ref _rootNative);
-        if (p != IntPtr.Zero) return p;
         lock (_nativeLock)
         {
+            if (_disposed) return IntPtr.Zero;
             if (_rootNative == IntPtr.Zero)
                 _rootNative = NativeProvider.Create(_fragmentRoot); // refcount 1 = bridge's ref
-            return _rootNative;
+            return NativeProvider.Tearoff(_rootNative, which);
         }
     }
 
-    /// <summary>The cached native object for an element, or Zero if it has no wrapper.</summary>
-    private IntPtr ElementNativePrimary(ElementId id)
+    /// <summary>An element's cached native object as tear-off <paramref name="which"/>, AddRef'd,
+    /// or Zero if it has no wrapper.</summary>
+    private IntPtr ElementRef(ElementId id, NativeProvider.As which)
     {
-        if (_nativeByElement.TryGetValue(id, out var p)) return p;
         if (!_wrappers.TryGetValue(id, out var wrapper)) return IntPtr.Zero;
         lock (_nativeLock)
         {
-            if (_nativeByElement.TryGetValue(id, out p)) return p;
-            p = NativeProvider.Create(wrapper); // refcount 1 = bridge's ref
-            _nativeByElement[id] = p;
-            return p;
+            if (!_nativeByElement.TryGetValue(id, out var p))
+            {
+                // Again under the lock: an element dropped meanwhile (Drop) gets no object that
+                // nothing would ever detach.
+                if (!_wrappers.ContainsKey(id)) return IntPtr.Zero;
+                p = NativeProvider.Create(wrapper); // refcount 1 = bridge's ref
+                _nativeByElement[id] = p;
+            }
+            return NativeProvider.Tearoff(p, which);
         }
     }
 
     /// <summary>The root as IRawElementProviderSimple* (WM_GETOBJECT, events).</summary>
-    internal IntPtr NativeRootSimple() => NativeProvider.Tearoff(RootNativePrimary(), NativeProvider.As.Simple);
+    internal IntPtr NativeRootSimple() => RootRef(NativeProvider.As.Simple);
 
     /// <summary>The root as IRawElementProviderFragment* (a fragment's parent).</summary>
-    internal IntPtr NativeRootFragment() => NativeProvider.Tearoff(RootNativePrimary(), NativeProvider.As.Fragment);
+    internal IntPtr NativeRootFragment() => RootRef(NativeProvider.As.Fragment);
 
     /// <summary>The root as IRawElementProviderFragmentRoot* (GetFragmentRoot).</summary>
-    internal IntPtr NativeRootFragmentRoot() => NativeProvider.Tearoff(RootNativePrimary(), NativeProvider.As.FragmentRoot);
+    internal IntPtr NativeRootFragmentRoot() => RootRef(NativeProvider.As.FragmentRoot);
 
     /// <summary>A cached fragment as IRawElementProviderFragment* (Navigate, hit-test, focus), or null.</summary>
     internal IntPtr NativeFragment(ElementId? id)
-        => id is null ? IntPtr.Zero : NativeProvider.Tearoff(ElementNativePrimary(id.Value), NativeProvider.As.Fragment);
+        => id is null ? IntPtr.Zero : ElementRef(id.Value, NativeProvider.As.Fragment);
 
     /// <summary>A cached fragment as IRawElementProviderSimple* (events, selection container), or null.</summary>
     internal IntPtr NativeFragmentSimple(ElementId? id)
-        => id is null ? IntPtr.Zero : NativeProvider.Tearoff(ElementNativePrimary(id.Value), NativeProvider.As.Simple);
+        => id is null ? IntPtr.Zero : ElementRef(id.Value, NativeProvider.As.Simple);
 
     /// <summary>The HWND host provider, AddRef'd (chains our tree to the window's non-client tree).</summary>
     internal IntPtr HostProviderRef()
@@ -571,11 +579,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
             var id = removed.Node.ElementId;
             if (_wrappers.TryGetValue(id, out var wrapper) && wrapper.Generation == generation)
                 continue;
-            _wrappers.TryRemove(id, out _);
-            // Drop the bridge's reference to the element's cached native object;
-            // it frees once any client references are also released.
-            if (_nativeByElement.TryRemove(id, out var native))
-                Marshal.Release(native);
+            Drop(id);
         }
 
         // 3) Apply property changes to surviving wrappers.
@@ -739,10 +743,44 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         foreach (var (id, wrapper) in _wrappers)
         {
             if (wrapper.Generation == generation) continue;
-            _wrappers.TryRemove(id, out _);
-            if (_nativeByElement.TryRemove(id, out var native))
-                Marshal.Release(native);
+            Drop(id);
         }
+    }
+
+    /// <summary>
+    /// Drops an element that left the tree: its wrapper, and its native object, which a client
+    /// may still hold. UI Automation is told the provider is gone (UiaDisconnectProvider), and the
+    /// object is cut from its wrapper: every call a client makes on it, or on a pattern or a text
+    /// range of the element, answers UIA_E_ELEMENTNOTAVAILABLE, not the name, value or text it
+    /// showed, and it no longer keeps the old tree alive. A locked screen that replaced a
+    /// person's details left them readable from every element a client had held.
+    /// </summary>
+    private void Drop(ElementId id)
+    {
+        _wrappers.TryRemove(id, out _);
+        IntPtr native;
+        lock (_nativeLock)
+            if (!_nativeByElement.TryRemove(id, out native)) return;
+
+        // Told while the object still answers: UI Automation may ask it for its runtime id.
+        IntPtr simple = NativeProvider.Tearoff(native, NativeProvider.As.Simple);
+        try { UiaInterop.UiaDisconnectProvider(simple); }
+        finally { Marshal.Release(simple); }
+        NativeProvider.Detach(native);
+        Marshal.Release(native);
+        ProviderDisconnected?.Invoke(id);
+    }
+
+    /// <summary>For tests: told of each element whose provider the bridge disconnected (<see cref="Drop"/>).</summary>
+    internal Action<ElementId>? ProviderDisconnected;
+
+    /// <summary>Whether a provider's element left the tree (or the bridge is gone): a node's
+    /// element has no wrapper, a virtual list item's list has none.</summary>
+    internal bool IsGone(ElementId id)
+    {
+        if (VirtualItemId.TryDecode(id, out var listId, out _))
+            return listId == default || !_wrappers.ContainsKey(listId);
+        return !_wrappers.ContainsKey(id);
     }
 
     /// <summary>
@@ -954,7 +992,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
             {
                 IntPtr root = self.NativeRootSimple(); // UiaReturnRawElementProvider wants IRawElementProviderSimple*
                 IntPtr lresult = UiaInterop.UiaReturnRawElementProvider(hwnd, wParam, lParam, root);
-                Marshal.Release(root); // UIA took its own reference
+                if (root != IntPtr.Zero) Marshal.Release(root); // UIA took its own reference
                 self._host.RootRequested();
                 return lresult;
             }
@@ -1007,6 +1045,11 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
     internal void ToggleElement(ElementId id) => _host.ToggleElement(id);
     internal void SelectElement(ElementId id) => _host.SelectElement(id);
     internal void SetValue(ElementId id, string value) => _host.SetValue(id, value);
+    internal void ExpandCollapse(ElementId id, bool expand) => _host.ExpandCollapseElement(id, expand);
+    internal void ScrollElementIntoView(ElementId id) => _host.ScrollElementIntoView(id);
+    /// <summary>Whether a node's value may not be written: a text area's or a rich text editor's,
+    /// as the text it offers says (read from the node, on any thread, as its text pattern is).</summary>
+    internal bool IsValueReadOnly(ElementId id) => GetText(id) is { IsReadOnly: true };
     /// <summary>
     /// A node's value for the Value pattern, from its node, as its ValueValue property answers
     /// (<see cref="UiaFragment.GetPropertyValue"/>): for a node that offers text, the version its
@@ -1057,10 +1100,21 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         // Drop the bridge's references to cached native objects.
         lock (_nativeLock)
         {
+            // Detached too: a client that holds one after the window is gone reads nothing of it.
             foreach (var native in _nativeByElement.Values)
+            {
+                NativeProvider.Detach(native);
                 Marshal.Release(native);
+            }
             _nativeByElement.Clear();
-            if (_rootNative != IntPtr.Zero) { Marshal.Release(_rootNative); _rootNative = IntPtr.Zero; }
+            // The root as well: a client holding it would otherwise keep the bridge and the last
+            // tree alive, and read the window's name from it.
+            if (_rootNative != IntPtr.Zero)
+            {
+                NativeProvider.Detach(_rootNative);
+                Marshal.Release(_rootNative);
+                _rootNative = IntPtr.Zero;
+            }
         }
 
         if (_hostProviderPtr != IntPtr.Zero)

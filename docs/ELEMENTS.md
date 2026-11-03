@@ -154,6 +154,13 @@ start, no context menu from that press), and hover catches up on the release.
 This is how `Slider` keeps following a drag that wanders off its track. The
 release still synthesizes a click when it lands on the captured element.
 
+**Positions inside a transformed subtree.** `e.Position` is in window coordinates;
+`e.LocalPosition` is relative to the current target's content box *in that element's own
+layout units*: the `Element.Transform` of every ancestor (and the element's own) is undone
+first, as hit testing does. So a view laid out at full size and drawn scaled down — a monitor
+preview, a live thumbnail — reads a drag at the size it was laid out. `HitTester.ToElementSpace(
+element, windowPoint)` does the same mapping for any point.
+
 Handlers are replaced by each rebuild's versions during reconciliation, so closures stay in sync with what the element displays. One rule: never capture the element variable itself — for hover/press/focus styling use the declarative `.OnHover`/`.OnPressed`/`.OnFocus` overrides (they survive rebuilds and restore the base look automatically), use `e.CurrentTarget` for other self-references (e.g. reading `.Layout`), and `Ref<T>` for cross-element reach. See "Event handlers follow the latest build" in REACTIVITY.md.
 
 ### Identity
@@ -723,6 +730,33 @@ Canvas.New()       // Without draw callback (set Draw property later)
 | `DrawRoundedRect(rect, radius, fill)` | Filled rounded rectangle |
 | `DrawRoundedRectStroke(rect, radius, color, strokeWidth)` | Rounded rectangle outline |
 | `DrawText(text, position, color, fontSize)` | Text at a given position |
+| `DrawText(text, position, color, fontSize, halo, haloWidth)` | Text over a halo — its glyph outlines stroked `haloWidth` wide in `halo` — legible on any background (labels over photographs and dark images) |
+| `MeasureText(text, fontSize)` | Advance width of `text` in the font `DrawText` uses, for placing and separating labels |
+| `DrawImage(source, dest, sourceRect, sampling)` | A rectangle of an image (in its own pixels) over `dest`, resampled per `ImageSampling` (`Nearest`, `Linear`, `Cubic`, or `Default`); frame sources are cut too |
+| `FillPolygon(points, fill)` / `DrawPolyline(points, color, width)` | Antialiased polygon fill and open polyline |
+| `PushClip(rect)` / `PushTransform(matrix)` / `Pop()` | Clip and transform until the matching `Pop`; the matrix is in canvas coordinates |
+
+A clip or transform the callback leaves open is undone when it returns (`PopAll`), so it never
+leaks into the elements painted after the canvas.
+
+**Showing an image under your own zoom, pan and rotation.** `DrawImage` with a source
+rectangle is the zoom and pan, `PushTransform` around it the rotation or mirror, and the
+sampling decides what a magnified pixel looks like: `Nearest` keeps it a hard-edged square
+(what someone inspecting single pixels wants), `Cubic` is the smooth choice for a
+picture fitted to its view. Fed from a `PixelFrameSink` in `PixelFormat.Gray8`, a monochrome
+image uploads one byte a pixel when its grey levels change.
+
+```csharp
+var view = Canvas.New(ctx =>
+{
+    var b = ctx.Bounds;
+    ctx.PushClip(new Rect(0, 0, b.Width, b.Height));
+    ctx.PushTransform(Matrix3x2.CreateRotation(MathF.PI / 2, new Vector2(b.Width / 2, b.Height / 2)));
+    ctx.DrawImage(sink, new Rect(0, 0, b.Width, b.Height), new Rect(0, 0, 512, 512), ImageSampling.Cubic);
+    ctx.Pop();
+    ctx.Pop();
+});
+```
 
 **Example:**
 
@@ -881,7 +915,9 @@ intrinsic size. The renderer holds a frame from the draw until the frame is
 flushed and only then hands it back, so a producer never overwrites what is being
 uploaded; with three slots it never has to wait for it either. The `x` formats
 (`Rgbx8888`, `Bgrx8888`) are opaque with the fourth byte ignored, which is what a
-decoder emitting `rgb0`/`bgr0` needs. Under the headless host the render log
+decoder emitting `rgb0`/`bgr0` needs. `Gray8` is one byte a pixel, opaque grey — a
+monochrome image after its grey-level mapping — and its rows are `width` bytes, not
+`width * 4` (`PixelFormats.BytesPerPixel` says which). Under the headless host the render log
 records `version=N` for every frame drawn.
 
 ---
@@ -1615,16 +1651,23 @@ TextArea.New("initial text")       // pre-filled; caret at the end
     .OnTextChanged(t => _notes = t)
     .ReadOnly()                    // selectable and scrollable, not editable
     .Spans(highlightSpans)         // IReadOnlyList<TextSpan>, colour and decoration per range
-    .Highlights(findMatches);      // IReadOnlyList<TextHighlight>, a background per range
+    .Highlights(findMatches)       // IReadOnlyList<TextHighlight>, a background per range
+    .GrowsWithContent();           // as tall as its wrapped text; the page scrolls, not the area
 ```
 
-Those five are the only fluent members; everything else is a property.
+Those six are the only fluent members; everything else is a property.
+
+**Growing with its text.** By default an area is the size layout gives it and scrolls its
+rows inside that — an editor pane. `GrowsWithContent` makes it measure as its wrapped rows
+(one at least) at the width it is offered, so a field in a flowing document — a report
+section, a notes box — pushes what follows down as lines are typed, and the scroll view
+around the page does the scrolling. An explicit height or a flex grow still wins.
 
 | Property | Type | Notes |
 |---|---|---|
 | `Text` | `string` | setting it collapses the selection to a caret, and a different value forgets the undo history |
 | `CursorPosition` | `int` | UTF-16 offset |
-| `SelectionStart`, `SelectionEnd`, `HasSelection`, `SelectedText` | read-only | document-order |
+| `SelectionStart`, `SelectionEnd`, `HasSelection`, `SelectedText` | read-only | document-order; `Select(anchor, caret)` sets a range from code |
 | `CanUndo`, `CanRedo` | read-only | false while `ReadOnly` |
 | `ReadOnly` | `bool` | |
 

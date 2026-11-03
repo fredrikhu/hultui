@@ -11,8 +11,10 @@ namespace HultUI.Platform.Accessibility.Windows;
 /// Windows. Every call reads the text as it is now, from the node's source, on UIA's thread.
 /// </summary>
 [SupportedOSPlatform("windows")]
-internal sealed class UiaTextProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeTextProvider
+internal sealed class UiaTextProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeTextProvider, IElementBound
 {
+    public bool Gone => bridge.IsGone(elementId);
+
     public int GetSelection(out IntPtr pRetVal)
     {
         var text = UiaTextRange.TextOf(bridge, elementId);
@@ -94,7 +96,7 @@ internal sealed class UiaTextProvider(WindowsAccessibilityBridge bridge, Element
 /// line, page is the document.
 /// </remarks>
 [SupportedOSPlatform("windows")]
-internal sealed class UiaTextRange : INativeTextRange
+internal sealed class UiaTextRange : INativeTextRange, IElementBound
 {
     private static readonly AccessibleText Empty = new("");
 
@@ -113,6 +115,7 @@ internal sealed class UiaTextRange : INativeTextRange
     internal int Start => _start;
     internal int End => _end;
     internal ElementId ElementId => _elementId;
+    public bool Gone => _bridge.IsGone(_elementId);
 
     internal static AccessibleText TextOf(WindowsAccessibilityBridge bridge, ElementId id) => bridge.GetText(id) ?? Empty;
 

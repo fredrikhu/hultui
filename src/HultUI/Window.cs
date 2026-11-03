@@ -15,7 +15,7 @@ using HultUI.Core.Threading;
 
 namespace HultUI;
 
-public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer, IPreFrameHost
+public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer, IPreFrameHost
 {
     private readonly LayoutEngine _layoutEngine;
     private readonly FocusManager _focusManager = new();
@@ -401,6 +401,45 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     }
 
     public void ToggleFullscreen() => SetFullscreen(!IsFullscreen);
+
+    /// <summary>
+    /// The monitor the window is on: the one its <see cref="Placement"/> overlaps most (for a
+    /// maximized or full-screen window, the one it fills). Null when the platform lists no
+    /// monitors (<see cref="Application.Monitors"/>) or cannot say where the window is.
+    /// </summary>
+    public MonitorInfo? Monitor
+    {
+        get
+        {
+            var monitors = Application.Monitors;
+            if (monitors.Count == 0 || Placement is not { IsUsable: true } p) return null;
+            return MonitorInfo.For(new Rect(p.X, p.Y, p.Width, p.Height), monitors);
+        }
+    }
+
+    /// <summary>
+    /// Puts the window on <paramref name="monitor"/>: maximized over its work area (the
+    /// default), full screen over all of it, or at its current size centred on it.
+    /// </summary>
+    /// <remarks>
+    /// <para>The window leaves full screen first, since a full-screen window belongs to the
+    /// monitor it covers, and its restored bounds land on the new monitor too, so
+    /// un-maximizing it later keeps it there. Called before <see cref="Application.Run"/>, the
+    /// window opens in place, like a <see cref="Placement"/> set then.</para>
+    /// <para>Built on <see cref="Placement"/>, so it inherits that property's platform rules:
+    /// Wayland takes the size and state but never a position, and a headless session moves the
+    /// window only when it was given monitors (<c>HeadlessOptions.Monitors</c>).</para>
+    /// </remarks>
+    public void MoveToMonitor(MonitorInfo monitor, MonitorFit fit = MonitorFit.Maximized)
+    {
+        ArgumentNullException.ThrowIfNull(monitor);
+        if (IsFullscreen) SetFullscreen(false);
+        var current = Placement;
+        int width = current is { IsUsable: true } c ? c.Width : (int)(LayoutWidth * DisplayScale);
+        int height = current is { IsUsable: true } d ? d.Height : (int)(LayoutHeight * DisplayScale);
+        Placement = monitor.Center(width, height, maximized: fit != MonitorFit.Centered);
+        if (fit == MonitorFit.Fullscreen) SetFullscreen(true);
+    }
 
     /// <summary>Current viewport width in density-independent (layout) units.</summary>
     public float LayoutWidth => PlatformWindow.LayoutWidth;
@@ -1544,6 +1583,24 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         for (int i = 0; i < children.Count; i++) CollectGpuSources(children[i], into);
     }
 
+    /// <summary>Whether <see cref="RenderFrame"/> is running for this window (UI thread).</summary>
+    internal bool IsDrawingFrame { get; private set; }
+
+    /// <summary>Sets <see cref="IsDrawingFrame"/> for a frame, cleared however the frame ends.</summary>
+    private readonly struct DrawingFrame : IDisposable
+    {
+        private readonly Window _window;
+        public DrawingFrame(Window window) { _window = window; Set(window, true); }
+        public void Dispose() => Set(_window, false);
+
+        // The SDL window too: its event watcher must not resize the surface under the frame.
+        private static void Set(Window window, bool drawing)
+        {
+            window.IsDrawingFrame = drawing;
+            if (window.PlatformWindow is HultUI.Platform.SDL3.SDL3Window sdl) sdl.DrawingFrame = drawing;
+        }
+    }
+
     /// <param name="evenIfMinimized">Draw a minimized window too, as a forced frame does.</param>
     /// <param name="drawClean">Draw even with nothing dirty: a live resize holds the loop, and a
     /// video's next frame, posted and not yet run, is taken from its decoder by the draw.</param>
@@ -1551,6 +1608,12 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     internal bool RenderFrame(bool evenIfMinimized = false, bool drawClean = false)
     {
         if (_root is null) return false;
+        // Not inside a frame of this window: a wait in a draw (Parallel.For, Task.Wait, a
+        // contended lock) on the UI thread can pump messages, and on Windows a live-resize
+        // event then asked for a whole frame inside this one, drawing the same elements again
+        // mid-draw. The asker keeps what it wants (ResizePending, the dirt) for the next one.
+        if (IsDrawingFrame) return false;
+        using var _drawing = new DrawingFrame(this);
 
         // Drain queued UI-thread actions from the accessibility action router.
         // AT callbacks (UIA worker threads, the AT-SPI D-Bus receive thread) run
@@ -1801,15 +1864,15 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         }
         _perf.EndRender();
 
-        // Drag ghost overlay
-        if (_isDragging && !_isExternalDrag)
-            RenderDragGhost(ctx);
-
         if (_autoScrollTarget is not null)
             RenderAutoScrollAnchor(ctx);
 
         // Overlay layer (tooltips, context menus, popups)
         RenderOverlays(ctx);
+
+        // The drag ghost follows the pointer above everything, a dialog's own drag included.
+        if (_isDragging && !_isExternalDrag)
+            RenderDragGhost(ctx);
 
         // After the overlays: a focused control can live inside one, and the ring belongs on
         // top of everything either way — it is drawn outside the control's own bounds, so a
@@ -1847,7 +1910,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         _perf.BeginPresent();
         using (_tracer.Begin("Phase", "Present"))
         {
-            PlatformWindow.Surface.Present();
+            // A frame SaveFrame asked for is read back as it is presented; otherwise a count.
+            if (_frameSaves.Count > 0) PresentSavingFrame();
+            else PlatformWindow.Surface.Present();
             PlatformWindow.SwapBuffers();
         }
         _perf.EndPresent();
@@ -2356,7 +2421,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
                     }
 
                     // Record potential drag source if the element (or ancestor) is draggable
-                    if (!isOverlayHit && button.Button == 0 && _textInputDragTarget is null && _textAreaDragTarget is null && _textElementDragTarget is null && _groupDragToken is null)
+                    // In an overlay too (a dialog's own drag and drop: its rows, chips, tiles).
+                    if (button.Button == 0 && _textInputDragTarget is null && _textAreaDragTarget is null && _textElementDragTarget is null && _groupDragToken is null)
                     {
                         var draggable = FindDraggableAncestor(target);
                         if (draggable is not null)
@@ -3031,13 +3097,24 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     /// (Windows today). An app can hide the affordance where it reports false.</summary>
     public bool CanDragFilesOut => PlatformWindow is INativeDragSource { CanDragFiles: true };
 
+    /// <summary>
+    /// The element a drag is over at <paramref name="pos"/>: the topmost overlay's (a dialog
+    /// takes drops on its own elements, and a modal one shields the tree beneath it), else
+    /// the main tree's.
+    /// </summary>
+    private Element? DragTargetAt(Point pos)
+    {
+        var (overlayTarget, _) = HitTestOverlays(pos);
+        return overlayTarget ?? (_root is null ? null : HitTester.HitTest(_root, pos));
+    }
+
     private void UpdateDragHover(Point pos, KeyModifiers modifiers)
     {
         if (_root is null || _dragData is null) return;
         _lastDragPos = pos;
         _dragModifiers = modifiers;
 
-        var target = HitTester.HitTest(_root, pos);
+        var target = DragTargetAt(pos);
 
         // Fire DragLeave / DragEnter when the hovered element changes
         if (target != _dragHoveredElement)
@@ -3070,7 +3147,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         // later against it (the DragLeave pairing this enter, above all) reaches the tree
         // rather than an orphan whose parent chain leads nowhere.
         if (_dragHoveredElement is { Parent: null } && !ReferenceEquals(_dragHoveredElement, _root))
-            _dragHoveredElement = HitTester.HitTest(_root, pos);
+            _dragHoveredElement = DragTargetAt(pos);
 
         PlatformWindow.SetCursor(_dragAccepted ? CursorType.Move : CursorType.NotAllowed);
     }
@@ -3080,7 +3157,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         if (_root is null || _dragData is null) { ResetDragState(); return; }
         _dragModifiers = modifiers;
 
-        var target = HitTester.HitTest(_root, pos);
+        var target = DragTargetAt(pos);
 
         // Fire final DragOver to confirm acceptance
         bool accepted = false;
@@ -3103,7 +3180,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             EventDispatcher.DispatchDirect(new DragEndEvent { Position = pos, DragData = _dragData, Modifiers = modifiers, WasAccepted = accepted }, _dragSource);
 
         // Restore cursor
-        var cursorTarget = HitTester.HitTest(_root, pos);
+        var cursorTarget = DragTargetAt(pos);
         PlatformWindow.SetCursor(cursorTarget?.ResolvedInherited.Cursor ?? CursorType.Default);
 
         ResetDragState();
@@ -3141,7 +3218,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
 
         if (_root is not null && _dragData is not null)
         {
-            var target = HitTester.HitTest(_root, _lastDragPos);
+            var target = DragTargetAt(_lastDragPos);
             if (target is not null)
             {
                 var overEvt = new DragOverEvent { Position = _lastDragPos, DragData = _dragData, Modifiers = modifiers };
@@ -3865,6 +3942,46 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     /// <inheritdoc/>
     public void CloseMenu() => CloseContextMenu(MenuCloseReason.Dismissed);
 
+    /// <summary>
+    /// Closes every light-dismiss overlay — context menus, dropdown lists, popovers — as a press
+    /// outside them does. For the presses this window never receives: on its OS title bar or
+    /// frame, in another window, in another application. Overlays shown with
+    /// <c>dismissOnOutsideClick: false</c> (dialogs, tooltips) stay.
+    /// </summary>
+    public void DismissPopups()
+    {
+        if (_overlays.Count > 0) DismissOverlaysOnOutsideClick();
+    }
+
+    /// <summary>
+    /// Closes every overlay the window shows — menus, dropdown lists, popovers, tooltips and
+    /// overlays their owners close themselves — and, with <paramref name="includeDialogs"/>, the
+    /// modal ones too: <see cref="Core.Dialogs.Dialog.Confirm"/>, <see cref="Core.Dialogs.Dialog.Show{TResult}"/>
+    /// and any other overlay shown with <c>modal: true</c>. Each closes the way a dismissal
+    /// closes it: a menu's owner is told <see cref="MenuCloseReason.Dismissed"/>, an overlay's
+    /// <c>onDismissed</c> runs, and a dialog resolves with its default result, as Escape gives
+    /// (false for a confirmation), even one that does not close on Escape. For a window whose
+    /// content is replaced at once, a lock screen: nothing it showed stays above it.
+    /// </summary>
+    public void CloseOverlays(bool includeDialogs = false)
+    {
+        // Before the early return: a tooltip still in its show delay is no overlay yet, and
+        // would otherwise open over whatever replaced its owner's content.
+        HideTooltip();
+        if (_overlays.Count == 0) return;
+        CloseContextMenu(MenuCloseReason.Dismissed);
+        for (int i = _overlays.Count - 1; i >= 0; i--)
+        {
+            // A dismissal callback can close other overlays.
+            if (i >= _overlays.Count) continue;
+            var entry = _overlays[i];
+            if (entry.IsModal && !includeDialogs) continue;
+            RemoveOverlayAt(i);
+            _root?.MarkPaintDirty();
+            entry.OnDismissed?.Invoke();
+        }
+    }
+
     private void TryShowContextMenu(Element target, Point pos)
     {
         var (owner, itemsProvider) = FindContextMenuOwner(target);
@@ -4161,6 +4278,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     {
         if (_disposed) return;
         _disposed = true;
+        FailFrameSaves();
         if (_tracer.IsRecording && !string.IsNullOrEmpty(_envTracePath))
             _tracer.StopRecording(_envTracePath);
         PlatformWindow.InputReceived -= HandleInputEvent;

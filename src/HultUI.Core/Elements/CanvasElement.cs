@@ -21,7 +21,16 @@ public class CanvasElement : BoxElement
         if (Draw is null) return;
 
         var drawCtx = ctx.CreateCanvasContext(Layout.AbsoluteContentBox);
-        Draw(drawCtx);
+        try
+        {
+            Draw(drawCtx);
+        }
+        finally
+        {
+            // A clip or transform the callback left open would otherwise apply to
+            // everything painted after this element.
+            drawCtx.PopAll();
+        }
     }
 
     // What it copies below is paint: the callback runs when the canvas is drawn, and it

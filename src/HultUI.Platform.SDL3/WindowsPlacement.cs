@@ -88,6 +88,71 @@ internal static unsafe class WindowsPlacement
         return 1;   // keep enumerating
     }
 
+    /// <summary>
+    /// Every monitor, in screen coordinates (physical pixels: the process is per-monitor DPI
+    /// aware), with its work area, effective DPI and primary flag — the same numbers
+    /// <see cref="Read"/> and <see cref="Move"/> use.
+    /// </summary>
+    public static List<MonitorInfo> Monitors()
+    {
+        var monitors = new List<MonitorInfo>();
+        var handle = GCHandle.Alloc(monitors);
+        try
+        {
+            EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, &CollectMonitor, GCHandle.ToIntPtr(handle));
+        }
+        finally { handle.Free(); }
+        return monitors;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
+    private static int CollectMonitor(IntPtr monitor, IntPtr hdc, RECT* clip, IntPtr data)
+    {
+        try
+        {
+            var monitors = (List<MonitorInfo>)GCHandle.FromIntPtr(data).Target!;
+            var info = new MONITORINFOEXW { cbSize = (uint)sizeof(MONITORINFOEXW) };
+            if (GetMonitorInfoW(monitor, ref info))
+            {
+                var b = info.rcMonitor;
+                var w = info.rcWork;
+                string device = new string(info.szDevice).TrimEnd('\0');
+                float scale = GetDpiForMonitor(monitor, 0 /* MDT_EFFECTIVE_DPI */, out uint dpiX, out _) == 0 && dpiX > 0
+                    ? dpiX / 96f
+                    : 1f;
+                string name = device.StartsWith(@"\\.\DISPLAY", StringComparison.OrdinalIgnoreCase)
+                    ? "Display " + device[@"\\.\DISPLAY".Length..]
+                    : device;
+                monitors.Add(new MonitorInfo(device, name,
+                    new Rect(b.Left, b.Top, b.Right - b.Left, b.Bottom - b.Top),
+                    new Rect(w.Left, w.Top, w.Right - w.Left, w.Bottom - w.Top),
+                    scale, (info.dwFlags & MONITORINFOF_PRIMARY) != 0));
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[HultUI] Listing monitors failed: {ex.Message}");
+        }
+        return 1;   // keep enumerating
+    }
+
+    private const uint MONITORINFOF_PRIMARY = 1;
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct MONITORINFOEXW
+    {
+        public uint cbSize;
+        public RECT rcMonitor, rcWork;
+        public uint dwFlags;
+        public fixed char szDevice[32];
+    }
+
+    [DllImport("user32", EntryPoint = "GetMonitorInfoW")]
+    private static extern bool GetMonitorInfoW(IntPtr hMonitor, ref MONITORINFOEXW lpmi);
+
+    [DllImport("shcore")]
+    private static extern int GetDpiForMonitor(IntPtr hmonitor, int dpiType, out uint dpiX, out uint dpiY);
+
     public static bool IsMaximizedOrMinimized(IntPtr hwnd) => IsZoomed(hwnd) || IsIconic(hwnd);
 
     /// <summary>

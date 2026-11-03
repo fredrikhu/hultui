@@ -524,7 +524,7 @@ public static partial class AccessibilityTreeBuilder
             var (localTop, height) = source.ItemBounds(i) ?? (i * itemHeight, itemHeight);
             var box = new Rect(content.X, content.Y + localTop, content.Width, height);
             items[i] = MakeItemNode(slot, i, role, source.GetItemLabel(i), place.Unscrolled(box), source.ItemIsToggled(i),
-                source.IsItemSelected(i), !RectsIntersect(clip, place.OnScreen(box)));
+                source.ItemIsExpanded(i), source.IsItemSelected(i), !RectsIntersect(clip, place.OnScreen(box)));
         }
         if (open.Element is { } row)
         {
@@ -547,7 +547,7 @@ public static partial class AccessibilityTreeBuilder
 
     /// <summary>The node of item <paramref name="index"/> of the list holding <paramref name="slot"/>.</summary>
     private static AccessibilityNode MakeItemNode(uint slot, int index, AccessibilityRole role, string? label, Rect unscrolled,
-        bool? toggled, bool selected, bool offscreen) =>
+        bool? toggled, bool? expanded, bool selected, bool offscreen) =>
         new(VirtualItemId.ForSlot(slot, index),
             role,
             label,
@@ -558,6 +558,7 @@ public static partial class AccessibilityTreeBuilder
             isEnabled: true,
             isToggled: toggled,
             value: null,
+            expanded: expanded,
             // In the node, so the differ sees a move of the selection: without it a move that
             // scrolled nothing changed no node, and no reader heard which item was selected.
             isSelected: selected)

@@ -15,8 +15,10 @@ namespace HultUI.Platform.Accessibility.Windows;
 /// Exposed to UIA as native objects (see <see cref="NativeProvider"/>).
 /// </summary>
 [SupportedOSPlatform("windows")]
-internal sealed class UiaInvokeProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeInvoke
+internal sealed class UiaInvokeProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeInvoke, IElementBound
 {
+    public bool Gone => bridge.IsGone(elementId);
+
     public int Invoke()
     {
         bridge.InvokeElement(elementId);
@@ -25,8 +27,10 @@ internal sealed class UiaInvokeProvider(WindowsAccessibilityBridge bridge, Eleme
 }
 
 [SupportedOSPlatform("windows")]
-internal sealed class UiaToggleProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeToggle
+internal sealed class UiaToggleProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeToggle, IElementBound
 {
+    public bool Gone => bridge.IsGone(elementId);
+
     public int Toggle()
     {
         bridge.ToggleElement(elementId);
@@ -47,17 +51,22 @@ internal sealed class UiaToggleProvider(WindowsAccessibilityBridge bridge, Eleme
 
 [SupportedOSPlatform("windows")]
 internal sealed class UiaValueProvider(WindowsAccessibilityBridge bridge, ElementId elementId, bool readOnly = false)
-    : INativeValue
+    : INativeValue, IElementBound
 {
+    public bool Gone => bridge.IsGone(elementId);
+
     /// <summary>UIA_E_ELEMENTNOTENABLED: what SetValue on a read-only value answers.</summary>
     private const int ElementNotEnabled = unchecked((int)0x80040200);
 
     public int SetValue(IntPtr pwsz)
     {
-        if (readOnly) return ElementNotEnabled;
+        if (IsReadOnly) return ElementNotEnabled;
         bridge.SetValue(elementId, Marshal.PtrToStringUni(pwsz) ?? "");
         return 0;
     }
+
+    /// <summary>A document's value is never written; a field's is refused while it is read-only.</summary>
+    private bool IsReadOnly => readOnly || bridge.IsValueReadOnly(elementId);
 
     public int GetValue(out IntPtr pRetVal)
     {
@@ -67,15 +76,17 @@ internal sealed class UiaValueProvider(WindowsAccessibilityBridge bridge, Elemen
 
     public int GetIsReadOnly(out int pRetVal)
     {
-        pRetVal = readOnly ? 1 : 0;
+        pRetVal = IsReadOnly ? 1 : 0;
         return 0;
     }
 }
 
 [SupportedOSPlatform("windows")]
 internal sealed class UiaSelectionItemProvider(WindowsAccessibilityBridge bridge, ElementId elementId)
-    : INativeSelectionItem
+    : INativeSelectionItem, IElementBound
 {
+    public bool Gone => bridge.IsGone(elementId);
+
     // This provider serves list items (virtualized and eager), radio buttons and
     // tabs. The bridge resolves list items to (list, index) — for anything it
     // doesn't recognize as a list item, selecting goes to the element (a radio is
@@ -123,8 +134,10 @@ internal sealed class UiaSelectionItemProvider(WindowsAccessibilityBridge bridge
 /// multi-select. Complements the per-item <see cref="UiaSelectionItemProvider"/>.
 /// </summary>
 [SupportedOSPlatform("windows")]
-internal sealed class UiaSelectionProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeSelection
+internal sealed class UiaSelectionProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeSelection, IElementBound
 {
+    public bool Gone => bridge.IsGone(elementId);
+
     public int GetSelection(out IntPtr pRetVal)
     {
         var indices = bridge.GetSelectedIndices(elementId);
@@ -160,8 +173,10 @@ internal sealed class UiaSelectionProvider(WindowsAccessibilityBridge bridge, El
 /// realized as a provider.
 /// </summary>
 [SupportedOSPlatform("windows")]
-internal sealed class UiaItemContainerProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeItemContainer
+internal sealed class UiaItemContainerProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeItemContainer, IElementBound
 {
+    public bool Gone => bridge.IsGone(elementId);
+
     public int FindItemByProperty(IntPtr pStartAfter, int propertyId, UiaVariant value, out IntPtr pFound)
     {
         int start = bridge.DecodeItemIndex(elementId, pStartAfter);
@@ -171,23 +186,26 @@ internal sealed class UiaItemContainerProvider(WindowsAccessibilityBridge bridge
 }
 
 /// <summary>
-/// ExpandCollapse for a tree item / expander. State comes from the node snapshot;
-/// Expand/Collapse reuse the element's click-to-toggle (via Invoke), acting only
-/// when the current state actually needs to change.
+/// ExpandCollapse for anything that opens something: a dropdown, an expander, a submenu's item,
+/// a popover's anchor. State comes from the node snapshot; Expand/Collapse go to the host, which
+/// opens or closes the element as the keyboard or the pointer would (a dropdown opens on a press,
+/// not a click), acting only when the current state actually needs to change.
 /// </summary>
 [SupportedOSPlatform("windows")]
 internal sealed class UiaExpandCollapseProvider(WindowsAccessibilityBridge bridge, ElementId elementId)
-    : INativeExpandCollapse
+    : INativeExpandCollapse, IElementBound
 {
+    public bool Gone => bridge.IsGone(elementId);
+
     public int Expand()
     {
-        if (bridge.GetExpanded(elementId) == false) bridge.InvokeElement(elementId);
+        if (bridge.GetExpanded(elementId) == false) bridge.ExpandCollapse(elementId, true);
         return 0;
     }
 
     public int Collapse()
     {
-        if (bridge.GetExpanded(elementId) == true) bridge.InvokeElement(elementId);
+        if (bridge.GetExpanded(elementId) == true) bridge.ExpandCollapse(elementId, false);
         return 0;
     }
 
@@ -209,8 +227,10 @@ internal sealed class UiaExpandCollapseProvider(WindowsAccessibilityBridge bridg
 /// BOOL out-params use VARIANT_BOOL (-1 = true).
 /// </summary>
 [SupportedOSPlatform("windows")]
-internal sealed class UiaScrollProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeScroll
+internal sealed class UiaScrollProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeScroll, IElementBound
 {
+    public bool Gone => bridge.IsGone(elementId);
+
     public int Scroll(int horizontalAmount, int verticalAmount)
     {
         bridge.ScrollByAmount(elementId, horizontalAmount, verticalAmount);
@@ -243,13 +263,31 @@ internal sealed class UiaScrollProvider(WindowsAccessibilityBridge bridge, Eleme
 }
 
 /// <summary>
+/// ScrollItem for anything inside a scroll view or a list (an item of a large list too): every
+/// view holding it scrolls until it is in view, on the UI thread.
+/// </summary>
+[SupportedOSPlatform("windows")]
+internal sealed class UiaScrollItemProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeScrollItem, IElementBound
+{
+    public bool Gone => bridge.IsGone(elementId);
+
+    public int ScrollIntoView()
+    {
+        bridge.ScrollElementIntoView(elementId);
+        return 0;
+    }
+}
+
+/// <summary>
 /// RangeValue for a slider. State is read from its node, as the RangeValue
 /// properties are (it read the live element, and the two disagreed until the
 /// range's coalesced refresh); SetValue marshals onto the UI thread. BOOL out-params use VARIANT_BOOL (-1 = true).
 /// </summary>
 [SupportedOSPlatform("windows")]
-internal sealed class UiaRangeValueProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeRangeValue
+internal sealed class UiaRangeValueProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeRangeValue, IElementBound
 {
+    public bool Gone => bridge.IsGone(elementId);
+
     public int SetValue(double value) { bridge.SetRangeValue(elementId, value); return 0; }
     public int GetValue(out double pRetVal)
     { pRetVal = bridge.TryGetRangeValue(elementId, out var i) ? i.Value : 0; return 0; }
