@@ -310,6 +310,34 @@ public class EnvironmentsViewTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    /// <summary>A submitted prompt builds the window once: the action builds for what it changed and
+    /// the prompt goes with that build; the window was built again after it (plan 17 round 7). An
+    /// action that builds nothing (no name given) still takes the prompt down.</summary>
+    [Fact]
+    public void ASubmittedPromptBuildsTheWindowOnce()
+    {
+        Hosted((session, app, keyring) =>
+        {
+            GoToEnvironments(session);
+            Click(session, "add-env-key");
+            session.Window.TypeText("new_key");
+            session.PumpFrames(2);
+            int builds = app.Builds;
+            session.Window.PressKey(KeyCode.Enter);
+            Assert.Equal(1, app.Builds - builds);
+            session.PumpFrames(2);
+            Assert.Null(session.Window.FindByAutomationId("dialog-input"));
+            Assert.True(Contains(session, "new_key"), "the new key's row");
+
+            Click(session, "add-env-key");
+            builds = app.Builds;
+            session.Window.PressKey(KeyCode.Enter);
+            Assert.Equal(1, app.Builds - builds);
+            session.PumpFrames(2);
+            Assert.Null(session.Window.FindByAutomationId("dialog-input"));
+        });
+    }
+
     [Fact]
     public void ASecretResolvesFromTheKeyringOnSend()
     {
