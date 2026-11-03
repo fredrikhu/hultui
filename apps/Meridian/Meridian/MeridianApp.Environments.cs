@@ -368,7 +368,7 @@ public partial class MeridianApp
 
         bool revealed = _reveal is { } r && r.Env == envName && r.Key == key
             && System.Diagnostics.Stopwatch.GetTimestamp() < r.UntilTs;
-        var value =Flex.Column(gap: 0).FlexShrink(1).JustifyContent(JustifyContent.Center);
+        var value = Flex.Column(gap: 0).FlexShrink(1).JustifyContent(JustifyContent.Center);
         value.AddChild(Ui.Mono(revealed ? secret.Value : "••••••••", 11.5f, revealed ? Azimuth.Text : Azimuth.TextMuted)
             .MaxLines(1).TextOverflow(TextOverflow.Ellipsis)
             .AutomationId($"secret-value-{key}-{envName}"));
