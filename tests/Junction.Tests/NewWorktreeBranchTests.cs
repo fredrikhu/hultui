@@ -81,6 +81,9 @@ public class NewWorktreeBranchTests
         Run((session, app, _) =>
         {
             Invoke(app, "DoCreateBranch", "feature/earlier", null, false);
+            // git runs on the pool and hands its result back to the UI thread: wait for the
+            // command, then the frame that applies it (one frame was a race; see BranchRootMemoryTests).
+            session.PumpUntil(() => Field<Task>(app, "_stagingChain").IsCompleted, TimeSpan.FromSeconds(20));
             session.PumpFrame();
 
             Invoke(app, "PromptNewWorktree");
