@@ -5,7 +5,12 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 8
-- **Phase:** build — round 8, step 2 next (9 steps; step 1 landed; question 11 answered yes, it joins step 2). The survey's eight
+- **Phase:** build — round 8, **step 2 PAUSED by the user (2026-11-03)**; the loop is stopped. Step 2's agent was
+  stopped mid-step with no commit: its uncommitted edits stay in the worktree (AccessibilityTreeBuilder.cs and
+  .Refresh.cs, AccessibilityRebuildAllocationTests.cs, PerfSuite Scenarios.Accessibility.cs and Scenarios.Virtual.cs —
+  change 1 and its suite row and tests, not yet measured; change 2 not started). On resuming, give a step 2 agent
+  those edits to review and finish, or undo them by reverse edit. 9 steps; step 1 landed; question 11 answered yes,
+  it joins step 2. The survey's eight
   reports are `17-reports/r8-*.md` (common brief: session 64e7e0e2's scratchpad `brief-r8-survey.md`). Weekly usage 86 %
   after the survey (it cost ~5 %): the 90 % pause applies to build steps (the user waived it for the survey only), so
   small steps go first and the rest wait for the reset if a step would cross 90 %. Round 7
@@ -634,3 +639,5 @@ From 2026-11-02 (round 7's survey); earlier entries are in the archive ([to 2026
   state on the canvas before the context's `BeginFrame` hands over its base save count, and resets restore to it; to
   prove a clip, compare two in-process saves with a deliberately wrong clip (`--frame-counter` cannot see it);
   VulkanProbeTests skip without `HULTUI_UITESTS=1` and an all-skipped run exits 0. Usage 87 % weekly (~1 % a small step).
+- 2026-11-03: the user paused step 2 while its agent was adding tests; the agent was stopped (no commit, 5 files of
+  uncommitted work kept in the worktree) and the loop stopped. Usage 87 % weekly.
