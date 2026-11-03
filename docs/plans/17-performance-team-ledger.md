@@ -6,8 +6,10 @@ file after every step and commits it with the step's work. Full survey reports a
 
 - **Round:** 8
 - **Phase:** survey — round 8 started 2026-11-03 in a fresh context: round 6's Landed rows, round 7's build order and
-  answered questions and round 6's log are archived; **the eight survey agents are not spawned yet** (weekly usage 81 %;
-  a survey has cost about 7–18 % of a week, so it would likely cross the user's 90 % pause line; asked the user). Round 7
+  answered questions and round 6's log are archived. The eight experts run in their own worktrees on 27020cdb, reviewing
+  17d4220a..df45b4a2 (reports to come as `17-reports/r8-*.md`; common brief: this session's scratchpad
+  `brief-r8-survey.md`, probes in its `r8-<area>\`). Weekly usage 81 % at the start: the user chose to run the survey
+  anyway (2026-11-03), knowing it may pass 90 %; builds wait for the reset if it does. Round 7
   released: main's app-support merge (f64e4674, another session) merged into the branch as c655b411 with fixes
   7dfd2ce3, then the branch merged into main as df45b4a2; CI run 41691075588 green (test, test-linux, docs). Open for
   the user, none blocking: question 10 (`TokenizeDiff` public), the live screen-reader check of menus (script in
@@ -25,7 +27,9 @@ file after every step and commits it with the step's work. Full survey reports a
   round 7's build, 17d4220a..df45b4a2 (the last survey report to the round 7 release), which also brings main's
   app-support merge f64e4674 (25 commits from another session: headless locators, frame robustness, lock privacy,
   UIA, overlays, rich text) — review it like the rest.
-- **Probe code:** round 7 surveys in the same scratchpad's `r7-<area>\`; round 6 surveys in session 855f4ddd's scratchpad
+- **Probe code:** round 8 surveys in session 64e7e0e2's scratchpad
+  `C:\Users\fredr\AppData\Local\Temp\claude\C--Users-fredr-source-repos-fredrikhu-hului-revamped--claude-worktrees-distracted-mendel-5071ba\64e7e0e2-bc1c-4069-9d42-9311fee04c9e\scratchpad\r8-<area>\`;
+  round 7 surveys (and builds) in session 855f4ddd's scratchpad `r7-<area>\`; round 6 surveys in session 855f4ddd's scratchpad
   `C:\Users\fredr\AppData\Local\Temp\claude\C--Users-fredr-source-repos-fredrikhu-hului-revamped--claude-worktrees-distracted-mendel-5071ba\855f4ddd-feda-4f0a-a595-a83e07af08f8\scratchpad\r6-<area>\`
   (each report names its files). Rounds 4–5 in the scratchpad of session dc3c745c (a fresh context may have another
   scratchpad): `C:\Users\fredr\AppData\Local\Temp\claude\C--Users-fredr-source-repos-fredrikhu-hului-revamped--claude-worktrees-distracted-mendel-5071ba\dc3c745c-a83d-4dc0-96ba-442a47e69937\scratchpad\`.
@@ -505,4 +509,6 @@ From 2026-11-02 (round 7's survey); earlier entries are in the archive ([to 2026
 - 2026-11-03: round 8 survey started in a fresh context (main had not moved: origin/main df45b4a2 is in the branch).
   Moved to the archive (counts checked before and after, no line lost): round 6's 51 Landed rows, round 7's build
   order with the survey's closed-from-Waiting note, round 7's answered questions 1–4, and round 6's 34 log entries
-  (2026-10-27 to 2026-11-02). Weekly usage 81 %: the survey agents wait for the user's go-ahead (90 % rule).
+  (2026-10-27 to 2026-11-02). Weekly usage 81 %; asked the user, who chose to run the survey now though it may pass
+  the 90 % line. The eight experts run in their own worktrees on 27020cdb, reviewing 17d4220a..df45b4a2 (101 commits,
+  main's app-support merge f64e4674 included).
