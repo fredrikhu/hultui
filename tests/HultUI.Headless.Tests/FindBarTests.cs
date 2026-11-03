@@ -24,8 +24,13 @@ public class FindBarTests
         private readonly int[] _starts;
         public int RootKeys;
         public int Builds;
+        /// <summary>Builds of the bar: it asks for its magnifier once a build.</summary>
+        public int BarBuilds;
+        public int Moves;
 
-        public Viewer(int lineCount = 200)
+        /// <param name="moved">A <see cref="FindBar.Moved"/>: a step then builds the bar's count
+        /// alone.</param>
+        public Viewer(int lineCount = 200, bool moved = false)
         {
             Lines = Enumerable.Range(0, lineCount)
                 .Select(i => i % 50 == 49 ? $"line {i} has the needle in it" : $"line {i}")
@@ -49,7 +54,13 @@ public class FindBarTests
                     if (line < 0) line = ~line - 1;
                     return new FindSelection(area.SelectedText, line, 0, area.SelectionStart - _starts[line]);
                 },
+                Icon = icon =>
+                {
+                    if (icon == FindBarIcon.Search) BarBuilds++;
+                    return null;
+                },
             };
+            if (moved) Find.Moved = () => Moves++;
             Find.Search.Bind(Lines.Length, 1, (line, _) => line >= 0 && line < Lines.Length ? Lines[line] : null);
         }
 
@@ -71,10 +82,10 @@ public class FindBarTests
         protected internal override void OnAfterBuild() => Find.Service();
     }
 
-    private static (HeadlessSession Session, Viewer View) Open(int lines = 200)
+    private static (HeadlessSession Session, Viewer View) Open(int lines = 200, bool moved = false)
     {
         var session = HeadlessSession.Create(500, 300);
-        var view = new Viewer(lines);
+        var view = new Viewer(lines, moved);
         session.Window.SetRoot(view.Mount());
         session.PumpFrame();
         view.Body.Current!.Focus();
@@ -91,10 +102,12 @@ public class FindBarTests
     private static string Status(HeadlessSession s) =>
         ((TextElement)s.Window.FindByAutomationId("find-status")!.Element).Content;
 
-    [Fact]
-    public void CtrlFOpensTheBarWithTheKeyboardInIt_AndTypingSearches()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CtrlFOpensTheBarWithTheKeyboardInIt_AndTypingSearches(bool moved)
     {
-        var (s, view) = Open();
+        var (s, view) = Open(moved: moved);
         using var _ = s;
 
         Press(s, KeyCode.F, KeyModifiers.Ctrl);
@@ -108,10 +121,12 @@ public class FindBarTests
         Assert.Equal("1 of 4", Status(s));
     }
 
-    [Fact]
-    public void EnterAndShiftEnterWalkTheMatches_AndTheMatchIsScrolledTo()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void EnterAndShiftEnterWalkTheMatches_AndTheMatchIsScrolledTo(bool moved)
     {
-        var (s, view) = Open();
+        var (s, view) = Open(moved: moved);
         using var _ = s;
         Press(s, KeyCode.F, KeyModifiers.Ctrl);
         s.Window.TypeText("needle");
@@ -130,10 +145,12 @@ public class FindBarTests
 
     /// <summary>Escape closes the bar, clears the query, and the keyboard goes back to the body —
     /// left on the unmounted field, the view's keys would reach nothing.</summary>
-    [Fact]
-    public void EscapeClosesAndGivesTheBodyTheKeyboard()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void EscapeClosesAndGivesTheBodyTheKeyboard(bool moved)
     {
-        var (s, view) = Open();
+        var (s, view) = Open(moved: moved);
         using var _ = s;
         Press(s, KeyCode.F, KeyModifiers.Ctrl);
         s.Window.TypeText("needle");
@@ -146,10 +163,12 @@ public class FindBarTests
         Assert.Same(view.Body.Current, s.Window.Window.FocusedElement);
     }
 
-    [Fact]
-    public void AltCAndAltRToggleTheOptions_AndTheChipsShowIt()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AltCAndAltRToggleTheOptions_AndTheChipsShowIt(bool moved)
     {
-        var (s, view) = Open();
+        var (s, view) = Open(moved: moved);
         using var _ = s;
         Press(s, KeyCode.F, KeyModifiers.Ctrl);
 
@@ -168,10 +187,12 @@ public class FindBarTests
     }
 
     /// <summary>n and p walk the matches while the body has the keyboard, and are letters in the field.</summary>
-    [Fact]
-    public void NAndPWalkTheMatchesFromTheBody_ButAreLettersInTheField()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void NAndPWalkTheMatchesFromTheBody_ButAreLettersInTheField(bool moved)
     {
-        var (s, view) = Open();
+        var (s, view) = Open(moved: moved);
         using var _ = s;
         Press(s, KeyCode.F, KeyModifiers.Ctrl);
         s.Window.TypeText("needle");
@@ -192,10 +213,12 @@ public class FindBarTests
 
     /// <summary>Ctrl+F with text selected searches for it, starting at the selection rather than
     /// the first occurrence — opening the bar must not scroll the reader away from what they chose.</summary>
-    [Fact]
-    public void CtrlFSearchesForTheSelection_StartingAtIt()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CtrlFSearchesForTheSelection_StartingAtIt(bool moved)
     {
-        var (s, view) = Open();
+        var (s, view) = Open(moved: moved);
         using var _ = s;
         var area = view.Body.Current!;
         int third = string.Join('\n', view.Lines.Take(149)).Length + 1 + "line 149 has the ".Length;
@@ -279,12 +302,109 @@ public class FindBarTests
         Assert.Equal(1, StepBuilds(() => s.Window.TypeText("x")));
     }
 
+    /// <summary>
+    /// With <see cref="FindBar.Moved"/> set, a step that moves the current match — Enter,
+    /// Shift+Enter, the next button, n — builds neither the bar nor the owner: the bar writes its
+    /// count into the label on screen, the owner's body hears of the step through Moved, and the
+    /// match is revealed as after a build. A step built the owner's whole view (Junction's window,
+    /// Meridian's response panel) until round 7 of plan 17. Everything else the bar does still
+    /// builds the owner once, and the bar with it: a switch moves every match, typing moves the
+    /// query, Escape takes the bar away.
+    /// </summary>
+    [Fact]
+    public void AStepBuildsNothing_AndStillCountsAndReveals()
+    {
+        var (s, view) = Open(moved: true);
+        using var _ = s;
+        var area = view.Body.Current!;
+        Press(s, KeyCode.F, KeyModifiers.Ctrl);
+        s.Window.TypeText("needle");
+        s.PumpFrames(2);
+        Assert.Equal("1 of 4", Status(s));
+
+        (int Owner, int Bar, int Moves) Step(Action step)
+        {
+            int owner = view.Builds, bar = view.BarBuilds, moves = view.Moves;
+            step();
+            s.PumpFrames(2);
+            return (view.Builds - owner, view.BarBuilds - bar, view.Moves - moves);
+        }
+
+        float top = area.ScrollOffsetY;
+        Assert.Equal((0, 0, 1), Step(() => s.Window.PressKey(KeyCode.Enter)));
+        Assert.Equal("2 of 4", Status(s));
+        Assert.Equal((0, 0, 1), Step(() => s.Window.PressKey(KeyCode.Enter)));
+        Assert.Equal("3 of 4", Status(s));
+        // Line 149: far below a 300px window, so it is on screen only if the step revealed it.
+        float atThird = area.ScrollOffsetY;
+        Assert.True(atThird > 1000 && atThird > top, $"the step did not reveal the match ({top} → {atThird})");
+
+        Assert.Equal((0, 0, 1), Step(() => s.Window.PressKey(KeyCode.Enter, KeyModifiers.Shift)));
+        Assert.Equal("2 of 4", Status(s));
+        Assert.True(area.ScrollOffsetY < atThird, $"Shift+Enter did not reveal the match ({atThird} → {area.ScrollOffsetY})");
+        Assert.Equal((0, 0, 1), Step(() => s.Window.FindByAutomationId("find-next")!.Click()));
+        Assert.Equal("3 of 4", Status(s));
+        // Past the last match and round to the first, from the field (the click left the button
+        // with the keyboard).
+        s.Window.FindByAutomationId("find-input")!.Element.Focus();
+        s.PumpFrame();
+        Assert.Equal((0, 0, 1), Step(() => s.Window.PressKey(KeyCode.Enter)));
+        Assert.Equal((0, 0, 1), Step(() => s.Window.PressKey(KeyCode.Enter)));
+        Assert.Equal("1 of 4", Status(s));
+        // The field keeps the keyboard through the steps.
+        Assert.Same(s.Window.FindByAutomationId("find-input")!.Element, s.Window.Window.FocusedElement);
+
+        area.Focus();
+        s.PumpFrame();
+        Assert.Equal((0, 0, 1), Step(() => s.Window.PressKey(KeyCode.N)));
+        Assert.Equal("2 of 4", Status(s));
+
+        // What moves more than the current match builds the owner, and the bar in its build.
+        Assert.Equal((1, 1, 0), Step(() => s.Window.PressKey(KeyCode.C, KeyModifiers.Alt)));
+        Assert.True(view.Find.Search.MatchCase);
+        s.Window.PressKey(KeyCode.F, KeyModifiers.Ctrl);
+        s.PumpFrames(2);
+        Assert.Equal((1, 1, 0), Step(() => s.Window.TypeText("x")));
+        Assert.Equal("no matches", Status(s));
+        Assert.Equal((1, 0, 0), Step(() => s.Window.PressKey(KeyCode.Escape)));
+        Assert.False(view.Find.IsOpen);
+        Assert.Same(area, s.Window.Window.FocusedElement);
+
+        // With no count on screen to write, a step tells the owner as any change does.
+        s.Window.PressKey(KeyCode.F, KeyModifiers.Ctrl);
+        s.Window.TypeText("needle");
+        s.Window.PressKey(KeyCode.Escape);
+        s.PumpFrames(2);
+        Assert.Equal((1, 0, 0), Step(() => view.Find.Next()));
+    }
+
+    /// <summary>With no <see cref="FindBar.Moved"/> for the owner to hear a step by, a step builds
+    /// the owner, and the bar in it, as before: its body could not otherwise tint the match that
+    /// moved.</summary>
+    [Fact]
+    public void WithNoMovedAStepBuildsTheOwner()
+    {
+        var (s, view) = Open(moved: false);
+        using var _ = s;
+        Press(s, KeyCode.F, KeyModifiers.Ctrl);
+        s.Window.TypeText("needle");
+        s.PumpFrames(2);
+
+        int owner = view.Builds, bar = view.BarBuilds;
+        Press(s, KeyCode.Enter);
+        Assert.Equal(1, view.Builds - owner);
+        Assert.Equal(1, view.BarBuilds - bar);
+        Assert.Equal("2 of 4", Status(s));
+    }
+
     /// <summary>Ctrl+F on an open bar puts the keyboard back in the field with the query selected
     /// whole: the next keystroke is a new search, not an addition to the old one.</summary>
-    [Fact]
-    public void CtrlFOnAnOpenBarSelectsTheQuery()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CtrlFOnAnOpenBarSelectsTheQuery(bool moved)
     {
-        var (s, view) = Open();
+        var (s, view) = Open(moved: moved);
         using var _ = s;
         Press(s, KeyCode.F, KeyModifiers.Ctrl);
         s.Window.TypeText("needle");
@@ -298,10 +418,12 @@ public class FindBarTests
         Assert.Equal("line 1", view.Find.Search.Query);
     }
 
-    [Fact]
-    public void TheThemeReachesTheBar()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TheThemeReachesTheBar(bool moved)
     {
-        var (s, view) = Open();
+        var (s, view) = Open(moved: moved);
         using var _ = s;
         s.Application.Theme = Theme.Dark.With(new FindBarTheme
         {

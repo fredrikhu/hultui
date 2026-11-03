@@ -1,3 +1,4 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Components;
 using HultUI.Core.Elements;
@@ -168,12 +169,17 @@ static partial class Scenarios
     /// the list draws the selection (<c>.SelectionHighlight(…)</c>) and its rows are made
     /// unselected. The row reports the rows made per step. With
     /// <paramref name="chrome"/> the pane sits in a window's chrome (<see cref="WalkChrome"/>).
-    /// The list holds <paramref name="count"/> commits.
+    /// The list holds <paramref name="count"/> commits. With <paramref name="composite"/> each row
+    /// is a keyed button a reader reads as its own, selected or not, as the command palette's rows
+    /// are (<c>RowsAreComposite</c>). With <paramref name="countTrees"/> the row reports the
+    /// accessibility trees a key builds instead, and <paramref name="clear"/> runs before each key.
     /// </summary>
     internal static Op SelectionWalk(Ctx ctx, Func<int, string?>? check, Action? reset = null, bool itemRows = false,
-        WalkChrome chrome = WalkChrome.None, bool listHighlight = false, int count = 1_000)
+        WalkChrome chrome = WalkChrome.None, bool listHighlight = false, int count = 1_000, bool composite = false,
+        bool countTrees = false, Action? clear = null)
     {
-        var pane = new WalkPane(WalkItems(ctx.Rng, count), itemRows, chrome: chrome, listHighlight: listHighlight);
+        var pane = new WalkPane(WalkItems(ctx.Rng, count), itemRows, chrome: chrome, listHighlight: listHighlight,
+            composite: composite);
         var host = pane.Mount();
         host.On<KeyDownEvent>(e =>
         {
@@ -184,18 +190,20 @@ static partial class Scenarios
         pane.Select(pane.LastWholeRow());
         ctx.Session.PumpFrame(WalkFrame);
         int first = pane.Selected;
-        int madeBefore = 0;
+        int madeBefore = 0, treesBefore = 0;
         return new Op
         {
             Reset = reset is null ? null : _ => reset(),
             Run = _ =>
             {
+                clear?.Invoke();
                 madeBefore = pane.RowsMade;
+                treesBefore = ctx.Window.AccessibilityTreesBuilt;
                 ctx.Window.PressKey(KeyCode.Down);
             },
             FrameDelta = WalkFrame,
-            Figure = () => pane.RowsMade - madeBefore,
-            FigureUnit = "rows made",
+            Figure = countTrees ? () => ctx.Window.AccessibilityTreesBuilt - treesBefore : () => pane.RowsMade - madeBefore,
+            FigureUnit = countTrees ? "a11y trees/key" : "rows made",
             Check = step => pane.Verify(first + step + 1) ?? pane.VerifyChrome() ?? check?.Invoke(step),
         };
     }
@@ -282,10 +290,12 @@ enum WalkChrome
 /// With <paramref name="details"/> the same Build makes a details pane beside the list, for
 /// the commit the walk started on (<see cref="DetailsPane"/>): what an app's whole-window
 /// Build makes again, unchanged, on every move. With <paramref name="listHighlight"/> the list
-/// draws the selection itself, the fill the rows drew, and makes its rows unselected.
+/// draws the selection itself, the fill the rows drew, and makes its rows unselected. With
+/// <paramref name="composite"/> each row is a button keyed by its commit, named and selected or not
+/// for a reader, which reads the rows rather than the list's items, as the command palette's.
 /// </summary>
 sealed class WalkPane(List<WalkItem> items, bool itemRows = false, bool details = false,
-    WalkChrome chrome = WalkChrome.None, bool listHighlight = false) : Component
+    WalkChrome chrome = WalkChrome.None, bool listHighlight = false, bool composite = false) : Component
 {
     public const float RowHeight = 46f;
 
@@ -350,6 +360,7 @@ sealed class WalkPane(List<WalkItem> items, bool itemRows = false, bool details 
         if (itemRows) list.RenderWith((item, isSelected) => Row(item, isSelected));
         else list.RenderWith(item => Row(item, item.Index == selected));
         if (listHighlight) list.SelectionHighlight(Ui.Selected);
+        list.RowsAreComposite = composite;
         var pane = Flex.Column(gap: 0).FlexGrow(1).Children(
             Flex.Row(gap: 8).FlexShrink(0).AlignItems(AlignItems.Center).Padding(new Thickness(9, 16))
                 .BorderColor(Ui.Line).BorderWidth(new Thickness(0, 0, 1, 0))
@@ -545,6 +556,11 @@ sealed class WalkPane(List<WalkItem> items, bool itemRows = false, bool details 
                     Text.New(item.Subject).FontSize(13f).MaxLines(1).TextOverflow(TextOverflow.Ellipsis),
                     Text.New(item.Meta).FontSize(11f).TextColor(Ui.Muted).MaxLines(1).TextOverflow(TextOverflow.Ellipsis)));
         row.OnClick(_ => Select(item.Index));
+        if (composite)
+        {
+            row.AccessibleRole(AccessibilityRole.Button).AccessibleName(Label(item)).AccessibleSelected(selected);
+            row.Key = item.Index.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
         return row;
     }
 

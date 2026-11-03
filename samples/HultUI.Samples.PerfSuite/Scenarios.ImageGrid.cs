@@ -19,8 +19,12 @@ static partial class Scenarios
     /// <paramref name="key"/>, as many of <paramref name="back"/>, and again. The walk starts in the
     /// grid's second column, so Right stays on one row of cards, and Down goes past the rows on
     /// screen. The row reports the rows of cards made a step; with <paramref name="keepCards"/> a
-    /// row made again hands back its unchanged cards, and it reports the cards made.</summary>
-    internal static Op ImageGridWalk(Ctx ctx, KeyCode key, KeyCode back, int turn, bool keepCards = false)
+    /// row made again hands back its unchanged cards, and it reports the cards made. With
+    /// <paramref name="told"/> an accessibility client listens, the keys come
+    /// <paramref name="keyEvery"/> apart, <paramref name="clear"/> runs before each, and the row
+    /// reports the trees a key builds; <paramref name="told"/> says why a step was not told.</summary>
+    internal static Op ImageGridWalk(Ctx ctx, KeyCode key, KeyCode back, int turn, bool keepCards = false,
+        Func<int, string?>? told = null, TimeSpan? keyEvery = null, Action? clear = null)
     {
         var pane = new ImageGridPane(ImageGridFilms(600), keepCards);
         var host = pane.Mount();
@@ -34,20 +38,25 @@ static partial class Scenarios
         ctx.Pump(2);
         int cursor = pane.Cursor;
         int step = key == KeyCode.Right ? 1 : ImageGridPane.PerRow;
-        int madeBefore = 0;
+        int madeBefore = 0, treesBefore = 0;
+        bool reader = told is not null;
         return new Op
         {
             Run = i =>
             {
+                clear?.Invoke();
                 madeBefore = keepCards ? pane.CardsMade : pane.RowsMade;
+                treesBefore = ctx.Window.AccessibilityTreesBuilt;
                 ctx.Window.PressKey(i / turn % 2 == 0 ? key : back);
             },
-            Figure = () => (keepCards ? pane.CardsMade : pane.RowsMade) - madeBefore,
-            FigureUnit = keepCards ? "cards made" : "rows made",
+            FrameDelta = keyEvery,
+            Figure = reader ? () => ctx.Window.AccessibilityTreesBuilt - treesBefore
+                : () => (keepCards ? pane.CardsMade : pane.RowsMade) - madeBefore,
+            FigureUnit = reader ? "a11y trees/key" : keepCards ? "cards made" : "rows made",
             Check = i =>
             {
                 int steps = (i + 1) % (2 * turn), there = steps <= turn ? steps : 2 * turn - steps;
-                return pane.Verify(cursor + there * step);
+                return pane.Verify(cursor + there * step) ?? told?.Invoke(i);
             },
         };
     }

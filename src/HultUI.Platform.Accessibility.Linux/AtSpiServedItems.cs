@@ -121,7 +121,8 @@ internal sealed class AtSpiServedItems
             ElementId = IdOf(index),
             Path = PathOf(index),
             IsRoot = false,
-            Role = AtSpiConstants.MapRole(AccessibilityRole.ListItem),
+            // A menu's items are menu items, as their nodes would be.
+            Role = AtSpiConstants.MapRole(AccessibilityTreeBuilder.ItemRoleOf(list.Node?.Role ?? AccessibilityRole.List)),
             ItemOf = this,
             ItemIndex = index,
             Selectable = true,

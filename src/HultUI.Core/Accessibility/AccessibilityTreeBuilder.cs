@@ -499,7 +499,8 @@ public static partial class AccessibilityTreeBuilder
 
     /// <summary>
     /// Emits one <see cref="AccessibilityRole.ListItem"/> node per item of a
-    /// virtualized list — including the off-screen items the list hasn't realized
+    /// virtualized list (a <see cref="AccessibilityRole.MenuItem"/> per item of a menu,
+    /// <see cref="ItemRoleOf"/>) — including the off-screen items the list hasn't realized
     /// as elements. Item positions are derived from the fixed item height and the
     /// list's content box, scroll-adjusted like any other node so bounds and
     /// hit-testing stay correct as the list scrolls.
@@ -514,6 +515,7 @@ public static partial class AccessibilityTreeBuilder
         var content = list.Layout.AbsoluteContentBox;
         // Every item's id packs the list's slot: look it up once, not under a lock per item.
         uint slot = AccessibleOwnerSlots.SlotOf(list.Id);
+        var role = ItemRoleOf(listNode.Role);
         var items = new AccessibilityNode[count];
         for (int i = 0; i < count; i++)
         {
@@ -521,7 +523,7 @@ public static partial class AccessibilityTreeBuilder
             // itself; everything else stacks at one height.
             var (localTop, height) = source.ItemBounds(i) ?? (i * itemHeight, itemHeight);
             var box = new Rect(content.X, content.Y + localTop, content.Width, height);
-            items[i] = MakeItemNode(slot, i, source.GetItemLabel(i), place.Unscrolled(box), source.ItemIsToggled(i),
+            items[i] = MakeItemNode(slot, i, role, source.GetItemLabel(i), place.Unscrolled(box), source.ItemIsToggled(i),
                 source.ItemIsExpanded(i), source.IsItemSelected(i), !RectsIntersect(clip, place.OnScreen(box)));
         }
         if (open.Element is { } row)
@@ -534,11 +536,20 @@ public static partial class AccessibilityTreeBuilder
         listNode.SetChildren(items);
     }
 
+    /// <summary>
+    /// The role of the items a list publishes (<see cref="IAccessibleItemSource"/>), from the list's:
+    /// a <see cref="AccessibilityRole.Menu"/>'s are <see cref="AccessibilityRole.MenuItem"/>s (a
+    /// context menu's, a menu bar's menu's), anything else's <see cref="AccessibilityRole.ListItem"/>s
+    /// (a list's, a dropdown's popup's). The bridges ask it for the items they serve on demand too.
+    /// </summary>
+    internal static AccessibilityRole ItemRoleOf(AccessibilityRole listRole) =>
+        listRole == AccessibilityRole.Menu ? AccessibilityRole.MenuItem : AccessibilityRole.ListItem;
+
     /// <summary>The node of item <paramref name="index"/> of the list holding <paramref name="slot"/>.</summary>
-    private static AccessibilityNode MakeItemNode(uint slot, int index, string? label, Rect unscrolled,
+    private static AccessibilityNode MakeItemNode(uint slot, int index, AccessibilityRole role, string? label, Rect unscrolled,
         bool? toggled, bool? expanded, bool selected, bool offscreen) =>
         new(VirtualItemId.ForSlot(slot, index),
-            AccessibilityRole.ListItem,
+            role,
             label,
             description: null,
             unscrolled,

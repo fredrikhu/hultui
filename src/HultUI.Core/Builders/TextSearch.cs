@@ -30,8 +30,11 @@ public sealed class TextSearch
 
     private readonly Action _onChanged;
     private readonly List<Hit> _hits = [];
-    // The same hits keyed by (lane, line), because a row template asks the question the other
-    // way round — "what do I tint in this line" — once per realized row per frame.
+    // The hits of a line, keyed by (lane, line), because a row template asks the question the
+    // other way round — "what do I tint in this line" — once per realized row per frame. Listed
+    // the first time a line is asked about (LineHits), and kept until the next scan: listing
+    // every line with a hit on every scan made a list for each, on every typed character, where
+    // only the rows on screen ask (plan 17, round 7).
     private readonly Dictionary<(int Lane, int Line), List<Hit>> _byLine = [];
 
     private int _lineCount;
@@ -190,8 +193,30 @@ public sealed class TextSearch
 
     /// <summary>The matches on a line of a lane, in order, or null when there are none — the
     /// question a row template asks while it is being built.</summary>
-    public IReadOnlyList<Hit>? HitsOn(int line, int lane = 0) =>
-        _byLine.TryGetValue((lane, line), out var hits) ? hits : null;
+    public IReadOnlyList<Hit>? HitsOn(int line, int lane = 0) => LineHits(lane, line);
+
+    // The hits on a line of a lane, or null. The scan adds them in line order and, within a
+    // line, lane order, so a line's hits are one run of _hits: found by a binary search the
+    // first time the line is asked about, copied out, and kept for the rows that ask again. A
+    // line with none is searched each time it is asked about, and costs nothing kept.
+    private List<Hit>? LineHits(int lane, int line)
+    {
+        if (_byLine.TryGetValue((lane, line), out var listed)) return listed;
+        int lo = 0, hi = _hits.Count;
+        while (lo < hi)
+        {
+            int mid = (lo + hi) >>> 1;
+            var h = _hits[mid];
+            if (h.Line < line || (h.Line == line && h.Lane < lane)) lo = mid + 1;
+            else hi = mid;
+        }
+        int end = lo;
+        while (end < _hits.Count && _hits[end].Line == line && _hits[end].Lane == lane) end++;
+        if (end == lo) return null;
+        var hits = _hits.GetRange(lo, end - lo);
+        _byLine[(lane, line)] = hits;
+        return hits;
+    }
 
     /// <summary>
     /// Folds match tinting into a line's syntax colouring, producing the one sorted,
@@ -210,7 +235,7 @@ public sealed class TextSearch
         Color hitBackground, Color currentBackground)
     {
         if (length <= 0) return syntax;
-        if (_byLine.TryGetValue((lane, line), out var hits) is false) return syntax;
+        if (LineHits(lane, line) is not { } hits) return syntax;
 
         var current = Current;
         bool hasSyntax = syntax is { Count: > 0 };
@@ -378,9 +403,6 @@ public sealed class TextSearch
     private bool Add(Hit hit)
     {
         _hits.Add(hit);
-        var key = (hit.Lane, hit.Line);
-        if (!_byLine.TryGetValue(key, out var list)) _byLine[key] = list = [];
-        list.Add(hit);
         if (_hits.Count < MaxHits) return true;
         Capped = true;
         return false;

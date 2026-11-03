@@ -122,9 +122,10 @@ public sealed partial class ApertureApp
             ? (delta > 0 ? 0 : _cursorItems.Count - 1)
             : Math.Clamp(_cursorIndex + delta, 0, _cursorItems.Count - 1);
         if (next == _cursorIndex) return true;   // at an end: the key is still ours
+        int was = _cursorIndex;
         _cursorIndex = next;
         _pendingCursorFocus = true;
-        RerenderView();
+        if (!MoveRingWithoutBuild(was)) RerenderView();
         return true;
     }
 
@@ -132,9 +133,10 @@ public sealed partial class ApertureApp
     {
         if (_cursorItems.Count == 0) return false;
         _cursorToEnd = false;
+        int was = _cursorIndex;
         _cursorIndex = Math.Clamp(index, 0, _cursorItems.Count - 1);
         _pendingCursorFocus = true;
-        RerenderView();
+        if (!MoveRingWithoutBuild(was)) RerenderView();
         return true;
     }
 
@@ -145,10 +147,36 @@ public sealed partial class ApertureApp
     private bool MoveCursorToEnd()
     {
         if (_cursorItems.Count == 0) return false;
+        int was = _cursorIndex;
         _cursorIndex = _cursorItems.Count - 1;
         _cursorToEnd = _cursorTotal > _cursorItems.Count;   // before the build, which asks for the rest
         _pendingCursorFocus = true;
-        RerenderView();
+        if (_cursorToEnd || !MoveRingWithoutBuild(was)) RerenderView();
+        return true;
+    }
+
+    /// <summary>
+    /// A cursor move on Home, done on the live cards with no build: the ring off the card at
+    /// <paramref name="from"/> and onto the cursor's, which takes the cursor's ref and the keyboard —
+    /// what a build would make of the move, as nothing else on Home shows the cursor. Only while Home
+    /// is on screen as its latest build left it, and only between library cards (a watchlist title
+    /// card is built). A card on another page of its shelf is not on screen: as after a build, it
+    /// takes no ring and no keyboard. The next build compares each card with what it was made with
+    /// (ApertureApp.Home.cs), so the two moved are made again then. A key used to build all of
+    /// Home, every shelf's cards with it.
+    /// </summary>
+    private bool MoveRingWithoutBuild(int from)
+    {
+        if (Current.View != ApertureView.Home || _homeBuild != Builds) return false;
+        if (!HomeCardAt(from, out var left) || !HomeCardAt(_cursorIndex, out var reached)) return false;
+        if (left is BoxElement l) l.Outline = default;
+        if (reached is BoxElement r)
+        {
+            r.Outline = CursorRing;
+            _cursorCard.Current = r;
+            _cursorCardIndex = _cursorIndex;
+        }
+        FocusCursorCard();
         return true;
     }
 

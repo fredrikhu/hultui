@@ -24,7 +24,7 @@ public class BranchRootMemoryTests
         Hosted((session, app, settings) =>
         {
             CreateBranch(app, branch);
-            session.PumpFrame();
+            Settle(session, app);
 
             Assert.Equal(expectedRoot, settings.LastBranchRoot);
         });
@@ -36,7 +36,7 @@ public class BranchRootMemoryTests
         Hosted((session, app, settings) =>
         {
             CreateBranch(app, "feature/login");
-            session.PumpFrame();
+            Settle(session, app);
 
             foreach (var (method, args) in new (string, object?[])[]
             {
@@ -57,12 +57,12 @@ public class BranchRootMemoryTests
         Hosted((session, app, settings) =>
         {
             CreateBranch(app, "feature/login");
-            session.PumpFrame();
+            Settle(session, app);
 
             // ".." is invalid in a ref name, so git refuses the branch outright. The
             // earlier root has to survive that — the failed attempt is not a preference.
             CreateBranch(app, "broken/x..y");
-            session.PumpFrame();
+            Settle(session, app);
 
             Assert.Equal("feature/", settings.LastBranchRoot);
         });
@@ -77,7 +77,7 @@ public class BranchRootMemoryTests
         Run(repo, settings, (session, app) =>
         {
             CreateBranch(app, "feature/login");
-            session.PumpFrame();
+            Settle(session, app);
         });
 
         // A second launch reads the file back rather than the object we just mutated.
@@ -91,6 +91,15 @@ public class BranchRootMemoryTests
 
     private static void CreateBranch(JunctionApp app, string name) =>
         Invoke(app, "DoCreateBranch", [name, null, false]);
+
+    /// <summary>git runs on the pool and hands its result back to the UI thread: wait for the
+    /// command, then the frame that applies it. One frame was a race the command usually won
+    /// only while other git work slowed that frame down.</summary>
+    private static void Settle(HeadlessSession session, JunctionApp app)
+    {
+        session.PumpUntil(() => Field<Task>(app, "_stagingChain").IsCompleted, TimeSpan.FromSeconds(20));
+        session.PumpFrame();
+    }
 
     private static object? Invoke(JunctionApp app, string method, object?[] args)
     {

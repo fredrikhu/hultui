@@ -483,6 +483,7 @@ public class A11yLeafPatchTests
     private static Run Play(string which, bool forceRebuild, Func<Func<ulong, string>, (IAccessibilityBridge Bridge, Func<List<string>> Told)> bridge)
     {
         using var session = HeadlessSession.Create(800, 900);
+        session.Window.Window.AccessibilityBuildsEveryRefresh = forceRebuild;
         var scene = Make(which);
         ulong baseId = MinId(scene.Root);
         string Map(ulong raw) => raw == 0 ? "root" : VirtualItemId.TryDecode(new ElementId(raw), out var list, out int index)

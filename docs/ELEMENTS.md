@@ -1253,7 +1253,7 @@ var list = VirtualListElement<FileEntry>.New()
 | — | `InvalidateHeights()`, `InvalidateRows()` | after a change the list cannot see; with `ItemRowTemplate`, whenever anything a row shows besides its item and selected state changes |
 | — | `InvalidateRow(index)` | `InvalidateRows()` for one item: its row (if realized) and its kept label are made again, every other row is kept — for something only a row or two show that moves (see **State that only some rows show** below) |
 | `.SelectionHighlight(fill, radius, ring, width)`, `.SelectionHighlight(RowHighlight?)` | `SelectionHighlight` | the list draws the selection itself, under each selected row on screen, and makes its rows unselected, so a selection move makes no row — see **A selection the list draws** below |
-| `.HoverHighlight(fill, radius)` | `HoverHighlight` | the list draws a tint under the unselected row the pointer is on, so rows it keeps need no hover of their own — same section |
+| `.HoverHighlight(fill, radius, rows)` | `HoverHighlight`, `HoverRowFor` | the list draws a tint under the unselected row the pointer is on, so rows it keeps need no hover of their own; with `rows`, only under the rows it is true for (not a header) — same section |
 | `.SelectionOverlay(element)` | `SelectionOverlay` | the list holds one element over the selected row, against its end, for what only that row shows — same section |
 | `.StickyRows(Func<T,int,bool>)` | `StickyRowFor` | the rows held at the top while the rows after them scroll under them, each until the next pushes it off — see **Rows held at the top** below |
 
@@ -1263,7 +1263,15 @@ component always shows current data with no reference tricks. A row with a `Key`
 patched instead of replaced, which is what keeps focus, a caret or a scroll offset alive
 inside it; key rows that hold state. Rows are force-sized to their height and
 `FlexShrink(0)`, so a template that wants a different height must say so through
-`RowHeights`. A row inherits text style from the list like any other child: a `.FontSize()`,
+`RowHeights`. A row's margins are laid out inside its place, as a column lays out a child's:
+the row is as tall as its place less its top and bottom margins and as wide as the list less
+its side margins, set in by them. The place — what `ItemHeight` or `RowHeights` gives, and what
+scrolling, reveals and a reader's item bounds go by — keeps its height, so the margins add
+nothing to the list's length, and a press in a margin reaches no row. A list whose rows need an
+inset gives them margins instead of a box around each: the command palette's rows carry the
+list's padding this way (its first row the top, its last the bottom), which saved a box and its
+style per row made. (Until plan 17 round 7 step 5 a row's margins were dropped: it filled its
+place.) A row inherits text style from the list like any other child: a `.FontSize()`,
 `.TextColor()` or `.Cursor()` set above the list reaches every row that does not set its own.
 (Until 2026-10-12 a row from the one-argument template was resolved under the theme's
 defaults while it was made, and the next style pass resolved it again under the list,
@@ -1312,10 +1320,28 @@ list made its rows again on a scale change. The window tells the list before its
 event, so an owner that moves its cache to the new scale there has the rows made with the new
 glyphs. Handlers in a kept row are the ones it was made with, so
 they should read live state (`SelectionContains(c.Hash)`) rather than a value the build
-captured. Rows are matched by index: an insertion above the viewport makes the rows it moves
-again, as before. The one-argument template keeps its behaviour exactly; nothing changes for
-a list that does not opt in. On the perf suite's selection walk the opt-in makes 3 rows per
-step instead of 19 and allocates 26 KB instead of 97.
+captured. A row whose index another item takes is not lost: it follows its item (below). The
+one-argument template keeps its behaviour exactly; nothing changes for a list that does not opt
+in. On the perf suite's selection walk the opt-in makes 3 rows per step instead of 19 and
+allocates 26 KB instead of 97.
+
+**Rows follow their item.** A row the list lets go of because another item now stands at its
+index goes back, as it is, to the index where an equal item stands in the same selected state,
+before the template is asked for that index. An insertion above the rows, a removal or a filter
+moves the rows it shifts and makes only the rows that come into the window. A moved row is the
+same element, so a field in it keeps the focus, and a reader hears it under its new item. So
+**keep the index out of the item** unless the row shows it: an item that carries its index is
+equal at no other index, and every row a change moves is made again. A row that shows something
+of its place carries only that, and only while it shows it: Vesper's Detail rows carry whether
+the zebra tint falls on them while the tint is on (`PaneRowItem.Odd`), not their index. Two rows
+are still made again: a row under the pointer, unless the focus is in it (moved, it would take
+its hover tint away from the pointer until the pointer moves), and every row a patch moves when
+its build told the list `InvalidateRow` (what that tells follows a place, see below). On the
+perf suite `virtual/filter 1,000 item rows, rows follow their item` makes 3 rows a step instead
+of 19 and allocates 14.8 KB instead of 76.6, and `virtual/insert above 1,000 item rows, rows
+follow their item` makes 1 row instead of 20 (7.1 KB instead of 80.5); their `rows carry their
+place` twins still make every row that moved. Vesper's Detail type-to-find, once its items
+dropped the index (headless, 400 files, NativeAOT): 195.7 → 102.9 KB a key, rows made 26.5 → 9.3.
 
 **State that only some rows show.** A second highlight beside the selection (the open file
 under a tree's cursor, the branches picked for a comparison), a folder's open state: these
@@ -1351,7 +1377,8 @@ the loader) and the highlight is one value that moves, the app can instead tell 
 rows it moved between: `InvalidateRow(index)` makes that one row again (and lets go of its kept
 label), and keeps every other. Call it for the row the highlight left and the row it reached,
 through the list's ref, before the rebuild patches the list — the same place `InvalidateRows()`
-goes:
+goes. In a build that calls it, the rows the patch moves are made again instead of following their
+item: the indices it names are the new items', the rows it would move the old items':
 
 ```csharp
 if (partner != _partnerWas && _listRef.Current is { } list)
@@ -1391,14 +1418,22 @@ row drew and the row's own background becomes transparent (a row with a ring kee
 border of the ring's width, so its contents stay where they were). It fits only a selection that
 is a background. A row that shows its selection any other way cannot show it any more: a bolder
 label or an icon's colour. Such a list keeps the selection in its rows. Assistive technology
-reads the list's selection, not the rows', so it is told the same either way.
+reads the list's selection, not the rows', so it is told the same either way. On composite rows
+(`RowsAreComposite`), which a reader reads as they are, a row made unselected would say it is not
+selected: the list tells each row that says whether it is (its `AccessibleSelected` is set — make
+it `false`) whether its item is, as it realizes, keeps or moves the row and as the selection moves.
+A reader hears the same selected row and the same IsSelected changes as when the rows said it
+themselves. The command palette's rows are such buttons.
 
 Two more things a row would have to be told its selection for move to the list. A row that tints
 under the pointer and leaves the tint off its selected row would keep the tint over the highlight,
 since a kept row never learns it became selected: `.HoverHighlight(fill)` has the list draw the
 tint, under the row the pointer is on (`Element.IsHovered`, what a row's own `.OnHover` sees) and
 only if that row is not selected. The pixels are a row's own, and a row with a fill of its own
-covers the tint. Something only the selected row has goes in `.SelectionOverlay(element)`: one
+covers the tint. A row that took no tint of its own (a held section header, whose fill the tint
+would go over, or a "No changes" line) is left out with `rows`: Junction's Changes list passes
+`.HoverHighlight(Nocturne.Neutral900, Nocturne.RadiusRow, rows: (item, _) => item.Kind is …)`.
+Something only the selected row has goes in `.SelectionOverlay(element)`: one
 element the list holds over the selected row (`SelectedIndex`), at the row's end and as tall as it,
 over the rows and under the scroll bars, scrolled and clipped as they are. A move only moves it, with
 no layout. Hand back the element on screen from a build, or a new one, which is patched into it.
@@ -1434,6 +1469,14 @@ while the zebra tint is on or a drag hovers a folder in the pane, either of whic
 the list's box; each is in the rows' shape, so the switch makes the rows again (Detail Down 35 →
 23 KB a key). Something that needs the selected row's place — a menu opened under it — works it out
 from the list (`ScreenContentBox`, `ItemHeight`, `ScrollOffsetY`), since no row is made selected.
+
+When the list is then the only thing that shows the selection, a move need not rebuild its owner
+at all: set `SelectedIndex` on the mounted list through its ref, and scroll the row into view
+(`ScrollRangeIntoView`), as the command palette's Down does. The next build hands the list the same
+index. A Down in Junction's palette made 32 elements and allocated 32 KB a key with its rows drawing
+the choice, each in a box of its own; 14 elements and 15 KB with the list drawing it and the card
+built again; and 3.9 elements (the rows scrolled in) and 3.7 KB with neither (plan 17, round 7,
+step 5).
 
 **Rows held at the top.** `.StickyRows((item, index) => item.IsHeader)` says which rows are a
 section's header in one list of rows. The list keeps the last sticky row at or above the first row
@@ -1475,7 +1518,9 @@ only the ones on screen, and the held row.
 **An editor in a row.** A field or a rich text editor in a row holds its own text, caret and undo,
 and an editor of fixed height leaves the row's height alone, so a key in it needs no row made and
 no build. Make the row again only when something else in it shows the change: a `RichTextToolbar`
-says so with `IsStale`, true when a build would make other buttons than the last one made.
+says so with `IsStale`, true when a build would make other buttons than the last one made. Wire an
+editor's `SelectionChanged` through `IsStale` wherever it sits, not straight to a rebuild: one that
+grows with its text (`AutoHeight`) lays itself out again without one.
 
 ```csharp
 .OnDocumentChanged(d => { _doc = d; Edited(); })
@@ -1522,7 +1567,9 @@ row without realizing it, so a reader can walk 20,000 items that were never buil
 virtualize: a container that paints its own rows — the context menu does — implements it so
 those rows reach assistive tech at all. `ItemBounds(i)` places them when they are not a
 uniform height (a menu with separators in it), and `ItemIsToggled(i)` says which of them is
-the choice in force.
+the choice in force. The items are list items, or menu items when the container's role is
+`Menu`: a context menu and a menu bar's menu are read as a menu, a dropdown's open list as a
+list.
 
 **A ref points at the element you just built.** `WithRef` sets `Current` immediately, and
 reconciliation repoints it at the live element afterwards — so inside one `Build()`, a ref
@@ -1871,6 +1918,7 @@ _find = new FindBar(MarkDirty)
     Reveal = RevealCurrentMatch,            // scroll _find.Search.Current into view
     Selection = SelectionInBody,            // Ctrl+F searches for it, starting at it
     LetterKeys = true,                      // n / p walk the matches when no field has the keyboard
+    Moved = MatchMoved,                     // a step: re-tint where the match left and reached
 };
 _find.Search.Bind(lines.Length, lanes: 1, (line, _) => lines[line]);   // when the text changes
 
@@ -1891,6 +1939,7 @@ _find.Service();
 | `HandleKey(e)` | Ctrl+F, Escape, Enter / Shift+Enter, Alt+C, Alt+R, and `n` / `p` with `LetterKeys` |
 | `Service()` | focus the field, give the body the keyboard back, reveal the current match |
 | `RevealCurrent()` | ask for a reveal at the next `Service` without rebuilding |
+| `Moved` | runs instead of `onChanged` after a step that moved only the current match: the step builds nothing |
 | `Body`, `Reveal`, `Selection`, `Opening` | the owner's hooks |
 | `RevealAfterLayout` (true) | false when `Reveal` defers itself (`ScrollRangeIntoView`) and can land on the same frame |
 | `Placeholder`, `FieldWidth` 280, `FieldHeight` 30, `Icon` | the field and the glyphs |
@@ -1927,6 +1976,35 @@ own rebuild made view-only (an owner with kept parts gives the bar the rebuild t
 nothing a part shows moves with a find step, and a full one built Vesper's title bar and command
 line again on every Enter). Headless, JIT; NativeAOT 326 → 68 KB (plan 17, round 6). Junction's
 diff the same: 36 rows and 468 KB an Enter, 3 rows and 108 KB now.
+
+**A step builds nothing.** With `Moved` set, a step that moves only the current match — Enter,
+Shift+Enter, `n`, `p`, the arrows — runs `Moved` instead of `onChanged`. Of the bar it changes
+the count alone, which the bar writes into the label on screen, as the reconciler would after a
+build; then it runs `Service`, as the owner's `OnAfterBuild` would, and the match is revealed. The
+owner's view is not built at all. `Moved` does on the body as it is what the owner's build does
+when it sees the match move, and leaves the field that build compares where the rows show it:
+
+```csharp
+private void MatchMoved()
+{
+    var s = _find.Search;
+    var hit = s.Index >= 0 && s.Index < s.Hits.Count ? (s.Index, s.Hits[s.Index].Line) : (-1, -1);
+    if (hit != _hitWas && _listRef.Current is { } list)
+    {
+        list.InvalidateRow(_hitWas.Line);
+        list.InvalidateRow(hit.Line);
+    }
+    _hitWas = hit;
+}
+// A TextArea body: area.Highlights = Tints(), the same list the next build hands it.
+```
+
+Without `Moved` a step builds the owner as any other change does; a switch, typing, opening and
+closing always do, because they move every match or the bar itself. An Enter, headless app
+walks, NativeAOT (JIT agrees within 2 KB): Junction's diff on a 3,000-line file 88 → 31.5 KB,
+Meridian's 2,000-line response 60 → 12.6 KB, Vesper's reader on 3,000 lines 69 → 21 KB, with no
+build; a typed character unchanged (plan 17, round 7). A `Part` of its own for the bar was
+measured first and declined: its build alone is 16 KB a step (see DECISIONS.md).
 
 **A TextArea body takes the matches as highlights.** One `TextArea` over a whole document
 (Meridian's response, Junction's Files view) has one span list for the document, so the matches
@@ -2305,3 +2383,50 @@ private void MarkViewDirty() => base.MarkDirty();
 - **`Builds`:** on `Part` and on `PartGroup` (of all its parts), for tests.
 - **`Mount()`** is a `Component`'s: it hands back the host without the check. A part mounted, not
   placed, hears a full rebuild only through a signal it reads, as Junction's chrome does.
+
+## 28. KeptElements (elements a build hands back)
+
+`KeptElements<TState>` is not an element but a helper (`HultUI.Core.Components`): the elements an
+owner's build made, by key, with the state each was made from, so that the next build can hand back
+the live element of each one it would make from the same state. The reconciler puts such an element
+back where it was, untouched. A cursor key on a page of cards then makes the two cards it moved
+between, not every card on the page. The reasoning and the traps are in
+[REACTIVITY.md](REACTIVITY.md), "Hand back the elements a key does not change".
+
+```csharp
+private readonly record struct CardState(MediaItem Item, bool Cursor, IImageSource? Picture);
+private readonly KeptElements<CardState> _cards = new();
+
+private Element Shelf(IReadOnlyList<MediaItem> items)
+{
+    _cards.Begin(_builds);   // the owner's count of its builds
+    var row = Flex.Row(gap: 16);
+    for (int i = 0; i < items.Count; i++)
+    {
+        var state = new CardState(items[i], i == _cursor, Picture(items[i]));
+        if (_cards.TryKeep(items[i].Id, state, out var kept)) row.AddChild(kept);
+        else row.AddChild(_cards.Made(items[i].Id, state, Card(items[i], state)));
+    }
+    return row;
+}
+```
+
+- **`Begin(build)`:** starts a build of these elements, numbered by the owner's count of its builds.
+  Only what the build numbered one less made or handed back can be handed back: an element a build
+  left out was removed or patched into something else, and an owner build that made none of them
+  (another view) may have done that to all. Elements a virtual list makes in a frame skip it, and
+  give each a place instead.
+- **`TryKeep(key, state, out element, place)`:** the live element made for the key with an equal
+  state, still in the window, and with a `place` a child of the parent keyed so: a row a virtual
+  list makes again while the rows around it stay. Add it where the new one would go.
+- **`Made(key, state, element)`:** remembers an element just made and returns it to add. It sets the
+  element's key, so key its siblings too (all of a row's cards go through the helper), and attaches
+  a ref that follows the element to the live one it is patched into.
+- **`Live(key)`:** the element in the window for a key, as the latest build left it, for a change
+  the owner makes to the live element with no build (Aperture's Home moves the cursor's ring this
+  way). Check first that no build of the owner has run since that one without making these elements.
+- **`Clear()`** forgets them all, for a change to something every element shows that no state
+  holds. **`Count`** is how many it holds; those that left the window go as the count doubles.
+- **The state is what the element shows and does:** its item, the cursor on it, its picture as the
+  cache has it, and a setting every element shows (or `Clear()` when it moves). Its handlers are the
+  old build's, so what they capture belongs in the state too.

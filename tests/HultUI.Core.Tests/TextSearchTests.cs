@@ -1,6 +1,7 @@
 using HultUI.Core.Builders;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
+using HultUI.Testing;
 using Xunit;
 
 namespace HultUI.Core.Tests;
@@ -273,6 +274,89 @@ public class TextSearchTests
         s.SetQuery("alpha");
 
         Assert.Same(syntax, s.Decorate(syntax, 1, 0, "beta".Length, Hit, Current));
+    }
+
+    // ── A line's hits ────────────────────────────────────────────────────
+
+    /// <summary>A line's hits are found in the scan's results when the line is asked about:
+    /// every line and lane of a grid with lines of none, one or several hits, empty lanes and
+    /// a scan stopped at the cap answers exactly the scan's hits on it, and lines outside the
+    /// content answer none.</summary>
+    [Fact]
+    public void HitsOnAnswersTheScansHitsForEveryLineAndLane()
+    {
+        var rng = new Random(17);
+        const int Lines = 400;
+        var grid = new string?[Lines, 3];
+        for (int line = 0; line < Lines; line++)
+            for (int lane = 0; lane < 3; lane++)
+                grid[line, lane] = rng.Next(5) == 0 ? null
+                    : string.Join(' ', Enumerable.Range(0, rng.Next(4)).Select(_ => rng.Next(3) == 0 ? "hit" : "miss"));
+        var s = new TextSearch(() => { });
+        s.Bind(Lines, 3, (line, lane) => grid[line, lane]);
+
+        foreach (var query in new[] { "hit", "i", "zzz" })
+        {
+            s.SetQuery(query);
+            for (int line = -2; line < Lines + 2; line++)
+                for (int lane = 0; lane < 3; lane++)
+                {
+                    var expected = s.Hits.Where(h => h.Line == line && h.Lane == lane).ToArray();
+                    // Asked twice: the second answer is the list the first one kept.
+                    for (int ask = 0; ask < 2; ask++)
+                        if (expected.Length == 0) Assert.Null(s.HitsOn(line, lane));
+                        else Assert.Equal(expected, s.HitsOn(line, lane)!);
+                }
+        }
+
+        // Stopped at the cap: the lines past it have no hits, the line it stopped in some.
+        var many = new TextSearch(() => { });
+        many.Bind(30_000, 1, (_, _) => "a a");
+        many.SetQuery("a");
+        Assert.True(many.Capped);
+        var last = many.Hits[^1];
+        Assert.Equal(many.Hits.Count(h => h.Line == last.Line), many.HitsOn(last.Line)!.Count);
+        Assert.Null(many.HitsOn(last.Line + 1));
+    }
+
+    /// <summary>A line's hits are listed once, when a row first asks, and kept until the next
+    /// scan, which answers from its own results.</summary>
+    [Fact]
+    public void ALinesHitsAreKeptUntilTheNextScan()
+    {
+        var s = Over("hit hit", "hit", "none");
+        s.SetQuery("hit");
+
+        var first = s.HitsOn(0);
+        Assert.Same(first, s.HitsOn(0));
+        Assert.Equal(2, first!.Count);
+
+        s.SetQuery("hit ");
+        var again = s.HitsOn(0);
+        Assert.NotSame(first, again);
+        Assert.Single(again!);
+        Assert.Null(s.HitsOn(1));
+    }
+
+    /// <summary>
+    /// A scan — every typed character — lists no line's hits: only a row on screen asks for
+    /// them. Listing every line with a hit as the scan went made a list and its array for each,
+    /// 120 B a line, on every key (plan 17, round 7: 54 % of typing into a response's find).
+    /// </summary>
+    [Fact]
+    public void AScanListsNoLinesHits()
+    {
+        var lines = Enumerable.Range(0, 2_000).Select(i => $"line {i} has a hit in it").ToArray();
+        var s = Over(lines);
+        s.SetQuery("hit");
+        s.SetQuery("hi");
+        long bytes = Allocations.Least(() =>
+        {
+            s.SetQuery("hit");
+            s.SetQuery("hi");
+        });
+        Assert.Equal(2_000, s.Hits.Count);
+        Assert.True(bytes < lines.Length, $"{bytes:N0} B for two scans of {lines.Length:N0} lines with a hit each");
     }
 
     // ── Content changes ──────────────────────────────────────────────────

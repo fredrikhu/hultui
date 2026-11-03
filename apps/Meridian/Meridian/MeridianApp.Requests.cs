@@ -339,6 +339,13 @@ public partial class MeridianApp
                 {
                     bool wasDirty = tab.Dirty;
                     tab.Doc.SetRequestLine(tab.Doc.Method ?? "GET", url);
+                    // The box holds what was typed. On the Headers, Body and Auth sub-tabs nothing
+                    // else the editor shows reads the URL but the Params and Chain counts, so a
+                    // character that moves neither (and does not make the request unsaved) builds
+                    // nothing: a build of the editor was 64 KB a character.
+                    if (tab.Dirty == wasDirty && (tab.SubTab is EditorTab.Headers or EditorTab.Body or EditorTab.Auth)
+                        && UrlCountsOf(tab) == _urlCountsShown)
+                        return;
                     DocEdited(tab, wasDirty);
                 })
                 .Height(Dimension.Px(28))
@@ -445,7 +452,8 @@ public partial class MeridianApp
             .AutomationId("subtabs");
         bar.ShowScrollbarX = false;
 
-        bar.AddChild(SubTabButton(tab, EditorTab.Params, $"Params {CountLabel(QueryParams(tab).Count)}"));
+        var counts = _urlCountsShown = UrlCountsOf(tab);
+        bar.AddChild(SubTabButton(tab, EditorTab.Params, $"Params {CountLabel(counts.Params)}"));
         bar.AddChild(SubTabButton(tab, EditorTab.Headers, $"Headers {CountLabel(tab.Doc.Headers.Count)}"));
         bar.AddChild(SubTabButton(tab, EditorTab.Body, tab.Doc.Body is { Type.Length: > 0 } b ? $"Body {b.Type}" : "Body"));
         var (authSpec, authInherited) = EffectiveAuth(tab);
@@ -454,10 +462,22 @@ public partial class MeridianApp
             : authInherited != null ? "Auth inherited"
             : "Auth " + KindLabel(authSpec.Kind)));
         bar.AddChild(SubTabButton(tab, EditorTab.Assertions, AssertionsTabLabel(tab)));
-        var chainNode = Chain.Analyze(tab.Path, tab.Doc);
-        bar.AddChild(SubTabButton(tab, EditorTab.Chain,
-            $"Chain {CountLabel(chainNode.Uses.Count + chainNode.Produces.Count)}"));
+        bar.AddChild(SubTabButton(tab, EditorTab.Chain, $"Chain {CountLabel(counts.Chain)}"));
         return bar;
+    }
+
+    /// <summary>What the sub-tab strip shows of a tab's URL: the pairs Params counts, and the
+    /// variables used and produced that Chain counts.</summary>
+    private readonly record struct UrlCounts(RequestTab Tab, int Params, int Chain);
+
+    /// <summary>The counts the last build of the strip showed, which a URL character that moves
+    /// neither leaves as they are.</summary>
+    private UrlCounts _urlCountsShown;
+
+    private static UrlCounts UrlCountsOf(RequestTab tab)
+    {
+        var chain = Chain.Analyze(tab.Path, tab.Doc);
+        return new(tab, QueryParams(tab).Count, chain.Uses.Count + chain.Produces.Count);
     }
 
     private static string CountLabel(int n) => n > 0 ? n.ToString() : "";

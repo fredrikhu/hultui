@@ -204,10 +204,14 @@ public sealed class Shortcut
     public string KeysText => ShownAs ?? string.Join(" · ", Keys);
 
     /// <summary>Whether <paramref name="e"/> is one of its chords now.</summary>
+    /// <remarks>An index loop: a foreach over <see cref="Keys"/>, an interface, boxes an enumerator
+    /// per shortcut tried, and an app's key handler tries most of its table on every key (Vesper:
+    /// 168 a key, 5.3 KB).</remarks>
     public bool Matches(KeyDownEvent e)
     {
-        foreach (var chord in Keys)
-            if (chord.Matches(e)) return true;
+        var keys = Keys;
+        for (int i = 0; i < keys.Count; i++)
+            if (keys[i].Matches(e)) return true;
         return false;
     }
 

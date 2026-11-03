@@ -135,9 +135,18 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// change in it, in place of a tree (<see cref="TryRebuildOverlays"/>). UI thread.</summary>
     internal int AccessibilityOverlayPartsBuilt { get; private set; }
 
-    /// <summary>How many coalesced layout refreshes brought the applied tree up to date in place,
-    /// building none (<see cref="TryRefreshA11yInPlace"/>). UI thread.</summary>
+    /// <summary>How many refreshes — coalesced layout refreshes, and frames whose elements' children
+    /// changed — brought the applied tree up to date in place, building none
+    /// (<see cref="TryRefreshA11yInPlace"/>). UI thread.</summary>
     internal int AccessibilityLayoutRefreshesInPlace { get; private set; }
+
+    /// <summary>How many of those found nodes added, gone or in another order, and built only the
+    /// new ones. UI thread.</summary>
+    internal int AccessibilityStructureRefreshesInPlace { get; private set; }
+
+    /// <summary>For tests: every refresh builds the tree, none is made in place, as before plan 17's
+    /// round 5: what a build tells, to hold a refresh made in place to. UI thread.</summary>
+    internal bool AccessibilityBuildsEveryRefresh { get; set; }
 
     /// <summary>Why the last layout refresh that could not be made in place built a tree (what a
     /// build makes otherwise there), or null. For tests. UI thread.</summary>
@@ -1135,22 +1144,25 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     }
 
     /// <summary>
-    /// A coalesced layout refresh without a tree: the elements are walked against the applied tree by
-    /// the builder's rules (<see cref="AccessibilityTreeBuilder.TryRefreshInPlace"/>), and where a build
-    /// would make the same nodes, what changed is written in place — a box moved in its scroll views'
-    /// content, a node gone out of view or come into it, a scroll view's offset and geometry, a leaf
-    /// whose own properties changed (made again, as a leaf's patch makes it) — and the bridge is handed
-    /// the changes the build's diff would have reported, in its order, as patched properties. A pure
-    /// scroll writes one offset and the offscreen states: each wheel turn over a 1,000-row list built
-    /// and diffed 3,001 nodes, and a reader walking a list at its own pace one tree per key. Whatever
-    /// a list's selection, a caret or a leaf told since is in that, as it is in a build's diff. False,
-    /// writing nothing, when a build would make another tree (a node added, gone or moved elsewhere, a
-    /// list's items in another number, a node with children whose own properties changed, a change no
-    /// diff tells), and the tree is built then, as it always was.
+    /// A coalesced layout refresh, or a frame whose elements' children changed, without a tree: the
+    /// elements are walked against the applied tree by the builder's rules
+    /// (<see cref="AccessibilityTreeBuilder.TryRefreshInPlace"/>), and what a build would make otherwise
+    /// is written in place — a box moved in its scroll views' content, a node gone out of view or come
+    /// into it, a scroll view's offset and geometry, a leaf whose own properties changed (made again, as
+    /// a leaf's patch makes it), a node's children added, gone or in another order (only the new ones
+    /// built) — and the bridge is handed the changes the build's diff would have reported, in its
+    /// order: as patched properties, or, with nodes added or removed, as that diff. A pure scroll writes
+    /// one offset and the offscreen states: each wheel turn over a 1,000-row list built and diffed 3,001
+    /// nodes, and a reader walking a list at its own pace one tree per key; a row a key made again in a
+    /// composite list built and diffed the whole window's tree. Whatever a list's selection, a caret or
+    /// a leaf told since is in that, as it is in a build's diff. False, writing nothing, when a build
+    /// would make another tree than that (a node with children whose own properties changed, a list
+    /// whose items cross the number served on demand, a change no diff tells), and the tree is built
+    /// then, as it always was.
     /// </summary>
     private bool TryRefreshA11yInPlace()
     {
-        if (_previousA11yTree is not { } tree) return false;
+        if (_previousA11yTree is not { } tree || AccessibilityBuildsEveryRefresh) return false;
         if (_a11yRefreshSkips > 0)
         {
             _a11yRefreshSkips--;
@@ -1172,7 +1184,19 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             _a11yRefreshFailures = 0;
             refresh.Apply();
             AccessibilityLayoutRefreshesInPlace++;
-            if (refresh.Changes.Count > 0)
+            if (refresh.Structural)
+            {
+                // What a build's diff would be, of the tree that is that build now: the bridge takes
+                // the nodes added and lets go of those removed, as it does for a build.
+                AccessibilityStructureRefreshesInPlace++;
+                var diff = new TreeDiff();
+                diff.Added.AddRange(refresh.Added);
+                diff.Removed.AddRange(refresh.Removed);
+                diff.Reordered.AddRange(refresh.Reordered);
+                diff.PropertyChanged.AddRange(refresh.Changes);
+                _accessibilityBridge.ApplyChanges(diff, tree);
+            }
+            else if (refresh.Changes.Count > 0)
             {
                 var patch = new TreeDiff();
                 patch.PropertyChanged.AddRange(refresh.Changes);
@@ -1676,8 +1700,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // Structural (Children), property/focus, and first-attach changes refresh
         // immediately. Layout-only changes are coalesced (see A11yCoalesceMs): a
         // continuous resize/scroll otherwise rebuilds the whole tree every frame.
-        bool a11yImmediate = a11yActive && (!_a11yWasActive || _a11yPropertyDirty
-            || (_root.DirtyFlags & DirtyFlags.Children) != 0);
+        bool a11yChildren = (_root.DirtyFlags & DirtyFlags.Children) != 0;
+        bool a11yImmediate = a11yActive && (!_a11yWasActive || _a11yPropertyDirty || a11yChildren);
         if (a11yActive && layoutWasDirty)
             _a11yLayoutRefreshPending = true;
         // An open overlay's part of the tree, a child of the root node, is built again on its own:
@@ -1690,15 +1714,22 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         bool a11yRangeDue = a11yActive && _a11yRangeRefreshPending
             && nowMs - _lastA11yRangeMs >= A11yRangeCoalesceMs;
         bool a11yRebuild = a11yImmediate;
-        // A layout refresh came due and nothing else asks for a tree: the applied tree is brought up to
-        // date in place where a build would make the same nodes, and built where it would not. Either
-        // tells what the patches below would, so they do not run then.
+        // A layout refresh came due and nothing else asks for a tree, or the elements' children changed
+        // (rows made again, a row scrolled in) and nothing but that asks for one: the applied tree is
+        // brought up to date in place, with nodes built only for what is new, where the walk finds what
+        // a build would make, and built where it does not. Either tells what the patches below would, so
+        // they do not run then. A row a key made again in a composite list built the whole window's tree.
         bool a11yRefreshed = false;
-        if (a11yLayoutDue && !a11yImmediate)
+        bool a11yStructure = a11yImmediate && a11yChildren && _a11yWasActive && !_a11yPropertyDirty;
+        if ((a11yLayoutDue && !a11yImmediate) || a11yStructure)
         {
             using (_tracer.Begin("Phase", "A11y"))
                 a11yRefreshed = TryRefreshA11yInPlace();
-            if (a11yRefreshed) A11yRefreshed(nowMs);
+            if (a11yRefreshed)
+            {
+                A11yRefreshed(nowMs);
+                a11yRebuild = false;
+            }
             else a11yRebuild = true;
         }
         bool a11yOverlays = a11yActive && !a11yRebuild && !a11yRefreshed && ((overlayChanges & OverlayChanges.Structure) != 0
@@ -3451,6 +3482,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         if (ReferenceEquals(entry.Content.AccessibilityObserver, _a11yObserver))
             entry.Content.AccessibilityObserver = null;
         A11yOverlaysChanged(entry);
+        // The slots its elements took for nodes of their own (a menu's items) go with it: the
+        // content was never added to a parent, so no unmount gives them back.
+        AccessibleOwnerSlots.ReleaseTree(entry.Content);
         if (_focusManager.FocusedElement is not { } focused || TopOf(focused) != entry.Content) return;
         _focusManager.SetFocus(entry.FocusBefore is { } before && IsInWindow(before) ? before : null);
 
@@ -4342,10 +4376,22 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             // One of a set in the main tree: a menu's entry the pointer reached or left. Its node's
             // selected state is marked and told as a list's item's is (TryPatchA11y). Its name is
             // not the row's text changing, so an entry with children patches as well as a leaf.
-            else if (propertyName == AccessibilityProperties.IsSelected && element.IsMenuEntry)
+            // A row of a list whose rows a reader reads as they are (RowsAreComposite), told its
+            // selected state by a list that draws the selection: marked and told the same way. A
+            // rebuild for it built the whole tree on every caret key of Junction's Changes list.
+            else if (propertyName == AccessibilityProperties.IsSelected
+                && (element.IsMenuEntry || element.AccessibleSelected is not null
+                    && element.Parent is IAccessibleItemSource { PublishesItemNodes: false }))
             {
                 if (!window._a11yOwnSelection.Contains(element)) window._a11yOwnSelection.Add(element);
             }
+            // Such a list has no selected state of its own and no item nodes: what a move of its
+            // selection changes, its rows tell, made again (its children change, and the change is
+            // walked in place) or told their selected state (above). A rebuild for it built the
+            // whole tree on every key of a walk through such a list.
+            else if (propertyName == AccessibilityProperties.IsSelected
+                && element is IAccessibleItemSource { PublishesItemNodes: false } && element.AccessibleSelected is null)
+                return;
             // A keystroke, a caret or a selection moved in text made on request (a rich text
             // editor's, a text area's), or what its version holds besides the text changed
             // (read-only, its layout): its new version goes on the applied tree's node and the

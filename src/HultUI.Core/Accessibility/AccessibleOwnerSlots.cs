@@ -79,4 +79,27 @@ internal static class AccessibleOwnerSlots
             if (SlotOfOwner.Remove(owner.Value, out var slot)) OwnerOfSlot.Remove(slot);
         }
     }
+
+    /// <summary>
+    /// An overlay's <paramref name="content"/> has closed: it and every element under it give
+    /// their slots back. The content is a root of its own, never added to a parent, so nothing
+    /// unmounts it, and a context menu (which publishes its items) kept its slot for the life of
+    /// the process: one more for every menu opened while a reader ran.
+    /// </summary>
+    public static void ReleaseTree(Element content)
+    {
+        if (!_any) return;
+        lock (Gate)
+        {
+            if (SlotOfOwner.Count > 0) ReleaseUnder(content);
+        }
+    }
+
+    private static void ReleaseUnder(Element element)
+    {
+        if (SlotOfOwner.Remove(element.Id.Value, out var slot)) OwnerOfSlot.Remove(slot);
+        var children = element.Children;
+        for (int i = 0; i < children.Count; i++) // by index: a foreach over the interface boxes
+            ReleaseUnder(children[i]);
+    }
 }

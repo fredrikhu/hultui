@@ -10,6 +10,8 @@ namespace HultUI.Core.Elements;
 /// <summary>
 /// Renders a context menu as a single leaf element. Tracks hover/selection
 /// index and exposes methods for the Window to drive keyboard navigation.
+/// A reader hears a <see cref="Accessibility.AccessibilityRole.Menu"/> of menu items (a context
+/// menu, a menu bar's menu), or a List of list items where the owner sets that role (a dropdown's popup).
 /// </summary>
 internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleItemSource
 {
@@ -44,6 +46,10 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
         // A choice reserves the icon column whether or not it is the one in force, so
         // turning one on does not shift every label sideways.
         _hasIcons = items.Any(i => i.Glyph is not null || i.Icon is not null || i.IsChecked is not null);
+        // A reader hears a menu of menu items: UIA Menu and MenuItem, AT-SPI menu and menu item
+        // (plan 17 round 7, step 13; it heard a list). A dropdown's popup sets List again: a
+        // combo box's list is a list of its values.
+        Role = Accessibility.AccessibilityRole.Menu;
 
         OnOwn<PointerMoveEvent>(OnPointerMove);
         OnOwn<PointerDownEvent>(OnPointerDown);

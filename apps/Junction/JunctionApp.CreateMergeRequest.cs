@@ -320,13 +320,10 @@ public partial class JunctionApp
         col.AddChild(branches);
 
         // Title + description.
-        col.AddChild(CreateMrField("Title", CreateMrInput(f.Title, "What this change does", v => { f.Title = v; f.TitleTouched = true; MarkDirty(); }, "create-mr-title")));
+        col.AddChild(CreateMrField("Title", CreateMrInput(f.Title, "What this change does", v => CreateMrTitleTyped(f, v), "create-mr-title")));
         var toolbar = CreateMrToolbar();
-        // A typed character changes the document and moves the caret, in one event: both ask
-        // for one rebuild of the window (RerenderView coalesces them), and the chrome shows
-        // neither, so it stays as it is.
         var desc = MarkdownEditor(f.Description, toolbar, f.Path,
-                d => { f.Description = d; f.DescriptionTouched = true; RerenderView(); }, RerenderView)
+                d => { f.Description = d; f.DescriptionTouched = true; CreateMrDescriptionEdited(); }, CreateMrDescriptionEdited)
             .PlaceholderText("Pre-filled from the commits. Closes #… closes the issue on merge.")
             .AutoHeight(96, 320)
             .Style(Ui.Field(verticalPadding: 8f));
@@ -381,6 +378,33 @@ public partial class JunctionApp
 
         backdrop.AddChild(card);
         return backdrop;
+    }
+
+    /// <summary>
+    /// A character in the title. The field holds its own text, and of the rest of the card only
+    /// the primary button reads the title, for whether there is one; the chrome shows none of it.
+    /// So the card builds when the title empties or fills again, and not for each character: it
+    /// built the window and its chrome on every one (256.5 KB a character over History).
+    /// </summary>
+    private void CreateMrTitleTyped(CreateMrForm f, string title)
+    {
+        bool had = !string.IsNullOrWhiteSpace(f.Title);
+        f.Title = title;
+        f.TitleTouched = true;
+        if (had != !string.IsNullOrWhiteSpace(title)) MarkViewDirty();
+    }
+
+    /// <summary>
+    /// The description changed, or its caret or selection moved. The editor holds all of that and
+    /// grows with what it holds (AutoHeight); only the formatting bar can show the change, so the
+    /// card builds while the bar is stale (<see cref="RichTextToolbar.IsStale"/>) and not for each
+    /// character (126.3 KB a character). A typed character raises both events, in one: the
+    /// revision signal brings the two writes to one build at the end of it. The chrome shows
+    /// neither, so it stays as it is.
+    /// </summary>
+    private void CreateMrDescriptionEdited()
+    {
+        if (CreateMrToolbar().IsStale) RerenderView();
     }
 
     private List<string> TargetChoices(CreateMrForm f, RepoSummary sum)

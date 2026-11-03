@@ -482,6 +482,12 @@ the header, param and body editors −64…−70 %; a History key −35 %; a fin
 response rebuilds only the pane (no window build, −12 %). The time of a key and its frames moves
 less (−1…−7 % at 25 requests): at this size the frames, not the build, are most of it.
 
+A field holds the text typed into it, so a key needs a build only for what else on screen reads
+that text. On the Headers, Body and Auth sub-tabs the URL is read only by the Params and Chain
+counts: a URL character compares the two with what the last build showed, and builds nothing when
+neither moved and the request was already unsaved (round 7, step 10: 66.6 → 4.0 KB a character
+and −17 % time on NativeAOT, −27 % on JIT; a query typed out −83 %).
+
 Vesper keeps its title bar, rail and command line, and each pane's tab strip, path trail, column
 header and footer, this way (round 5, step 12), and adds four lessons:
 
@@ -567,13 +573,19 @@ replace. Four things keep it right:
   Count builds and keep the cells for the next one only.
 - **Keep the live element, not the one you built.** A changed cell is patched into the old one,
   and the element the build made is thrown away; keep a `Ref` on it, which follows the patch.
-- **Everything the cell shows is in what you compare.** The entry, the cursor, and a shape of
-  the rest (the marks, the theme, the row height, the scale) as kept rows need one.
+- **Everything the cell shows is in what you compare.** The entry, the cursor, what only some
+  cells show (a mark, a file cut for a move) kept with each cell, and a shape of what every cell
+  shows (the theme, the row height, the scale). A set in the shape makes every cell again when one
+  member changes: Brief kept its marks there until round 7 (step 9), and a mark made all 140 cells
+  on screen, 471.0 → 35.7 KB a key once each cell kept its own (NativeAOT, Insert; Space, Shift+arrows
+  the same).
 
 Vesper's Brief view this way (round 4, step 13; headless, a key and two frames, 300 files): a
 key 759.9 → 237.8 KB (−69 %), what the rest of the window's build costs; the NativeAOT app in a
 real window 1,093 → 242 KB a key. A resize that changes the columns keeps them too: each cell
-moves to its new column (755.8 → 229.4 KB a step).
+moves to its new column (755.8 → 229.4 KB a step). A type-to-find key still makes cells (about 45
+a key, 400 files): every one is an entry the filter brought into the columns on screen, which had
+no cell to hand back; none on screen before is made again.
 
 The same works inside a virtual list whose item is a row of cards (Vesper's Thumbnails, round 6
 step 6). The list makes a row when its item changes — the cursor moved onto it or off it — and
@@ -611,6 +623,41 @@ Headless, 600 films with pictures, 1440×900, a key and two frames, NativeAOT wi
 181.9 → 114.1 KB (−37 %). The suite pins it: `virtual/image grid walk Right, 600 cards` against
 `…, cards handed back` (48 → 22 KB, two cards made).
 
+**`KeptElements<TState>` holds these rules** (`HultUI.Core.Components`, round 7 step 11; ELEMENTS.md
+§28). Brief, Thumbnails and the library grid each wrote them out by hand, and Brief's marks slipped
+into the shape; new code uses the helper, and the three can move to it as they are next changed:
+
+- `Made(key, state, element)` keys the element and keeps a ref that follows it to the live one, so
+  the first and third rules are its job; key the element's siblings too.
+- `TryKeep(key, state, out element)` compares the state with what the element was made from, so put
+  everything it shows in the state, a setting every element shows among it: a record struct makes
+  that a field more, not a set in a shape that remakes them all. Its handlers are the old build's;
+  what they capture belongs in the state.
+- `Begin(build)`, with the owner's count of its builds, is "only from the build just before". It is
+  stricter than "still in the window": a build that left an element out may have patched it, by
+  position, into something else that is still there, and a build of the owner that showed another
+  view may have done that to all of them. `TryKeep` checks the window as well (`Element.IsHosted`).
+- `TryKeep(…, place: key)` is the row-place check for cards a virtual list makes in a frame: those
+  skip `Begin` and are handed back only into a parent keyed so.
+
+Aperture's Home is its first user (one helper per shelf, as one film can stand on two shelves). The
+perf suite pins it: `component/shelf walk Right, 5 shelves of 7 cards, every card made` against `…,
+cards kept`.
+
+**A key that moves only a ring needs no build.** Nothing on Home shows the cursor but the ring on one
+card and the keyboard on it. So a cursor key there takes the ring off the live card it leaves and
+puts it on the one it reaches (`KeptElements.Live`), hands that card the cursor's ref and the
+keyboard, and builds nothing. The next build compares each card with what it was made with, so the
+two are made again then. Two checks keep it right: Home's latest build is the app's latest (a build
+of another view may have patched its cards into something else), and both places are cards the
+helper knows (a watchlist title card, or End in a list still loading, takes the build). Make the ring
+one value that the build and the move both use, so the two cannot drift. Headless, 1440×900, a key
+and two frames, NativeAOT (JIT and UI Automation the same): one shelf (the fake library) 63.7 → 0.2 KB
+a key, and five shelves of seven 255.7 → 0.3 KB, no build, −8…−11 % time a key; the cards kept
+without the ring move (a build a key that hands back all but two cards) took 32.9 and 70.7 KB. The
+suite pins it: `component/shelf walk Right, 5 shelves of 7 cards, ring moved without a build` (219 →
+0 KB a key against every card made).
+
 A column whose cells are all kept is left with no children by the time the reconciler reaches
 it, since the build moved every one into its new tree. Until round 5 those came back one by one,
 each marking the column's structure, so with a reader listening every key built the whole
@@ -618,6 +665,30 @@ accessibility tree; now they come back as they were and mark nothing (Brief with
 files: 300.6 → 230.2 KB a key, 1.00 → 0 trees; Reel's player, alone in its container, 5.8 → 2.0
 KB a build). The same elements in the same order is the rule: a column handed back in another
 order, or with a new cell, marks its structure as any change does.
+
+### Keep the index out of a list's item
+
+A virtual list on item rows (`.RenderWith((item, selected) => …)`) hands a row back to the index
+where its item now stands (ELEMENTS.md, "Rows follow their item"): a filter, an insertion or a
+removal moves the rows it shifts, and makes only the rows that come into the window. That holds
+only while an equal item can stand at another index. An item that carries its index never does,
+so every row a change moves is made again, as all of them were before round 7. Put in the item
+what the row shows, and of its place only what the row shows of it: Vesper's Detail rows show an
+odd row's zebra tint, so their item carries `Odd` while the tint is on, not the index. Its
+type-to-find (headless, 400 files, a key and two frames, NativeAOT) went 195.7 → 88.5 KB a key
+(−55 %) with the filtered rows made once a filter, rows made 26.5 → 9.3, median −10 %; with UI
+Automation 334.9 → 227.7 KB. An automation id made from the index (Meridian's `hist-row-N`, the
+command palette's `palette-row-N`) is something the row shows of its place: such a list keeps its
+index in the item, and its rows are made again when they move.
+
+The same goes for an object made again with its data: an item that holds a tree node compares as
+that node, and a model that makes every node again for a change makes every row again with it. Give
+the item an `Equals` that compares what the row shows and acts on (Junction's Changes compares a
+node by its path, depth, segment, count and file, and carries a folder's totals): a stage there
+moved the rows it shifted, 4–8 made of the ~20 on screen, where it made them all. And keep a derived
+view while what it is derived from is the same: Changes made its view (git's answer with the
+stagings in flight applied) again on every call, new lists each time, so each build while git had
+not answered flattened the rows again.
 
 ---
 
@@ -763,6 +834,15 @@ public override Element Build()
 ```
 
 Without keys, inserting an item at the beginning of the list would cause every element to be patched with the next item's data instead of shifting elements down.
+
+**A child that comes and goes ahead of siblings of its own type needs a key.** When the number of
+unkeyed children changes, the old and new children are matched from both ends while their types
+agree, so a child that appears in front of children of its own type takes the first one's place:
+that one is patched into the newcomer, and the next one into it, and so on. Meridian's stale-preview
+banner (a row) came in above the assertion rows (rows) with the first key after a send; the first
+row's fields were made again, the one being typed into lost the keyboard, and the next key went
+nowhere. Key the newcomer (`banner.Key = "stale-banner"`); its unkeyed siblings are still matched by
+position among themselves.
 
 ### Event handlers follow the latest build
 

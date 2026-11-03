@@ -40,6 +40,11 @@ public record GitFileDiff(string Path, string? OldPath, List<GitDiffHunk> Hunks)
     /// <summary>Raw "--- a/path" header line from the diff output. Needed for patch reconstruction.</summary>
     public string? OldPathHeader { get; set; }
 
+    /// <summary>The file's path before the change when git found it renamed (its <c>rename from</c>
+    /// header), else null: where the old side is read. <see cref="OldPath"/> stays null, as it is
+    /// for every diff git is asked for.</summary>
+    public string? RenamedFrom { get; set; }
+
     /// <summary>Raw "+++ b/path" header line from the diff output. Needed for patch reconstruction.</summary>
     public string? NewPathHeader { get; set; }
 }

@@ -12,7 +12,8 @@ namespace Junction.Tests;
 
 /// <summary>
 /// The Changes view's composer is a child component the app keeps while it rebuilds around it
-/// (PlaceComposer, JunctionApp.Changes.cs), and a character in its fields builds it alone. The
+/// (PlaceComposer, JunctionApp.Changes.cs), and a character in its fields builds it alone, when it
+/// builds at all (only the issue list and the closing hint show the text, on GitLab). The
 /// risk is what it shows moving while it is kept: a commit button that still says what it said
 /// before a file was staged, Amend pouring in an old message.
 ///
@@ -24,11 +25,12 @@ public class ComposerPartTests
 {
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(20);
 
-    /// <summary>A character builds the composer and nothing else: no window build, no chrome,
-    /// every element of the lists the one it was, whatever the number of changed files. It
-    /// built the whole view (1.3 MB a character with 200 files).</summary>
+    /// <summary>A character builds nothing: no window build, no chrome, every element of the lists
+    /// the one it was, whatever the number of changed files. It built the whole view (1.3 MB a
+    /// character with 200 files), then the composer (13.5 KB); off GitLab the composer shows
+    /// nothing of the text, which its fields hold. On GitLab: CreateMergeRequestTests.</summary>
     [Fact]
-    public void ACharacter_BuildsTheComposerAlone_AndKeepsTheLists()
+    public void ACharacter_BuildsNothing_AndKeepsTheLists()
     {
         Hosted((repo, session, app) =>
         {
@@ -45,7 +47,7 @@ public class ComposerPartTests
                 session.PumpFrames(2);
                 Assert.Equal(0, app.Builds - builds);
                 Assert.Equal(0, app.ChromeBuilds - chrome);
-                Assert.Equal(1, app.ComposerBuilds - composer);
+                Assert.Equal(0, app.ComposerBuilds - composer);
             }
 
             Assert.Equal("Fix it", Get<string>(app, "_commitSummary"));
@@ -63,10 +65,11 @@ public class ComposerPartTests
             var description = Ref<TextAreaElement>(app, "_descRef").Current!;
             session.Window.Click(description);
             session.PumpFrames(2);
-            int windowBuilds = app.Builds;
+            int windowBuilds = app.Builds, composerBuilds = app.ComposerBuilds;
             session.Window.TypeText("Body");
             session.PumpFrames(2);
             Assert.Equal(windowBuilds, app.Builds);
+            Assert.Equal(composerBuilds, app.ComposerBuilds);
             Assert.Equal("Body", Get<string>(app, "_commitDescription"));
             AssertIsAFullBuild(session, app, "description typed");
         });

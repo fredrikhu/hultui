@@ -42,6 +42,8 @@ public class VirtualListRowOverlayTests
         public bool PlainRows;
         public Func<Element?>? Overlay;
         public Func<Entry, int, float>? Heights;
+        /// <summary>The rows the tint goes under (<c>.HoverHighlight(…, rows: …)</c>); null, every row.</summary>
+        public Func<Entry, int, bool>? HoverRows;
         public int Made, Clicks;
         public int LastClicked = -1;
         public readonly Ref<VirtualListElement<Entry>> List = new();
@@ -61,7 +63,7 @@ public class VirtualListRowOverlayTests
             list.RowsAreComposite = Composite;
             if (PlainRows) list.ItemTemplate = Row;
             list.ItemHeightFor = Heights;
-            if (Hover) list.HoverHighlight(Tint);
+            if (Hover) list.HoverHighlight(Tint, rows: HoverRows);
             list.SelectionOverlay(Overlay?.Invoke());
             return Flex.Column().FlexGrow(1).Children(list.WithRef(List));
         }
@@ -153,6 +155,26 @@ public class VirtualListRowOverlayTests
             using (var shot = Shot(session))
                 Assert.NotEqual(Sk(Tint), Fill(shot, 4));
             Assert.Equal(made, pane.Made);
+        }
+    }
+
+    /// <summary>A row the app says takes no tint (a section's header, "No changes") takes none from the
+    /// list: Junction's Changes rows tinted themselves, its headers did not.</summary>
+    [Fact]
+    public void ARowTheRowsSayTakesNoTint_TakesNone()
+    {
+        var (session, pane) = Mount(setUp: p => p.HoverRows = static (e, _) => e.Id % 3 != 0);
+        using (session)
+        {
+            float x = ListX(session, pane);
+            session.Window.MoveMouse(x, RowY(3));
+            session.PumpFrames(2);
+            using (var shot = Shot(session))
+                Assert.NotEqual(Sk(Tint), Fill(shot, 3));
+            session.Window.MoveMouse(x, RowY(4));
+            session.PumpFrames(2);
+            using (var shot = Shot(session))
+                Assert.Equal(Sk(Tint), Fill(shot, 4));
         }
     }
 

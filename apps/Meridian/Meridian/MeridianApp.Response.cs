@@ -24,7 +24,10 @@ public partial class MeridianApp
     private readonly FindBar _responseFind;
     private readonly Ref<TextAreaElement> _responseBodyRef = new();
 
-    // A find step rebuilds the response panel alone: nothing else shows the bar or its hits.
+    // A change to the search rebuilds the response panel alone: nothing else shows the bar or its
+    // hits. A step (Enter, n, p) not even the panel: the bar writes its count into the label on
+    // screen, and the body takes the tints with the current one moved (FindBar.Moved,
+    // ResponseFindMoved): 60 → 12.6 KB an Enter on a 2,000-line answer, NativeAOT (plan 17, round 7).
     private FindBar NewResponseFind() => new(ResponseDirty)
     {
         Placeholder = "find in response…",
@@ -33,6 +36,7 @@ public partial class MeridianApp
         LetterKeys = true,
         Body = () => _responseBodyRef.Current,
         Reveal = RevealResponseHit,
+        Moved = ResponseFindMoved,
         Selection = ResponseFindSelection,
         // Text glyphs in the chrome's mono, as the response bar has always had, and no magnifier.
         Icon = icon => icon switch
@@ -513,6 +517,14 @@ public partial class MeridianApp
         }
         (_highlights, _highlightsStarts, _highlightsSearch) = (tints, starts, key);
         return tints;
+    }
+
+    /// <summary>A find step (<see cref="FindBar.Moved"/>): the body on screen takes the tints with
+    /// the current one moved, the list the panel's next build hands it too, with no build.</summary>
+    private void ResponseFindMoved()
+    {
+        if (_responseBodyRef.Current is { } area && _window.IsInTree(area))
+            area.Highlights = ResponseHighlights(_respLineStarts);
     }
 
     private IReadOnlyList<TextHighlight>? _highlights;

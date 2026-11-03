@@ -47,8 +47,9 @@ public enum AccessibilityRole : byte
     /// <summary>A list of commands that opens from a button and goes away again: UIA's Menu
     /// control, AT-SPI's menu. Its entries are <see cref="MenuItem"/>s, directly inside it, and
     /// one is selected while the pointer is on it. A box with a click that holds a menu is the
-    /// backdrop that closes it, and no button. For a menu an app draws with elements; a
-    /// <c>ContextMenu</c>, a menu bar's menu and a dropdown's list publish their items
-    /// themselves.</summary>
+    /// backdrop that closes it, and no button. A context menu and a menu bar's menu have it
+    /// too, and publish their items themselves, as menu items selected by the keys and the
+    /// pointer; a dropdown's list, which publishes its items the same way, is a
+    /// <see cref="List"/>.</summary>
     Menu,
 }

@@ -121,12 +121,14 @@ public class A11yKeptChildrenTests
     ];
 
     /// <summary>The steps whose rebuild hands every changed cell back in its place: no structure
-    /// changed, so no tree.</summary>
+    /// changed. The others put a column's cells in another order, which the frame tells by a walk of
+    /// the tree in place, building no tree either (plan 17, round 7, step 7).</summary>
     private static readonly HashSet<string> NoStructure = ["rebuild, nothing changed", "cursor down", "cursor to the last column", "rebuild again", "cursor back to the first cell"];
 
     private static Run Play(bool forceRebuild, Func<Func<ulong, string>, (IAccessibilityBridge Bridge, Func<List<string>> Told)> bridge)
     {
         using var session = HeadlessSession.Create(600, 400);
+        session.Window.Window.AccessibilityBuildsEveryRefresh = forceRebuild;
         var grid = new Grid();
         var forcer = Box.New().Width(Dimension.Px(10)).Height(Dimension.Px(10)).AccessibleName("forcer");
         var root = Flex.Column(gap: 4).Padding(8).Children(TextB.New("Files"), grid.Mount(), forcer);
@@ -202,10 +204,9 @@ public class A11yKeptChildrenTests
         Assert.All(kept.BuildsPerStep, b => Assert.Equal(1, b));
         for (int i = 0; i < Steps.Length; i++)
         {
-            if (NoStructure.Contains(Steps[i].Name))
-                Assert.True(kept.TreesPerStep[i] == 0, $"{Steps[i].Name}: {kept.TreesPerStep[i]} trees");
-            else
-                Assert.True(kept.TreesPerStep[i] >= 1, $"{Steps[i].Name}: no tree for a new order");
+            Assert.True(kept.TreesPerStep[i] == 0, $"{Steps[i].Name}: {kept.TreesPerStep[i]} trees");
+            if (!NoStructure.Contains(Steps[i].Name))
+                Assert.True(rebuilt.TreesPerStep[i] >= 1, $"{Steps[i].Name}: no tree for a new order when every refresh builds one");
         }
     }
 

@@ -165,6 +165,43 @@ public class ChainingViewTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    /// <summary>The stale banner comes in above the assertion rows with the first key after a send,
+    /// and goes when the edit is undone; the field being typed into keeps the keyboard both times.
+    /// The rows are rows like the banner, so unkeyed it took the first row's place in the reconcile:
+    /// that row's fields were made again, the keyboard went nowhere and so did the next key
+    /// (plan 17 round 7).</summary>
+    [Fact]
+    public void TheStaleBannerComingAndGoingLeavesTheKeyboardInTheField()
+    {
+        Hosted((session, app) =>
+        {
+            Click(session, "req-login");
+            SendAndWait(session, app);
+            Click(session, "subtab-assertions");
+            Click(session, "assert-expected-0");
+            var field = session.Window.Window.FocusedElement;
+            Assert.Equal("assert-expected-0", field?.AutomationId);
+            session.Window.PressKey(KeyCode.End);
+            session.PumpFrames(2);
+
+            session.Window.TypeText("1");
+            session.PumpFrames(2);
+            Assert.NotNull(session.Window.FindByAutomationId("stale-banner"));
+            Assert.Same(field, session.Window.Window.FocusedElement);
+            session.Window.TypeText("2");
+            session.PumpFrames(2);
+            Assert.Equal("status equals 20012", app.ActiveTab!.Doc.Asserts[0].Args);
+
+            session.Window.PressKey(KeyCode.Backspace);
+            session.PumpFrames(2);
+            session.Window.PressKey(KeyCode.Backspace);
+            session.PumpFrames(2);
+            Assert.Null(session.Window.FindByAutomationId("stale-banner"));
+            Assert.Same(field, session.Window.Window.FocusedElement);
+            Assert.Equal("status equals 200", app.ActiveTab.Doc.Asserts[0].Args);
+        });
+    }
+
     // ── Extractions ──────────────────────────────────────────────────────
 
     [Fact]

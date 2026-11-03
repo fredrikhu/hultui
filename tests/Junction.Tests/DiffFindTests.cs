@@ -227,20 +227,23 @@ public class DiffFindTests
             SettleBuilds(session, app);
             Assert.Equal(0, Search(app).Index);
 
-            // One build a step: the bar's search tells the app through the bar, which holds it
-            // for the step's own notice (two builds a step before).
+            // No build a step: the bar is a part of its own, builds its count alone and has the
+            // list make the two rows the match moves between (FindBar.Moved; one build a step
+            // until round 7 of plan 17, two before round 5).
             int builds = app.Builds;
             Press(session, KeyCode.Enter);
             Assert.Equal(1, Search(app).Index);
-            Assert.Equal(builds + 1, app.Builds);
+            Assert.Equal(builds, app.Builds);
+            Assert.Equal($"2 of {count}", ((TextElement)session.Window.FindByAutomationId("find-status")!.Element).Content);
 
             for (int i = 1; i < count; i++) Press(session, KeyCode.Enter);
             Assert.Equal(0, Search(app).Index);   // all the way round
-            Assert.Equal(builds + count, app.Builds);
+            Assert.Equal(builds, app.Builds);
 
             Press(session, KeyCode.Enter, KeyModifiers.Shift);
             Assert.Equal(count - 1, Search(app).Index);
-            Assert.Equal(builds + count + 1, app.Builds);
+            Assert.Equal(builds, app.Builds);
+            Assert.Equal($"{count} of {count}", ((TextElement)session.Window.FindByAutomationId("find-status")!.Element).Content);
         }, content: string.Join("\n", Enumerable.Range(0, 40).Select(i => $"line {i}")) + "\n");
     }
 

@@ -59,6 +59,9 @@ public class VirtualListSelectionHighlightTests
             _ => null,
         };
         public bool CanSelectMultiple;
+        /// <summary>Each row a keyed button a reader reads as its own (<c>RowsAreComposite</c>),
+        /// selected or not, as the command palette's rows.</summary>
+        public bool Composite;
         /// <summary>Rows the template made, and how many of them it was told were selected.</summary>
         public int Made, MadeSelected;
         public readonly Ref<VirtualListElement<Entry>> List = new();
@@ -76,6 +79,7 @@ public class VirtualListSelectionHighlightTests
                 .RenderWith((e, selected) => Row(e, selected))
                 .SelectionHighlight(Highlight)
                 .FlexGrow(1);
+            list.RowsAreComposite = Composite;
             return Flex.Column().FlexGrow(1).Children(list.WithRef(List));
         }
 
@@ -90,6 +94,11 @@ public class VirtualListSelectionHighlightTests
                 row.BorderColor(Line).BorderWidth(new Thickness(0, 0, 1, 0));
             else
                 row.BorderWidth(1f).BorderColor(selected ? Ring : Color.Transparent);
+            if (Composite)
+            {
+                row.AccessibleRole(AccessibilityRole.Button).AccessibleName(e.Name).AccessibleSelected(selected);
+                row.Key = e.Name;
+            }
             return row;
         }
 
@@ -98,12 +107,13 @@ public class VirtualListSelectionHighlightTests
         public void Rebuild() => MarkDirty();
     }
 
-    private static (HeadlessSession Session, Pane Pane) Mount(Draw draw, int count = 200, float scale = 1f)
+    private static (HeadlessSession Session, Pane Pane) Mount(Draw draw, int count = 200, float scale = 1f,
+        bool composite = false)
     {
         var session = HeadlessSession.Create(400, 300, scale);
         try
         {
-            var pane = new Pane(draw, Entries(count));
+            var pane = new Pane(draw, Entries(count)) { Composite = composite };
             session.Application.SetRoot(pane.Mount());
             session.PumpFrames(3);
             return (session, pane);
@@ -387,6 +397,51 @@ public class VirtualListSelectionHighlightTests
             }
             return trees;
         }
+    }
+
+    /// <summary>On composite rows a reader reads the rows themselves, and a row the list made
+    /// unselected would say it is not selected: the list tells each row that says whether it is
+    /// (<c>AccessibleSelected</c> set) whether its item is. A reader hears the same rows, selected
+    /// states and IsSelected changes as when the rows drew the selection, and a move makes no row.
+    /// Neither builds a tree: the list's own selection is its rows' to tell, and a row's state is
+    /// marked on the applied tree and told from it (each built the whole tree a move).</summary>
+    [Fact]
+    public void OnCompositeRows_TheListTellsEachRowItsSelection_AsTheRowsToldItThemselves()
+    {
+        var (byRows, madeByRows, treesByRows) = Walk(Draw.Rows);
+        var (byList, madeByList, treesByList) = Walk(Draw.List);
+
+        Assert.Equal(byRows, byList);
+        Assert.Equal("entry 2=False, entry 9=True | entry 9", byList[^1]);
+        Assert.Equal((10, 0), (madeByRows, madeByList));
+        Assert.Equal((0, 0), (treesByRows, treesByList));
+
+        static (List<string> Steps, int Made, int Trees) Walk(Draw draw)
+        {
+            var (session, pane) = Mount(draw, composite: true);
+            using var _ = session;
+            var bridge = session.Window.InstallAccessibilityBridge();
+            session.PumpFrames(2);
+            bridge.ClearDiffs();
+            var steps = new List<string>();
+            int made = pane.Made, trees = session.Window.AccessibilityTreesBuilt;
+            foreach (int id in new[] { 1, 2, 3, 2, 9 })
+            {
+                pane.Select(id);
+                session.PumpFrames(2);
+                var told = bridge.Diffs.SelectMany(d => d.PropertyChanged)
+                    .Where(c => c.PropertyName == AccessibilityProperties.IsSelected)
+                    .Select(c => $"{c.Node.Name}={c.Node.IsSelected}").Order();
+                var buttons = Buttons(bridge.CurrentTree!);
+                Assert.All(buttons, b => Assert.NotNull(b.IsSelected));
+                steps.Add($"{string.Join(", ", told)} | {string.Join(", ", buttons.Where(b => b.IsSelected == true).Select(b => b.Name))}");
+                bridge.ClearDiffs();
+            }
+            return (steps, pane.Made - made, session.Window.AccessibilityTreesBuilt - trees);
+        }
+
+        static List<AccessibilityNode> Buttons(AccessibilityNode node) =>
+            node.Role == AccessibilityRole.Button ? [node] : node.Children.SelectMany(Buttons).ToList();
     }
 
     private static List<(string? Name, bool? Selected)> Items(AccessibilityNode root)

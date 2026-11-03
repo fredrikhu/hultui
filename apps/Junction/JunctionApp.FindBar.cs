@@ -26,12 +26,18 @@ public partial class JunctionApp
         _ => _diffFull ? _diffFind : null,
     };
 
-    // The view's: a find bar searches the text on screen, which is nothing the chrome shows.
-    private FindBar NewFindBar(string placeholder, Func<Element?> body, Action reveal) => new(MarkViewDirty)
+    // The view's: a find bar searches the text on screen, which is nothing the chrome shows. And
+    // a step (Enter, F3, n, p) not even the view's: the bar writes its count into the label on
+    // screen, and `moved` (FindBar.Moved) re-tints the match it left and the one it reached on the
+    // body as it is. A step built the whole window until round 7 of plan 17 (the diff on a
+    // 3,000-line file, NativeAOT: 88 KB an Enter, 51 of it the window's build; 31.5 KB with no
+    // build).
+    private FindBar NewFindBar(string placeholder, Func<Element?> body, Action reveal, Action moved) => new(MarkViewDirty)
     {
         Placeholder = placeholder,
         Body = body,
         Reveal = reveal,
+        Moved = moved,
         LetterKeys = true,
         Icon = FindIcon,
     };

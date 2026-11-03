@@ -427,9 +427,9 @@ public partial class JunctionApp : Component, IDisposable
             settings.CommitFileListWidth);
         _changesSplit = new PaneSplitter(MarkViewDirty, Persist, MinFileListWidth, MaxFileListWidth,
             settings.ChangesFileListWidth);
-        _diffFind = NewFindBar("Find in diff…", () => _diffBodyRef.Current, RevealDiffHit);
+        _diffFind = NewFindBar("Find in diff…", () => _diffBodyRef.Current, RevealDiffHit, DiffFindMoved);
         _diffFind.Selection = DiffFindSelection;
-        _filesFind = NewFindBar("Find in file…", () => _fileBodyRef.Current, RevealFilesHit);
+        _filesFind = NewFindBar("Find in file…", () => _fileBodyRef.Current, RevealFilesHit, FilesFindMoved);
         _filesFind.Selection = FilesFindSelection;
         // Blame replaces the file's text with a gutter view the search cannot bind to, and its
         // reveal would scroll a body no longer on screen: Ctrl+F comes back to the source.
@@ -1068,10 +1068,10 @@ public partial class JunctionApp : Component, IDisposable
         _selectedCommitHashes.Clear();
         if (hash != null) _selectedCommitHashes.Add(hash);
         EndBranchCompare();   // any collapse (History click, repo switch) ends a branch compare
-        // Start on the commit's files and diff at the selection, not at the Commit tab.
-        // History's build asks too, but the selection can land while another tab is
-        // showing — a preloaded log picking its first commit — and this covers that.
-        PrefetchCommitDetail(hash);
+        // Start on the commit's files and diff at the selection (once it rests), not at the
+        // Commit tab. History's build asks too, but the selection can land while another tab
+        // is showing — a preloaded log picking its first commit — and this covers that.
+        PrefetchSelectionOnRest();
     }
 
     /// <summary>Clears the Branches-tab compare selection. Called when a History
@@ -1657,6 +1657,7 @@ public partial class JunctionApp : Component, IDisposable
         _retryPending.Clear();   // a pending retry finds nothing to do
         _highlightNext = null;
         _highlightCancel?.Cancel();
+        _detailRest?.Dispose();
         DisposeMarkdown();
     }
 }

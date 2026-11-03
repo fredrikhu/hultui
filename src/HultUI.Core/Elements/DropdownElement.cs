@@ -216,7 +216,11 @@ public class DropdownElement : Element
             };
         }
 
-        var popup = new ContextMenuElement(rows, menuTheme, ClosePopup);
+        var popup = new ContextMenuElement(rows, menuTheme, ClosePopup)
+        {
+            // A combo box's list, as a reader expects one: a List of ListItems, not a menu.
+            Role = AccessibilityRole.List,
+        };
         // At least as wide as the control, so the open list reads as its extension.
         popup.Box.MinWidth = Dimension.Px(Layout.Width);
         popup.SetHoveredIndex(_selectedIndex);

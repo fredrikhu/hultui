@@ -66,12 +66,11 @@ public partial class JunctionApp
         if (filtered.Count > 0 && (_selectedCommitHash == null || filtered.All(c => c.Hash != _selectedCommitHash)))
             SetCommitSelection(filtered[0].Hash);
 
-        // Eagerly load the selected commit's (or multi-select compare's) detail so
-        // opening the Commit view is instant. Any selection change rebuilds History,
-        // so this covers keyboard, click and auto-select alike; a repeat with the
-        // same key is a cache hit.
-        if (SelectedRange() is { } range) PrefetchRangeDetail(range);
-        else PrefetchCommitDetail(_selectedCommitHash);
+        // Load the selected commit's (or multi-select compare's) detail once the selection
+        // rests, so opening the Commit view is instant. Any selection change rebuilds History,
+        // so this covers keyboard, click and auto-select alike; a repeat with the same key
+        // asks nothing.
+        PrefetchSelectionOnRest();
 
         // The rows whose realization asks for the next page: the last tenth of a page, which
         // is a few screens — enough lead for the page to land before the scroll reaches the

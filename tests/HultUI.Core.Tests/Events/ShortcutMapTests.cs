@@ -1,4 +1,5 @@
 using HultUI.Core.Events;
+using HultUI.Testing;
 using Xunit;
 
 namespace HultUI.Core.Tests.Events;
@@ -157,6 +158,34 @@ public sealed class ShortcutMapTests
         live.LoadOverrides(draft.SaveOverrides());
         Assert.Equal("F2", live.Keys("Copy"));
         Assert.True(live["Copy"].Rebindable);
+    }
+
+    /// <summary>
+    /// A key handler asks the table on every key, most of it each time: Vesper tries 168 shortcuts
+    /// a key. A foreach over a shortcut's chords boxed an enumerator per shortcut tried, 5.3 KB a
+    /// key there (plan 17, round 7). A rebound shortcut's chords are another kind of list than its
+    /// defaults, so both kinds are asked.
+    /// </summary>
+    [Fact]
+    public void MatchingAKey_AllocatesNothing()
+    {
+        var map = Commander();
+        map.Rebind("Copy", new KeyChord(KeyCode.F2));
+        var none = Press(KeyCode.Q);
+        var close = Press(KeyCode.Escape);
+        Shortcut? found = null;
+        bool matched = false;
+
+        double perCall = Allocations.PerCall(100, () =>
+        {
+            found = map.Find(none);
+            found = map.Find(close, "Viewer");
+            matched = map.Matches("Copy", none) | map.Matches("Close", close);
+        });
+
+        Assert.Equal(0, perCall);
+        Assert.Equal("Close", found?.Id);
+        Assert.True(matched);
     }
 
     [Fact]

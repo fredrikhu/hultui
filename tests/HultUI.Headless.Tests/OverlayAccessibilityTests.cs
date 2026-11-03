@@ -1,6 +1,7 @@
 ﻿using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
 using HultUI.Core.Primitives;
 using HultUI.Headless;
 using Xunit;
@@ -44,6 +45,40 @@ public class OverlayAccessibilityTests
         var names = Walk(session.Window.AccessibilityTree).Select(n => n.Name).ToList();
         Assert.Contains("Play", names);
         Assert.Contains("Mark watched", names);
+    }
+
+    /// <summary>
+    /// A menu's items are nodes of its own, whose ids carry a slot the menu takes
+    /// (<see cref="AccessibleOwnerSlots"/>). An overlay's content is never added to a parent, so
+    /// it never unmounted, and every menu opened while a reader ran kept its slot for the life of
+    /// the process (plan 17, round 7: 2,000 slots and ~200 KB after 2,000 menus). A closed menu
+    /// gives it back: its items' ids name nothing.
+    /// </summary>
+    [Fact]
+    public void AClosedMenu_GivesItsSlotBack()
+    {
+        using var session = HeadlessSession.Create(600, 400);
+        var bridge = session.Window.InstallAccessibilityBridge();
+        session.Window.SetRoot(Box.New().FlexGrow(1).AccessibleName("Page"));
+        session.PumpFrame();
+        ContextMenuItem[] items = [new ContextMenuItem { Label = "Play" }, new ContextMenuItem { Label = "Mark watched" }];
+
+        int held = 0;
+        for (int i = 0; i < 20; i++)
+        {
+            session.Window.Window.OpenContextMenu(items, new Point(40, 60));
+            session.PumpFrame();
+            var play = Walk(bridge.CurrentTree!).First(n => n.Name == "Play").ElementId;
+            Assert.True(VirtualItemId.TryDecode(play, out var menu, out _));
+            Assert.NotEqual(default, menu);   // open, the item names its menu
+
+            session.Window.PressKey(KeyCode.Escape);
+            session.PumpFrame();
+            Assert.DoesNotContain(Walk(bridge.CurrentTree!), n => n.Name == "Play");
+            VirtualItemId.TryDecode(play, out menu, out _);
+            if (menu != default) held++;
+        }
+        Assert.Equal(0, held);
     }
 
     [Fact]

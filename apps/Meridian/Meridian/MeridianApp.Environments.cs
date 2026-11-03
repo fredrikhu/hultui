@@ -326,12 +326,17 @@ public partial class MeridianApp
         MarkDirty();
     }
 
+    /// <summary>Runs the prompt's action, which finds the prompt already taken off (<see cref="_dialog"/>
+    /// null), and builds the window only when the action built nothing, as a popover's pick does
+    /// (<see cref="Pick"/>). An action builds for what it changed — a new key, a secret set, a discovery
+    /// started — and the prompt goes with that build; the window was built again after it.</summary>
     private void SubmitDialog()
     {
         if (_dialog is not { } dialog) return;
         _dialog = null;
+        int builds = Builds;
         dialog.OnSubmit(_dialogValue);
-        MarkDirty();
+        if (Builds == builds) MarkDirty();
     }
 
     private void CancelDialog()

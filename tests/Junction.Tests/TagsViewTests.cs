@@ -190,6 +190,9 @@ public class TagsViewTests
             session.Window.PressKey(KeyCode.Digit6);
             PumpUntilVisible(session, "v39");
             session.PumpFrames(3);
+            // The repository's first loads write .git/index, and the watcher's change lands as a
+            // rebuild of its own 300 ms later: let it come and go before counting a key's.
+            QuietFor(session, app, TimeSpan.FromMilliseconds(600));
 
             for (int i = 1; i <= 30; i++)
             {
@@ -235,6 +238,21 @@ public class TagsViewTests
             body(repo, session, app);
         }
         finally { app?.Dispose(); }
+    }
+
+    /// <summary>Pumps frames until the window has built nothing for <paramref name="quiet"/> of real
+    /// time: a watcher's debounced change has had its chance to land.</summary>
+    private static void QuietFor(HeadlessSession session, JunctionApp app, TimeSpan quiet)
+    {
+        var since = System.Diagnostics.Stopwatch.StartNew();
+        var total = System.Diagnostics.Stopwatch.StartNew();
+        int builds = app.Builds;
+        while (since.Elapsed < quiet && total.Elapsed < TimeSpan.FromSeconds(20))
+        {
+            Thread.Sleep(10);
+            session.PumpFrame();
+            if (app.Builds != builds) { builds = app.Builds; since.Restart(); }
+        }
     }
 
     private static void PumpUntilVisible(HeadlessSession session, string text)

@@ -1,0 +1,46 @@
+{
+  "label": "plan 17 round 7 step 2a before (jit), find rows of 2 alternated whole-suite runs",
+  "date": "2026-11-02 18:30 +01:00 / 2026-11-02 18:36 +01:00",
+  "commit": "377c64d5",
+  "machine": "SPELDATOR",
+  "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+  "cores": 28,
+  "os": "Microsoft Windows 10.0.26200",
+  "runtime": ".NET 10.0.14",
+  "configuration": "Release",
+  "rounds": 5,
+  "perRound": 5,
+  "pinning": "pinned to the 16 fastest of 28 logical processors (hybrid CPU; --no-pin to disable)",
+  "results": [
+    {
+      "name": "text/find typing in highlighted JSON in a TextArea",
+      "description": "Type a character into the find bar over a 2,000-line JSON response, as Meridian's response find does (\"a\" → \"at\"): the response is searched again, the pane rebuilt and its TextArea handed the matches to tint",
+      "elements": 18,
+      "n": 25,
+      "minMs": 0.4688,
+      "medianMs": 0.5057,
+      "buildMs": 0.1044,
+      "styleMs": 0.0022,
+      "layoutMs": 0.0032,
+      "renderMs": 0.3906,
+      "otherMs": 0.0019,
+      "allocKB": 54.0,
+      "unrenderedSteps": 0
+    },
+    {
+      "name": "text/find Enter in highlighted JSON in a TextArea",
+      "description": "Press Enter in the find bar over the 2,000-line JSON response: the next match becomes the current one, its tint changes and the pane rebuilds",
+      "elements": 18,
+      "n": 25,
+      "minMs": 0.3907,
+      "medianMs": 0.4284,
+      "buildMs": 0.0175,
+      "styleMs": 0.0023,
+      "layoutMs": 0.0052,
+      "renderMs": 0.4006,
+      "otherMs": 0.0019,
+      "allocKB": 25.5,
+      "unrenderedSteps": 0
+    }
+  ]
+}

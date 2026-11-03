@@ -18,23 +18,40 @@ public class ChangesListTests
 {
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(30);
 
+    /// <summary>The list draws the caret, so a key makes no row: it made the two the caret left and
+    /// reached, 2.2 a key at 300 files. A reader still hears which row has it: the rows say whether
+    /// they are selected and the list tells them, the caret's row the selected one, a change of the
+    /// two rows' state and no tree built for it.</summary>
     [Fact]
-    public void AKey_MakesTheRowsItChanged_OutOfThreeHundred()
+    public void AKey_MakesNoRow_OutOfThreeHundred_AndAReaderHearsTheCaret()
     {
         WithFiles(300, (repo, session, app) =>
         {
+            var bridge = session.Window.InstallAccessibilityBridge();
+            session.PumpFrames(3);
             var list = ChangeList(app);
             Assert.InRange(CountElements(list), 40, 260);
             int total = RowCount(app);
             Assert.True(total >= 306, $"{total} rows");
+            Assert.Equal(CaretName(app), SelectedNames(bridge.CurrentTree!).Single());
 
-            // The first: the caret from the row it was on to the next, and no other.
-            int made = app.ChangeRowsMade;
+            // The first: the caret from the row it was on to the next, no row made, and the reader told.
+            int made = app.ChangeRowsMade, trees = session.Window.AccessibilityTreesBuilt;
+            bridge.ClearDiffs();
+            string left = CaretName(app);
             session.Window.PressKey(KeyCode.Down);
             session.PumpFrames(2);
-            Assert.Equal(2, app.ChangeRowsMade - made);
+            Assert.Equal(0, app.ChangeRowsMade - made);
+            string reached = CaretName(app);
+            Assert.NotEqual(left, reached);
+            Assert.Equal([reached], SelectedNames(bridge.CurrentTree!));
+            var told = bridge.Diffs.SelectMany(d => d.PropertyChanged)
+                .Where(c => c.PropertyName == AccessibilityProperties.IsSelected)
+                .Select(c => $"{File(c.Node.Name)}={c.Node.IsSelected}").Order().ToList();
+            Assert.Equal([$"{left}=False", $"{reached}=True"], told);
+            Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
 
-            // On past the fold, a row scrolled in with most keys.
+            // On past the fold: only the rows a key scrolls in are made, and no tree is built.
             made = app.ChangeRowsMade;
             const int Keys = 40;
             for (int i = 0; i < Keys; i++)
@@ -42,9 +59,78 @@ public class ChangesListTests
                 session.Window.PressKey(KeyCode.Down);
                 session.PumpFrames(3);
             }
-            Assert.InRange(app.ChangeRowsMade - made, Keys, 3 * Keys);
+            Assert.InRange(app.ChangeRowsMade - made, 1, Keys + 4);
+            Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+            Assert.Equal([CaretName(app)], SelectedNames(bridge.CurrentTree!));
             Assert.InRange(CountElements(list), 40, 260);
         });
+
+        static string File(string? name) => name is null ? "" : name.Split(' ').First(w => w.StartsWith("file", StringComparison.Ordinal));
+        static List<string> SelectedNames(AccessibilityNode root) =>
+            Nodes(root).Where(n => n.IsSelected == true).Select(n => File(n.Name)).ToList();
+        static string CaretName(JunctionApp app) => System.IO.Path.GetFileName(CaretPath(app));
+    }
+
+    /// <summary>A stage moves its file between the lists at once and asks git behind it. The rows it
+    /// shifts are the rows they were, moved (a stage made every node of the tree again, and every row
+    /// on screen with it); while git has not answered, a key makes no row (the view was made again on
+    /// every call, new lists each time, and every row on screen with it); and git's answer, the same
+    /// lists, makes none.</summary>
+    [Fact]
+    public void AStage_MovesTheRowsItShifts_AndWhileItIsInFlight_AKeyMakesNoRow()
+    {
+        WithFiles(60, (repo, session, app) =>
+        {
+            var list = ChangeList(app);
+            var gate = new TaskCompletionSource();
+            typeof(JunctionApp).GetField("_stagingChain", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(app, gate.Task);
+            var before = Rows(list);
+            Assert.True(before.Count > 12, $"{before.Count} rows");
+
+            int made = app.ChangeRowsMade;
+            Invoke(app, "StagePaths", (IReadOnlyList<string>)["src/area5/file005.cs"]);
+            session.PumpFrames(3);
+            Assert.NotNull(session.Window.FindByText("STAGED · 1"));
+            // Made: the two headers' counts, the staged folder and file, the folders the file left.
+            Assert.InRange(app.ChangeRowsMade - made, 4, 8);
+            AssertKept(before, Rows(list), out int kept);
+            Assert.True(kept > 8, $"{kept} kept");
+
+            made = app.ChangeRowsMade;
+            var flattened = Field<object>(app, "_changeListRows");
+            session.Window.PressKey(KeyCode.Down);
+            session.PumpFrames(3);
+            session.Window.PressKey(KeyCode.Up);
+            session.PumpFrames(3);
+            Assert.Equal(0, app.ChangeRowsMade - made);
+            Assert.Same(flattened, Field<object>(app, "_changeListRows"));
+
+            var moved = Rows(list);
+            made = app.ChangeRowsMade;
+            gate.SetResult();
+            session.PumpUntil(() => repo.Repo.GetStagedChanges().Count == 1 && Pending(app) == 0, Wait);
+            session.PumpFrames(3);
+            Assert.Equal(0, app.ChangeRowsMade - made);
+            AssertKept(moved, Rows(list), out _);
+        });
+
+        static Dictionary<string, Element> Rows(ScrollViewElement list) =>
+            list.Children.Where(c => c.Key is not null).ToDictionary(c => c.Key!);
+
+        // Every row still on screen under the key it had is the element it was.
+        static void AssertKept(Dictionary<string, Element> was, Dictionary<string, Element> now, out int kept)
+        {
+            kept = 0;
+            foreach (var (key, row) in now)
+                if (was.TryGetValue(key, out var old) && key.StartsWith("u:", StringComparison.Ordinal))
+                {
+                    Assert.Same(old, row);
+                    kept++;
+                }
+        }
+
+        static int Pending(JunctionApp app) => Count(Field<object>(app, "_pendingStage")) + Count(Field<object>(app, "_settledStage"));
+        static int Count(object set) => (int)set.GetType().GetProperty("Count")!.GetValue(set)!;
     }
 
     /// <summary>The caret moves in the view: the title bar, the sidebar, the toolbar and the composer
@@ -147,12 +233,11 @@ public class ChangesListTests
     /// <summary>The caret's row is an element, drawn whole in the list and below the row held there.</summary>
     private static void AssertCaretIsOnScreen(JunctionApp app, ScrollViewElement list)
     {
-        var caret = Field<object>(app, "_changeCaret");
-        var key = (string)caret.GetType().GetProperty("Path")!.GetValue(caret)!;
+        var key = CaretKey(app);
         Element? row = null, held = null;
         foreach (var child in list.Children)
         {
-            if (child.Key is { } k && k.Contains(key, StringComparison.Ordinal) && k.Contains("#f", StringComparison.Ordinal)) row = child;
+            if (child.Key is { } k && k.Split('#')[0] == key) row = child;
             if (child.Position.Type == PositionType.Sticky && child.ScreenBorderBox.Y <= list.ScreenContentBox.Y + 0.5f
                 && child.ScreenBorderBox.Bottom > list.ScreenContentBox.Y + 0.5f) held = child;
         }
@@ -351,6 +436,23 @@ public class ChangesListTests
     }
 
     private static int RowCount(JunctionApp app) => ((System.Collections.ICollection)Field<object>(app, "_changeListRows")).Count;
+
+    private static string CaretPath(JunctionApp app)
+    {
+        var caret = Field<object>(app, "_changeCaret");
+        return (string)caret.GetType().GetProperty("Path")!.GetValue(caret)!;
+    }
+
+    /// <summary>The key of the caret's row, less the marks of its state.</summary>
+    private static string CaretKey(JunctionApp app)
+    {
+        var caret = Field<object>(app, "_changeCaret");
+        var type = caret.GetType();
+        string section = type.GetProperty("Section")!.GetValue(caret)!.ToString()!;
+        return (bool)type.GetProperty("IsFolder")!.GetValue(caret)!
+            ? $"{section}:dir:{CaretPath(app)}"
+            : (section == "Staged" ? "s:" : section == "Conflicted" ? "c:" : "u:") + CaretPath(app);
+    }
 
     private static int CountElements(Element element)
     {

@@ -2291,6 +2291,7 @@ public class GitRepository
             else if (currentFile != null && currentHunk == null && rawLine.StartsWith("rename from "))
             {
                 headerKind = FileChangeKind.Renamed;
+                currentFile.RenamedFrom = rawLine["rename from ".Length..];
             }
             else if (currentFile != null && currentHunk == null && rawLine.StartsWith("index "))
             {

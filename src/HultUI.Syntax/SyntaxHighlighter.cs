@@ -105,13 +105,24 @@ public static class SyntaxHighlighter
     internal static readonly TimeSpan LineBudget = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan FileBudget = TimeSpan.FromSeconds(3);
 
+    // Tokenizing one line costs the square of its length (each search measures the whole
+    // line): with no budget a 32,000-character line took 17 s of JavaScript and 27 s of C#. A
+    // line longer than LongLine is coloured on its first LongLine characters only, and the rest
+    // draws plain; 2,000 dense characters take 80 ms of JavaScript, 130 ms of C#. JSON and XML
+    // tokenize about 17 times cheaper, and 8,000 of theirs take 70 and 40 ms. Like a line
+    // stopped at its budget, a cut line leaves the next one the state it started in.
+    internal const int LongLine = 2_000;
+    internal const int LongDataLine = 8_000;
+
     /// <summary>
     /// The most lines <see cref="TokenizeLines(string, string)"/> colours: a text with more
     /// gets no spans at all. A caller that tokenizes on a worker and can stop a tokenize it
     /// no longer wants may pass its own cap to
     /// <see cref="TokenizeLines(string, string, int, CancellationToken, TimeProvider?)"/>; texts
     /// are still held to 2,000,000 characters and three seconds, after which the remaining lines
-    /// stay uncoloured.
+    /// stay uncoloured. A line longer than 2,000 characters (8,000 in JSON and XML) is coloured
+    /// on those first characters only and the rest of it draws plain: a line's tokenize costs the
+    /// square of its length.
     /// </summary>
     public const int DefaultMaxLines = 20_000;
 
@@ -433,6 +444,7 @@ public static class SyntaxHighlighter
 
         // TextMateSharp measures a line's budget on the wall clock only; MaxValue is none.
         private readonly TimeSpan _lineBudget = clock == TimeProvider.System ? LineBudget : TimeSpan.MaxValue;
+        private readonly int _longLine = LongLineFor(grammar);
         private readonly List<TextSpan> _spans = new(32);
 
         /// <summary>Walks lines <paramref name="from"/> to <paramref name="to"/> from
@@ -448,22 +460,32 @@ public static class SyntaxHighlighter
                 Lines++;
 
                 bool inFirst = first.Shows(i), inSecond = second.Shows(i);
+                var line = lines[i];
+                // A long line is tokenized on its first characters only and, like a line
+                // stopped at its budget, leaves the state it started in. Walked for that state
+                // alone, it needs no tokenize at all.
+                bool whole = line.Length <= _longLine;
+                if (!whole)
+                {
+                    if (!inFirst && !inSecond) continue;
+                    line = line[..(char.IsHighSurrogate(line.Span[_longLine - 1]) ? _longLine - 1 : _longLine)];
+                }
                 long lineStarted = Stopwatch.GetTimestamp();
                 if (!inFirst && !inSecond)
                 {
                     IStateStack next;
-                    try { next = grammar.TokenizeLine2(new LineText(lines[i]), state, _lineBudget).RuleStack; }
+                    try { next = grammar.TokenizeLine2(new LineText(line), state, _lineBudget).RuleStack; }
                     catch { continue; }   // a broken grammar rule shouldn't kill the whole file
                     if (Finished(lineStarted)) state = next;
                     continue;
                 }
 
                 ITokenizeLineResult tokenized;
-                try { tokenized = grammar.TokenizeLine(new LineText(lines[i]), state, _lineBudget); }
+                try { tokenized = grammar.TokenizeLine(new LineText(line), state, _lineBudget); }
                 catch { continue; }   // a broken grammar rule shouldn't kill the whole file
-                if (Finished(lineStarted)) state = tokenized.RuleStack;
+                if (whole && Finished(lineStarted)) state = tokenized.RuleStack;
 
-                int lineLength = lines[i].Length;
+                int lineLength = line.Length;
                 _spans.Clear();
                 foreach (var token in tokenized.Tokens)
                 {
@@ -494,6 +516,10 @@ public static class SyntaxHighlighter
         // before the stop.
         private bool Finished(long lineStarted) =>
             _lineBudget == TimeSpan.MaxValue || Stopwatch.GetElapsedTime(lineStarted) < _lineBudget;
+
+        /// <summary>How many characters of a line <paramref name="grammar"/> colours.</summary>
+        private static int LongLineFor(IGrammar grammar) =>
+            grammar.GetScopeName() is "source.json" or "source.json.comments" or "text.xml" ? LongDataLine : LongLine;
     }
 
     private static Color? ColorFor(List<string> scopes)

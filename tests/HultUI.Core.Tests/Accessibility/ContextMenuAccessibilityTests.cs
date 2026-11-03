@@ -33,10 +33,27 @@ public class ContextMenuAccessibilityTests
             ContextMenuItem.Separator(),
             new ContextMenuItem { Label = "Mark watched" }));
 
-        Assert.Equal(AccessibilityRole.List, tree.Role);
         Assert.Equal(2, tree.Children.Count);
         Assert.Equal("Play", tree.Children[0].Name);
         Assert.Equal("Mark watched", tree.Children[1].Name);
+    }
+
+    /// <summary>A context menu is a menu of menu items (plan 17 round 7, step 13: it was a list of
+    /// list items); a menu its owner calls a list, as the dropdown calls its popup, a list of list
+    /// items.</summary>
+    [Theory]
+    [InlineData(AccessibilityRole.None, AccessibilityRole.Menu, AccessibilityRole.MenuItem)]
+    [InlineData(AccessibilityRole.List, AccessibilityRole.List, AccessibilityRole.ListItem)]
+    public void AMenuIsAMenuOfMenuItems_AndOneSetToAListAListOfListItems(AccessibilityRole set,
+        AccessibilityRole role, AccessibilityRole itemRole)
+    {
+        var menu = Menu(new ContextMenuItem { Label = "Play" }, ContextMenuItem.Separator(),
+            new ContextMenuItem { Label = "More", Children = [new ContextMenuItem { Label = "Alpha" }] });
+        if (set != AccessibilityRole.None) menu.Role = set;
+        var tree = BuildLaidOut(menu);
+
+        Assert.Equal(role, tree.Role);
+        Assert.Equal([itemRole, itemRole], tree.Children.Select(c => c.Role));
     }
 
     [Fact]

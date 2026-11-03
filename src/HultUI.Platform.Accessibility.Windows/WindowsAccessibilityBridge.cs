@@ -33,7 +33,10 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
     private readonly UiaFragmentRoot _fragmentRoot;
     // UIA calls provider methods (Navigate, GetFocus, …) from worker threads
     // while the UI thread mutates this in ApplyChanges — must be concurrent.
-    private readonly ConcurrentDictionary<ElementId, UiaFragment> _wrappers = new();
+    // One lock: the UI thread is the only writer, reads take none, and Count, which
+    // every apply reads, takes them all. A default map grows its locks with its table,
+    // to 1,024–2,047 of them at a few hundred wrappers (17 µs a Count on a 28-thread desk).
+    private readonly ConcurrentDictionary<ElementId, UiaFragment> _wrappers = new(concurrencyLevel: 1, capacity: 31);
     private IntPtr _hostProviderPtr;
     private AccessibilityNode? _rootNode;
     // ElementId? (nullable ulong) isn't torn-read-safe across threads; store the
@@ -327,6 +330,11 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
     /// <summary>Whether item <paramref name="index"/> of a list served on demand is selected, as its
     /// list's node carries it (what <see cref="UiaVirtualItem"/> answers for SelectionItem.IsSelected).</summary>
     internal bool GetServedItemSelected(ElementId listId, int index) => NodeOf(listId)?.Served.IsSelected(index) == true;
+
+    /// <summary>The control type of an item a list serves on demand, as its node would have it: a
+    /// menu's are menu items (<see cref="AccessibilityTreeBuilder.ItemRoleOf"/>).</summary>
+    internal int ServedItemControlType(ElementId listId) =>
+        UiaFragment.MapControlType(AccessibilityTreeBuilder.ItemRoleOf(NodeOf(listId)?.Role ?? AccessibilityRole.List));
 
     /// <summary>
     /// The wrapper of item <paramref name="index"/>'s node, when its list has item nodes now: a

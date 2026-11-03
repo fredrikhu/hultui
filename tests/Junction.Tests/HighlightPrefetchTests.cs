@@ -65,6 +65,22 @@ public class HighlightPrefetchTests
         });
     }
 
+    /// <summary>A file renamed and changed in the commit: its old side is read under the old
+    /// name, and the lines it lost have their colours. Read at the new name it found nothing, and
+    /// they stayed plain.</summary>
+    [Fact]
+    public void ARenamedFile_HasItsDeletedLinesColoured()
+    {
+        Hosted((session, app) =>
+        {
+            Open(session, app, "src/Renamed.cs");
+
+            session.PumpUntil(() => Coloured(session, app, "    string Label = \"new\";"), TimeSpan.FromSeconds(20));
+
+            Assert.True(Coloured(session, app, "    string Name = \"old\";"), "the renamed file's deleted line is plain");
+        });
+    }
+
     /// <summary>A session's clock runs on with its frames while the worker tokenizes: the colours
     /// reach the end of the file however many seconds of it go by.</summary>
     [Fact]
@@ -466,6 +482,7 @@ public class HighlightPrefetchTests
         string Comment(string line) => "/* opens\n" + Lines(400, i => $"   comment {i}") + line + "\n   closes */\nclass Comment { }\n";
         string Spaced(string first, string indent) =>
             first + "\n" + Lines(800, i => $"    int Value{i} = {i};") + indent + "int Indented = 0;\n" + Lines(20, i => $"    int After{i} = {i};");
+        string Renamed(string line) => "class Shop\n{\n" + Lines(40, i => $"    int Kept{i} = {i};") + line + "\n}\n";
 
         repo.Write("src/Big.cs", Big("    int Changed = 1;"));
         repo.Write("src/Grown.cs", Grown(1));
@@ -475,6 +492,7 @@ public class HighlightPrefetchTests
         repo.Write("src/Other1.cs", "class Other1 { }\n");
         repo.Write("src/Other2.cs", "class Other2 { }\n");
         repo.Write("src/notes.unknowntext", "plain\n");
+        repo.Write("src/Before.cs", Renamed("    string Name = \"old\";"));
         repo.Git("add", "-A");
         repo.Git("commit", "-m", "the sources");
 
@@ -486,6 +504,8 @@ public class HighlightPrefetchTests
         repo.Write("src/Other2.cs", "class Other2 { int x; }\n");
         repo.Write("src/notes.unknowntext", "still plain\n");
         repo.Git("rm", "-q", "src/Gone.cs");
+        repo.Git("mv", "src/Before.cs", "src/Renamed.cs");
+        repo.Write("src/Renamed.cs", Renamed("    string Label = \"new\";"));
         repo.Git("commit", "-am", "change them");
 
         using var session = HeadlessSession.Create(1440, 900);
