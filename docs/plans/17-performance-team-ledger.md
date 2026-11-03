@@ -4,22 +4,25 @@ State of [the performance team](17-performance-team.md). The orchestrator update
 file after every step and commits it with the step's work. Full survey reports are in
 [`17-reports/`](17-reports/).
 
-- **Round:** 7
-- **Phase:** release — round 7 (every build step landed; the full suite passed on the merge with main, 7dfd2ce3). Survey done 2026-11-02 (reports `17-reports/r7-*.md`, 631fe15f..17d4220a):
-  seven experts unsatisfied, GL and Vulkan satisfied; one review objection (4325bac6, step 1). 13 build steps; round 7
-  questions 1–4 were answered yes on 2026-11-02 (the user's live reader check of step 13 remains). Round 6 released: merge 0b8e684a, CI fixes
-  1939afcb, CI run 41432647572 green. Question 10 (`TokenizeDiff` public) open, not blocking. Weekly usage 37 % at the
-  survey's start (reset 2026-11-08 03:00 UTC; extra usage off); pause at 90 % (user, 2026-10-27). The total comparison
-  of rounds 1–5 is in [`17-reports/total-r1-r5.md`](17-reports/total-r1-r5.md). Older rounds are in
+- **Round:** 8
+- **Phase:** survey — round 8, to start in a fresh context (the loop stopped 2026-11-03 after round 7's release). Round 7
+  released: main's app-support merge (f64e4674, another session) merged into the branch as c655b411 with fixes
+  7dfd2ce3, then the branch merged into main as df45b4a2; CI run 41691075588 green (test, test-linux, docs). Open for
+  the user, none blocking: question 10 (`TokenizeDiff` public), the live screen-reader check of menus (script in
+  ACCESSIBILITY-PLAN.md, round 7 step 13), f9bceb6d's window checks (Open). Weekly usage 80 % after the release (reset
+  2026-11-08 03:00 UTC; extra usage off); pause at 90 % (user, 2026-10-27). Older rounds are in
   [the archive](17-performance-team-ledger-archive.md) (search it, don't read it whole). History note: rewritten
   2026-10-25 (every commit after 3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history).
   To resume in a fresh context, run in this worktree: `/loop Run the next step of the performance team: follow
   docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md. Read both once per
   session (afterwards only the ledger's Phase and the part the step needs), do the step the ledger's Phase calls
-  for, record it in the ledger, and commit.` Before resuming, `git fetch` and merge main if it moved.
+  for, record it in the ledger, and commit.` Before resuming, `git fetch` and merge main if it moved. The common
+  survey brief from round 7 is reusable: session 855f4ddd's scratchpad `brief-r7-survey.md`.
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`)
-- **Review commits since:** round 6's survey reviewed 643eb07b..f31194ab (round 5's build); round 7's survey reviews
-  round 6's build, cd3b6c8f..1939afcb (the last survey report to the round 6 release).
+- **Review commits since:** round 7's survey reviewed cd3b6c8f..1939afcb (round 6's build); round 8's survey reviews
+  round 7's build, 17d4220a..df45b4a2 (the last survey report to the round 7 release), which also brings main's
+  app-support merge f64e4674 (25 commits from another session: headless locators, frame robustness, lock privacy,
+  UIA, overlays, rich text) — review it like the rest.
 - **Probe code:** round 7 surveys in the same scratchpad's `r7-<area>\`; round 6 surveys in session 855f4ddd's scratchpad
   `C:\Users\fredr\AppData\Local\Temp\claude\C--Users-fredr-source-repos-fredrikhu-hului-revamped--claude-worktrees-distracted-mendel-5071ba\855f4ddd-feda-4f0a-a595-a83e07af08f8\scratchpad\r6-<area>\`
   (each report names its files). Rounds 4–5 in the scratchpad of session dc3c745c (a fresh context may have another
@@ -834,3 +837,9 @@ From 2026-10-27 (round 6's survey); earlier entries are in the archive ([to 2026
   — step 13's MenuRoleTests expected Invoke on a submenu's parent, which now expands (round 6's rule) since item nodes
   carry an expanded state — and docfx's main-side cref. Fixed in 7dfd2ce3 (test, ACCESSIBILITY-PLAN.md, cref → `Enter`):
   Headless 1,443 pass, docfx 0 warnings. Phase → release.
+- 2026-11-03: round 7 merged into main as df45b4a2 (detached origin/main merge in this worktree, tree identical to the
+  tested branch; the push gate held: origin/main f64e4674 was in the branch). Primary checkout fast-forwarded behind
+  the guard; branch pushed. CI run 41691075588 green: test 22 min, test-linux 6.5 min, docs 1.5 min (main's own run on
+  f64e4674 had been red: the docs cref, fixed in 7dfd2ce3, and 3 ConPTY tests timing out on the Windows runner, which
+  passed this time — a runner flake candidate). Round → 8, Phase → survey; the loop stops, and round 8 starts in a
+  fresh context.
