@@ -37,6 +37,8 @@ internal static class Shortcuts
         map.Add("env", global, "Switch environment", K(KeyCode.E, ctrl));
         map.Add("run", global, "Run the collection", K(KeyCode.R, ctrl));
         map.Add("import", global, "Import an OpenAPI spec", K(KeyCode.I, ctrl));
+        map.Add("rename", global, "Rename the open request, or the active environment on its view", K(KeyCode.F2));
+        map.Add("delete", global, "Delete the open request, or the active environment on its view", K(KeyCode.Delete));
         map.Add("send", "Requests", "Send", K(KeyCode.Enter, ctrl));
         map.Add("cancel", "Requests", "Cancel the send, or abort the run", K(KeyCode.Escape));
         map.Add("flip", "Requests", "Flip the response pane right ⇄ bottom", K(KeyCode.Backslash, ctrl));

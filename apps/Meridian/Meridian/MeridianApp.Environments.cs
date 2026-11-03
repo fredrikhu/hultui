@@ -74,7 +74,10 @@ public partial class MeridianApp
             if (missing > 0)
                 r.AddChild(Text.New($"! {missing} missing").FontSize(10f).TextColor(Azimuth.StatusWarn));
             var name = env.Name;
+            // Rename and delete: the ⋯ at the row's end, or a right-click on the row.
+            r.AddChild(RowActionsButton($"actions for {name}.env", "env-actions-" + name, () => EnvironmentActions(name)));
             r.OnClick(_ => SelectEnvironment(name));
+            RowContextMenu(r, () => EnvironmentActions(name));
             if (!active) r.HoverBg(Azimuth.Raised, Color.Transparent);
             panel.AddChild(r);
         }
@@ -209,7 +212,8 @@ public partial class MeridianApp
             row.AddChild(BuildCell(env.Name, key, secret));
 
         var remove = RemoveButton($"remove {key} from every environment", () => RemoveKey(key))
-            .Tooltip("remove from every environment");
+            .Tooltip(secret ? "remove from every environment — and, on save, its value from this machine's keyring"
+                : "remove from every environment");
         remove.AutomationId($"remove-key-{key}");
         row.AddChild(remove);
         return row;
@@ -228,11 +232,31 @@ public partial class MeridianApp
         MarkDirty();
     }
 
+    /// <summary>Takes a key out of every environment. A secret's keyring value goes too, on the
+    /// save that writes the files without it (<see cref="ForgetRemovedSecrets"/>): nothing will
+    /// ask for it again, and an entry left behind would come back if the key were added anew.</summary>
     private void RemoveKey(string key)
     {
+        if (IsSecretAnywhere(key)) _removedSecrets.Add(key);
         foreach (var env in _envFiles)
             _envDocs.GetValueOrDefault(env.Name)?.RemoveKey(key);
         MarkDirty();
+    }
+
+    /// <summary>Secret keys removed from every environment since the last save.</summary>
+    private readonly HashSet<string> _removedSecrets = new(StringComparer.Ordinal);
+
+    /// <summary>Forgets the keyring values of the removed secrets, once every file is saved without
+    /// them. A key added back before the save keeps its value; a file that failed to save keeps
+    /// them waiting for the next save.</summary>
+    private void ForgetRemovedSecrets()
+    {
+        if (_workspace is not { } ws || _removedSecrets.Count == 0) return;
+        if (_envFiles.Any(e => _envDocs.GetValueOrDefault(e.Name)?.Edited == true)) return;
+        foreach (var key in _removedSecrets)
+            if (_envFiles.All(e => _envDocs.GetValueOrDefault(e.Name)?.Keys.Contains(key) != true))
+                _keyring.Delete(ws.Root, key);
+        _removedSecrets.Clear();
     }
 
     private Element BuildCell(string envName, string key, bool secret)
@@ -362,6 +386,7 @@ public partial class MeridianApp
                 Flash($"Could not save {env.Name}.env: {e.Message}");
             }
         }
+        ForgetRemovedSecrets();
         MarkDirty();
     }
 
@@ -386,7 +411,7 @@ public partial class MeridianApp
     // ── New environment ──────────────────────────────────────────────────
 
     private void OpenNewEnvironmentDialog() =>
-        OpenDialog("New environment", "name — local, staging, ci", CreateEnvironment, EnvNameProblem);
+        OpenDialog("New environment", "name — local, staging, ci", CreateEnvironment, input => EnvNameProblem(input));
 
     /// <summary>"local.env" and " local " both mean local: the suffix and the spaces go.</summary>
     private static string EnvNameFrom(string input) => CollectionNames.Stem(input, ".env");
@@ -395,11 +420,14 @@ public partial class MeridianApp
     /// file name in envs/ and a <c>--env</c> argument, on every OS the collection is cloned to
     /// (<see cref="CollectionNames.Problem"/>), and no clash with an existing environment in any
     /// letter case.</summary>
-    private string? EnvNameProblem(string input)
+    /// <param name="except">The environment being renamed, which is no clash: a rename may change
+    /// only the letter case.</param>
+    private string? EnvNameProblem(string input, string? except = null)
     {
         string name = EnvNameFrom(input);
         if (CollectionNames.Problem(name, "environment") is { } problem) return problem;
-        if (_envFiles.FirstOrDefault(e => string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase)) is { } existing)
+        if (_envFiles.FirstOrDefault(e => e.Name != except
+                && string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase)) is { } existing)
             return $"{existing.Name}.env already exists.";
         return null;
     }
@@ -437,11 +465,12 @@ public partial class MeridianApp
 
     /// <param name="validate">Null, or the reason a value is refused: the prompt then stays up with
     /// the reason under the field and the text as typed.</param>
+    /// <param name="initial">The text the field starts with, selected: a rename's current name.</param>
     private void OpenDialog(string title, string placeholder, Action<string> onSubmit,
-        Func<string, string?>? validate = null)
+        Func<string, string?>? validate = null, string initial = "")
     {
         _dialog = (title, placeholder, onSubmit, validate);
-        _dialogValue = "";
+        _dialogValue = initial;
         _dialogError = null;
         _pendingDialogFocus = true;
         MarkDirty();

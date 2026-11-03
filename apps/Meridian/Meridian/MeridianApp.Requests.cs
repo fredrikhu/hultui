@@ -119,19 +119,26 @@ public partial class MeridianApp
         int childDepth = isRoot ? 0 : depth + 1;
         if (!isRoot)
         {
-            // Folders in mono — they are real directories.
-            string relative = TreeRelative(folder.Path);
+            // Folders in mono — they are real directories. ＋ request and ＋ folder make them in
+            // this folder; rename and delete are the ⋯ at the row's end, or a right-click on the row.
+            string relative = Relative(folder.Path);
+            string id = relative.Replace('/', '-');
             var path = folder.Path;
-            list.AddChild(Flex.Row(gap: 2).Height(Azimuth.RowList).FlexShrink(0)
+            var row = Flex.Row(gap: 2).Height(Azimuth.RowList).FlexShrink(0)
                 .AlignItems(AlignItems.Center)
                 .Padding(new Thickness(0, Azimuth.S2, 0, Azimuth.S3 + depth * Azimuth.S3))
+                .AccessibleRole(AccessibilityRole.Group).AccessibleName($"folder {folder.Name}")
+                .AutomationId("folder-" + id)
                 .Children(
-                    Ui.Mono(folder.Name + "/", 12f, Azimuth.TextMuted)
-                        .MaxLines(1).TextOverflow(TextOverflow.Ellipsis).FlexGrow(1),
+                    Ui.Mono(folder.Name + "/", 12f, Azimuth.TextMuted).MaxLines(1).TextOverflow(TextOverflow.Ellipsis),
+                    Box.New().FlexGrow(1),
                     TreeAction(Icons.NewRequest, $"New request in {relative}", "tree-new-request-" + relative,
                         () => OpenNewRequestDialog(path)),
                     TreeAction(Icons.NewFolder, $"New folder in {relative}", "tree-new-folder-" + relative,
-                        () => OpenNewFolderDialog(path))));
+                        () => OpenNewFolderDialog(path)),
+                    RowActionsButton($"actions for folder {folder.Name}", "folder-actions-" + id, () => FolderActions(folder)));
+            RowContextMenu(row, () => FolderActions(folder));
+            list.AddChild(row);
             // A folder made in the app shows before its first request (its _folder.req keeps it).
             if (folder.Folders.Count == 0 && folder.Requests.Count == 0)
                 list.AddChild(Flex.Row(gap: 0).Height(Azimuth.RowList).FlexShrink(0)
@@ -175,8 +182,12 @@ public partial class MeridianApp
             row.AddChild(Ui.Mono("⛓" + request.UsesCount, 8f, Azimuth.TextFaint).FlexShrink(0));
         if (openTab is { Dirty: true })
             row.AddChild(Dot(Azimuth.Accent));
+        var path = request.Path;
+        row.AddChild(RowActionsButton($"actions for {request.DisplayName}",
+            "req-actions-" + System.IO.Path.GetFileNameWithoutExtension(path), () => RequestActions(path)));
 
         row.OnClick(_ => OpenRequest(request.Path));
+        RowContextMenu(row, () => RequestActions(path));
         if (!active) row.HoverBg(Azimuth.Raised, Color.Transparent);
         return row;
     }

@@ -15,6 +15,11 @@ public interface IKeyring
     /// <summary>Stores (or replaces) a value for this machine. False when the
     /// platform has no store to write to.</summary>
     bool Set(string workspaceRoot, string key, string value);
+
+    /// <summary>Forgets this machine's value — the key went from every environment, so
+    /// nothing will ask for it again. True when an entry was there and is gone; false when
+    /// there was none, or the platform has no store.</summary>
+    bool Delete(string workspaceRoot, string key);
 }
 
 /// <summary>
@@ -31,6 +36,10 @@ public sealed class DefaultKeyring : IKeyring
 
     public bool Set(string workspaceRoot, string key, string value) =>
         _store?.Set(workspaceRoot, key, value) ?? false;
+
+    // A CI-injected environment variable is not ours to forget.
+    public bool Delete(string workspaceRoot, string key) =>
+        _store?.Delete(workspaceRoot, key) ?? false;
 }
 
 /// <summary>
@@ -84,6 +93,9 @@ public sealed partial class WindowsCredentialKeyring : IKeyring
         }
     }
 
+    public bool Delete(string workspaceRoot, string key) =>
+        OperatingSystem.IsWindows() && CredDeleteW(Target(workspaceRoot, key), CredTypeGeneric, 0);
+
     private static string Target(string workspaceRoot, string key) => $"meridian|{workspaceRoot}|{key}";
 
     [StructLayout(LayoutKind.Sequential)]
@@ -110,6 +122,10 @@ public sealed partial class WindowsCredentialKeyring : IKeyring
     [DllImport("advapi32.dll", EntryPoint = "CredWriteW", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CredWriteW(ref Credential credential, uint flags);
+
+    [LibraryImport("advapi32.dll", EntryPoint = "CredDeleteW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool CredDeleteW(string target, int type, int flags);
 
     [LibraryImport("advapi32.dll", EntryPoint = "CredFree")]
     private static partial void CredFree(IntPtr buffer);

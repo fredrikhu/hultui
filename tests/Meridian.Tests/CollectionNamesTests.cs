@@ -31,9 +31,9 @@ public class CollectionNamesTests : IDisposable
     [InlineData("tab\there", "can't contain <")]
     [InlineData(".hidden", "can't start with a dot")]
     [InlineData("trailing.", "can't end with a dot")]
-    [InlineData("CON", "device name on Windows")]
-    [InlineData("aux.req", "device name on Windows")]
-    [InlineData("Lpt9", "device name on Windows")]
+    [InlineData("CON", "for a device; pick another name")]
+    [InlineData("aux.req", "for a device; pick another name")]
+    [InlineData("Lpt9", "for a device; pick another name")]
     public void ANameNoOsTakesIsRefused(string name, string reason) =>
         Assert.Contains(reason, CollectionNames.Problem(name, "request"));
 
@@ -47,6 +47,19 @@ public class CollectionNamesTests : IDisposable
         Assert.Equal("Users", CollectionNames.Taken(_root, "USERS"));
         Assert.Null(CollectionNames.Taken(_root, "users.req"));
         Assert.Null(CollectionNames.Taken(Path.Combine(_root, "missing"), "x"));
+    }
+
+    /// <summary>A rename is no clash with itself, so it may change only the letter case — but
+    /// only itself: another entry in another case still clashes.</summary>
+    [Fact]
+    public void TakenIgnoresTheEntryBeingRenamed()
+    {
+        File.WriteAllText(Path.Combine(_root, "Login.req"), "");
+        File.WriteAllText(Path.Combine(_root, "logout.req"), "");
+
+        Assert.Null(CollectionNames.Taken(_root, "LOGIN.req", except: "Login.req"));
+        Assert.Equal("logout.req", CollectionNames.Taken(_root, "Logout.req", except: "Login.req"));
+        Assert.Equal("Login.req", CollectionNames.Taken(_root, "login.req", except: "login.req"));   // exact name only
     }
 
     [Theory]

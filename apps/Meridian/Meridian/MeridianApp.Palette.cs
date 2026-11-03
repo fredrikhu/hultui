@@ -71,6 +71,15 @@ public partial class MeridianApp
             // Ctrl S saves whatever is on screen, so it is shown on the one row it does now.
             list.Add(Command("Save environments", "Environment",
                 View == MeridianView.Environments ? Shortcuts.Keys("save") : "", SaveEnvironments));
+            if (_envName is { } env)
+            {
+                // F2 and Delete reach the active environment on its own view.
+                bool here = View == MeridianView.Environments;
+                list.Add(Command($"Rename environment {env}…", "Environment", here ? Shortcuts.Keys("rename") : "",
+                    () => OpenRenameEnvironmentDialog(env)));
+                list.Add(Command($"Delete environment {env}…", "Environment", here ? Shortcuts.Keys("delete") : "",
+                    () => ConfirmDeleteEnvironment(env)));
+            }
 
             // Every request in the collection is a command — the fastest way
             // to a known request in a large tree.
@@ -93,6 +102,15 @@ public partial class MeridianApp
             list.Add(Command("Save request", "Request",
                 View != MeridianView.Environments ? Shortcuts.Keys("save") : "", SaveActiveTab));
             list.Add(new PaletteCommand("Close tab", CloseActiveTab) { Group = "Request", Keys = Shortcuts.Keys("close") });
+            if (_workspace != null)
+            {
+                var path = ActiveTab.Path;
+                bool here = View == MeridianView.Requests;
+                list.Add(Command("Rename request…", "Request", here ? Shortcuts.Keys("rename") : "",
+                    () => OpenRenameRequestDialog(path)));
+                list.Add(Command("Delete request…", "Request", here ? Shortcuts.Keys("delete") : "",
+                    () => ConfirmDeleteRequest(path)));
+            }
             if (!_forceResponseBottom)
                 list.Add(Command("Flip the response pane", "Request",
                     View == MeridianView.Requests ? Shortcuts.Keys("flip") : "", FlipResponsePane));

@@ -28,9 +28,9 @@ public static class CollectionNames
         if (name.StartsWith('.')) return "A name can't start with a dot.";
         if (name.EndsWith('.')) return "A name can't end with a dot.";
         // Windows refuses a device name with any extension too: con.req is CON.
-        int dot = name.IndexOf('.');
-        if (WindowsDevices.Contains(dot < 0 ? name : name[..dot]))
-            return $"{name} is a device name on Windows.";
+        string stem = name.Split('.')[0];
+        if (WindowsDevices.Contains(stem))
+            return $"Windows keeps {stem.ToUpperInvariant()} for a device; pick another name.";
         return null;
     }
 
@@ -38,7 +38,9 @@ public static class CollectionNames
     /// <paramref name="entryName"/> would land on in any letter case — on Windows and macOS
     /// they are the same entry — or null when there is none (or the folder can't be read, in
     /// which case creating the entry reports the problem).</summary>
-    public static string? Taken(string directory, string entryName)
+    /// <param name="except">The name of the entry being renamed, exactly as it is: no clash with
+    /// itself, so a rename may change only the letter case.</param>
+    public static string? Taken(string directory, string entryName, string? except = null)
     {
         try
         {
@@ -46,7 +48,9 @@ public static class CollectionNames
             foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
             {
                 var existing = Path.GetFileName(entry);
-                if (string.Equals(existing, entryName, StringComparison.OrdinalIgnoreCase)) return existing;
+                if (string.Equals(existing, entryName, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(existing, except, StringComparison.Ordinal))
+                    return existing;
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }

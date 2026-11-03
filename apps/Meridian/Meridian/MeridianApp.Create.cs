@@ -119,33 +119,17 @@ public partial class MeridianApp
     private string FolderTitle(string folder)
     {
         var ws = _workspace!;
-        string relative = TreeRelative(folder);
-        return relative.Length == 0 ? ws.Name + "/" : $"{ws.Name}/{relative}/";
+        string relative = Relative(folder);
+        return relative == "." ? ws.Name + "/" : $"{ws.Name}/{relative}/";
     }
 
-    /// <summary>A folder's path below the collection's root with / between its names, "" for the root.</summary>
-    private string TreeRelative(string folder)
-    {
-        string relative = System.IO.Path.GetRelativePath(_workspace!.Root, folder);
-        return relative == "." ? "" : relative.Replace('\\', '/');
-    }
-
-    private static string? RequestNameProblem(string folder, string input)
-    {
-        string name = CollectionNames.Stem(input, ".req");
-        if (CollectionNames.Problem(name, "request") is { } problem) return problem;
-        if (name.Equals("_folder", StringComparison.OrdinalIgnoreCase))
-            return "_folder.req holds the folder's defaults — pick another name.";
-        if (CollectionNames.Taken(folder, name + ".req") is { } existing) return $"{existing} already exists.";
-        return null;
-    }
-
-    /// <summary>Writes <c>name.req</c>, rescans, and opens it with its URL box taking the keyboard.</summary>
+    /// <summary>Writes <c>name.req</c>, rescans, and opens it with its URL box taking the keyboard.
+    /// The name rules are a rename's too (<see cref="RequestNameProblem"/>).</summary>
     internal void CreateRequest(string folder, string input)
     {
         if (_workspace is null) return;
         if (RequestNameProblem(folder, input) is { } problem) { Flash(problem); return; }
-        string name = CollectionNames.Stem(input, ".req");
+        string name = RequestNameFrom(input);
         var path = System.IO.Path.Combine(folder, name + ".req");
         try
         {
@@ -160,22 +144,12 @@ public partial class MeridianApp
         OpenRequest(path, editUrl: true);
     }
 
-    private string? FolderNameProblem(string parent, string input)
-    {
-        string name = input.Trim();
-        if (CollectionNames.Problem(name, "folder") is { } problem) return problem;
-        if (TreeRelative(parent).Length == 0 && name.Equals("envs", StringComparison.OrdinalIgnoreCase))
-            return "envs/ holds the environments — pick another name.";
-        if (CollectionNames.Taken(parent, name) is { } existing) return $"{existing} already exists.";
-        return null;
-    }
-
     /// <summary>Makes the folder with its <c>_folder.req</c> (see <see cref="FolderDefaultsText"/>) and rescans.</summary>
     internal void CreateFolder(string parent, string input)
     {
         if (_workspace is null) return;
         if (FolderNameProblem(parent, input) is { } problem) { Flash(problem); return; }
-        string name = input.Trim();
+        string name = FolderNameFrom(input);
         var dir = System.IO.Path.Combine(parent, name);
         try
         {

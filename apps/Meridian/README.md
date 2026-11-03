@@ -83,7 +83,8 @@ file to write by hand:
 - **＋ add key** adds a key to the active environment; a key another
   environment lacks shows **missing — add to …** in that column (a secret
   arrives as its flag alone); **✕** at a row's end removes the key from every
-  environment.
+  environment. Removing a secret also forgets this machine's keyring value for
+  it, on the save that writes the files without it.
 - The **SECRET** column's **○ / ●** toggles a key's secret flag in every file
   that has it: on appends `secret <key>`, off takes it out again (a key with
   only the flag keeps its place as `key=`). A flagged key's cell then asks for
@@ -91,6 +92,31 @@ file to write by hand:
   shows **still in local.env — move to keyring** (or **— clear**).
 - Every edit waits in the table until **Ctrl+S**, which rewrites only the lines
   that changed.
+
+**Files are renamed and deleted in the app** too. Every row of the Requests
+tree (requests and folders) and of the environment list has a **⋯** at its end,
+and a right-click on the row opens the same menu: **Rename…** and **Delete…**.
+**F2** and **Delete** do the same for the request open in the editor, or for
+the active environment on the Environments view.
+
+- **Rename** moves the file (`get-charge.req`, `envs/staging.env`) or folder,
+  under the same name rules as a new one, refusing a name a sibling already
+  has in any letter case; a change of letter case alone is allowed.
+  An open tab follows its file, unsaved edits and all, and saves to the new
+  name; a folder takes its `_folder.req` defaults and everything else in it
+  along. A renamed environment keeps its unsaved edits and stays active. The
+  tree shows a request's `name` line when it has one, so renaming the file
+  leaves that label as it is.
+- **Delete** asks first, naming what goes: the file, or the folder with the
+  number of requests and other files in it, and any open tab with unsaved
+  changes. It goes to the **Recycle Bin** on Windows and the **Trash** on
+  Linux (the freedesktop.org trash the file managers restore from). Where
+  there is no bin the confirmation says the delete is permanent, and where the
+  bin refuses a path (a network share, another file system than the trash) a
+  second confirmation offers to delete it for good. Open tabs of what went
+  close. Deleting the active environment makes `local` active, else the first
+  left — as opening a collection does. Its secrets stay in the keyring: they
+  belong to the collection, and the file can come back from the bin.
 
 ## Running in CI
 
@@ -147,6 +173,7 @@ GitHub Actions:
 | `Ctrl+O` / `Ctrl+N` | open a collection · make a new one |
 | `Ctrl+S` / `Ctrl+W` | save (the request, or the environments on their view) · close tab |
 | `Ctrl+E` | switch environment |
+| `F2` / `Delete` | rename · delete the open request, or the active environment on its view |
 | `Ctrl+R` | run the collection, from any view |
 | `Ctrl+I` | import an OpenAPI spec |
 | `Ctrl+F` | find in the response |

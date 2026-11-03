@@ -163,7 +163,7 @@ public class CreateInAppTests : IDisposable
                 ("..", "can't contain"),
                 (".hidden", "can't start with a dot"),
                 ("shop.", "can't end with a dot"),
-                ("con", "device name on Windows"),
+                ("con", "for a device; pick another name"),
                 ("a|b", "can't contain"));
 
             // A good name, then Escape at the base URL: still nothing on disk.
@@ -261,8 +261,8 @@ public class CreateInAppTests : IDisposable
                 ("List-Users", "list-users.req already exists"),
                 ("../escape", "can't contain"),
                 ("sub\\dir", "can't contain"),
-                ("_folder", "holds the folder's defaults"),
-                ("nul", "device name on Windows"),
+                ("_folder", "holds a folder's defaults"),
+                ("nul", "for a device; pick another name"),
                 ("what?", "can't contain"));
             Assert.Equal(["list-users.req"], Directory.GetFileSystemEntries(Path.Combine(Collection, "users")).Select(Path.GetFileName));
             Assert.False(File.Exists(Path.Combine(Collection, "escape.req")));
@@ -342,7 +342,7 @@ public class CreateInAppTests : IDisposable
                 ("Envs", "envs/ holds the environments"),
                 (".git", "can't start with a dot"),
                 ("a/b", "can't contain"),
-                ("lpt1", "device name on Windows"));
+                ("lpt1", "for a device; pick another name"));
             Assert.Equal(["envs", "users"],
                 Directory.GetFileSystemEntries(Collection).Select(Path.GetFileName).Order(StringComparer.Ordinal));
 
