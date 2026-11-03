@@ -115,11 +115,17 @@ public class A11yLayoutRefreshInPlaceTests
         "wheel", "item rows walk", "one-argument walk", "label edit in rows", "resize", "sticky header",
         "nested scroll views", "overlay over a scrolled root", "content in a scroll view", "list items relabelled",
         "list selection and a ticking label", "items added to a list", "click handler added to a box",
+        "rows added and removed", "rows moved", "a row made again", "composite list walk", "composite list wheel",
+        "rows changed under an overlay",
     };
 
     /// <summary>The scenes whose steps add or remove nodes: a build's diff has them, and the walk tells
     /// them so (plan 17, round 7, step 7).</summary>
-    private static readonly HashSet<string> Structural = ["items added to a list", "click handler added to a box"];
+    private static readonly HashSet<string> Structural =
+    [
+        "items added to a list", "click handler added to a box", "rows added and removed", "rows moved",
+        "a row made again", "composite list walk", "composite list wheel", "rows changed under an overlay",
+    ];
 
     public static TheoryData<string, string> FallsBack => new()
     {

@@ -185,22 +185,33 @@ public sealed class A11yTextCaretPatchTests : IDisposable
         Assert.True(AccessibilityTreeDiffer.Diff(bridge.CurrentTree, session.Window.Window.BuildAccessibilityTree()).IsEmpty);
     }
 
-    [Fact]
-    public void AnEditInAFrameThatRebuildsAnyway_IsToldOnce_ByTheDiff()
+    /// <summary>A frame whose elements' children changed is refreshed by a walk of the tree in place
+    /// (plan 17, round 7, step 7), which tells the edit with the node added, once, as a build's diff
+    /// does; and every refresh building the tree tells it the same.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AnEditInAFrameThatRefreshesTheTree_IsToldOnce_ByTheDiff(bool build)
     {
         using var session = HeadlessSession.Create(600, 400);
         var bridge = session.Window.InstallAccessibilityBridge();
+        session.Window.Window.AccessibilityBuildsEveryRefresh = build;
         var (editor, label) = Mount(session);
         int trees = session.Window.AccessibilityTreesBuilt;
+        int structural = session.Window.Window.AccessibilityStructureRefreshesInPlace;
         bridge.ClearDiffs();
 
         session.Window.TypeText("x");
         ((Element)label.Parent!).AddChild(TextB.New("new"));
         session.PumpFrame();
 
-        Assert.Equal(trees + 1, session.Window.AccessibilityTreesBuilt);
+        Assert.Equal(build ? trees + 1 : trees, session.Window.AccessibilityTreesBuilt);
+        Assert.Equal(build ? structural : structural + 1, session.Window.Window.AccessibilityStructureRefreshesInPlace);
+        var diff = Assert.Single(bridge.Diffs);
+        Assert.Equal("new", Assert.Single(diff.Added).Node.Name);
         Assert.Equal([AccessibilityProperties.Text, AccessibilityProperties.TextSelection],
-            bridge.Diffs.SelectMany(d => d.PropertyChanged).Where(c => c.Node.ElementId == editor.Id).Select(c => c.PropertyName));
+            diff.PropertyChanged.Where(c => c.Node.ElementId == editor.Id).Select(c => c.PropertyName));
+        Assert.True(AccessibilityTreeDiffer.Diff(bridge.CurrentTree, session.Window.Window.BuildAccessibilityTree()).IsEmpty);
     }
 
     [Fact]
@@ -228,11 +239,16 @@ public sealed class A11yTextCaretPatchTests : IDisposable
         Assert.True(AccessibilityTreeDiffer.Diff(bridge.CurrentTree, session.Window.Window.BuildAccessibilityTree()).IsEmpty);
     }
 
-    [Fact]
-    public void ACaretMoveInAnEditorMountedInTheSameHandler_IsInTheTreeItsRebuildBuilds()
+    /// <summary>The editor mounted in the same handler is new to the tree: the frame's walk builds its
+    /// node, as a build would, with the caret where it is now.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ACaretMoveInAnEditorMountedInTheSameHandler_IsInTheNodeTheRefreshBuilds(bool build)
     {
         using var session = HeadlessSession.Create(600, 400);
         var bridge = session.Window.InstallAccessibilityBridge();
+        session.Window.Window.AccessibilityBuildsEveryRefresh = build;
         var (editor, _) = Mount(session);
         int trees = session.Window.AccessibilityTreesBuilt;
 
@@ -241,7 +257,7 @@ public sealed class A11yTextCaretPatchTests : IDisposable
         second.State.Select(RichSelection.Caret(1, 4));
         session.PumpFrame();
 
-        Assert.Equal(trees + 1, session.Window.AccessibilityTreesBuilt);
+        Assert.Equal(build ? trees + 1 : trees, session.Window.AccessibilityTreesBuilt);
         Assert.Equal("first paragraph of the text\n".Length + 4, NodeOf(bridge.CurrentTree!, second).Text!.Caret);
     }
 

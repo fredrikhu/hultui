@@ -135,8 +135,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     /// change in it, in place of a tree (<see cref="TryRebuildOverlays"/>). UI thread.</summary>
     internal int AccessibilityOverlayPartsBuilt { get; private set; }
 
-    /// <summary>How many coalesced layout refreshes brought the applied tree up to date in place,
-    /// building none (<see cref="TryRefreshA11yInPlace"/>). UI thread.</summary>
+    /// <summary>How many refreshes — coalesced layout refreshes, and frames whose elements' children
+    /// changed — brought the applied tree up to date in place, building none
+    /// (<see cref="TryRefreshA11yInPlace"/>). UI thread.</summary>
     internal int AccessibilityLayoutRefreshesInPlace { get; private set; }
 
     /// <summary>How many of those found nodes added, gone or in another order, and built only the
@@ -1104,7 +1105,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     }
 
     /// <summary>
-    /// A coalesced layout refresh without a tree: the
+    /// A coalesced layout refresh, or a frame whose elements' children changed, without a tree: the
     /// elements are walked against the applied tree by the builder's rules
     /// (<see cref="AccessibilityTreeBuilder.TryRefreshInPlace"/>), and what a build would make otherwise
     /// is written in place — a box moved in its scroll views' content, a node gone out of view or come
@@ -1636,8 +1637,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         // Structural (Children), property/focus, and first-attach changes refresh
         // immediately. Layout-only changes are coalesced (see A11yCoalesceMs): a
         // continuous resize/scroll otherwise rebuilds the whole tree every frame.
-        bool a11yImmediate = a11yActive && (!_a11yWasActive || _a11yPropertyDirty
-            || (_root.DirtyFlags & DirtyFlags.Children) != 0);
+        bool a11yChildren = (_root.DirtyFlags & DirtyFlags.Children) != 0;
+        bool a11yImmediate = a11yActive && (!_a11yWasActive || _a11yPropertyDirty || a11yChildren);
         if (a11yActive && layoutWasDirty)
             _a11yLayoutRefreshPending = true;
         // An open overlay's part of the tree, a child of the root node, is built again on its own:
@@ -1650,15 +1651,22 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         bool a11yRangeDue = a11yActive && _a11yRangeRefreshPending
             && nowMs - _lastA11yRangeMs >= A11yRangeCoalesceMs;
         bool a11yRebuild = a11yImmediate;
-        // A layout refresh came due and nothing else asks for a tree: the applied tree is brought up to
-        // date in place where a build would make the same nodes, and built where it would not. Either
-        // tells what the patches below would, so they do not run then.
+        // A layout refresh came due and nothing else asks for a tree, or the elements' children changed
+        // (rows made again, a row scrolled in) and nothing but that asks for one: the applied tree is
+        // brought up to date in place, with nodes built only for what is new, where the walk finds what
+        // a build would make, and built where it does not. Either tells what the patches below would, so
+        // they do not run then. A row a key made again in a composite list built the whole window's tree.
         bool a11yRefreshed = false;
-        if (a11yLayoutDue && !a11yImmediate)
+        bool a11yStructure = a11yImmediate && a11yChildren && _a11yWasActive && !_a11yPropertyDirty;
+        if ((a11yLayoutDue && !a11yImmediate) || a11yStructure)
         {
             using (_tracer.Begin("Phase", "A11y"))
                 a11yRefreshed = TryRefreshA11yInPlace();
-            if (a11yRefreshed) A11yRefreshed(nowMs);
+            if (a11yRefreshed)
+            {
+                A11yRefreshed(nowMs);
+                a11yRebuild = false;
+            }
             else a11yRebuild = true;
         }
         bool a11yOverlays = a11yActive && !a11yRebuild && !a11yRefreshed && ((overlayChanges & OverlayChanges.Structure) != 0
