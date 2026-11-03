@@ -10,6 +10,7 @@ static partial class Scenarios
         Layout()
             .Concat(TextScenarios())
             .Concat(FindInTextAreaScenarios())
+            .Concat(FindBesideListScenarios())
             .Concat(Scroll())
             .Concat(Virtual())
             .Concat(MovingRows())
