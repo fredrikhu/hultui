@@ -323,6 +323,11 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
     /// list's node carries it (what <see cref="UiaVirtualItem"/> answers for SelectionItem.IsSelected).</summary>
     internal bool GetServedItemSelected(ElementId listId, int index) => NodeOf(listId)?.Served.IsSelected(index) == true;
 
+    /// <summary>The control type of an item a list serves on demand, as its node would have it: a
+    /// menu's are menu items (<see cref="AccessibilityTreeBuilder.ItemRoleOf"/>).</summary>
+    internal int ServedItemControlType(ElementId listId) =>
+        UiaFragment.MapControlType(AccessibilityTreeBuilder.ItemRoleOf(NodeOf(listId)?.Role ?? AccessibilityRole.List));
+
     /// <summary>
     /// The wrapper of item <paramref name="index"/>'s node, when its list has item nodes now: a
     /// provider of an item served on demand that a client still holds after the list shrank to 2,000

@@ -544,6 +544,7 @@ public static partial class AccessibilityTreeBuilder
         float itemHeight = source.ItemHeight;
         var content = list.Layout.AbsoluteContentBox;
         uint slot = AccessibleOwnerSlots.SlotOf(list.Id);
+        var role = ItemRoleOf(listNode.Role);
         for (int i = 0; i < kept; i++)
         {
             var node = nodes[i];
@@ -561,7 +562,7 @@ public static partial class AccessibilityTreeBuilder
             if (node.Name != label || node.IsToggled != toggled || node.IsSelected != selected)
             {
                 if (holdsRow) return refresh.Fail("a node with children changed");
-                var made = MakeItemNode(slot, i, label, unscrolled, toggled, selected, offscreen);
+                var made = MakeItemNode(slot, i, role, label, unscrolled, toggled, selected, offscreen);
                 AccessibilityTreeDiffer.CompareNodes(refresh.Changes, node, made, prevAbove, currAbove);
                 refresh.Remade.Add((listNode, i, made));
                 continue;
@@ -584,7 +585,7 @@ public static partial class AccessibilityTreeBuilder
         {
             var (localTop, height) = source.ItemBounds(i) ?? (i * itemHeight, itemHeight);
             var box = new Rect(content.X, content.Y + localTop, content.Width, height);
-            var item = MakeItemNode(slot, i, source.GetItemLabel(i), place.Unscrolled(box), source.ItemIsToggled(i),
+            var item = MakeItemNode(slot, i, role, source.GetItemLabel(i), place.Unscrolled(box), source.ItemIsToggled(i),
                 source.IsItemSelected(i), !RectsIntersect(clip, place.OnScreen(box)));
             if (i == open.Item)
             {

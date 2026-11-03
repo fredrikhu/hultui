@@ -188,6 +188,14 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
                 => new UiaSelectionProvider(_bridge, ElementId),
             AccessibilityRole.List when patternId == UiaInterop.UIA_ItemContainerPatternId
                 => new UiaItemContainerProvider(_bridge, ElementId),
+            // A menu that publishes its items (a context menu, a menu bar's menu) is their
+            // selection container as a list is, with the same three patterns.
+            AccessibilityRole.Menu when patternId == UiaInterop.UIA_ScrollPatternId && Node.ItemSource is not null
+                => new UiaScrollProvider(_bridge, ElementId),
+            AccessibilityRole.Menu when patternId == UiaInterop.UIA_SelectionPatternId && Node.ItemSource is not null
+                => new UiaSelectionProvider(_bridge, ElementId),
+            AccessibilityRole.Menu when patternId == UiaInterop.UIA_ItemContainerPatternId && Node.ItemSource is not null
+                => new UiaItemContainerProvider(_bridge, ElementId),
             // Any expandable element (regardless of role) exposes ExpandCollapse.
             _ when patternId == UiaInterop.UIA_ExpandCollapsePatternId && _expanded is not null
                 => new UiaExpandCollapseProvider(_bridge, ElementId),
@@ -358,7 +366,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
 
     // ── Helpers ──
 
-    private static int MapControlType(AccessibilityRole role) => role switch
+    internal static int MapControlType(AccessibilityRole role) => role switch
     {
         AccessibilityRole.Button => UiaInterop.UIA_ButtonControlTypeId,
         AccessibilityRole.Checkbox => UiaInterop.UIA_CheckBoxControlTypeId,

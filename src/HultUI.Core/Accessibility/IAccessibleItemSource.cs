@@ -28,7 +28,9 @@ public readonly record struct AccessibleItemQuery(AccessibleItemProperty Propert
 /// </summary>
 /// <remarks>
 /// Items are accessed lazily by index. Today the tree builder reads all of them
-/// to emit one <see cref="AccessibilityRole.ListItem"/> node per item; the same
+/// to emit one <see cref="AccessibilityRole.ListItem"/> node per item (a
+/// <see cref="AccessibilityRole.MenuItem"/> when the container's role is
+/// <see cref="AccessibilityRole.Menu"/>); the same
 /// index-based contract lets a future on-demand provider serve items without
 /// materializing them all, so this scales toward very large lists.
 /// </remarks>

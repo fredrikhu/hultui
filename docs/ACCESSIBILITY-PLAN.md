@@ -289,8 +289,44 @@ A MenuItem with no menu of its own now has Invoke on UIA and the click action on
 had neither of: a menu bar's title, which expands, keeps ExpandCollapse and gets the click only on
 AT-SPI. Hover is all the selection these two menus have: they take no keyboard, as they did not
 before, and Escape and a click outside close them as they did (Escape only in Junction, where
-the window's key handler does it). A context menu, a menu bar's menu and a dropdown's list are not
-this role: they publish virtual items, which every bridge reads as a List of ListItems.
+the window's key handler does it). A context menu, a menu bar's menu and a dropdown's list publish
+virtual items instead, which every bridge read as a List of ListItems until round 7 (below).
+
+A context menu and a menu bar's menu are a Menu of MenuItems (round 7, step 13; the user approved
+it on 2026-11-02, question 2). `ContextMenuElement` has the role `Menu`, and the items it publishes
+take their role from it (`AccessibilityTreeBuilder.ItemRoleOf`): UIA Menu (50009) and MenuItem
+(50011), AT-SPI menu (33) and menu item (35), served on demand past 2,000 items as well. A
+dropdown's popup sets `List` again, as a combo box's list is a list, and is read as before. Only
+the roles changed: each item keeps Invoke and SelectionItem on UIA (and Toggle for a choice in
+force), the click action and the selectable state on AT-SPI, and the menu keeps the list's
+Selection, Scroll and ItemContainer patterns as its items' selection container. A submenu's parent
+item has no ExpandCollapse, as it had none; Invoke opens its submenu. The selection moves as it did
+(round 5): the keys and the pointer select an item, told as UIA's SelectionItem.IsSelected change
+and AT-SPI's `state-changed:selected`, patched with no tree built. A MenuItem tells it by
+selection, not focus: the keyboard focus stays where it was when the menu opened, since the items
+are not focusable. The recording bridge's streams for a context-menu, a menu-bar and a dropdown
+walk differ in the roles and control types alone, the dropdown's in nothing.
+
+**Live reader check (still to do).** NVDA and Narrator follow a menu by focus, and these items move
+by selection, so what a reader says has to be heard. In the Fluent sample (its MenuBar and a
+Dropdown) and Vesper Commander or Junction (a right-click on a file), with Narrator, then NVDA,
+then Orca on Linux:
+
+1. Alt (or F10), then Down on the first title: the menu opens on its first item. Expected: "menu",
+   then the item's name and shortcut, "menu item", and its place ("1 of 6") where the reader counts
+   it; no "list".
+2. Down, Down, Up: each move says the newly selected item, "menu item", its place, and "checked" or
+   "not checked" on a choice. A separator is skipped and not counted.
+3. Right: the next title's menu opens on its first item, said as in 1.
+4. Enter on an item runs it; Escape closes the menu and the reader goes back to the title.
+5. A right-click on a file opens its context menu; Down says the first item as in 1.
+6. A dropdown (the Fluent sample's "Never / When plugged in / Always"), opened with Down, Enter or
+   a click: "list", then its value, "list item", as before this step.
+
+If a reader says nothing on a move (it follows focus only), note which one, and whether it speaks
+when the item under the pointer changes: the fix would be to give the selected item the focus
+(UIA's focus event, AT-SPI `focused`), a change of what a reader is told that needs the user's
+approval. A disabled item is read as enabled today (its node's state is not set), a gap of its own.
 
 A dialog with nothing focusable in it takes the focus itself (round 6, step 5): the panel, not a
 Tab stop, so a reader is told the focus is on the dialog, named by its title. It was on the scrim,

@@ -1528,7 +1528,9 @@ row without realizing it, so a reader can walk 20,000 items that were never buil
 virtualize: a container that paints its own rows — the context menu does — implements it so
 those rows reach assistive tech at all. `ItemBounds(i)` places them when they are not a
 uniform height (a menu with separators in it), and `ItemIsToggled(i)` says which of them is
-the choice in force.
+the choice in force. The items are list items, or menu items when the container's role is
+`Menu`: a context menu and a menu bar's menu are read as a menu, a dropdown's open list as a
+list.
 
 **A ref points at the element you just built.** `WithRef` sets `Current` immediately, and
 reconciliation repoints it at the live element afterwards — so inside one `Build()`, a ref
