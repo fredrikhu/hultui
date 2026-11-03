@@ -44,17 +44,26 @@ public class A11yLayoutRefreshInPlaceTests
         public void NotifyFocusChanged(AccessibilityNode? focused, AccessibilityNode? previous) => inner.NotifyFocusChanged(focused, previous);
     }
 
-    /// <summary>What a diff or a patch names, as lines: each change's property, node and what its
-    /// previous node says of it; the structural parts as counts. The forcer's automation id, which only
-    /// the forced run changes, is left out.</summary>
+    /// <summary>What a diff or a patch names, as lines: each node added with its parent, each removed
+    /// with its parent and its place among that parent's children as they were, each parent reordered,
+    /// each change's property, node and what its previous node says of it. The forcer's automation id,
+    /// which only the forced run changes, is left out.</summary>
     private sealed class Recording(Func<ulong, string> map) : IAccessibilityBridge
     {
         public readonly List<string> Lines = [];
         public bool IsActive => true;
         public void ApplyChanges(TreeDiff diff, AccessibilityNode root)
         {
-            if (diff.Added.Count + diff.Removed.Count + diff.Reordered.Count > 0)
-                Lines.Add($"structure +{diff.Added.Count} -{diff.Removed.Count} r{diff.Reordered.Count}");
+            string Id(AccessibilityNode? n) => n is null ? "-" : n.Parent is null ? "root" : map(n.ElementId.Value);
+            foreach (var a in diff.Added) Lines.Add($"+ {Id(a.Node)} {a.Node.Role} {a.Node.Name} under {Id(a.Parent)}");
+            foreach (var r in diff.Removed)
+            {
+                int at = -1;
+                for (int i = 0; r.Parent is { } p && i < p.Children.Count; i++)
+                    if (p.Children[i].ElementId == r.Node.ElementId) at = i;
+                Lines.Add($"- {Id(r.Node)} under {Id(r.Parent)} at {at}");
+            }
+            foreach (var r in diff.Reordered) Lines.Add($"reordered {Id(r)}");
             foreach (var c in diff.PropertyChanged)
             {
                 if (c.PropertyName == AccessibilityProperties.AutomationId) continue;
@@ -105,23 +114,46 @@ public class A11yLayoutRefreshInPlaceTests
     {
         "wheel", "item rows walk", "one-argument walk", "label edit in rows", "resize", "sticky header",
         "nested scroll views", "overlay over a scrolled root", "content in a scroll view", "list items relabelled",
-        "list selection and a ticking label",
+        "list selection and a ticking label", "items added to a list", "click handler added to a box",
     };
+
+    /// <summary>The scenes whose steps add or remove nodes: a build's diff has them, and the walk tells
+    /// them so (plan 17, round 7, step 7).</summary>
+    private static readonly HashSet<string> Structural = ["items added to a list", "click handler added to a box"];
 
     public static TheoryData<string, string> FallsBack => new()
     {
-        { "items added to a list", "a list's items" },
-        { "click handler added to a box", "children" },
+        { "items past 2,000", "a list's items" },
+        { "a node with children named", "a node with children changed" },
     };
 
     private static BoxElement Rows(int n, string prefix = "row")
     {
         var rows = new Element[n];
-        for (int i = 0; i < n; i++)
-            rows[i] = Flex.Row(gap: 8).FlexShrink(0).Padding(new Thickness(2, 8)).Children(
-                TextB.New($"{i}").FontSize(12f).Width(Dimension.Px(40)), TextB.New($"{prefix} {i} label").FontSize(12f));
+        for (int i = 0; i < n; i++) rows[i] = OneRow($"{i}", $"{prefix} {i} label");
         return Flex.Column().FlexShrink(0).Children(rows);
     }
+
+    private static BoxElement OneRow(string number, string label) =>
+        Flex.Row(gap: 8).FlexShrink(0).Padding(new Thickness(2, 8)).Children(
+            TextB.New(number).FontSize(12f).Width(Dimension.Px(40)), TextB.New(label).FontSize(12f));
+
+    /// <summary>A list whose rows are buttons a reader reads as its own (RowsAreComposite), as
+    /// Aperture's grid and Junction's Changes are: the owner's cursor is in the items, so a row the
+    /// cursor reaches or leaves is another item, and the list makes it again.</summary>
+    private static VirtualListElement<Cursored> CompositeList(int count, int cursor)
+    {
+        var list = VirtualListElement<Cursored>.New().ItemHeight(24).Items(CursorItems(count, cursor))
+            .RenderWith((c, _) => Button.New(c.Cursor ? $"{c.Commit.Subject}, cursor" : c.Commit.Subject))
+            .Height(Dimension.Px(240));
+        list.RowsAreComposite = true;
+        return list;
+    }
+
+    private sealed record Cursored(Commit Commit, bool Cursor);
+
+    private static List<Cursored> CursorItems(int count, int cursor) =>
+        Enumerable.Range(0, count).Select(i => new Cursored(new Commit(i, $"Commit {i}"), i == cursor)).ToList();
 
     private sealed record Commit(int Index, string Subject);
 
@@ -308,6 +340,109 @@ public class A11yLayoutRefreshInPlaceTests
                 return With(Flex.Column().Children(label, box), s =>
                     s.Step("handler", () => { box.On<ClickEvent>(_ => { }); label.Content = "Status: ready"; }));
             }
+            case "rows added and removed":
+            {
+                var rows = Rows(40);
+                var view = ScrollView.New().Height(Dimension.Px(300)).Children(rows);
+                return With(view, s =>
+                {
+                    s.Step("one in at 5", () => rows.InsertChild(5, OneRow("n1", "new one")));
+                    s.Step("row 10 gone", () => rows.RemoveChild(rows.Children[10]));
+                    s.Step("two at the end, the first gone", () =>
+                    {
+                        rows.AddChild(OneRow("n2", "new two"));
+                        rows.AddChild(OneRow("n3", "new three"));
+                        rows.RemoveChild(rows.Children[0]);
+                    });
+                    s.Step("scrolled, one in at 20", () => { view.ScrollOffsetY = 200; rows.InsertChild(20, OneRow("n4", "new four")); });
+                });
+            }
+            case "rows moved":
+            {
+                var rows = Rows(30);
+                var view = ScrollView.New().Height(Dimension.Px(300)).Children(rows);
+                void Move(int from, int to)
+                {
+                    var row = rows.Children[from];
+                    rows.RemoveChild(row);
+                    rows.InsertChild(to, row);
+                }
+                return With(view, s =>
+                {
+                    s.Step("3 after 8", () => Move(3, 8));
+                    s.Step("the last first", () => Move(rows.Children.Count - 1, 0));
+                    s.Step("two swapped, one gone", () => { Move(6, 7); rows.RemoveChild(rows.Children[12]); });
+                });
+            }
+            case "a row made again":
+            {
+                var rows = Rows(30);
+                var label = (TextElement)rows.Children[12].Children[1];
+                var view = ScrollView.New().Height(Dimension.Px(300)).Children(rows);
+                return With(view, s =>
+                {
+                    s.Step("row 4 made again", () => { rows.RemoveChild(rows.Children[4]); rows.InsertChild(4, OneRow("4", "row 4 label")); });
+                    s.Step("one in at 2, a label after it renamed", () => { rows.InsertChild(2, OneRow("n", "new")); label.Content = "row 12, renamed"; });
+                });
+            }
+            case "composite list walk":
+            {
+                var list = CompositeList(200, cursor: 7);
+                return With(list, s =>
+                {
+                    for (int i = 8; i < 13; i++)
+                    {
+                        int at = i;
+                        s.Step($"cursor to {at}", () => { list.Items = CursorItems(200, at); list.ScrollRangeIntoView(at * 24f, 24f); });
+                    }
+                });
+            }
+            case "composite list wheel":
+            {
+                var list = CompositeList(200, cursor: 2);
+                return With(list, s =>
+                {
+                    s.Step("down 3", session => session.Window.Wheel(100, 120, 0, -3));
+                    s.Step("down 1", session => session.Window.Wheel(100, 120, 0, -1));
+                    s.Step("up 2", session => session.Window.Wheel(100, 120, 0, 2));
+                });
+            }
+            case "rows changed under an overlay":
+            {
+                var rows = Rows(30);
+                var root = ScrollView.New().FlexGrow(1).Children(rows);
+                var menu = Flex.Column(gap: 4).Padding(8).Children(TextB.New("Menu"), Button.New("One"));
+                var scene = new Scene { Root = root };
+                scene.Steps.Add(("open", session =>
+                {
+                    session.Window.Window.ShowOverlay(menu, 300, 40);
+                    session.PumpFrame();
+                    session.PumpFrame(TimeSpan.FromMilliseconds(300));
+                }, _ => rows.InsertChild(3, OneRow("n", "new under the menu"))));
+                scene.Step("one gone, scrolled", () => { rows.RemoveChild(rows.Children[5]); root.ScrollOffsetY = 60; });
+                rows.AddChild(scene.Forcer);
+                return scene;
+            }
+            case "items past 2,000":
+            {
+                var list = CommitList(Commits(1_990), itemRows: true);
+                return With(list, s =>
+                {
+                    s.Step("past 2,000", () => list.Items = Commits(2_010));
+                    s.Step("back under", () => list.Items = Commits(1_990));
+                });
+            }
+            case "a node with children named":
+            {
+                // A tab named by the text inside it, with a close button of its own: its name is its label's.
+                var label = TextB.New("Inbox").FontSize(12f);
+                var item = Flex.Row(gap: 8).AccessibleRole(AccessibilityRole.Tab).Children(label, Button.New("Close"));
+                return With(Flex.Column().Children(item), s =>
+                {
+                    s.Step("renamed", () => label.Content = "Inbox, 3 unread");
+                    s.Step("renamed again", () => label.Content = "Inbox, 12 unread messages");
+                });
+            }
             default:
                 throw new ArgumentException(which);
         }
@@ -315,12 +450,16 @@ public class A11yLayoutRefreshInPlaceTests
 
     /// <summary>What a run told and built: the bridge's lines, a dump of the tree after each step,
     /// and per step the trees built and the refreshes made in place.</summary>
-    private sealed record Run(List<string> Told, List<string> Trees, int[] TreesPerStep, int[] InPlacePerStep, string? Mismatch);
+    private sealed record Run(List<string> Told, List<string> Trees, int[] TreesPerStep, int[] InPlacePerStep, string? Mismatch,
+        int Structural);
 
+    /// <summary>A scene's run. Forced, every refresh builds the tree (and the forcer's automation id
+    /// changes in each step's frames, as it did before the window had a switch for it).</summary>
     private static Run Play(string which, bool forceRebuild,
         Func<Func<ulong, string>, (IAccessibilityBridge Bridge, Func<List<string>> Told)> bridge)
     {
         using var session = HeadlessSession.Create(800, 600);
+        session.Window.Window.AccessibilityBuildsEveryRefresh = forceRebuild;
         var scene = Make(which);
         ulong baseId = MinId(scene.Root);
         string Map(ulong raw) => raw == 0 ? "root"
@@ -339,6 +478,7 @@ public class A11yLayoutRefreshInPlaceTests
         var inPlace = new int[scene.Steps.Count];
         int flip = 0;
         var window = session.Window.Window;
+        int structural = window.AccessibilityStructureRefreshesInPlace;
         for (int i = 0; i < scene.Steps.Count; i++)
         {
             var (name, before, change) = scene.Steps[i];
@@ -354,7 +494,8 @@ public class A11yLayoutRefreshInPlaceTests
             inPlace[i] = window.AccessibilityLayoutRefreshesInPlace - refreshed;
             trees.Add(Dump(counting.Tree!, Map));
         }
-        return new Run([.. told()], trees, perStep, inPlace, window.AccessibilityLayoutRefreshMismatch);
+        return new Run([.. told()], trees, perStep, inPlace, window.AccessibilityLayoutRefreshMismatch,
+            window.AccessibilityStructureRefreshesInPlace - structural);
     }
 
     private static ulong MinId(Element e)
@@ -412,11 +553,20 @@ public class A11yLayoutRefreshInPlaceTests
         var built = Play(which, forceRebuild: true, Recorded);
         Assert.Equal(built.Told, inPlace.Told);
         Assert.Equal(built.Trees, inPlace.Trees);
-        Assert.All(inPlace.TreesPerStep, trees => Assert.Equal(0, trees));
+        AssertNoTree(inPlace);
         Assert.All(inPlace.InPlacePerStep, refreshes => Assert.True(refreshes > 0));
         // Something was told on the way: the scenes change what a reader hears.
         Assert.True(inPlace.Told.Count > inPlace.TreesPerStep.Length);
+        // Nodes added or removed, told as a build's diff tells them, with nothing built but the new ones.
+        Assert.Equal(Structural.Contains(which), inPlace.Structural > 0);
+        if (Structural.Contains(which))
+            Assert.Contains(inPlace.Told, l => l.StartsWith("+ ") || l.StartsWith("- ") || l.StartsWith("reordered "));
+        Assert.All(built.TreesPerStep, trees => Assert.True(trees > 0));
     }
+
+    private static void AssertNoTree(Run run) =>
+        Assert.True(run.TreesPerStep.All(t => t == 0),
+            $"trees a step {string.Join(",", run.TreesPerStep)}; the last walk that did not match: {run.Mismatch}");
 
     [Theory]
     [MemberData(nameof(InPlace))]
@@ -426,7 +576,8 @@ public class A11yLayoutRefreshInPlaceTests
         var built = Play(which, forceRebuild: true, AtSpi);
         Assert.Equal(built.Told, inPlace.Told);
         Assert.Equal(built.Trees, inPlace.Trees);
-        Assert.All(inPlace.TreesPerStep, trees => Assert.Equal(0, trees));
+        AssertNoTree(inPlace);
+        Assert.Equal(Structural.Contains(which), inPlace.Structural > 0);
     }
 
     [WindowsTheory]
@@ -438,7 +589,8 @@ public class A11yLayoutRefreshInPlaceTests
         var built = PlayUia(which, forceRebuild: true);
         Assert.Equal(built.Told, inPlace.Told);
         Assert.Equal(built.Trees, inPlace.Trees);
-        Assert.All(inPlace.TreesPerStep, trees => Assert.Equal(0, trees));
+        AssertNoTree(inPlace);
+        Assert.Equal(Structural.Contains(which), inPlace.Structural > 0);
     }
 
     [Theory]
@@ -454,15 +606,16 @@ public class A11yLayoutRefreshInPlaceTests
         Assert.Equal(built.Trees, run.Trees);
     }
 
-    /// <summary>A refresh a build makes other nodes for, again and again — a list its owner filters
-    /// as one types — pays for a walk and a build each time. After 1, 2, 3 or 4 such refreshes in a
-    /// row, the next 1, 3, 7 or 15 build at once, and one made in place starts the count again.</summary>
+    /// <summary>A refresh a build makes other nodes for than a walk can, again and again — a list its
+    /// owner filters as one types, across the 2,000 items it serves on demand from — pays for a walk and
+    /// a build each time. After 1, 2, 3 or 4 such refreshes in a row, the next 1, 3, 7 or 15 build at
+    /// once, and one made in place starts the count again.</summary>
     [Fact]
     public void RefreshesThatKeepFallingBack_BuildWithoutAWalk_UntilOneIsMadeInPlace()
     {
         using var session = HeadlessSession.Create(800, 600);
         session.Window.InstallAccessibilityBridge();
-        var items = Commits(30);
+        var items = Commits(2_010);
         var list = CommitList(items, itemRows: true);
         var view = ScrollView.New().Height(Dimension.Px(200)).Children(Rows(40));
         session.Window.SetRoot(Flex.Column(gap: 4).Children(list, view));
@@ -480,7 +633,8 @@ public class A11yLayoutRefreshInPlaceTests
             session.PumpFrame(TimeSpan.FromMilliseconds(120));
             session.PumpFrame(TimeSpan.FromMilliseconds(120));
         }
-        void Filter() { items = items.Count > 20 ? items[..^1] : [.. items, new Commit(items.Count, "again")]; list.Items = items; }
+        // 2,010 and 1,990 items in turn: served on demand, then a node each.
+        void Filter() { items = items.Count > 2_000 ? items[..1_990] : Commits(2_010); list.Items = items; }
 
         // Walks at the 1st, 3rd and 7th: 1 + 3 + 5 built without one.
         for (int i = 0; i < 12; i++) Refresh(Filter);

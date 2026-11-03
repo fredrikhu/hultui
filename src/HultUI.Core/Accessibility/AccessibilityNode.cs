@@ -351,7 +351,8 @@ public sealed class AccessibilityNode
     /// leaf whose own properties changed: the window makes its node again and puts it in its
     /// place in the applied tree (<see cref="ReplaceChild"/>), one reference write, so a reader on
     /// another thread finds the leaf's old node there or its new one, each whole, with the same id
-    /// and parent.</summary>
+    /// and parent; and for children added, gone or in another order, which a layout refresh puts in
+    /// place of the old ones all at once (<see cref="ReplaceChildren"/>), one reference write too.</summary>
     public IReadOnlyList<AccessibilityNode> Children => _children;
 
     /// <summary>
@@ -583,6 +584,36 @@ public sealed class AccessibilityNode
         child.Parent = this;
         Volatile.Write(ref _children[index], child);
     }
+
+    /// <summary>
+    /// Puts <paramref name="children"/> in place of the node's children, in a tree that is out (UI
+    /// thread): a layout refresh found children added, gone or in another order
+    /// (<see cref="AccessibilityTreeBuilder.TryRefreshInPlace"/>). The ones kept are the same nodes;
+    /// the new ones take this node as their parent. One reference write of a new array: a reader on
+    /// another thread walks the old children or the new, each whole. The old array is never written
+    /// again (a stand-in made before, <see cref="ChildrenStandIn"/>, keeps it). The node keeps the
+    /// array: the caller must not change it afterwards.
+    /// </summary>
+    internal void ReplaceChildren(AccessibilityNode[] children)
+    {
+        foreach (var child in children)
+            child.Parent = this;
+        Volatile.Write(ref _children, children);
+    }
+
+    /// <summary>
+    /// A node of no tree standing for this one with the children it has now, before a layout
+    /// refresh puts others in their place (<see cref="ReplaceChildren"/>): what the refresh hands a
+    /// bridge as the parent of each child it removed, which a diff takes from the previous tree, and
+    /// where a bridge reads the child's place among its parent's children as they were. It carries
+    /// the id, the role, the name, the parent and the children.
+    /// </summary>
+    internal AccessibilityNode ChildrenStandIn() =>
+        new(ElementId, Role, Name, description: null, UnscrolledRect)
+        {
+            _children = _children,
+            Parent = Parent,
+        };
 
     /// <summary>Adds one child after the others. Copies the children each time: for the odd
     /// node added after a build (an overlay's tree under the window's root), not for building.</summary>

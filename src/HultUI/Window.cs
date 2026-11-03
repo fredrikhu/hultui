@@ -139,6 +139,14 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     /// building none (<see cref="TryRefreshA11yInPlace"/>). UI thread.</summary>
     internal int AccessibilityLayoutRefreshesInPlace { get; private set; }
 
+    /// <summary>How many of those found nodes added, gone or in another order, and built only the
+    /// new ones. UI thread.</summary>
+    internal int AccessibilityStructureRefreshesInPlace { get; private set; }
+
+    /// <summary>For tests: every refresh builds the tree, none is made in place, as before plan 17's
+    /// round 5: what a build tells, to hold a refresh made in place to. UI thread.</summary>
+    internal bool AccessibilityBuildsEveryRefresh { get; set; }
+
     /// <summary>Why the last layout refresh that could not be made in place built a tree (what a
     /// build makes otherwise there), or null. For tests. UI thread.</summary>
     internal string? AccessibilityLayoutRefreshMismatch { get; private set; }
@@ -1096,22 +1104,25 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     }
 
     /// <summary>
-    /// A coalesced layout refresh without a tree: the elements are walked against the applied tree by
-    /// the builder's rules (<see cref="AccessibilityTreeBuilder.TryRefreshInPlace"/>), and where a build
-    /// would make the same nodes, what changed is written in place — a box moved in its scroll views'
-    /// content, a node gone out of view or come into it, a scroll view's offset and geometry, a leaf
-    /// whose own properties changed (made again, as a leaf's patch makes it) — and the bridge is handed
-    /// the changes the build's diff would have reported, in its order, as patched properties. A pure
-    /// scroll writes one offset and the offscreen states: each wheel turn over a 1,000-row list built
-    /// and diffed 3,001 nodes, and a reader walking a list at its own pace one tree per key. Whatever
-    /// a list's selection, a caret or a leaf told since is in that, as it is in a build's diff. False,
-    /// writing nothing, when a build would make another tree (a node added, gone or moved elsewhere, a
-    /// list's items in another number, a node with children whose own properties changed, a change no
-    /// diff tells), and the tree is built then, as it always was.
+    /// A coalesced layout refresh without a tree: the
+    /// elements are walked against the applied tree by the builder's rules
+    /// (<see cref="AccessibilityTreeBuilder.TryRefreshInPlace"/>), and what a build would make otherwise
+    /// is written in place — a box moved in its scroll views' content, a node gone out of view or come
+    /// into it, a scroll view's offset and geometry, a leaf whose own properties changed (made again, as
+    /// a leaf's patch makes it), a node's children added, gone or in another order (only the new ones
+    /// built) — and the bridge is handed the changes the build's diff would have reported, in its
+    /// order: as patched properties, or, with nodes added or removed, as that diff. A pure scroll writes
+    /// one offset and the offscreen states: each wheel turn over a 1,000-row list built and diffed 3,001
+    /// nodes, and a reader walking a list at its own pace one tree per key; a row a key made again in a
+    /// composite list built and diffed the whole window's tree. Whatever a list's selection, a caret or
+    /// a leaf told since is in that, as it is in a build's diff. False, writing nothing, when a build
+    /// would make another tree than that (a node with children whose own properties changed, a list
+    /// whose items cross the number served on demand, a change no diff tells), and the tree is built
+    /// then, as it always was.
     /// </summary>
     private bool TryRefreshA11yInPlace()
     {
-        if (_previousA11yTree is not { } tree) return false;
+        if (_previousA11yTree is not { } tree || AccessibilityBuildsEveryRefresh) return false;
         if (_a11yRefreshSkips > 0)
         {
             _a11yRefreshSkips--;
@@ -1133,7 +1144,19 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             _a11yRefreshFailures = 0;
             refresh.Apply();
             AccessibilityLayoutRefreshesInPlace++;
-            if (refresh.Changes.Count > 0)
+            if (refresh.Structural)
+            {
+                // What a build's diff would be, of the tree that is that build now: the bridge takes
+                // the nodes added and lets go of those removed, as it does for a build.
+                AccessibilityStructureRefreshesInPlace++;
+                var diff = new TreeDiff();
+                diff.Added.AddRange(refresh.Added);
+                diff.Removed.AddRange(refresh.Removed);
+                diff.Reordered.AddRange(refresh.Reordered);
+                diff.PropertyChanged.AddRange(refresh.Changes);
+                _accessibilityBridge.ApplyChanges(diff, tree);
+            }
+            else if (refresh.Changes.Count > 0)
             {
                 var patch = new TreeDiff();
                 patch.PropertyChanged.AddRange(refresh.Changes);
