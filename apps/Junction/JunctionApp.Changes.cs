@@ -1167,7 +1167,8 @@ public partial class JunctionApp
     // A child component, as the chrome is (see JunctionApp.Chrome.cs): a character in the summary built the
     // whole view, every row of the lists with it, for fields that hold their own text. 76 KB a
     // key with one changed file, 1.3 MB with 200. Nothing outside the composer shows what is typed,
-    // so a character builds the composer alone (_composerRevision). It builds with the view when
+    // so a character builds the composer alone (_composerRevision), and only when the issue list or
+    // the closing hint moves (ComposerTyped): the fields hold their own text. It builds with the view when
     // a full rebuild asked (_chromeRevision, safe by default) or when what it shows of the
     // working copy moved, which the view's build compares (Place); a view-only build (a row
     // selected, a splitter dragged) leaves it as it is. ComposerPartTests holds it to what a full
@@ -1195,18 +1196,43 @@ public partial class JunctionApp
         {
             _composerBuiltCounts = _composerCounts;
             _composerBuiltRevision = _chromeRevision.Peek();
-            return BuildComposer(_composerCounts);
+            var built = BuildComposer(_composerCounts);
+            _composerBuiltText = ComposerTextShown();   // after the build, which clamps the list's row
+            return built;
         }, own: _composerRevision);
         part.Mount();   // the first build, before asking what it was built from
         return part.Place(stale: _composerCounts != _composerBuiltCounts || _composerBuiltRevision != _chromeRevision.Peek());
     }
 
-    /// <summary>A character in one of the composer's fields: it builds again alone. The fields
-    /// hold their own text; what the build follows is the issue list and the closing hint.</summary>
+    /// <summary>All the composer shows of the text typed into it, on GitLab: the issue list's
+    /// token and highlighted row, and the closing hint's reference. Off GitLab it shows nothing of
+    /// it (the default). The fields hold their own text.</summary>
+    private readonly record struct ComposerText((int Start, string Query)? Token, int Row, string? Closing);
+
+    private ComposerText _composerBuiltText;
+
+    private ComposerText ComposerTextShown()
+    {
+        // Both the token and a closing reference have a '#', and most messages have none: the
+        // common character asks nothing more, not even whether the repository is on GitLab.
+        bool inSummary = _commitSummary.Contains('#'), inBody = _commitDescription.Contains('#');
+        if (!(inSummary || inBody) || !GitLabActive(_activeRepoPath)) return default;
+        var text = _issueInSummary ? _commitSummary : _commitDescription;
+        var token = (_issueInSummary ? inSummary : inBody) ? IssueTokenAt(text, _issueCaret) : null;
+        string? closing = null;
+        if (inSummary && ClosingRef.Match(_commitSummary) is { Success: true } s) closing = s.Value;
+        else if (inBody && ClosingRef.Match(_commitDescription) is { Success: true } b) closing = b.Value;
+        return new ComposerText(token, token is null ? 0 : _issueSel, closing);
+    }
+
+    /// <summary>A character in one of the composer's fields. The fields hold their own text, so
+    /// the composer builds again, alone, only when what it shows of the text moves: the issue
+    /// list or the closing hint (<see cref="ComposerText"/>). It built on every character
+    /// (13.5 KB a character off GitLab, 15.4 on it with no issue being typed).</summary>
     private void ComposerTyped(bool summary, int caret)
     {
         NoteComposerTyping(summary, caret);
-        _composerRevision.Value++;
+        if (ComposerTextShown() != _composerBuiltText) _composerRevision.Value++;
     }
 
     private Element BuildComposer(ComposerCounts counts)

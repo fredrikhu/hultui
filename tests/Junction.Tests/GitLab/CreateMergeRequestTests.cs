@@ -466,9 +466,10 @@ public class CreateMergeRequestTests
         });
     }
 
-    /// <summary>A character builds the composer alone (ComposerPart), and that build is what
-    /// the list and the hint follow: the list opens and narrows, the hint comes and goes, and
-    /// the window is not built for any of it.</summary>
+    /// <summary>A character builds the composer alone (ComposerPart), and only when the list or
+    /// the hint it shows moves: the list opens and narrows, the hint comes and goes, and the
+    /// window is not built for any of it. A character that moves neither builds nothing (15.4 KB
+    /// a character on GitLab, with no issue being typed).</summary>
     [Fact]
     public void TypingInTheComposer_BuildsItAlone_AndItsListAndHintFollow()
     {
@@ -483,10 +484,19 @@ public class CreateMergeRequestTests
             session.PumpFrames(2);
 
             int builds = app.Builds;
-            foreach (var ch in "Closes #10")
+            foreach (var ch in "Closes ")
             {
+                int composer = app.ComposerBuilds;
                 session.Window.TypeText(ch.ToString());
                 session.PumpFrames(2);
+                Assert.Equal(composer, app.ComposerBuilds);
+            }
+            foreach (var ch in "#10")
+            {
+                int composer = app.ComposerBuilds;
+                session.Window.TypeText(ch.ToString());
+                session.PumpFrames(2);
+                Assert.True(app.ComposerBuilds > composer, $"'{ch}' moved the list and did not build the composer");
             }
             // The issue list's load landing builds the part, as a character does.
             session.PumpUntil(() => ById(session, "issue-suggestions") is not null, TimeSpan.FromSeconds(15));

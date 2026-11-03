@@ -31,7 +31,7 @@ public partial class JunctionApp
     // Safe by default, then: a rebuild builds the chrome too. Only paths that change nothing
     // the chrome shows say so, with MarkViewDirty and RerenderView — the selection moves and
     // cursors of History, Branches, Tags, Files and the Commit file list, and the search boxes.
-    // (A character in the composer's fields builds the composer alone: see ComposerPart.)
+    // (A character in the composer's fields builds the composer at most: see ComposerPart.)
     // ChromePartTests holds every chrome input to what a full build of the chrome makes.
 
     private readonly HultUI.Core.Reactivity.Signal<int> _chromeRevision = new(0);
