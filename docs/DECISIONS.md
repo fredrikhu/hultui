@@ -581,6 +581,63 @@ nothing, and adds one property and no `Place()`. The label is found by its autom
 field, as `FindBarElement` finds its parts: a `Ref` on it cost every build of the bar a list (0.1 KB a
 typed key).
 
+### A long line is coloured on its first 2,000 characters (round 7)
+
+Tokenizing one line costs the square of its length: each doubling costs 3.2–3.8 times the time,
+likely because TextMateSharp's regex wrapper (Onigwrap 1.0.11) measures the whole line on every
+search. With no budget, as on a headless clock, a 32,000-character line took 16.3 s of JavaScript and
+26.1 s of C#. On the window's clock it spent its whole 250 ms line budget on every tokenize that reached
+it, and the longer it was the less colour it got: a JavaScript line of 4,000, 8,000, 16,000 and 32,000
+characters got 2,442, 876, 373 and 173. The user agreed (2026-11-02) that a line over P characters is
+coloured on its first P characters only, and the rest draws plain (VS Code gives a line over 20,000 no
+colour at all).
+
+P was picked by the time to tokenize a dense line (strings and punctuation all along, as in a minified
+bundle), idle machine, pinned, the least of five, in ms:
+
+| Characters | JS | C# | TS | Java | Go | Rust | Python | C++ | CSS | PowerShell | Markdown | SQL | shell | YAML | HTML | JSON | XML |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1,000 | 24 | 36 | 37 | 38 | 21 | 46 | 66 | 74 | 73 | 78 | 23 | 229 | 13 | 8 | 6 | 2 | 1 |
+| 2,000 | 79 | 131 | 137 | 141 | 78 | 174 | 246 | 268 | 284 | 281 | 160 | 849 | 47 | 26 | 19 | 5 | 3 |
+| 4,000 | 293 | 495 | 522 | 518 | 288 | 649 | 888 | 966 | 1,063 | 1,033 | 1,099 | 3,097 | 171 | 90 | 71 | 18 | 11 |
+| 8,000 | | | | | | | | | | | | | | 328 | 250 | 65 | 40 |
+
+P is 2,000, the number the user approved: a third of the budget in JavaScript, half in C#. JSON and XML
+(`source.json`, `source.json.comments`, `text.xml`) tokenize 17 times and more cheaper and get 8,000, which
+costs them what 2,000 costs JavaScript. A table per grammar was not made: SQL, CSS, PowerShell, C++ and
+Python spend most or all of the budget on 2,000 dense characters, and in a window such a line still stops
+at its budget, as before, with less colour than a smaller P would give it. P is an internal constant
+(`SyntaxHighlighter.LongLine`, `LongDataLine`); nothing asked for a knob.
+
+A cut line leaves the next line the state it started in, as a line stopped at its budget does (VS Code's
+rule). So a long line that a diff walks only for its state is not tokenized at all.
+
+Before → after, two idle-gated pinned runs each, alternated (plan 17, round 7, step 12):
+
+| | Before | After |
+|---|---|---|
+| One line, no budget: JavaScript 4k / 8k / 16k / 32k | 296 / 1,124 / 4,191 / 16,291 ms, 32k 13.8 MB | 78–80 ms, 0.9 MB each |
+| C# 32k / JSON 32k / XML 32k, no budget | 26,108 / 907 / 593 ms; 22.3 / 11.0 / 9.7 MB | 129–132 / 64–68 / 39–41 ms; 1.6 / 3.0 / 2.5 MB |
+| Window budget, characters coloured: JavaScript 4k–32k | 2,442 / 876 / 373 / 173, 250 ms each | 2,000 each, 78–82 ms |
+| C# 4k–32k / JSON 32k | 1,160 / 480 / 224 / 108; 4,517 (250 ms) | 2,000 (130 ms); 8,000 (66 ms) |
+| Diff walk, change below a 4k, 8k and 16k line: window JS / C# / JSON | 821 / 789 / 332 ms | 70 / 39 / 21 ms |
+| The same, headless: JS / C# | 5,686 / 9,322 ms | 72 / 38 ms |
+| Diff walk, the 8k line itself changed: window JS / headless JS | 788 / 2,589 ms, 890 / 8,005 coloured | 195 / 193 ms, 2,000 coloured |
+| Files view, 322 real `node_modules` files with a line over 2,000, window clock | 89.5 s, 1,757 MB all threads | 48.1–49.4 s, 1,808–1,811 MB |
+| The same, headless, 60 files whose longest line is under 8,000 | 30.4 s, 904 MB | 15.3 s, 867 MB |
+
+On the window's clock the Files walk allocates 3 % more: 2,000 characters coloured cost more bytes than
+a line stopped at its budget a few hundred characters in. Its 393 long lines got 769,000–775,000 coloured characters
+against 758,000–764,000. Lines between 2,000 and the length the budget used to reach (about 3,000 in
+JavaScript, 16,000 in JSON) get less colour than before.
+
+Spans: 3,206 files (3,094 with a grammar, from this repository, five other local repositories and 40
+`node_modules` files with long lines), tokenized whole on a standing clock before and after. Every line of
+2,000 characters or fewer with no longer line above it is identical: 1,687,032 lines, 3,922,381 spans.
+71 of the 80 lines over 2,000 changed. Of the 54,779 lines below such a line, 396 changed, all in one file
+(Babel's `helpers-generated.js`), whose long line ends inside a construct its start is not in: a headless
+tokenize used to carry that state on.
+
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
 BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction
