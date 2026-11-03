@@ -226,12 +226,12 @@ public class CreateMergeRequestTests
         });
     }
 
-    /// <summary>A character typed into the description builds the window once and leaves the
-    /// chrome as it is: the editor tells the edit and the caret's move in one event, and each
-    /// used to build at once (two builds a character, the chrome three times). The bar still
-    /// follows the caret.</summary>
+    /// <summary>A character typed into the description builds nothing: the editor holds its text
+    /// and caret and grows itself, and of the card only the formatting bar could show the change.
+    /// It built the window on every character (126.3 KB a character). When the bar does change,
+    /// the caret going into bold text, the window builds once and the chrome stays as it is.</summary>
     [Fact]
-    public void TypingTheDescription_BuildsOnceACharacter_AndTheBarFollowsTheCaret()
+    public void TypingTheDescription_BuildsNothing_AndTheBarFollowsTheCaret()
     {
         Hosted((repo, session, app) =>
         {
@@ -245,24 +245,88 @@ public class CreateMergeRequestTests
 
             // Counted as each event ends: a frame may bring a rebuild from elsewhere (a loader
             // landing), which is not the typing's.
-            foreach (var ch in " and **this**")
+            foreach (var ch in " and plain")
             {
                 int builds = app.Builds, chrome = app.ChromeBuilds;
                 session.Window.TypeText(ch.ToString());
-                Assert.Equal(1, app.Builds - builds);
+                Assert.Equal(0, app.Builds - builds);
                 Assert.Equal(0, app.ChromeBuilds - chrome);
                 session.PumpFrames(2);
             }
-            Assert.True(DescriptionHas(session, "Closes #1042 and this"));
+            session.Window.TypeText(" **this**");
+            session.PumpFrames(2);
+            Assert.True(DescriptionHas(session, "Closes #1042 and plain this"));
             Assert.Same(editor, ById(session, "create-mr-description"));
 
-            int before = app.Builds;
+            bool Bold() => ((ButtonElement)ById(session, "richtext-bold")!).AccessibleToggled == true;
             session.Window.PressKey(KeyCode.Left);
-            Assert.Equal(1, app.Builds - before);
             session.PumpFrames(2);
-            Assert.Equal(true, ((ButtonElement)ById(session, "richtext-bold")!).AccessibleToggled);
+            Assert.True(Bold());
+
+            // Back out of the bold a character at a time: the key that changes the bar builds the
+            // window once, the chrome not at all, and the others build nothing.
+            int flips = 0;
+            for (int i = 0; i < 6; i++)
+            {
+                bool was = Bold();
+                int builds = app.Builds, chrome = app.ChromeBuilds;
+                session.Window.PressKey(KeyCode.Left);
+                int built = app.Builds - builds;
+                Assert.Equal(0, app.ChromeBuilds - chrome);
+                session.PumpFrames(2);
+                bool now = Bold();
+                Assert.Equal(now != was ? 1 : 0, built);
+                if (now != was) flips++;
+            }
+            Assert.Equal(1, flips);
+            Assert.False(Bold());
         });
     }
+
+    /// <summary>A character in the title builds nothing: the field holds its text, and only the
+    /// primary button reads the title, for whether there is one. Emptied, the button is off, and
+    /// the first character that is not a space puts it back. It built the window and its chrome on
+    /// every character (256.5 KB a character).</summary>
+    [Fact]
+    public void TypingTheTitle_BuildsOnlyWhenItEmptiesOrFills()
+    {
+        Hosted((repo, session, app) =>
+        {
+            app.OpenCreateMergeRequest(Feature);
+            session.PumpUntil(() => ById(session, "create-mr") is not null, TimeSpan.FromSeconds(10));
+            session.PumpFrames(2);
+            var title = (TextInputElement)ById(session, "create-mr-title")!;
+            session.Window.Click(title);
+            session.Window.PressKey(KeyCode.End);
+            session.PumpFrames(2);
+            Assert.True(PrimaryOn(session));
+
+            int Built(Action act)
+            {
+                int builds = app.Builds, chrome = app.ChromeBuilds;
+                act();
+                Assert.Equal(0, app.ChromeBuilds - chrome);
+                int n = app.Builds - builds;
+                session.PumpFrames(2);
+                return n;
+            }
+
+            foreach (var ch in " now")
+                Assert.Equal(0, Built(() => session.Window.TypeText(ch.ToString())));
+            Assert.Equal(1, Built(() => { session.Window.PressKey(KeyCode.A, KeyModifiers.Ctrl); session.Window.PressKey(KeyCode.Backspace); }));
+            Assert.False(PrimaryOn(session));
+            Assert.Equal(0, Built(() => session.Window.TypeText(" ")));
+            Assert.False(PrimaryOn(session));
+            Assert.Equal(1, Built(() => session.Window.TypeText("S")));
+            Assert.True(PrimaryOn(session));
+            Assert.Equal(0, Built(() => session.Window.TypeText("p")));
+            Assert.Same(title, ById(session, "create-mr-title"));
+            Assert.Equal(" Sp", title.Text);
+        });
+    }
+
+    private static bool PrimaryOn(HeadlessSession session) =>
+        Root(session) is { } root && LayoutProbe.Descendants<Element>(root, e => e.Key == "create-mr-primary-on").Count > 0;
 
     private static bool DescriptionHas(HeadlessSession session, string text) =>
         ById(session, "create-mr-description") is RichTextEditorElement d && d.Document.ToPlainText().Contains(text);

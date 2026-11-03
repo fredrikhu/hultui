@@ -31,12 +31,15 @@ public enum RichTextCommand
 /// </summary>
 /// <remarks>
 /// <para>Like <see cref="FindBar"/>, an object the app keeps and builds each frame: hand it the
-/// editor's <see cref="Ref{T}"/> and a callback that rebuilds, and wire the editor's
-/// <see cref="RichTextEditorElement.SelectionChanged"/> to the same callback so the buttons follow
-/// the caret. Every command is also on <see cref="Execute"/>, for an app that draws its own.</para>
-/// <para>Most keys leave every button as it is, and a rebuild for each of them can be what makes
-/// typing slow: an app whose bar sits in a row of a list, or beside anything else that costs,
-/// rebuilds only while <see cref="IsStale"/> says the bar on screen no longer shows the editor.</para>
+/// editor's <see cref="Ref{T}"/> and a callback that rebuilds. So that the buttons follow the caret,
+/// wire the editor's <see cref="RichTextEditorElement.SelectionChanged"/> and
+/// <see cref="RichTextEditorElement.DocumentChanged"/> to a handler that checks
+/// <see cref="IsStale"/> first and rebuilds only while it says the bar on screen no longer shows
+/// the editor. Every command is also on <see cref="Execute"/>, for an app that draws its own.</para>
+/// <para>Most keys leave every button as it is, and the editor holds its own text and caret, so a
+/// rebuild for each key is what makes typing slow: a card in Junction that rebuilt its window on
+/// every character made 126 KB a character, and with the check it builds when a button
+/// changes.</para>
 /// <para>Build it <i>before</i> attaching the ref to the freshly built editor:
 /// <see cref="Element.WithRef{T}"/> points the ref at the new element at once, and that one is
 /// not the editor on screen until the rebuild is reconciled — its selection is a fresh one.</para>

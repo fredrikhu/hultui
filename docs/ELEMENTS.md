@@ -1479,7 +1479,9 @@ only the ones on screen, and the held row.
 **An editor in a row.** A field or a rich text editor in a row holds its own text, caret and undo,
 and an editor of fixed height leaves the row's height alone, so a key in it needs no row made and
 no build. Make the row again only when something else in it shows the change: a `RichTextToolbar`
-says so with `IsStale`, true when a build would make other buttons than the last one made.
+says so with `IsStale`, true when a build would make other buttons than the last one made. Wire an
+editor's `SelectionChanged` through `IsStale` wherever it sits, not straight to a rebuild: one that
+grows with its text (`AutoHeight`) lays itself out again without one.
 
 ```csharp
 .OnDocumentChanged(d => { _doc = d; Edited(); })
