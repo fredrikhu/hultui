@@ -44,19 +44,25 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         /// window, or (0, 0); see <see cref="ClipTo"/>.</summary>
         private (int Width, int Height) _clip;
 
+        /// <summary>The canvas's save count with the clip on it (1 with none), handed to the render
+        /// context with the canvas so its <c>BeginFrame</c> restores to it and keeps the clip.</summary>
+        public int BaseSaveCount { get; private set; } = 1;
+
         public void Hold(GRBackendRenderTarget target, SKSurface surface)
         {
             _target = target;
             Surface = surface;
             Canvas = surface.Canvas;
             _clip = (0, 0);
+            BaseSaveCount = 1;
         }
 
         /// <summary>
         /// Clips the canvas to the window's top-left <paramref name="width"/> by
         /// <paramref name="height"/> pixels, or unclips it with (0, 0), when that changes. Skia keeps
-        /// the clip across frames (the render context's own saves are balanced within a frame), and
-        /// the frame's scale is set after this: the clip is in device pixels.
+        /// the clip across frames (the render context's <c>BeginFrame</c> restores the canvas only
+        /// down to <see cref="BaseSaveCount"/>: a frame's pushes go, the clip stays), and the frame's
+        /// scale is set after this: the clip is in device pixels.
         /// </summary>
         public void ClipTo(int width, int height)
         {
@@ -69,6 +75,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
                 Canvas.ClipRect(SKRect.Create(width, height));
             }
             _clip = (width, height);
+            BaseSaveCount = Canvas.SaveCount;
         }
 
         /// <summary>Disposes what it holds; the holder itself can hold again.</summary>
@@ -150,6 +157,10 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     /// <summary>The frame size the offscreen's canvas is clipped to while it is larger than the
     /// frame, or (0, 0); see <see cref="OffscreenFor"/>.</summary>
     private (int Width, int Height) _offscreenClip;
+
+    /// <summary>The offscreen canvas's save count with that clip on it (1 with none), handed to
+    /// the render context with the canvas; see <see cref="WrappedImage.BaseSaveCount"/>.</summary>
+    private int _offscreenBaseSaveCount = 1;
 
     private int _width;
     private int _height;
@@ -501,7 +512,10 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         _transitionBeforeBlit = use == SwapchainTargetUse.KeptTransitionBeforeBlit;
 
         _frameColorSpace = frame.ColorSpace;
-        _renderContext.SetCanvas(throughOffscreen ? _offscreenCanvas! : target.Canvas);
+        // With the count its clip to the window left it at, if it has one: the context's BeginFrame
+        // restores to that, not to 1, and the clip stays.
+        if (throughOffscreen) _renderContext.SetCanvas(_offscreenCanvas!, _offscreenBaseSaveCount);
+        else _renderContext.SetCanvas(target.Canvas, target.BaseSaveCount);
         _frameOpen = true;
         _lentThisFrame.Clear();
         _lent.Clear();
@@ -865,11 +879,12 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
             _offscreenHeight = height;
             _offscreenEncoded = encoded;
             _offscreenClip = (0, 0);
+            _offscreenBaseSaveCount = 1;
         }
 
         // Larger than the frame, the canvas is clipped to it, so the drawing culls as it does on an
         // offscreen of the window's size (Skia keeps the clip across frames; the render context's
-        // own saves are balanced within a frame).
+        // BeginFrame restores the canvas only down to the count with the clip on).
         var clip = width != frame.WidthPx || height != frame.HeightPx ? (frame.WidthPx, frame.HeightPx) : (0, 0);
         if (clip != _offscreenClip)
         {
@@ -880,6 +895,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
                 _offscreenCanvas.ClipRect(SKRect.Create(clip.Item1, clip.Item2));
             }
             _offscreenClip = clip;
+            _offscreenBaseSaveCount = _offscreenCanvas.SaveCount;
         }
 
         // Apart from the surface, because the white scale changes without the size: a move

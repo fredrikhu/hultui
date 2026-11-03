@@ -286,9 +286,17 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     // snapping, which is entirely about where a band lands on the device grid.
     private float _scale = 1f;
 
-    internal void SetCanvas(SKCanvas canvas)
+    // The canvas's save count with only the surface's own saves on it; see SetCanvas.
+    private int _baseSaveCount = 1;
+
+    /// <param name="canvas">The canvas the next frame draws into.</param>
+    /// <param name="baseSaveCount">Its save count with only the surface's own saves on it: 1 for a
+    /// canvas as its SKSurface made it, 2 while the Vulkan surface clips an over-allocated target to
+    /// the window. <see cref="BeginFrame"/> restores the canvas to it, so the surface's clip stays.</param>
+    internal void SetCanvas(SKCanvas canvas, int baseSaveCount = 1)
     {
         _canvas = canvas;
+        _baseSaveCount = baseSaveCount;
         _deviceMatrixKnown = false;
     }
     internal void SetGLSurface(ISkiaExternalSurface surface) => _glSurface = surface;
@@ -306,10 +314,12 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         // EndFrame would have leaked its borrows into this one.
         ReleaseHeldFrames();
         // Nor should a push: a clip or layer left by a frame that threw would hold every later
-        // frame, its clear included, inside it. The canvas comes from an SKSurface, whose base
-        // save count is 1. Once a frame, not once a push.
+        // frame, its clear included, inside it. Back to the count the surface handed the canvas
+        // over at, not to 1: restored to 1, a Vulkan drag frame lost the clip to the window its
+        // surface had just set, and cleared and drew out to the allocated edge (plan 17, round 8:
+        // ClipBounds 1601×1068 layout px for an 800×533 window). Once a frame, not once a push.
         _saveStack.Clear();
-        Canvas.RestoreToCount(1);
+        Canvas.RestoreToCount(_baseSaveCount);
         Canvas.ResetMatrix();
         Canvas.Scale(scaleFactor);
         _deviceMatrixKnown = false;
