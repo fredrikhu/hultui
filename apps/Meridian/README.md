@@ -120,8 +120,9 @@ the buttons come from it too.
 
 Tagging `meridian-v<x.y.z>` builds the Windows installer and publishes a
 release ([workflow](../../.github/workflows/meridian-installer.yml)). The
-installer ships the app and the `meridian` CLI, and offers to put the CLI on
-PATH.
+installer ships the app as `Meridian.exe` and the `meridian` CLI in a `cli`
+folder beside it, and offers to put that folder on PATH. The folder is not
+optional: Windows file names ignore case, so the two cannot share one.
 
 The app icon is generated, not hand-drawn — `python
 scripts/generate-meridian-icon.py` redraws it from the Azimuth palette.
