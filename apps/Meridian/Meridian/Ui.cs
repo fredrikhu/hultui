@@ -143,6 +143,18 @@ public static class Ui
         Size = 22f, Padding = new Thickness(0), Text = Azimuth.TextFaint, FontSize = 10f, FontWeight = FontWeight.Regular,
     };
 
+    /// <summary>The compare table's secret flag, on: a 22px accent ●.</summary>
+    public static readonly ButtonStyle FlagOn = new()
+    {
+        Size = 22f, Padding = new Thickness(0), Text = Azimuth.Accent300, FontSize = 10f, FontWeight = FontWeight.Regular,
+    };
+
+    /// <summary>The compare table's secret flag, off: a faint ○ that marks the key when clicked.</summary>
+    public static readonly ButtonStyle FlagOff = new()
+    {
+        Size = 22f, Padding = new Thickness(0), Text = Azimuth.TextFaint, FontSize = 10f, FontWeight = FontWeight.Regular,
+    };
+
     /// <summary>A ghost action that adds a row — "＋ header" — in the editor's muted text.</summary>
     public static readonly ButtonStyle AddRow = new()
     {

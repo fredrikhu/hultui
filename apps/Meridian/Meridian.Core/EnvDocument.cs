@@ -84,6 +84,51 @@ public sealed class EnvDocument
         Touch();
     }
 
+    /// <summary>Clears a key's secret flag: drops its <c>secret</c> lines. A key
+    /// that had no <c>key=</c> line keeps its place — its first <c>secret</c>
+    /// line becomes <c>key=</c> — so un-flagging never makes it disappear.</summary>
+    public void UnmarkSecret(string key)
+    {
+        if (!_secrets.Contains(key)) return;
+        bool keepPlace = !_lines.Any(l => IsValueLine(l.Raw, key));
+        for (int i = 0; i < _lines.Count; i++)
+        {
+            if (!IsSecretLine(_lines[i].Raw, key)) continue;
+            if (keepPlace)
+            {
+                _lines[i] = _lines[i] with { Raw = $"{key}=" };
+                keepPlace = false;
+            }
+            else
+                _lines.RemoveAt(i--);
+        }
+        Touch();
+    }
+
+    /// <summary>Removes a key: every <c>key=value</c> and <c>secret key</c>
+    /// line for it, terminators included. Other lines keep every byte.</summary>
+    public void RemoveKey(string key)
+    {
+        if (!_order.Contains(key)) return;
+        _lines.RemoveAll(l => IsValueLine(l.Raw, key) || IsSecretLine(l.Raw, key));
+        Touch();
+    }
+
+    // The line shapes Reparse recognises, for the edits that find lines by key.
+    private static bool IsSecretLine(string raw, string key)
+    {
+        string line = raw.TrimStart();
+        return line.StartsWith("secret ", StringComparison.Ordinal) && line["secret ".Length..].Trim() == key;
+    }
+
+    private static bool IsValueLine(string raw, string key)
+    {
+        string line = raw.TrimStart();
+        if (line.StartsWith('#') || line.StartsWith("secret ", StringComparison.Ordinal)) return false;
+        int eq = line.IndexOf('=');
+        return eq > 0 && line[..eq].TrimEnd() == key;
+    }
+
     private int LastValueLine(string key)
     {
         for (int i = _lines.Count - 1; i >= 0; i--)

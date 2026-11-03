@@ -157,6 +157,193 @@ public class EnvironmentsViewTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    // ── Made in the app: environments, secret flags, removal ────────────
+    // Nothing here needs a hand-written file: the walkthrough user's envs\local.env
+    // and its `secret client_secret` line come from the view itself.
+
+    private string EnvText(string name) => File.ReadAllText(Path.Combine(_root, "envs", name + ".env"));
+
+    private static AccessibilityNode Node(HeadlessSession session, string automationId) =>
+        Walk(session.Window.AccessibilityTree).Single(n => n.AutomationId == automationId);
+
+    private static void Submit(HeadlessSession session, string text)
+    {
+        session.Window.PressKey(KeyCode.A, KeyModifiers.Ctrl);   // clear what an earlier try left
+        session.Window.PressKey(KeyCode.Backspace);
+        session.Window.TypeText(text);
+        session.PumpFrames(1);
+        session.Window.PressKey(KeyCode.Enter);
+        session.PumpFrames(2);
+    }
+
+    [Fact]
+    public void NewEnvironmentFromTheEmptyStateWritesTheFileAndMakesItActive()
+    {
+        Directory.Delete(Path.Combine(_root, "envs"), recursive: true);
+        Hosted((session, app, keyring) =>
+        {
+            GoToEnvironments(session);
+            Assert.True(Contains(session, "no environments"));
+            Assert.Null(app.ActiveEnvName);
+
+            Click(session, "new-env");
+            Assert.Equal("New environment",
+                Walk(session.Window.AccessibilityTree).Single(n => n.Role == AccessibilityRole.Dialog).Name);
+            Submit(session, "local");
+
+            Assert.Null(session.Window.FindByAutomationId("dialog-input"));
+            Assert.Equal("", EnvText("local"));                 // envs/ made, the file empty
+            Assert.Equal("local", app.ActiveEnvName);
+            Assert.True(Contains(session, "local, active"));
+
+            // The new environment is the one "＋ add key" fills, and Ctrl+S writes it.
+            Click(session, "add-env-key");
+            Submit(session, "client_id");
+            session.Window.PressKey(KeyCode.S, KeyModifiers.Ctrl);
+            session.PumpFrames(2);
+            Assert.Equal("client_id=\n", EnvText("local"));
+        });
+    }
+
+    [Fact]
+    public void ABadEnvironmentNameIsRefusedInThePrompt()
+    {
+        Hosted((session, app, keyring) =>
+        {
+            GoToEnvironments(session);
+            Click(session, "new-env");
+
+            foreach (var (bad, reason) in new[]
+            {
+                ("../escape", "can't contain"),
+                ("sub\\dir", "can't contain"),
+                ("", "Give the environment a name"),
+                ("Staging", "staging.env already exists"),
+                ("ci.env", "ci.env already exists"),
+                ("a:b", "can't contain"),
+            })
+            {
+                Submit(session, bad);
+                Assert.True(session.Window.FindByAutomationId("dialog-input") != null, $"'{bad}' closed the prompt");
+                Assert.Contains(reason, Node(session, "dialog-error").Name);
+                Assert.Contains(reason, Node(session, "dialog-input").Description);
+            }
+            Assert.False(File.Exists(Path.Combine(_root, "escape.env")));
+            Assert.Equal(3, Directory.GetFiles(Path.Combine(_root, "envs")).Length);
+            Assert.Equal("local", app.ActiveEnvName);
+
+            // A good name after the refusals: created, active, the prompt gone.
+            Submit(session, " qa.env ");
+            Assert.Null(session.Window.FindByAutomationId("dialog-input"));
+            Assert.Equal("", EnvText("qa"));
+            Assert.Equal("qa", app.ActiveEnvName);
+            Assert.NotNull(session.Window.FindByAutomationId("env-file-qa"));
+        });
+    }
+
+    [Fact]
+    public void MarkingAKeySecretWritesASecretLineAndLeavesEveryOtherByte()
+    {
+        const string staging = "# staging\r\nbase_url=https://staging.example\r\nclient_secret=\r\ntimeout_ms=30000\r\n";
+        string local = $"base_url={_server.Origin}\ntimeout_ms=30000\nsecret api_token\nclient_secret=\n";
+        Write("envs/staging.env", staging);
+        Write("envs/local.env", local);
+        string ci = File.ReadAllText(Path.Combine(_root, "envs", "ci.env"));
+        Hosted((session, app, keyring) =>
+        {
+            GoToEnvironments(session);
+            Assert.Equal(false, Node(session, "secret-toggle-client_secret").IsToggled);
+            Assert.NotNull(session.Window.FindByAutomationId("cell-client_secret-staging"));
+
+            Click(session, "secret-toggle-client_secret");
+            Assert.Equal(true, Node(session, "secret-toggle-client_secret").IsToggled);
+            Assert.True(Contains(session, "2 unsaved"));
+            // The keyring cell takes over the column: the fresh-machine fix.
+            Assert.NotNull(session.Window.FindByAutomationId("set-secret-client_secret"));
+            Assert.Null(session.Window.FindByAutomationId("cell-client_secret-staging"));
+
+            session.Window.PressKey(KeyCode.S, KeyModifiers.Ctrl);
+            session.PumpFrames(2);
+
+            Assert.Equal(staging + "secret client_secret\r\n", EnvText("staging"));   // its CRLF, too
+            Assert.Equal(local + "secret client_secret\n", EnvText("local"));
+            Assert.Equal(ci, EnvText("ci"));                                           // no client_secret: untouched
+        });
+    }
+
+    [Fact]
+    public void UnmarkingASecretPutsAFlagOnlyKeyBackInTheFile()
+    {
+        Hosted((session, app, keyring) =>
+        {
+            GoToEnvironments(session);
+            Assert.Equal(true, Node(session, "secret-toggle-api_token").IsToggled);
+
+            Click(session, "secret-toggle-api_token");
+            Assert.Equal(false, Node(session, "secret-toggle-api_token").IsToggled);
+            Assert.NotNull(session.Window.FindByAutomationId("cell-api_token-local"));
+
+            session.Window.PressKey(KeyCode.S, KeyModifiers.Ctrl);
+            session.PumpFrames(2);
+            Assert.Equal($"base_url={_server.Origin}\ntimeout_ms=30000\napi_token=\n", EnvText("local"));
+        });
+    }
+
+    /// <summary>An environment without a secret's flag would leave it unresolved there, so its
+    /// column offers the missing fix, not the keyring cell — and the fix adds the flag alone.</summary>
+    [Fact]
+    public void AnEnvironmentMissingASecretGetsItsFlagAndNoValue()
+    {
+        Hosted((session, app, keyring) =>
+        {
+            GoToEnvironments(session);
+            Click(session, "add-api_token-to-staging");
+
+            session.Window.PressKey(KeyCode.S, KeyModifiers.Ctrl);
+            session.PumpFrames(2);
+            Assert.Equal("base_url=https://staging.example\ntimeout_ms=30000\nsecret api_token\n", EnvText("staging"));
+            Assert.NotNull(session.Window.FindByAutomationId("add-api_token-to-ci"));
+        });
+    }
+
+    [Fact]
+    public void AValueTypedBeforeTheFlagMovesToTheKeyring()
+    {
+        Write("envs/local.env", $"base_url={_server.Origin}\nclient_secret=s3cr3t\n");
+        Hosted((session, app, keyring) =>
+        {
+            GoToEnvironments(session);
+            Click(session, "secret-toggle-client_secret");
+
+            // Flagged, but the file still holds it in plain text: the cell says so.
+            Assert.True(Contains(session, "still in local.env — move to keyring"));
+            Click(session, "plain-secret-client_secret-local");
+
+            Assert.Equal("s3cr3t", keyring.Get(app.Workspace!.Root, "client_secret"));
+            Assert.NotNull(session.Window.FindByAutomationId("secret-value-client_secret"));
+            session.Window.PressKey(KeyCode.S, KeyModifiers.Ctrl);
+            session.PumpFrames(2);
+            Assert.Equal($"base_url={_server.Origin}\nclient_secret=\nsecret client_secret\n", EnvText("local"));
+        });
+    }
+
+    [Fact]
+    public void RemovingAKeyTakesItOutOfEveryEnvironment()
+    {
+        Hosted((session, app, keyring) =>
+        {
+            GoToEnvironments(session);
+            Click(session, "remove-key-timeout_ms");
+            Assert.Null(session.Window.FindByAutomationId("cell-timeout_ms-local"));
+
+            session.Window.PressKey(KeyCode.S, KeyModifiers.Ctrl);
+            session.PumpFrames(2);
+            Assert.Equal($"base_url={_server.Origin}\nsecret api_token\n", EnvText("local"));
+            Assert.Equal("base_url=https://staging.example\n", EnvText("staging"));
+            Assert.Equal("base_url=https://ci.example\n", EnvText("ci"));
+        });
+    }
+
     // ── Switcher ─────────────────────────────────────────────────────────
 
     [Fact]

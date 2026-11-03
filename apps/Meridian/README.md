@@ -53,6 +53,25 @@ requests; `{{$uuid}}` and `{{$timestamp}}` are built-ins and can't be shadowed.
 CI, read from an environment variable of the same name) — never in the
 collection.
 
+**Environments are made in the app** (key 5), with no file to write by hand:
+
+- **New environment…** (the empty state, or **＋ new environment** under the
+  list) asks for a name and writes an empty `envs/<name>.env`, making `envs/`
+  when the collection has none. The new environment becomes the active one.
+  Names with `/`, `\`, `..`, a leading dot or a character Windows refuses, and
+  names already taken in any letter case, are refused in the prompt.
+- **＋ add key** adds a key to the active environment; a key another
+  environment lacks shows **missing — add to …** in that column (a secret
+  arrives as its flag alone); **✕** at a row's end removes the key from every
+  environment.
+- The **SECRET** column's **○ / ●** toggles a key's secret flag in every file
+  that has it: on appends `secret <key>`, off takes it out again (a key with
+  only the flag keeps its place as `key=`). A flagged key's cell then asks for
+  the value, which goes to the OS keyring. A value already typed into the file
+  shows **still in local.env — move to keyring** (or **— clear**).
+- Every edit waits in the table until **Ctrl+S**, which rewrites only the lines
+  that changed.
+
 ## Running in CI
 
 ```bash

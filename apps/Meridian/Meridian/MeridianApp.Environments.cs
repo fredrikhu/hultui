@@ -23,8 +23,14 @@ public partial class MeridianApp
             return EmptyView("Environments", "no environments",
                 "Open a collection to edit its envs/*.env files side by side.");
         if (_envFiles.Count == 0)
-            return EmptyView("Environments", "no environments",
-                $"Create envs{System.IO.Path.DirectorySeparatorChar}local.env in the collection and it appears here.");
+        {
+            var empty = EmptyView("Environments", "no environments",
+                $"An environment holds the variables for one place the API runs, saved as envs{System.IO.Path.DirectorySeparatorChar}<name>.env.");
+            empty.AddChild(Box.New().Height(Azimuth.S2));
+            empty.AddChild(Ui.Button(ButtonVariant.Primary, "New environment…", OpenNewEnvironmentDialog, "new-env",
+                style: Ui.Dialog));
+            return empty;
+        }
 
         var row = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
         var list = BuildEnvFileList(); list.Key = "env-list";
@@ -72,6 +78,10 @@ public partial class MeridianApp
             if (!active) r.HoverBg(Azimuth.Raised, Color.Transparent);
             panel.AddChild(r);
         }
+
+        panel.AddChild(Box.New().Height(Azimuth.S1));
+        panel.AddChild(Flex.Row(gap: 0).FlexShrink(0).Padding(new Thickness(0, Azimuth.S1, 0, Azimuth.S1))
+            .Children(AddRowButton("＋ new environment", "new-env", OpenNewEnvironmentDialog)));
 
         panel.AddChild(Box.New().FlexGrow(1));
         panel.AddChild(Flex.Row(gap: 0).Height(28).FlexShrink(0)
@@ -135,6 +145,7 @@ public partial class MeridianApp
                     env.Name == _envName
                         ? Text.New("● active").FontSize(9f).TextColor(Azimuth.Accent300)
                         : Box.New()));
+        header.AddChild(Box.New().Width(22).FlexShrink(0));   // over the rows' ✕
         col.AddChild(header);
 
         var scroll = ScrollView.New();
@@ -183,14 +194,45 @@ public partial class MeridianApp
         if (secret) row.Background(Azimuth.Alpha(Azimuth.Accent, 0.04));
 
         row.AddChild(Ui.Mono(key, 11.5f, Azimuth.TextDim).Width(170).FlexShrink(0));
-        row.AddChild(Box.New().Width(52).FlexShrink(0)
-            .Children(secret
-                ? Ui.Mono("●", 10f, Azimuth.Accent300)
-                : Text.New("")));
+
+        // The flag is a toggle: on writes `secret <key>` into every file that has the key, off
+        // takes it out again. Either waits for Ctrl+S with the table's other edits.
+        var flag = Ui.Button(ButtonVariant.Ghost, secret ? "●" : "○", () => SetSecret(key, !secret),
+                $"secret-toggle-{key}", style: secret ? Ui.FlagOn : Ui.FlagOff)
+            .Tooltip(secret ? "secret — the value lives in the OS keyring. Click to store it in the file instead"
+                : "mark secret — keep the value in the OS keyring, not the file");
+        flag.AccessibleName = $"secret {key}";
+        flag.AccessibleToggled = secret;
+        row.AddChild(Box.New().Width(52).FlexShrink(0).Children(flag));
 
         foreach (var env in _envFiles)
             row.AddChild(BuildCell(env.Name, key, secret));
+
+        var remove = RemoveButton($"remove {key} from every environment", () => RemoveKey(key))
+            .Tooltip("remove from every environment");
+        remove.AutomationId($"remove-key-{key}");
+        row.AddChild(remove);
         return row;
+    }
+
+    /// <summary>Flags or un-flags a key in every environment that has it. The values already in
+    /// the keyring stay there; un-flagged, the key resolves from the file again.</summary>
+    internal void SetSecret(string key, bool secret)
+    {
+        foreach (var env in _envFiles)
+            if (_envDocs.GetValueOrDefault(env.Name) is { } doc && doc.Keys.Contains(key))
+            {
+                if (secret) doc.MarkSecret(key);
+                else doc.UnmarkSecret(key);
+            }
+        MarkDirty();
+    }
+
+    private void RemoveKey(string key)
+    {
+        foreach (var env in _envFiles)
+            _envDocs.GetValueOrDefault(env.Name)?.RemoveKey(key);
+        MarkDirty();
     }
 
     private Element BuildCell(string envName, string key, bool secret)
@@ -199,19 +241,23 @@ public partial class MeridianApp
         var doc = _envDocs.GetValueOrDefault(envName);
         if (doc == null) return cell;
 
-        if (secret)
+        if (!doc.Keys.Contains(key))
         {
-            cell.AddChild(BuildSecretCell(envName, key));
+            // Missing here: the warn cell with the one-click fix. A secret arrives as its flag
+            // alone, so this environment resolves it from the keyring like the others.
+            var add = Ui.Button(ButtonVariant.Ghost, $"! missing — add to {envName}",
+                    () => { if (secret) doc.MarkSecret(key); else doc.SetValue(key, ""); MarkDirty(); },
+                    $"add-{key}-to-{envName}", style: Ui.WarnFill)
+                .AccessibleName($"add {key} to {envName}");
+            cell.AddChild(add);
             return cell;
         }
 
-        if (!doc.Keys.Contains(key))
+        if (secret)
         {
-            // Missing here: the warn cell with the one-click fix.
-            var add = Ui.Button(ButtonVariant.Ghost, $"! missing — add to {envName}",
-                    () => { doc.SetValue(key, ""); MarkDirty(); }, $"add-{key}-to-{envName}", style: Ui.WarnFill)
-                .AccessibleName($"add {key} to {envName}");
-            cell.AddChild(add);
+            cell.AddChild(doc.Values.GetValueOrDefault(key) is { Length: > 0 } plain
+                ? BuildPlainSecretFix(doc, envName, key, plain)
+                : BuildSecretCell(envName, key));
             return cell;
         }
 
@@ -260,6 +306,32 @@ public partial class MeridianApp
         if (!revealed)
             cell.AddChild(BarAction($"reveal ({RevealSeconds} s)", $"reveal-{key}", () => RevealSecret(key)));
         return cell;
+    }
+
+    /// <summary>A key flagged secret whose file still holds a value in plain text — typed into
+    /// the table before the flag went on. Marking leaves the line alone, so this cell offers the
+    /// fix: move the value to the keyring when this machine has none yet, else clear it.</summary>
+    private Element BuildPlainSecretFix(EnvDocument doc, string envName, string key, string plain)
+    {
+        var ws = _workspace!;
+        bool keyringHasIt = _keyring.Get(ws.Root, key) != null;
+        var fix = Ui.Button(ButtonVariant.Ghost,
+                keyringHasIt ? $"! still in {envName}.env — clear" : $"! still in {envName}.env — move to keyring",
+                () =>
+                {
+                    if (!keyringHasIt && !_keyring.Set(ws.Root, key, plain))
+                    {
+                        Flash("No keyring on this platform — set it as an environment variable instead");
+                        return;
+                    }
+                    doc.SetValue(key, "");
+                    MarkDirty();
+                },
+                $"plain-secret-{key}-{envName}", style: Ui.WarnFill)
+            .AccessibleName(keyringHasIt
+                ? $"clear {key}'s plain-text value from {envName}"
+                : $"move {key}'s plain-text value from {envName} to the OS keyring");
+        return Flex.Row(gap: Azimuth.S1).FlexGrow(1).AlignItems(AlignItems.Center).Children(fix);
     }
 
     private async void RevealSecret(string key)
@@ -311,17 +383,75 @@ public partial class MeridianApp
         MarkViewDirty();
     }
 
+    // ── New environment ──────────────────────────────────────────────────
+
+    private void OpenNewEnvironmentDialog() =>
+        OpenDialog("New environment", "name — local, staging, ci", CreateEnvironment, EnvNameProblem);
+
+    /// <summary>"local.env" and " local " both mean local: the suffix and the spaces go.</summary>
+    private static string EnvNameFrom(string input)
+    {
+        string name = input.Trim();
+        return name.EndsWith(".env", StringComparison.OrdinalIgnoreCase) ? name[..^".env".Length].TrimEnd() : name;
+    }
+
+    /// <summary>Why a typed name can't be a new environment, or null when it can. The name is a
+    /// file name in envs/ and a <c>--env</c> argument, on every OS the collection is cloned to:
+    /// no separators or <c>..</c>, nothing Windows refuses in a file name, no leading dot, and
+    /// no clash with an existing environment in any letter case.</summary>
+    private string? EnvNameProblem(string input)
+    {
+        string name = EnvNameFrom(input);
+        if (name.Length == 0) return "Give the environment a name.";
+        if (name.Contains('/') || name.Contains('\\') || name.Contains(".."))
+            return "A name can't contain /, \\ or two dots in a row.";
+        if (name.Any(c => char.IsControl(c) || "<>:\"|?*".Contains(c)))
+            return "A name can't contain < > : \" | ? or *";
+        if (name.StartsWith('.')) return "A name can't start with a dot.";
+        if (_envFiles.FirstOrDefault(e => string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase)) is { } existing)
+            return $"{existing.Name}.env already exists.";
+        return null;
+    }
+
+    /// <summary>Writes an empty envs/&lt;name&gt;.env (making envs/ when the collection has none),
+    /// rescans, and makes it the active environment — the one "＋ add key" adds to.</summary>
+    internal void CreateEnvironment(string input)
+    {
+        if (_workspace is not { } ws) return;
+        if (EnvNameProblem(input) is { } problem) { Flash(problem); return; }   // the prompt refuses these first
+        string name = EnvNameFrom(input);
+        var dir = System.IO.Path.Combine(ws.Root, "envs");
+        try
+        {
+            Directory.CreateDirectory(dir);
+            // CreateNew: a file the last scan missed is never overwritten.
+            using (new FileStream(System.IO.Path.Combine(dir, name + ".env"), FileMode.CreateNew)) { }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Flash($"Could not create {name}.env: {e.Message}");
+            return;
+        }
+        RescanWorkspace();
+        SelectEnvironment(name);
+    }
+
     // ── Minimal modal input dialog (Backdrop + card) ─────────────────────
 
-    private (string Title, string Placeholder, Action<string> OnSubmit)? _dialog;
+    private (string Title, string Placeholder, Action<string> OnSubmit, Func<string, string?>? Validate)? _dialog;
     private string _dialogValue = "";
+    private string? _dialogError;
     private readonly Ref<TextInputElement> _dialogRef = new();
     private bool _pendingDialogFocus;
 
-    private void OpenDialog(string title, string placeholder, Action<string> onSubmit)
+    /// <param name="validate">Null, or the reason a value is refused: the prompt then stays up with
+    /// the reason under the field and the text as typed.</param>
+    private void OpenDialog(string title, string placeholder, Action<string> onSubmit,
+        Func<string, string?>? validate = null)
     {
-        _dialog = (title, placeholder, onSubmit);
+        _dialog = (title, placeholder, onSubmit, validate);
         _dialogValue = "";
+        _dialogError = null;
         _pendingDialogFocus = true;
         MarkDirty();
     }
@@ -333,6 +463,12 @@ public partial class MeridianApp
     private void SubmitDialog()
     {
         if (_dialog is not { } dialog) return;
+        if (dialog.Validate?.Invoke(_dialogValue) is { } error)
+        {
+            _dialogError = error;
+            MarkDirty();
+            return;
+        }
         _dialog = null;
         int builds = Builds;
         dialog.OnSubmit(_dialogValue);
@@ -345,7 +481,7 @@ public partial class MeridianApp
         MarkDirty();
     }
 
-    private Element BuildDialog((string Title, string Placeholder, Action<string> OnSubmit) dialog)
+    private Element BuildDialog((string Title, string Placeholder, Action<string> OnSubmit, Func<string, string?>? Validate) dialog)
     {
         var backdrop = Box.New()
             .Width(Dimension.Percent(100)).Height(Dimension.Percent(100))
@@ -379,7 +515,11 @@ public partial class MeridianApp
             .TextColor(Azimuth.Text)
             .WithRef(_dialogRef);
         input.AutomationId("dialog-input");
+        if (_dialogError != null) input.AccessibleDescription(_dialogError);
         card.AddChild(input);
+        if (_dialogError != null)
+            card.AddChild(Text.New("! " + _dialogError).FontSize(11.5f).TextColor(Azimuth.StatusWarn)
+                .AutomationId("dialog-error"));
 
         var buttons = Flex.Row(gap: Azimuth.S2).JustifyContent(JustifyContent.FlexEnd);
         buttons.AddChild(BarAction("cancel", "dialog-cancel", CancelDialog));
