@@ -16,9 +16,9 @@ static partial class Scenarios
     /// <paramref name="key"/>, as many of <paramref name="back"/>, and again. Right runs along a shelf
     /// and on into the next; Down goes to the card below, on the next shelf. The row reports the
     /// cards made a key.</summary>
-    internal static Op ShelfWalk(Ctx ctx, KeyCode key, KeyCode back, int turn)
+    internal static Op ShelfWalk(Ctx ctx, KeyCode key, KeyCode back, int turn, bool keepCards = false)
     {
-        var pane = new ShelfPane(ImageGridFilms(ShelfPane.Shelves * ShelfPane.PerShelf));
+        var pane = new ShelfPane(ImageGridFilms(ShelfPane.Shelves * ShelfPane.PerShelf), keepCards);
         var host = pane.Mount();
         host.On<KeyDownEvent>(e =>
         {
@@ -56,6 +56,14 @@ static partial class Scenarios
         yield return new Scenario("component/shelf walk Down, 5 shelves of 7 cards, every card made",
             "The same page, the cursor moving down a column from shelf to shelf, the page scrolling to follow the focus",
             ctx => ShelfWalk(ctx, KeyCode.Down, KeyCode.Up, ShelfPane.Shelves - 1)) { Width = 1440, Height = 900 };
+
+        yield return new Scenario("component/shelf walk Right, 5 shelves of 7 cards, cards kept",
+            "The same walk with the cards in a KeptElements: the page's Build hands back each card whose film and cursor are what it was made with, and makes the two the cursor moved between",
+            ctx => ShelfWalk(ctx, KeyCode.Right, KeyCode.Left, 2 * ShelfPane.PerShelf, keepCards: true)) { Width = 1440, Height = 900 };
+
+        yield return new Scenario("component/shelf walk Down, 5 shelves of 7 cards, cards kept",
+            "The Down walk with the cards kept",
+            ctx => ShelfWalk(ctx, KeyCode.Down, KeyCode.Up, ShelfPane.Shelves - 1, keepCards: true)) { Width = 1440, Height = 900 };
     }
 }
 
@@ -63,9 +71,16 @@ static partial class Scenarios
 /// The shape of Aperture's Home: a scrolled page of shelves, each a heading and a row of poster cards,
 /// every card a focusable button, the cursor a ring on one card and the keyboard on it. The cursor walks
 /// one list made of every shelf in order; the page's Build reads it, and makes every shelf and card.
+/// With <paramref name="keepCards"/> the cards go through a <see cref="KeptElements{TState}"/>, keyed
+/// by film: a build hands back each card whose film and cursor did not change.
 /// </summary>
-sealed class ShelfPane(List<ImageGridFilm> films) : Component
+sealed class ShelfPane(List<ImageGridFilm> films, bool keepCards = false) : Component
 {
+    private readonly record struct CardState(ImageGridFilm Film, int Index, bool Cursor);
+
+    private readonly KeptElements<CardState> _kept = new();
+    private int _builds;
+
     public const int Shelves = 5, PerShelf = 7;
     private const float CardWidth = 168f, CardHeight = 252f, Gap = 16f, Pad = 24f;
 
@@ -114,6 +129,7 @@ sealed class ShelfPane(List<ImageGridFilm> films) : Component
     public override Element Build()
     {
         int cursor = _cursor.Value;
+        _kept.Begin(++_builds);
         var page = Flex.Column(gap: 32f).Padding(new Thickness(Pad));
         for (int s = 0; s < Shelves; s++)
         {
@@ -126,7 +142,14 @@ sealed class ShelfPane(List<ImageGridFilm> films) : Component
             for (int k = 0; k < PerShelf; k++)
             {
                 int i = s * PerShelf + k;
-                row.AddChild(Card(films[i], i, i == cursor));
+                if (!keepCards)
+                {
+                    row.AddChild(Card(films[i], i, i == cursor));
+                    continue;
+                }
+                var state = new CardState(films[i], i, i == cursor);
+                if (_kept.TryKeep(films[i].Id, state, out var kept)) row.AddChild(kept);
+                else row.AddChild(_kept.Made(films[i].Id, state, Card(films[i], i, i == cursor)));
             }
             shelf.AddChild(row);
             page.AddChild(shelf);

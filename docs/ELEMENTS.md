@@ -2340,3 +2340,50 @@ private void MarkViewDirty() => base.MarkDirty();
 - **`Builds`:** on `Part` and on `PartGroup` (of all its parts), for tests.
 - **`Mount()`** is a `Component`'s: it hands back the host without the check. A part mounted, not
   placed, hears a full rebuild only through a signal it reads, as Junction's chrome does.
+
+## 28. KeptElements (elements a build hands back)
+
+`KeptElements<TState>` is not an element but a helper (`HultUI.Core.Components`): the elements an
+owner's build made, by key, with the state each was made from, so that the next build can hand back
+the live element of each one it would make from the same state. The reconciler puts such an element
+back where it was, untouched. A cursor key on a page of cards then makes the two cards it moved
+between, not every card on the page. The reasoning and the traps are in
+[REACTIVITY.md](REACTIVITY.md), "Hand back the elements a key does not change".
+
+```csharp
+private readonly record struct CardState(MediaItem Item, bool Cursor, IImageSource? Picture);
+private readonly KeptElements<CardState> _cards = new();
+
+private Element Shelf(IReadOnlyList<MediaItem> items)
+{
+    _cards.Begin(_builds);   // the owner's count of its builds
+    var row = Flex.Row(gap: 16);
+    for (int i = 0; i < items.Count; i++)
+    {
+        var state = new CardState(items[i], i == _cursor, Picture(items[i]));
+        if (_cards.TryKeep(items[i].Id, state, out var kept)) row.AddChild(kept);
+        else row.AddChild(_cards.Made(items[i].Id, state, Card(items[i], state)));
+    }
+    return row;
+}
+```
+
+- **`Begin(build)`:** starts a build of these elements, numbered by the owner's count of its builds.
+  Only what the build numbered one less made or handed back can be handed back: an element a build
+  left out was removed or patched into something else, and an owner build that made none of them
+  (another view) may have done that to all. Elements a virtual list makes in a frame skip it, and
+  give each a place instead.
+- **`TryKeep(key, state, out element, place)`:** the live element made for the key with an equal
+  state, still in the window, and with a `place` a child of the parent keyed so: a row a virtual
+  list makes again while the rows around it stay. Add it where the new one would go.
+- **`Made(key, state, element)`:** remembers an element just made and returns it to add. It sets the
+  element's key, so key its siblings too (all of a row's cards go through the helper), and attaches
+  a ref that follows the element to the live one it is patched into.
+- **`Live(key)`:** the element in the window for a key, as the latest build left it, for a change
+  the owner makes to the live element with no build (Aperture's Home moves the cursor's ring this
+  way). Check first that no build of the owner has run since that one without making these elements.
+- **`Clear()`** forgets them all, for a change to something every element shows that no state
+  holds. **`Count`** is how many it holds; those that left the window go as the count doubles.
+- **The state is what the element shows and does:** its item, the cursor on it, its picture as the
+  cache has it, and a setting every element shows (or `Clear()` when it moves). Its handlers are the
+  old build's, so what they capture belongs in the state too.

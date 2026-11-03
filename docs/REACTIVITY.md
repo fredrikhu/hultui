@@ -623,6 +623,27 @@ Headless, 600 films with pictures, 1440×900, a key and two frames, NativeAOT wi
 181.9 → 114.1 KB (−37 %). The suite pins it: `virtual/image grid walk Right, 600 cards` against
 `…, cards handed back` (48 → 22 KB, two cards made).
 
+**`KeptElements<TState>` holds these rules** (`HultUI.Core.Components`, round 7 step 11; ELEMENTS.md
+§28). Brief, Thumbnails and the library grid each wrote them out by hand, and Brief's marks slipped
+into the shape; new code uses the helper, and the three can move to it as they are next changed:
+
+- `Made(key, state, element)` keys the element and keeps a ref that follows it to the live one, so
+  the first and third rules are its job; key the element's siblings too.
+- `TryKeep(key, state, out element)` compares the state with what the element was made from, so put
+  everything it shows in the state, a setting every element shows among it: a record struct makes
+  that a field more, not a set in a shape that remakes them all. Its handlers are the old build's;
+  what they capture belongs in the state.
+- `Begin(build)`, with the owner's count of its builds, is "only from the build just before". It is
+  stricter than "still in the window": a build that left an element out may have patched it, by
+  position, into something else that is still there, and a build of the owner that showed another
+  view may have done that to all of them. `TryKeep` checks the window as well (`Element.IsHosted`).
+- `TryKeep(…, place: key)` is the row-place check for cards a virtual list makes in a frame: those
+  skip `Begin` and are handed back only into a parent keyed so.
+
+Aperture's Home is its first user (one helper per shelf, as one film can stand on two shelves). The
+perf suite pins it: `component/shelf walk Right, 5 shelves of 7 cards, every card made` against `…,
+cards kept`.
+
 A column whose cells are all kept is left with no children by the time the reconciler reaches
 it, since the build moved every one into its new tree. Until round 5 those came back one by one,
 each marking the column's structure, so with a reader listening every key built the whole
