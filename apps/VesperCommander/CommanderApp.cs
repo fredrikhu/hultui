@@ -1621,10 +1621,22 @@ public partial class CommanderApp : Component, IDisposable
     {
         var raw = Listing(side);
         if (side != _active || _search.Length == 0) return raw;
+        // Asked many times a key (the cursor, the footer, the list): the matches are made once
+        // per listing and filter. A listing is never changed in place; a load or a re-read is a
+        // new list.
+        if (ReferenceEquals(raw, _filteredFrom) && side == _filteredSide && _search == _filteredBy)
+            return _filtered!;
         var filtered = new List<FileEntry>(raw.Count);
         foreach (var e in raw) if (e.IsParent || SearchMatch(e.Name)) filtered.Add(e);
+        (_filteredFrom, _filteredSide, _filteredBy, _filtered) = (raw, side, _search, filtered);
         return filtered;
     }
+
+    // The last filtered rows, and the listing, side and filter they were made from (Rows).
+    private IReadOnlyList<FileEntry>? _filteredFrom;
+    private char _filteredSide;
+    private string _filteredBy = "";
+    private List<FileEntry>? _filtered;
 
     /// <summary>The full path of the row under the cursor — the row's identity everywhere it
     /// has to be found again (see <see cref="IndexOfPath"/>).</summary>
