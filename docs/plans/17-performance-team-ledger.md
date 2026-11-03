@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 7
-- **Phase:** build — round 7, step 7 next (steps 1–6 landed). Survey done 2026-11-02 (reports `17-reports/r7-*.md`, 631fe15f..17d4220a):
+- **Phase:** build — round 7, step 8 next (steps 1–7 landed). Survey done 2026-11-02 (reports `17-reports/r7-*.md`, 631fe15f..17d4220a):
   seven experts unsatisfied, GL and Vulkan satisfied; one review objection (4325bac6, step 1). 13 build steps; round 7
   questions 1–4 were answered yes on 2026-11-02 (the user's live reader check of step 13 remains). Round 6 released: merge 0b8e684a, CI fixes
   1939afcb, CI run 41432647572 green. Question 10 (`TokenizeDiff` public) open, not blocking. Weekly usage 37 % at the
@@ -149,6 +149,11 @@ the report lines its brief quotes (`r7-k` = `17-reports/r7-k-<area>.md`).
 
 Re-ranked by the next survey.
 
+- **a11y-composite-selection-in-place** (7; round 7 step 7) — a composite list's own selection move and a kept
+  composite row's `AccessibleSelected` still build a whole tree (suite composite walk 1.0 a key). A tested patch stops
+  the list's own move from building (5 → 0 trees in a headless scene): scratchpad `r7b7\p4-composite-selection.patch`;
+  the suite walk also needs kept rows' `IsSelected` written in place by the walk and the patch. Also: the in-place walk
+  allocates 6.9–8.2 KB on Junction's unchanged tree (likely row names made from text content).
 - **junction-tags-test-flake** (tests; round 6 step 9b) — `TagsViewTests.ATagsKeyRebuildsOnce_AndTheListFollowsTheSelection`
   fails in its class's runs and passes alone. Cause not found.
 - **dropdown-follow-control-on-resize** (1, correctness, low) — a Dropdown list or DatePicker calendar stays at its
@@ -265,6 +270,7 @@ Round 6 (the round the next survey reviews; moves to the archive at round 8's su
 | 7 | 8bd2a2a2, b1c2894e | layout-virtuallist-row-margins | Suite rows `overlay/command palette Down 2,000` (+ UIA, AT-SPI) and twins `a11y/selection walk 1,000 composite item rows, UIA` (rows draw / the list draws). VirtualList lays a row's margins out inside its place; the palette's rows carry the list padding as margins, no wrapping box per row (folds palette-per-row-box). KB per step JIT = AOT: suite palette Down 21.7 → 19.0, filter 2,000 115.9 → 103.8 (−10 %), Junction palette Down 32.0 → 29.8, type+erase 97.2 → 88.0, Meridian Down 21.5 → 19.6, type+erase 94.9 → 81.6 (−14 %). ELEMENTS.md (VirtualList, `RowHeights`). |
 | 7 | ae3c5e70, c66d1bbb | layout-palette-drawn-selection | The palette's list draws the choice and the hover tint, rows made unselected; composite rows that set `AccessibleSelected` are told by the list whether they are selected (same IsSelected changes as before); Down sets the mounted list's `SelectedIndex` through its ref and scrolls the row into view instead of building the card. No API change. With (a), KB per step JIT / AOT: suite palette Down 21.7 → 3.9 / 3.9 (−82 %), filter 2,000 −14 %, typing UIA/AT-SPI −12 %, Down UIA/AT-SPI −58 / −57 %; Junction palette Down 32.0 → 3.7 / 3.8 (−88 %; elements 32.2 → 3.9), type+erase −13 %; Meridian Down 21.5 → 0.8 (−96 %), type+erase −19 %. Min times −3…+1 %. Step 5: suite 0 slower JIT + AOT, 1 faster AOT (captures 88f72224); 105 palette scenes (framework light/dark, Junction dark/light, Meridian, Vesper dark/light) A/A identical and A/B 0 px inside the card; reader trees and recording diffs key by key identical; audit 0 STALE. Core 5,037, Headless 1,285, Junction 1,075, Meridian 465, Vesper 876, Linux bridge 104 pass; Fedora Headless a11y/palette/VirtualList 316, bridge 104. |
 | 7 | f5e8baeb, b6119ae9 | findbar-step-builds-nothing (API) | Suite twin rows: a find step beside a 3,000-row list, the bar in the view / with `Moved`. **Public additive `FindBar.Moved` (`Action?`)**: when set, a step that moves only the current match (Enter, Shift+Enter, F3, n, p, arrows) runs `Moved` instead of `onChanged`; the bar writes the count into the label on screen (found by automation id, as `FindBarElement` finds its parts) and runs `Service`, so the reveal still happens; without a bar on screen or without `Moved`, the old path. Junction diff and Vesper reader/comparison `InvalidateRow` the two rows the match moved between; Junction Files and Meridian response hand the TextArea a new `Highlights` list. KB per Enter, AOT (JIT within 2 KB): Junction diff 88.0 → 31.5 (−64 %), Meridian response 60.2 → 12.6 (−79 %), Vesper reader 69.1 → 21.1 (−69 %); builds per Enter 1 → 0; median CPU −2…−5 %; typing unchanged. Suite row 170.4 → 8.1 KB (−95 %), min 0.623 → 0.604 ms JIT, 0.658 → 0.609 AOT; suite 0/0 JIT + AOT (captures 62ac3205). Declined (DECISIONS.md): the bar as its own `Part` (48.8 / 28.6 / 38.4 KB an Enter; the bar's build alone 16 KB), the count as its own `Part` (typing +0.3–0.4 KB), a `Ref` on the count (typing +0.1 KB). 189 find scenes (Junction diff and Files dark/light, Vesper reader and comparison dark/light, Meridian response) A/A and A/B identical: pixels, bridge tree, told changes, focus. Core 5,037, Headless 1,295, Meridian 465, Vesper 876, Junction 1,075, Fedora Headless 1,172 pass; 4 reverse edits. ELEMENTS.md §19. |
+| 7 | 31595ee9, 86f9c609, 77ce4633, 2937e090 | a11y-structural-refresh-in-place | Suite rows: image grid Down at 100 ms a key (recording, UIA, AT-SPI) and a composite walk (recording, AT-SPI), with trees per key. The in-place walk takes children added, gone or moved: pairs them as the differ does (by position, then id), builds only the new subtrees and hands the bridge a full diff in the same order; a removed node's parent is a stand-in holding the old children (AT-SPI keeps the old index); `ReplaceChildren` swaps the array in one write; items added at or removed from a list's end and the open row handled. Children-dirty frames use it too. Internal test switch `Window.AccessibilityBuildsEveryRefresh`; no API change. Suite (JIT = AOT within 0.3 KB): grid Down 144.6 → 127.5 KB (−12 %), UIA −11 %, AT-SPI −10 %, trees 1.0 → 0 a key; filter below 1,000 rows 284 → 12.7 (−96 %; AT-SPI −94 %), min −6…−8 %; add a row, AT-SPI −81 %; `--compare` 0/0 (captures eac6fb72). Probes JIT, KB a key: Junction Changes Down UIA 155.6 → 116.6 (−25 %), trees 62 → 0 over 40 keys; wheel at 120 ms 51.3 → 25.9 (−50 %), 60 → 0; a notch a frame 21.5 → 17.7, 18 → 0; Aperture Down 286.1 → 260.4 (−9 %), 38 → 0; bridge off, nodes added/removed and AT-SPI signal counts identical. Audit over 7 suites: 0 STALE in 3,127; 5,450 in-place walks (3,356 structural), 0 WALK-VALUE, 0 WALK-EVENT; fallbacks 135 → 120. Event streams: Linux signals (5,146) and UIA raises (460) identical, Headless diffs by test identical. Core, Headless, both bridges, Aperture, Vesper, Meridian, Junction 1,075 pass; Fedora Headless 1,190, bridge 104; live pyatspi not run (harness gone). ACCESSIBILITY-PLAN.md. |
 
 ## Examined, not worth it
 
@@ -734,3 +740,13 @@ From 2026-10-27 (round 6's survey); earlier entries are in the archive ([to 2026
   changed (REACTIVITY.md's "value that changes ten times a second"); a control in a `Part` still rebuilds every
   element in it (~16 KB for the find bar). Left open: a typed character still builds the whole view (Junction diff
   406 KB a key, mostly rows making new highlights); the terminal and Fluent samples use `Build()` without `Moved`.
+- 2026-11-03: round 7 step 7 landed (31595ee9..2937e090; captures eac6fb72): a layout refresh or a Children-dirty
+  frame updates the accessibility tree in place when children come, go or move — 0 whole trees on Junction Changes
+  keys and wheels and Aperture's grid (were 1–1.55 a key), filter −96 %, Changes wheel with UIA −50 %, Down −25 %; a
+  reader gets the same diff (audit 0 STALE, 0 walk mismatches over 3,356 structural walks; event streams identical).
+  Guideline note: a reader no longer costs a whole tree when rows are remade or scroll in; what still builds one is a
+  property change no patch takes (a kept composite row's `AccessibleSelected`, a composite list's own `SelectedIndex`);
+  tests comparing against a full build use `Window.AccessibilityBuildsEveryRefresh`. Left open (Waiting
+  a11y-composite-selection-in-place): composite-list selection still builds a tree (suite composite walk 1.0 a key);
+  the walk allocates 6.9–8.2 KB even on Junction's unchanged tree (likely row names from text content); 11 Headless
+  tests fail under the audit splice (7 before), all pass without it.
