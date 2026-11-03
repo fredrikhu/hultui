@@ -785,6 +785,15 @@ public override Element Build()
 
 Without keys, inserting an item at the beginning of the list would cause every element to be patched with the next item's data instead of shifting elements down.
 
+**A child that comes and goes ahead of siblings of its own type needs a key.** When the number of
+unkeyed children changes, the old and new children are matched from both ends while their types
+agree, so a child that appears in front of children of its own type takes the first one's place:
+that one is patched into the newcomer, and the next one into it, and so on. Meridian's stale-preview
+banner (a row) came in above the assertion rows (rows) with the first key after a send; the first
+row's fields were made again, the one being typed into lost the keyboard, and the next key went
+nowhere. Key the newcomer (`banner.Key = "stale-banner"`); its unkeyed siblings are still matched by
+position among themselves.
+
 ### Event handlers follow the latest build
 
 When patching, app event handlers (registered via `On<TEvent>`) **are copied from the new tree** — the retained element always runs the latest `Build()`'s handlers, exactly like properties and callback props. A handler that closes over per-item data therefore stays in sync with what the element displays: if the differ patches element #0 from "Apple" → "Banana", the handler is the new build's, and it captured "Banana". Conditionally attached handlers work the same way — a button built disabled (no handler) then rebuilt enabled gets the enabled build's handler; no key tricks required. (Element-internal wiring, like a `TextInputElement`'s own key handling, is *owned* by the element and survives patching untouched.)

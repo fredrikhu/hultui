@@ -47,10 +47,16 @@ public partial class MeridianApp
 
         if (PreviewStale(tab))
         {
+            // Keyed: it comes with the first edit after a send and goes when the edit is undone,
+            // ahead of the rows, which are rows like it. Unkeyed, the reconcile matched the column's
+            // children by type from the front, so the first row was patched into the banner and
+            // its fields made again: the one being typed into lost the keyboard, and the next key
+            // went nowhere.
             var banner = Flex.Row(gap: Azimuth.S3).Height(28).FlexShrink(0).AlignItems(AlignItems.Center)
                 .Padding(new Thickness(0, Azimuth.S2, 0, Azimuth.S2))
                 .Background(Azimuth.Alpha(Azimuth.StatusWarn, 0.10))
                 .CornerRadius(Azimuth.Radius1);
+            banner.Key = "stale-banner";
             banner.AddChild(Text.New("! preview is stale — request edited since last send")
                 .FontSize(11f).TextColor(Azimuth.StatusWarn).AutomationId("stale-banner"));
             banner.AddChild(Box.New().FlexGrow(1));
