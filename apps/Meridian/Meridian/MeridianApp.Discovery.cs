@@ -62,35 +62,40 @@ public partial class MeridianApp
 
     // ── Actions ──────────────────────────────────────────────────────────
 
-    internal void StartDiscovery(string baseUrl)
+    internal void StartDiscovery(string pastedUrl)
     {
-        _mapBaseUrl = baseUrl.TrimEnd('/');
+        var (baseUrl, specUrls) = OpenApi.ProbeCandidates(pastedUrl);
+        _mapBaseUrl = baseUrl;
         _map = ApiMap.Empty(_mapBaseUrl);
         _specError = null;
         _mapSelection = null;
         MarkDirty();
-        ProbeForSpec(_mapBaseUrl);
+        ProbeForSpec(baseUrl, specUrls);
     }
 
-    /// <summary>Tries the well-known spec locations in order. Finding one is
-    /// the delight moment: a quiet toast, and the map fills in behind it.</summary>
-    private async void ProbeForSpec(string baseUrl)
+    /// <summary>Tries the pasted URL, then the well-known spec locations, in
+    /// order. Finding one is the delight moment: a quiet toast, and the map
+    /// fills in behind it.</summary>
+    private async void ProbeForSpec(string baseUrl, IReadOnlyList<string> specUrls)
     {
         _probing = true;
         MarkDirty();
         try
         {
-            foreach (var candidate in OpenApi.WellKnownPaths)
+            foreach (var url in specUrls)
             {
-                var result = await Engine.SendAsync(new RequestSpec("GET", baseUrl + candidate, []));
+                var result = await Engine.SendAsync(new RequestSpec("GET", url, []));
                 if (result.Response is not { StatusCode: >= 200 and < 300 } response) continue;
                 if (response.Body.Kind != BodyKind.Text) continue;
 
-                var imported = OpenApi.Parse(response.Body.Text, baseUrl, candidate, out var failure);
+                // The path under the base, as the toast and the map's source say it.
+                var candidate = url.Length > baseUrl.Length && url.StartsWith(baseUrl, StringComparison.OrdinalIgnoreCase)
+                    ? url[baseUrl.Length..] : url;
+                var imported = OpenApi.Parse(OpenApi.FullText(response.Body), baseUrl, candidate, out var failure);
                 if (imported == null)
                 {
                     // A 200 that isn't a spec is not an error — keep probing.
-                    if (failure != null && candidate == OpenApi.WellKnownPaths[^1])
+                    if (failure != null && url == specUrls[^1])
                         SetSpecError(candidate, failure);
                     continue;
                 }
