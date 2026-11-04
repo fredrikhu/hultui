@@ -91,16 +91,19 @@ public partial class MeridianApp
         var col = Flex.Column(gap: 0).FlexShrink(0);
         if (bottom)
         {
-            // 380 when the window has room for it above the editor's floor; shorter windows
-            // shrink the pane, never below its own floor (see EditorMinHeight).
-            col.Height(Azimuth.ResponseBottom).FlexShrink(1).MinHeight(BottomPaneMinHeight)
+            // 380 (or as dragged) when the window has room for it above the editor's floor;
+            // shorter windows shrink the pane, never below its own floor (see EditorMinHeight).
+            float room = _window.LayoutHeight - TitleBarHeight - EditorMinHeight;
+            col.Height(ResponsePaneSize(_responseHeight, room)).FlexShrink(1).MinHeight(BottomPaneMinHeight)
                .BorderColor(Azimuth.BorderStrong).BorderWidth(new Thickness(0, 2, 0, 0));
         }
         else
         {
-            col.Width(Azimuth.ResponseRight)
+            float room = _window.LayoutWidth - Azimuth.RailWidth - Azimuth.TreeWidth - EditorMinWidth;
+            col.Width(ResponsePaneSize(_responseWidth, room))
                .BorderColor(Azimuth.BorderStrong).BorderWidth(new Thickness(2, 0, 0, 0));
         }
+        col.AddChild(BuildResponseResizeHandle(bottom));
         // A role, so the panel itself lands in the accessibility tree (and is
         // findable by automation id — containers without one are invisible there).
         col.AccessibleRole(AccessibilityRole.TabPanel).AccessibleName("Response");
@@ -136,6 +139,33 @@ public partial class MeridianApp
         contentBox.AddChild(content);
         col.AddChild(contentBox);
         return col;
+    }
+
+    /// <summary>The size the pane is built at: the splitter's, never more than the room the
+    /// editor's floor leaves (<see cref="PaneSplitter.SetMax"/>). A drag stops there, and a
+    /// pane a smaller window cut short comes back when it grows.</summary>
+    private static float ResponsePaneSize(PaneSplitter split, float room)
+    {
+        split.SetMax(room);
+        return split.Size;
+    }
+
+    /// <summary>The grip on the pane's inner edge — its left beside the editor, its top under it —
+    /// laid over the pane's border rather than beside it, so it takes nothing from the editor's
+    /// floor or the breakpoint. Arrow keys move it too, with Shift for bigger steps.</summary>
+    private Element BuildResponseResizeHandle(bool bottom)
+    {
+        var split = bottom ? _responseHeight : _responseWidth;
+        var handle = split.Handle(Azimuth.Alpha(Azimuth.Accent, 0.18f), Azimuth.Alpha(Azimuth.Accent, 0.40f));
+        handle.AccessibleName = bottom ? "Resize the response pane's height" : "Resize the response pane's width";
+        handle.AutomationId("response-resize");
+        handle.Position.Type = PositionType.Absolute;
+        handle.Position.Top = Dimension.Px(0);
+        handle.Position.Left = Dimension.Px(0);
+        if (bottom) handle.Width(Dimension.Percent(100)).Height(6);
+        else handle.Width(6).Height(Dimension.Percent(100));
+        handle.ZIndex(5);
+        return handle;
     }
 
     private static Element CenterNote(string text) =>

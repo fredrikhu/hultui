@@ -123,6 +123,14 @@ public partial class MeridianApp : Component, IDisposable
     internal const int MinWindowHeight = 540;
     private bool _responseBottomChoice;
     private bool _forceResponseBottom;
+
+    // The response pane's size, dragged by the handle on its inner edge: its width beside the
+    // editor, its height under it. Session state, as the flip is. Moving it rebuilds the pane
+    // alone (ResponseDirty): the handle and the size are both the pane's.
+    internal const float ResponseMinWidth = 480f;
+    private const float TitleBarHeight = 40f;
+    private readonly PaneSplitter _responseWidth;
+    private readonly PaneSplitter _responseHeight;
     internal bool ResponseAtBottom => _responseBottomChoice || _forceResponseBottom;
 
     // Small anchored popover (method picker). Junction's idiom.
@@ -171,6 +179,12 @@ public partial class MeridianApp : Component, IDisposable
         _responseFind = NewResponseFind();
         // History's search, walk and filters show in the History view alone (see Part).
         _historyFind = new TextSearch(MarkViewDirty);
+        // Each pane is after its handle (right of it, under it). The largest is the window's
+        // room less the editor's floor, held at build time (ResponsePaneSize).
+        _responseWidth = new PaneSplitter(ResponseDirty, null, ResponseMinWidth, 10_000f, Azimuth.ResponseRight,
+            SplitterAxis.Horizontal, trailing: true);
+        _responseHeight = new PaneSplitter(ResponseDirty, null, BottomPaneMinHeight, 10_000f, Azimuth.ResponseBottom,
+            SplitterAxis.Vertical, trailing: true);
 
         View = MeridianView.Requests;
 
@@ -230,6 +244,9 @@ public partial class MeridianApp : Component, IDisposable
             .TextColor(Azimuth.Text)
             .FontSize(12f)
             .Children(titleBar, body);
+        // A drag ends wherever the button comes up, so its move and release are heard here.
+        _responseWidth.AttachDrag(root);
+        _responseHeight.AttachDrag(root);
 
         // Overlays are conditional; keys keep each reconciling only against its
         // own kind rather than by position.

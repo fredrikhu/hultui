@@ -114,6 +114,69 @@ public class ResponseViewerTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    // ── Resizing the pane ────────────────────────────────────────────────
+
+    private static HultUI.Core.Primitives.Rect Box(HeadlessSession session, string automationId) =>
+        session.Window.FindByAutomationId(automationId)!.Element.Layout.AbsoluteBorderBox;
+
+    private static void DragHandle(HeadlessSession session, float dx, float dy)
+    {
+        var grip = Box(session, "response-resize");
+        var from = new HultUI.Core.Primitives.Point(grip.X + grip.Width / 2, grip.Y + grip.Height / 2);
+        session.Window.Drag(from, new HultUI.Core.Primitives.Point(from.X + dx, from.Y + dy));
+        session.PumpFrames(2);
+    }
+
+    /// <summary>Beside the editor the pane's inner edge drags: left widens it, up to the room the
+    /// editor's floor leaves (1440 − rail 48 − tree 264 − editor 448 = 680), and the arrow keys
+    /// move it too.</summary>
+    [Fact]
+    public void TheRightPaneWidensByItsInnerEdge_UpToTheEditorsFloor()
+    {
+        Hosted((session, app) =>
+        {
+            SendAndWait(session, app, "ok");
+            Assert.Equal(560, Box(session, "response-right").Width, 0.5);
+
+            DragHandle(session, -90, 0);
+            Assert.Equal(650, Box(session, "response-right").Width, 0.5);
+
+            DragHandle(session, -400, 0);   // held where the editor keeps its 448
+            Assert.Equal(680, Box(session, "response-right").Width, 0.5);
+
+            DragHandle(session, 300, 0);    // within the window: past its edge a headless pointer stops
+            Assert.Equal(MeridianApp.ResponseMinWidth, Box(session, "response-right").Width, 0.5);
+
+            session.Window.FindByAutomationId("response-resize")!.Element.Focus();
+            session.Window.PressKey(KeyCode.Left);
+            session.PumpFrames(2);
+            Assert.True(Box(session, "response-right").Width > MeridianApp.ResponseMinWidth, "Left widens it");
+        });
+    }
+
+    /// <summary>Under the editor the pane's top edge drags: up makes it taller, for a long body.</summary>
+    [Fact]
+    public void TheBottomPaneGrowsTallerByItsTopEdge()
+    {
+        Hosted((session, app) =>
+        {
+            SendAndWait(session, app, "ok");
+            session.Window.PressKey(KeyCode.Backslash, KeyModifiers.Ctrl);
+            session.PumpFrames(2);
+            Assert.Equal(380, Box(session, "response-bottom").Height, 0.5);
+
+            DragHandle(session, 0, -150);
+            Assert.Equal(530, Box(session, "response-bottom").Height, 0.5);
+
+            // Flipped away and back, it keeps the height it was given.
+            session.Window.PressKey(KeyCode.Backslash, KeyModifiers.Ctrl);
+            session.PumpFrames(2);
+            session.Window.PressKey(KeyCode.Backslash, KeyModifiers.Ctrl);
+            session.PumpFrames(2);
+            Assert.Equal(530, Box(session, "response-bottom").Height, 0.5);
+        });
+    }
+
     [Fact]
     public void ANarrowWindowForcesTheBottomOrientation()
     {
