@@ -94,12 +94,17 @@ internal sealed class ResponseView
         CancellationToken cancellationToken) =>
         view.GrammarPath is { } grammar ? Tokenize(grammar, view.Text, view.LineStarts, clock, cancellationToken) : null;
 
-    /// <summary>Pretty mode: JSON re-indented via a real parse; anything that isn't valid JSON
-    /// (or isn't JSON at all) shows as received.</summary>
+    /// <summary>Pretty mode: JSON re-indented via a real parse, HTML and XML re-indented
+    /// (<see cref="MarkupPretty"/>); a JSON that doesn't parse, and any other type, shows as
+    /// received.</summary>
     internal static string Prettify(HttpResponseData response)
     {
-        if (response.Body.Truncated) return response.Body.Text;   // a cut JSON never parses
         var ct = response.ContentType;
+        if (ct != null && ct.Contains("html", StringComparison.OrdinalIgnoreCase))   // xhtml too
+            return MarkupPretty.Html(response.Body.Text);
+        if (ct != null && ct.Contains("xml", StringComparison.OrdinalIgnoreCase))
+            return MarkupPretty.XmlOrIndented(response.Body.Text);   // a cut-off one is indented, not parsed
+        if (response.Body.Truncated) return response.Body.Text;   // a cut JSON never parses
         bool json = ct != null && (ct.Contains("/json", StringComparison.OrdinalIgnoreCase)
             || ct.Contains("+json", StringComparison.OrdinalIgnoreCase));
         if (!json) return response.Body.Text;
