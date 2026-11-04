@@ -142,8 +142,26 @@ instead.
 ## Walkthrough: OAuth2 client credentials
 
 This sets up a collection that fetches a token with the client-credentials grant and
-sends it with every request, without any hand-written files. It needs a real API with
-an OAuth2 token endpoint and a client registered on it; the test service above has none.
+sends it with every request, without any hand-written files. It needs an API with an
+OAuth2 token endpoint and a client registered on it.
+
+> **No server of your own yet?** Duende's public IdentityServer demo has a test client
+> anyone may use. Follow the steps with these values:
+>
+> | Step | Value |
+> |---|---|
+> | base URL (step 1) | `https://demo.duendesoftware.com` |
+> | `client_id` (step 2) | `m2m` |
+> | `client_secret` (step 4) | `secret` |
+> | token URL (step 5) | `{{base_url}}/connect/token` |
+> | scopes (step 5) | `api` |
+> | the request's URL (step 5) | `{{base_url}}/api/test` |
+>
+> The request returns the token's claims, or 401 without a token. `secret` is a
+> published demo value, not a real secret, so marking it secret is practice for the real
+> thing. The server is shared and public: send it nothing private, and it may be down.
+>
+> ![Meridian after a send to the demo: OAuth2 with the /connect/token URL and the api scope, the token valid for 60 minutes, 200 OK, and the token's claims as JSON](guide/10-oauth2-demo.png)
 
 1. **Make the collection.** Press **Ctrl+N**, pick a folder, name it `payments-api`, and
    give your API's base URL.
