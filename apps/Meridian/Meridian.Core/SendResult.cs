@@ -76,13 +76,30 @@ public sealed record HttpResponseData(
     PhaseTimings Timings,
     string FinalUrl);
 
+/// <summary>
+/// The request as it went out, which the request file does not show: variables resolved, the
+/// auth header added (an OAuth2 token included), the jar's cookies and the computed
+/// <c>Content-Length</c>, in the order the engine set them, <c>Host</c> first. The first
+/// request only — a redirect the handler follows is in the response's final URL.
+/// </summary>
+public sealed record SentRequest(
+    string Method,
+    string Url,
+    IReadOnlyList<(string Name, string Value)> Headers,
+    string? Body);
+
 /// <summary>Either a response (any status — a 500 is a <i>successful send</i>)
-/// or an infra failure. Never both.</summary>
+/// or an infra failure. Never both. Either way <see cref="Request"/> is what was sent.</summary>
 public sealed record SendResult
 {
     public HttpResponseData? Response { get; private init; }
     public InfraFailure? Failure { get; private init; }
 
+    /// <summary>What went out; null when the send failed before there was a request to send.</summary>
+    public SentRequest? Request { get; private init; }
+
     public static SendResult Ok(HttpResponseData response) => new() { Response = response };
     public static SendResult Infra(InfraFailure failure) => new() { Failure = failure };
+
+    public SendResult Sent(SentRequest? request) => this with { Request = request };
 }

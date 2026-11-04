@@ -86,7 +86,7 @@ public partial class MeridianApp : Component, IDisposable
     private readonly Dictionary<string, int> _extractedRun = new(StringComparer.Ordinal);
     private readonly Dictionary<(string Path, string Variable), int> _extractLastMatched = new();
     private int _runCounter;
-    internal enum ResponseTab { Body, Headers, Cookies, Timeline }
+    internal enum ResponseTab { Body, Headers, Cookies, Timeline, Request }
 
     // Response pane orientation: right 560dip by default, Ctrl+\ flips to
     // bottom 380dip, and below the breakpoint bottom is forced regardless.

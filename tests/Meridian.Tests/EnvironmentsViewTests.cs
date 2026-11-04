@@ -926,6 +926,56 @@ public class EnvironmentsViewTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    // ── The Request tab: what went out ───────────────────────────────────
+
+    /// <summary>The editor shows {{api_token}}; the Request tab shows what the wire carried —
+    /// with the secret's value masked wherever it lands until it is revealed.</summary>
+    [Fact]
+    public void TheRequestTabShowsWhatWentOut_WithASecretMaskedUntilRevealed()
+    {
+        Hosted((session, app, keyring) =>
+        {
+            keyring.Set(_rootFull(app), "local", "api_token", "tok-12345");
+            Click(session, "req-echo");
+            Click(session, "send");
+            session.PumpUntil(() => app.ActiveTab!.Result != null, TimeSpan.FromSeconds(10));
+            session.PumpFrames(2);
+            Click(session, "resptab-request");
+
+            Assert.True(Contains(session, $"{_server.Origin}/echo"), "the request line");
+            Assert.True(Contains(session, new Uri(_server.Origin).Authority), "the Host header");
+            Assert.True(Contains(session, "token=••••••••"), "the body, its secret masked");
+            Assert.False(Contains(session, "tok-12345"));
+
+            Click(session, "sent-reveal");
+            Assert.True(Contains(session, "token=tok-12345"), "reveal shows the value");
+        });
+    }
+
+    [Fact]
+    public void TheRequestTabMasksAnAuthorizationHeaderButKeepsItsScheme()
+    {
+        Write("authz.req", "GET {{base_url}}/ok\nheader Authorization: Bearer abc.def.ghi\n");
+        Hosted((session, app, keyring) =>
+        {
+            Click(session, "req-authz");
+            Click(session, "send");
+            session.PumpUntil(() => app.ActiveTab!.Result != null, TimeSpan.FromSeconds(10));
+            session.PumpFrames(2);
+            Click(session, "resptab-request");
+
+            // The editor shows the file's own line; the Request tab masks what went out.
+            bool InPanel(string text) => Walk(Node(session, "response-right")).Any(n =>
+                n.Name?.Contains(text, StringComparison.Ordinal) == true);
+            Assert.True(InPanel("Bearer ••••••••"));
+            Assert.False(InPanel("abc.def.ghi"));
+            Assert.True(InPanel("no body"));
+
+            Click(session, "sent-reveal");
+            Assert.True(InPanel("Bearer abc.def.ghi"));
+        });
+    }
+
     [Fact]
     public void AMissingSecretBlocksTheSendWithTheMachineLocalCopy()
     {

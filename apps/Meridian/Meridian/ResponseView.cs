@@ -108,11 +108,17 @@ internal sealed class ResponseView
         bool json = ct != null && (ct.Contains("/json", StringComparison.OrdinalIgnoreCase)
             || ct.Contains("+json", StringComparison.OrdinalIgnoreCase));
         if (!json) return response.Body.Text;
+        return PrettyJson(response.Body.Text) ?? response.Body.Text;
+    }
+
+    /// <summary>JSON re-indented through a real parse, or null when it isn't JSON.</summary>
+    internal static string? PrettyJson(string text)
+    {
         try
         {
             // Utf8JsonWriter, not JsonSerializer: no reflection, so Native AOT
             // has nothing to trim away.
-            using var doc = JsonDocument.Parse(response.Body.Text);
+            using var doc = JsonDocument.Parse(text);
             using var buffer = new MemoryStream();
             using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Indented = true }))
                 doc.WriteTo(writer);
@@ -120,7 +126,7 @@ internal sealed class ResponseView
         }
         catch (JsonException)
         {
-            return response.Body.Text;
+            return null;
         }
     }
 
