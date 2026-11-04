@@ -4,6 +4,10 @@ A native, keyboard-first HTTP/API client. Collections are **folders of plain
 text files** — no cloud, no login, no account wall — so a request is something
 you review in a pull request, and the same files run in CI.
 
+**New to Meridian?** [GUIDE.md](GUIDE.md) walks through every task in the app —
+a new collection, environments, secrets, an OAuth2 client-credentials setup, runs
+and CI — without a file to write by hand. This README is the reference.
+
 Three projects:
 
 | Project | What it is |
