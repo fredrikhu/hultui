@@ -22,6 +22,8 @@ command and every request by name.
 
 ## Start a collection
 
+![The start screen: Open a folder, New collection, Import OpenAPI and Discover an API](guide/01-start.png)
+
 1. Press **Ctrl+N**, or choose **New collection** on the start screen.
 2. Pick the folder to put the collection in.
 3. Type a name, for example `payments-api`, and press **Enter**.
@@ -48,12 +50,16 @@ On the Requests view (**1**):
 - Each folder's row has the same pair, for a request or a folder inside it.
 - The palette's **New request…** and **New folder…** make them in the root.
 
+![The New request prompt over the Requests tree, with list-refunds typed](guide/03-new-request.png)
+
 Type a name and press **Enter**. A new request starts as `GET {{base_url}}/` and opens
 with the keyboard in its URL box. A name with `/`, `\`, `..`, a leading or trailing dot,
 a character Windows refuses, or a name already taken is refused in the prompt, with the
 reason under the field.
 
 ## Edit and send a request
+
+![A request open in the editor: the method chip, the URL with {{base_url}}, and the Params, Headers, Body, Auth, Assertions and Chain tabs](guide/02-requests.png)
 
 - **The method**: click the method chip (`GET`) and pick another.
 - **The URL**: type it, using variables such as `{{base_url}}`. A variable the active
@@ -71,6 +77,8 @@ An environment holds the variables for one place your API runs: `local`, `stagin
 They are edited side by side on the Environments view (**5**): one row per key, one
 column per environment.
 
+![The Environments view: ci, local and staging side by side, a secret client_secret not yet set, and client_id missing from ci](guide/04-environments.png)
+
 1. **New environment…** (shown when there are none, or **＋ new environment** under
    the list) asks for a name. The new environment becomes the active one.
 2. **＋ add key** adds a key, such as `base_url` or `client_id`, to the active
@@ -79,6 +87,8 @@ column per environment.
    column: click it, then type the value.
 4. **✕** at a row's end removes the key from every environment.
 5. Press **Ctrl+S**. The footer counts unsaved environments until you do.
+
+![The New environment prompt, with prod typed](guide/05-new-environment.png)
 
 **Switch environment** with **Ctrl+E** or the `env:` chip in the title bar. Choosing
 **no environment** is allowed: requests that need a variable then say which one is
@@ -99,6 +109,8 @@ The value never reaches the collection, so it never reaches the repository.
 
 Once stored, the cell shows the value masked, where it comes from, and
 **reveal (5 s)**. Its **⋯** menu (or a right-click on the cell) manages it:
+
+![local's stored client_secret, masked, with its menu open: Change…, Use everywhere, Forget](guide/06-secret-menu.png)
 
 - **Change…** replaces the value. The old one is never shown.
 - **Use everywhere** makes this environment's value the *shared* one, which every
@@ -139,6 +151,8 @@ sends it with every request, without any hand-written files.
    request), and click the **Auth** tab. Choose **OAuth2**. The fields start as
    `{{base_url}}/oauth/token`, `{{client_id}}` and `{{client_secret}}`. Change the token
    URL if your server's differs, add **scopes** if it needs them, and press **Ctrl+S**.
+
+   ![The Auth tab set to OAuth2: grant type client_credentials, the token URL, client id, client secret and scopes fields](guide/07-oauth2.png)
 6. **Send.** Press **Ctrl+Enter**. Meridian fetches a token, then sends the request with
    `Authorization: Bearer …`. The Auth tab shows the token's state, such as
    **● token valid · expires in 59 m**, and a later send fetches a new token when it
@@ -164,6 +178,8 @@ In CI, the same collection runs with the secret from an environment variable; se
 
 ## Run the collection
 
+![The Runner view: scope (the collection or one folder), stop on failure, and Run, with the same run as a CI command below](guide/08-runner.png)
+
 Press **2**. Pick the scope (the whole collection or one folder), tick **stop on
 failure** if you want the run to stop at the first failed assertion, and click **Run**.
 **Ctrl+R** runs the collection from any view. Results stream in as they arrive;
@@ -187,6 +203,8 @@ Every row in the Requests tree and in the environment list has a **⋯** at its 
 right-click on the row opens the same menu: **Rename…** and **Delete…**. **F2** and
 **Delete** do the same for the open request, or for the active environment on the
 Environments view.
+
+![A request row's ⋯ menu in the Requests tree: Rename… and Delete…](guide/09-row-menu.png)
 
 - **Rename** keeps an open tab, with its unsaved edits, on the renamed file. A renamed
   environment keeps its keyring values and stays active.
