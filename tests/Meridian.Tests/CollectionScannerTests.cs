@@ -55,6 +55,25 @@ public class CollectionScannerTests : IDisposable
         Assert.Equal(["api"], tree.Root.Folders.Select(f => f.Name));
     }
 
+    /// <summary>The app's ＋ new folder writes a _folder.req, which keeps the folder in the tree
+    /// before its first request; an empty folder is still pruned.</summary>
+    [Fact]
+    public void AFolderWithItsOwnDefaultsFileIsKeptWithoutRequests()
+    {
+        Write("api/ping.req", "GET https://x/ping\n");
+        Write("admin/_folder.req", "# defaults\n");
+        Write("admin/roles/_folder.req", "");
+        Directory.CreateDirectory(Path.Combine(_root, "empty"));
+
+        var tree = Scan();
+
+        Assert.Equal(["admin", "api"], tree.Root.Folders.Select(f => f.Name));
+        var admin = tree.Root.Folders[0];
+        Assert.True(admin.HasFolderDefaults);
+        Assert.Empty(admin.Requests);
+        Assert.Equal(["roles"], admin.Folders.Select(f => f.Name));
+    }
+
     [Fact]
     public void DotDirectoriesAreNeverEntered()
     {

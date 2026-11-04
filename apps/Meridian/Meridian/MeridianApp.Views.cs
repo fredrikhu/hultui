@@ -18,9 +18,8 @@ public partial class MeridianApp
     /// <summary>
     /// First run, per mock 02 frame 3: the wordmark with flanking rules fading
     /// outward, one sentence, four entry cards. The Discover card carries the
-    /// accent border — the differentiating pillar gets the emphasis. Cards whose
-    /// feature hasn't landed use the sheet's disabled treatment (45% opacity),
-    /// never a click that silently does nothing.
+    /// accent border — the differentiating pillar gets the emphasis. Every card
+    /// is live: New collection, the last, landed 2026-11-04.
     /// </summary>
     private Element BuildFrontDoor()
     {
@@ -48,7 +47,7 @@ public partial class MeridianApp
                 Shortcuts.Keys("open"), OpenFolder),
             EntryCard(Icons.Plus, "New collection",
                 "Creates a folder, a first request, and an env file.",
-                "", null)));   // not built yet: no action, and so no key to name
+                Shortcuts.Keys("new"), NewCollection)));
         grid.AddChild(Flex.Row(gap: Azimuth.S3).Children(
             EntryCard(Icons.ImportSpec, "Import OpenAPI",
                 "A spec file or URL becomes a browsable endpoint map.",
@@ -74,12 +73,9 @@ public partial class MeridianApp
 
     private static Element BuildWordmarkLarge() => Wordmark(28f, Azimuth.Text);
 
-    /// <summary>An entry card. A null <paramref name="onClick"/> means the feature
-    /// hasn't landed: the sheet's 45% disabled treatment + an honest tooltip.</summary>
-    private Element EntryCard(string glyph, string title, string desc, string key, Action? onClick, bool accent = false)
+    /// <summary>An entry card: an icon, a title, the key that does it, one line of what it does.</summary>
+    private Element EntryCard(string glyph, string title, string desc, string key, Action onClick, bool accent = false)
     {
-        bool enabled = onClick != null;
-
         var card = Flex.Column(gap: Azimuth.S2)
             .Width(320).FlexShrink(0)
             .Padding(new Thickness(Azimuth.S4))
@@ -87,28 +83,20 @@ public partial class MeridianApp
             .Background(Azimuth.Surface)
             .BorderColor(accent ? Azimuth.Accent : Azimuth.Border).BorderWidth(1f)
             .AccessibleRole(AccessibilityRole.Button)
-            .AccessibleName(enabled ? title : $"{title} (not available yet)")
+            .AccessibleName(title)
             .AutomationId("door-" + title.ToLowerInvariant().Replace(' ', '-'));
 
         var head = Flex.Row(gap: Azimuth.S2).AlignItems(AlignItems.Center);
-        head.AddChild(Ui.Icon(glyph, 16f, enabled ? Azimuth.Accent300 : Azimuth.TextMuted));
+        head.AddChild(Ui.Icon(glyph, 16f, Azimuth.Accent300));
         head.AddChild(Text.New(title).FontSize(13f).FontWeight(FontWeight.Medium).TextColor(Azimuth.Text));
         head.AddChild(Box.New().FlexGrow(1));
         if (key.Length > 0) head.AddChild(Ui.Kbd(key));
         card.AddChild(head);
         card.AddChild(Text.New(desc).FontSize(11.5f).TextColor(Azimuth.TextMuted));
 
-        if (enabled)
-        {
-            card.Cursor(CursorType.Pointer);
-            card.OnClick(_ => onClick!());
-            card.HoverBg(Azimuth.Raised, Azimuth.Surface);
-        }
-        else
-        {
-            card.Opacity(0.45f);
-            card.Tooltip("Arrives in a later phase — see IMPLEMENTATION-PLAN.md");
-        }
+        card.Cursor(CursorType.Pointer);
+        card.OnClick(_ => onClick());
+        card.HoverBg(Azimuth.Raised, Azimuth.Surface);
         return card;
     }
 

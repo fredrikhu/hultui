@@ -49,7 +49,7 @@ public partial class MeridianApp : Component, IDisposable
     private readonly IKeyring _keyring;
 
     // The one secret whose value is momentarily revealed, and until when.
-    private (string Key, long UntilTs)? _reveal;
+    private (string Env, string Key, long UntilTs)? _reveal;
 
     // Open requests. One engine for the whole session — it owns the connection
     // pool, the cookie jar, and the workspace's trusted certificates.
@@ -59,7 +59,8 @@ public partial class MeridianApp : Component, IDisposable
 
     internal sealed class RequestTab(string path, ReqDocument doc)
     {
-        public string Path { get; } = path;
+        /// <summary>The file, which follows a rename made in the app.</summary>
+        public string Path { get; set; } = path;
         public ReqDocument Doc { get; set; } = doc;
         public bool Dirty => Doc.Edited;
         public SendResult? Result;
@@ -146,7 +147,8 @@ public partial class MeridianApp : Component, IDisposable
 
     public MeridianApp(Application app, Window window, IFileDialogs? fileDialogs = null,
         int viewerCapBytes = 1024 * 1024,
-        IKeyring? keyring = null)
+        IKeyring? keyring = null,
+        IFileTrash? trash = null)
     {
         _app = app;
         _window = window;
@@ -163,6 +165,7 @@ public partial class MeridianApp : Component, IDisposable
         // headless pair under test, so nothing needs substituting for either.
         _fileDialogs = fileDialogs ?? window.FileDialogs;
         _keyring = keyring ?? new DefaultKeyring();
+        _trash = trash ?? FileTrash.Default();
         Engine = new HttpEngine(viewerCapBytes);
         _oauth = new OAuth2(Engine);
         _responseFind = NewResponseFind();
@@ -242,6 +245,12 @@ public partial class MeridianApp : Component, IDisposable
             dialog.Key = "dialog";
             root.AddChild(dialog);
         }
+        if (_confirm is { } confirmSpec)
+        {
+            var confirm = BuildConfirm(confirmSpec);
+            confirm.Key = "confirm";
+            root.AddChild(confirm);
+        }
         if (_popover != null)
         {
             var popover = BuildPopover(_popover);
@@ -270,7 +279,16 @@ public partial class MeridianApp : Component, IDisposable
         if (_pendingDialogFocus)
         {
             _pendingDialogFocus = false;
-            _dialogRef.Current?.Focus();
+            if (_dialogRef.Current is { } field && _window.IsInTree(field))
+            {
+                field.Focus();
+                if (_dialogValue.Length > 0) field.SelectAll();   // a rename's name: typing replaces it
+            }
+        }
+        if (_pendingConfirmFocus)
+        {
+            _pendingConfirmFocus = false;
+            if (_confirmRef.Current is { } ok && _window.IsInTree(ok)) ok.Focus();
         }
         _responseFind.Service();
     }
@@ -448,13 +466,16 @@ public partial class MeridianApp : Component, IDisposable
     internal RequestTab? ActiveTab => _activeTab >= 0 && _activeTab < _tabs.Count ? _tabs[_activeTab] : null;
     internal int OpenTabCount => _tabs.Count;
 
-    internal void OpenRequest(string path)
+    /// <param name="editUrl">Open a new tab with its URL box open and taking the keyboard — a
+    /// request just made, whose URL is the first thing it needs.</param>
+    internal void OpenRequest(string path, bool editUrl = false)
     {
         int existing = _tabs.FindIndex(t => string.Equals(t.Path, path, StringComparison.OrdinalIgnoreCase));
         if (existing >= 0) { _activeTab = existing; MarkDirty(); return; }
         if (TryReadFile(path) is not { } text) { Flash($"Could not read {Path.GetFileName(path)}"); return; }
-        _tabs.Add(new RequestTab(path, ReqDocument.Parse(text)));
+        _tabs.Add(new RequestTab(path, ReqDocument.Parse(text)) { UrlEditing = editUrl });
         _activeTab = _tabs.Count - 1;
+        _pendingUrlFocus |= editUrl;
         MarkDirty();
     }
 
@@ -502,12 +523,12 @@ public partial class MeridianApp : Component, IDisposable
     internal Dictionary<string, string> EnvironmentValues()
     {
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (_env is not { } env || _workspace is not { } ws) return values;
+        if (_env is not { } env || _envName is not { } envName || _workspace is not { } ws) return values;
         foreach (var key in env.Keys)
         {
             if (env.IsSecret(key))
             {
-                if (_keyring.Get(ws.Root, key) is { } secret) values[key] = secret;
+                if (Secrets.Resolve(_keyring, ws.Root, envName, key) is { } secret) values[key] = secret.Value;
             }
             else if (env.Values.TryGetValue(key, out var value))
                 values[key] = value;
@@ -547,7 +568,7 @@ public partial class MeridianApp : Component, IDisposable
             // copy, naming the machine-local fix rather than the environment.
             var missingSecret = unresolved.Distinct().FirstOrDefault(n => _env?.IsSecret(n) == true);
             Flash(missingSecret != null
-                ? $"secret {missingSecret} not set on this machine — set it in Environments (5)"
+                ? $"secret {missingSecret} not set on this machine for {_envName} — set it in Environments (5)"
                 : $"Unresolved in env {_envName ?? "(none)"}: {string.Join(", ", unresolved.Distinct().Select(n => $"{{{{{n}}}}}"))}");
             return;
         }
@@ -650,6 +671,12 @@ public partial class MeridianApp : Component, IDisposable
             else if (e.Key == KeyCode.Escape) { CancelDialog(); e.StopPropagation = true; }
             return;
         }
+        if (_confirm != null)
+        {
+            if (e.Key == KeyCode.Enter) { Confirm(); e.StopPropagation = true; }
+            else if (e.Key == KeyCode.Escape) { CancelConfirm(); e.StopPropagation = true; }
+            return;
+        }
 
         // The response find bar's keys route ahead of everything else — the
         // Junction discipline, so Esc closes the bar before it cancels a send
@@ -682,6 +709,8 @@ public partial class MeridianApp : Component, IDisposable
 
         if (typing) return;
 
+        if (FileShortcut(e)) { e.StopPropagation = true; return; }
+
         // The History view walks its rows with the arrows (the mock's key map).
         if (View == MeridianView.History && HandleHistoryKey(e))
         {
@@ -706,6 +735,7 @@ public partial class MeridianApp : Component, IDisposable
     private bool CtrlShortcut(KeyDownEvent e)
     {
         if (Shortcuts.Pressed("open", e)) { OpenFolder(); return true; }
+        if (Shortcuts.Pressed("new", e)) { NewCollection(); return true; }
         if (Shortcuts.Pressed("palette", e)) { TogglePalette(); return true; }
         if (Shortcuts.Pressed("env", e) && _workspace != null) { OpenEnvSwitcher(); return true; }
         if (Shortcuts.Pressed("save", e))

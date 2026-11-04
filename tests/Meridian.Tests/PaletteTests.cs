@@ -343,14 +343,17 @@ public class PaletteTests : IClassFixture<TestHttpServer>, IDisposable
     }
 
     [Fact]
-    public void TheCardForWhatIsNotBuilt_NamesNoKey()
+    public void TheNewCollectionCardNamesTheKeyThatOpensItsPicker()
     {
         Hosted((session, app) =>
         {
             Assert.True(Contains(session, "New collection"));
-            Assert.False(Contains(session, "Ctrl+N") || Contains(session, "Ctrl N"),
-                "the inert New collection card still advertises a key");
-            Assert.True(Contains(session, "Ctrl+I"));   // the import card's key, which works now
+            Assert.True(Contains(session, "Ctrl+N"), "the card names its key");
+            Assert.True(Contains(session, "Ctrl+I"));   // the import card's key
+            int opened = session.Window.FileDialogs.OpenCount;
+            session.Window.PressKey(KeyCode.N, KeyModifiers.Ctrl);
+            session.PumpFrames(2);
+            Assert.Equal(opened + 1, session.Window.FileDialogs.OpenCount);   // and the key works
         }, open: false);
     }
 }

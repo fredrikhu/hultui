@@ -667,8 +667,9 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
         (BoxElement)Part(fx, "tree").Descendant(automationId);
 
     /// <summary>The tree's unsaved dot: the row's last child, a filled accent box with nothing in it.</summary>
+    // Before the row's ⋯ (its rename / delete menu), which ends it.
     private static bool HasDot(BoxElement row) =>
-        row.Children[^1] is BoxElement { Children.Count: 0 } dot && dot.BackgroundColor == Azimuth.Accent;
+        row.Children.Any(c => c is BoxElement { Children.Count: 0 } dot && dot.BackgroundColor == Azimuth.Accent);
 
     private static bool Lit(Element e) => e is BoxElement b && b.BorderColor == Azimuth.Accent;
 
