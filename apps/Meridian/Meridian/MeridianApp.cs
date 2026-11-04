@@ -604,12 +604,14 @@ public partial class MeridianApp : Component, IDisposable
         TickWhileSending(tab, cts);
         try
         {
-            if (await ApplyAuthAsync(tab, resolver, headers, cts.Token) is { } authError)
+            var (authedUrl, authError) = await Auth.ApplyAsync(
+                EffectiveAuth(tab).Spec, resolver, _oauth, headers, url.Text, cts.Token);
+            if (authError != null)
             {
                 Flash(authError);
                 return;
             }
-            var spec = new RequestSpec(method, ApplyAuthQuery(tab, resolver, url.Text), headers, bodyText,
+            var spec = new RequestSpec(method, authedUrl, headers, bodyText,
                 bodyText != null && tab.Doc.Body!.Type == "json" ? "application/json" : null);
             tab.Result = await Task.Run(() => Engine.SendAsync(spec, cts.Token));
             tab.ResultSnapshot = tab.Doc.Serialize();
