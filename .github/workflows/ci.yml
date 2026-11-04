@@ -117,6 +117,53 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # Meridian keeps secret values in the platform's keyring. The suites above fake it; this job
+  # runs PlatformKeyringTests against the real one, which is what proves the P/Invoke: libsecret
+  # and a gnome-keyring on Linux, a keychain on macOS (Windows' Credential Manager needs no setup
+  # and is checked by hand). The only macOS job: nothing else here builds for it.
+  meridian-keyring:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      MERIDIAN_KEYRING_TESTS: '1'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build
+        run: dotnet build tests/Meridian.Tests -c Release
+
+      # A private session bus with a Secret Service on it, its login keyring made and unlocked
+      # from stdin: what a desktop session has after sign-in.
+      - name: Run the keyring tests (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends gnome-keyring libsecret-1-0 dbus-daemon
+          dbus-run-session -- sh -c 'printf ci | gnome-keyring-daemon --unlock --components=secrets >/dev/null &&
+            dotnet test tests/Meridian.Tests -c Release --no-build --filter FullyQualifiedName~PlatformKeyringTests'
+
+      # A throwaway keychain, unlocked and made the default: the runner's own login keychain may
+      # be locked, and a locked one would ask a person to unlock it.
+      - name: Run the keyring tests (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          security create-keychain -p ci meridian-ci.keychain
+          security set-keychain-settings meridian-ci.keychain
+          security unlock-keychain -p ci meridian-ci.keychain
+          security list-keychains -d user -s meridian-ci.keychain
+          security default-keychain -d user -s meridian-ci.keychain
+          dotnet test tests/Meridian.Tests -c Release --no-build --filter FullyQualifiedName~PlatformKeyringTests
+
   # The API reference is generated from the XML docs, so a bad <see cref="..."/>
   # or a link to a page that moved is a build break here rather than a broken
   # published site. Nothing is deployed — see docs/PACKAGING.md for the

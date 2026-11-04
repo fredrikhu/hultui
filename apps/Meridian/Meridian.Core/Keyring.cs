@@ -28,11 +28,28 @@ public interface IKeyring
     bool Delete(string workspaceRoot, string? environment, string key);
 }
 
-/// <summary>The platform's credential store, or none: only Windows has one so far, and
-/// elsewhere a secret comes from an environment variable alone (<see cref="Secrets.Resolve"/>).</summary>
+/// <summary>The platform's credential store: the Credential Manager on Windows
+/// (<see cref="WindowsCredentialKeyring"/>), the login keychain on macOS (<see cref="MacKeychain"/>),
+/// the Secret Service on Linux (<see cref="SecretServiceKeyring"/>). A machine with none to reach —
+/// a Linux server without libsecret, a container with no session bus — has secrets from
+/// environment variables alone (<see cref="Secrets.Resolve"/>), and <see cref="Unavailable"/> says
+/// why.</summary>
 public sealed class DefaultKeyring : IKeyring
 {
-    private readonly IKeyring? _store = OperatingSystem.IsWindows() ? new WindowsCredentialKeyring() : null;
+    private readonly IKeyring? _store;
+    private readonly string? _missing;
+
+    public DefaultKeyring()
+    {
+        if (OperatingSystem.IsWindows()) _store = new WindowsCredentialKeyring();
+        else if (OperatingSystem.IsMacOS()) _store = new MacKeychain();
+        else if (OperatingSystem.IsLinux()) _store = SecretServiceKeyring.TryCreate(out _missing);
+        else _missing = "this platform has no keyring Meridian knows";
+    }
+
+    /// <summary>Why this machine has no keyring to store a secret in, or null when it has one. On
+    /// Linux a store that loaded can still find no Secret Service running, which the first call learns.</summary>
+    public string? Unavailable => _missing ?? (_store as SecretServiceKeyring)?.Unavailable;
 
     public string? Get(string workspaceRoot, string? environment, string key) =>
         _store?.Get(workspaceRoot, environment, key);
@@ -64,8 +81,8 @@ public readonly record struct SecretValue(string Value, SecretSource Source)
 /// <item>the process environment variable <c>&lt;key&gt;</c> (<c>client_secret</c>) — how CI injects
 /// a secret without any keyring.</item>
 /// </list>
-/// The variables are what a machine with no keyring has (CI, and Linux and macOS today); the
-/// <c>&lt;env&gt;__</c> one lets such a machine hold a different value per environment.
+/// The variables are what a machine with no keyring has (CI, a Linux server without a Secret
+/// Service); the <c>&lt;env&gt;__</c> one lets such a machine hold a different value per environment.
 /// </summary>
 public static class Secrets
 {

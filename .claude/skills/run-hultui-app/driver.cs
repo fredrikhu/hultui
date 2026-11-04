@@ -180,7 +180,8 @@ Element MountVesper()
 
 Element MountMeridian()
 {
-    var a = new Meridian.MeridianApp(session.Application, session.Window.Window);
+    // An in-memory keyring: a secret set while driving must never reach this machine's real one.
+    var a = new Meridian.MeridianApp(session.Application, session.Window.Window, keyring: new MemoryKeyring());
     instance = a as IDisposable;
     var root = a.Mount();
     // --dir opens a collection, the same as picking a folder in the app. Without one
@@ -657,4 +658,20 @@ static (string Verb, string Arg) Split(string s, char sep)
 {
     int i = s.IndexOf(sep);
     return i < 0 ? (s, "") : (s[..i], s[(i + 1)..]);
+}
+
+// Meridian's secrets while driving: kept in memory, gone when the driver exits.
+sealed class MemoryKeyring : Meridian.Core.IKeyring
+{
+    private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
+    private static string Entry(string root, string? env, string key) => $"{root}|{env}|{key}";
+    public string? Get(string workspaceRoot, string? environment, string key) =>
+        _values.GetValueOrDefault(Entry(workspaceRoot, environment, key));
+    public bool Set(string workspaceRoot, string? environment, string key, string value)
+    {
+        _values[Entry(workspaceRoot, environment, key)] = value;
+        return true;
+    }
+    public bool Delete(string workspaceRoot, string? environment, string key) =>
+        _values.Remove(Entry(workspaceRoot, environment, key));
 }

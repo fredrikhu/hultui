@@ -13,7 +13,7 @@ setup guide is in the history: `git show d2bc157b:docs/SELF-HOSTED-RUNNERS.md`.
 
 | Workflow | Runs on | Jobs | Proves or produces |
 |---|---|---|---|
-| `ci.yml` | push to `main`, by hand | `test` (Windows), `test-linux`, `docs` | the whole solution's tests on both OSes; the DocFX site with warnings as errors |
+| `ci.yml` | push to `main`, by hand | `test` (Windows), `test-linux`, `meridian-keyring` (Linux, macOS), `docs` | the whole solution's tests on both OSes; Meridian's secrets in the real Linux and macOS keyrings; the DocFX site with warnings as errors |
 | `<app>-installer.yml` (Junction, Vesper, Meridian, Aperture, Reel) | an `<app>-vX.Y.Z` tag, by hand | `test`, `test-linux` (Junction, Meridian), `installer` | the app's tests, a NativeAOT build, an Inno Setup installer; a GitHub release on a tag |
 | `mpv-natives.yml` | an `mpv-natives-v*` tag, by hand | `windows`, `linux`, `package` | the trimmed LGPL libmpv for both OSes, proved by the backend tests, and `HultUI.Media.Mpv.Natives` |
 | `cef-natives.yml` | a `cef-natives-v*` tag, by hand | `pack` | `HultUI.WebView.Cef.Natives.<rid>` for linux-x64 and linux-arm64, proved by the engine tests |
@@ -31,7 +31,7 @@ publishes no release. A dispatch of a natives workflow publishes to that workflo
 
 ## The images
 
-The jobs name `windows-2025` and `ubuntu-24.04`, not `-latest`. A `-latest` label moves to a
+The jobs name `windows-2025`, `ubuntu-24.04` and (`meridian-keyring` alone) `macos-15`, not `-latest`. A `-latest` label moves to a
 new image on GitHub's schedule, and the apt package names in these workflows are Ubuntu
 24.04's (the `t64` names, `7zip`). Moving to a newer image is a change to every workflow at
 once, made on purpose.
@@ -43,6 +43,8 @@ What the jobs add to the image:
 | every job that runs `dotnet` | `actions/setup-dotnet`, `10.0.x` | there is no `global.json`, so any 10.0 SDK builds the solution, and the newest is taken |
 | `test-linux` | `fonts-dejavu-core fonts-noto-cjk fonts-noto-core fonts-noto-color-emoji 7zip` | see the next section |
 | `test-linux`, `cef-natives` | `sysctl kernel.apparmor_restrict_unprivileged_userns=0` | Ubuntu 24.04 forbids an unconfined program a user namespace, so Chromium's sandbox cannot start: the CEF engine tests time out and `CefSandboxTests.OnThisMachine_TheSandboxCanStart` fails. The old runner, a Proxmox container, had its host's 0. Not something to ask of a user (`docs/design/WEBVIEW-LINUX-BRIEF.md`), but a hosted VM is thrown away after its job |
+| `meridian-keyring` Linux | `gnome-keyring libsecret-1-0 dbus-daemon`, then a private `dbus-run-session` with `gnome-keyring-daemon --unlock` | a Secret Service with an unlocked login keyring, for `PlatformKeyringTests` (`MERIDIAN_KEYRING_TESTS=1`) |
+| `meridian-keyring` macOS | a throwaway `meridian-ci.keychain`, unlocked and made the default | the runner's login keychain may be locked, and a locked one asks a person |
 | installers | Inno Setup, when the image lacks it | the step falls back to `choco install innosetup` |
 | `mpv-natives` Windows | an MSYS2 MINGW64 toolchain and the packages `native/mpv/README.md` lists | through `msys2/setup-msys2` |
 | `mpv-natives` Linux | the apt list in `native/mpv/README.md` | |
