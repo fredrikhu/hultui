@@ -38,7 +38,7 @@ public class ResponseViewerTests : IClassFixture<TestHttpServer>, IDisposable
 
     private void Hosted(Action<HeadlessSession, MeridianApp> body,
         int viewerCap = 1024 * 1024, string? saveTo = null, HeadlessOptions? options = null,
-        int width = 1440)
+        int width = 1440, HultUI.WebView.IWebEngine? webEngine = null)
     {
         using var session = HeadlessSession.Create(width, 900, options: options);
         if (saveTo is not null)
@@ -46,7 +46,8 @@ public class ResponseViewerTests : IClassFixture<TestHttpServer>, IDisposable
         MeridianApp? app = null;
         try
         {
-            app = new MeridianApp(session.Application, session.Window.Window, viewerCapBytes: viewerCap);
+            app = new MeridianApp(session.Application, session.Window.Window, viewerCapBytes: viewerCap,
+                webEngine: webEngine);
             session.Application.SetRoot(app.Mount());
             app.OpenWorkspace(_root);
             session.PumpFrame();
@@ -112,6 +113,75 @@ public class ResponseViewerTests : IClassFixture<TestHttpServer>, IDisposable
             Assert.NotNull(session.Window.FindByAutomationId("response-bottom"));
             Assert.Null(session.Window.FindByAutomationId("response-right"));
         });
+    }
+
+    // ── The web preview ──────────────────────────────────────────────────
+
+    /// <summary>An HTML body offers "web": the page rendered, as a string document under a policy
+    /// that runs nothing, and a link out of it refused.</summary>
+    [Fact]
+    public void AnHtmlBodyRendersInTheWebPreview_AndALinkOutIsRefused()
+    {
+        Write("page.req", $"GET {_server.Origin}/page\n");
+        var engine = new HultUI.WebView.Testing.FakeWebEngine();
+        Hosted((session, app) =>
+        {
+            SendAndWait(session, app, "page");
+            Assert.Null(session.Window.FindByAutomationId("body-web-view"));
+
+            Click(session, "body-web");
+            session.PumpFrames(3);   // drawn, placed, ready: then the held document goes in
+            Assert.NotNull(session.Window.FindByAutomationId("body-web-view"));
+            var view = Assert.Single(engine.Views);
+            Assert.Contains("NavigateToString", view.Calls);
+            Assert.Equal("A page", app.PreviewWeb!.Title);
+
+            view.Navigate(new Uri("https://elsewhere.test/"));   // what a clicked link asks of the engine
+            Assert.Contains("Cancelled https://elsewhere.test/", view.Calls);
+
+            Click(session, "body-pretty");
+            Assert.Null(session.Window.FindByAutomationId("body-web-view"));
+        }, webEngine: engine);
+    }
+
+    [Fact]
+    public void TheWebToggleIsOfferedForHtmlAlone()
+    {
+        Hosted((session, app) =>
+        {
+            SendAndWait(session, app, "ok");   // application/json
+            Assert.NotNull(session.Window.FindByAutomationId("body-pretty"));
+            Assert.Null(session.Window.FindByAutomationId("body-web"));
+        }, webEngine: new HultUI.WebView.Testing.FakeWebEngine());
+    }
+
+    [Fact]
+    public void WithNoEngineThePreviewSaysWhy()
+    {
+        Write("page.req", $"GET {_server.Origin}/page\n");
+        var engine = new HultUI.WebView.Testing.FakeWebEngine
+        {
+            Availability = HultUI.WebView.WebEngineAvailability.Missing("The WebView2 Runtime is not installed."),
+        };
+        Hosted((session, app) =>
+        {
+            SendAndWait(session, app, "page");
+            Click(session, "body-web");
+            Assert.Equal("The WebView2 Runtime is not installed.",
+                session.Window.FindByAutomationId("web-unavailable")!.Name);
+            Assert.Empty(engine.Views);
+        }, webEngine: engine);
+    }
+
+    [Fact]
+    public void ThePreviewsPolicyComesFirst_ButAfterTheDoctype()
+    {
+        string meta = $"<meta http-equiv=\"Content-Security-Policy\" content=\"{MeridianApp.PreviewPolicy}\">";
+        Assert.Equal("<!DOCTYPE html>" + meta + "<p>x</p>", MeridianApp.PreviewDocument("<!DOCTYPE html><p>x</p>"));
+        Assert.Equal("\n <!doctype html>" + meta + "<p>x</p>", MeridianApp.PreviewDocument("\n <!doctype html><p>x</p>"));
+        Assert.Equal(meta + "<p>x</p>", MeridianApp.PreviewDocument("<p>x</p>"));
+        Assert.Contains("default-src 'none'", MeridianApp.PreviewPolicy);
+        Assert.DoesNotContain("script-src", MeridianApp.PreviewPolicy);   // so scripts fall to 'none'
     }
 
     // ── Resizing the pane ────────────────────────────────────────────────

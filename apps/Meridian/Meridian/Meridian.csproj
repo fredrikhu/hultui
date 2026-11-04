@@ -36,6 +36,11 @@
     <ProjectReference Include="..\Meridian.Core\Meridian.Core.csproj" />
     <ProjectReference Include="..\..\..\src\HultUI\HultUI.csproj" />
     <ProjectReference Include="..\..\..\src\HultUI.Icons\HultUI.Icons.csproj" />
+    <!-- The response pane's web preview: WebView2 on Windows, the system's CEF on Linux
+         (Fedora's cef package). No bundled CEF: where there is none the preview says so. -->
+    <ProjectReference Include="..\..\..\src\HultUI.WebView\HultUI.WebView.csproj" />
+    <ProjectReference Include="..\..\..\src\HultUI.WebView.WebView2\HultUI.WebView.WebView2.csproj" />
+    <ProjectReference Include="..\..\..\src\HultUI.WebView.Cef\HultUI.WebView.Cef.csproj" />
     <ProjectReference Include="..\..\..\src\HultUI.SourceGenerators\HultUI.SourceGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 

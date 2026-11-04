@@ -274,8 +274,12 @@ public partial class MeridianApp
         {
             bar.AddChild(PrettyRawToggle(tab, raw: false));
             bar.AddChild(PrettyRawToggle(tab, raw: true));
-            bar.AddChild(Box.New().Width(Azimuth.S2));
-            bar.AddChild(Ui.Kbd(Shortcuts.Keys("find")));
+            if (IsHtml(response)) bar.AddChild(WebToggle(tab));
+            if (!(tab.RespWeb && IsHtml(response)))
+            {
+                bar.AddChild(Box.New().Width(Azimuth.S2));
+                bar.AddChild(Ui.Kbd(Shortcuts.Keys("find")));
+            }
         }
         return bar;
     }
@@ -298,10 +302,16 @@ public partial class MeridianApp
         return b;
     }
 
-    private Element PrettyRawToggle(RequestTab tab, bool raw)
+    private Element PrettyRawToggle(RequestTab tab, bool raw) =>
+        BodyViewToggle(raw ? "raw" : "pretty", !tab.RespWeb && tab.RespRaw == raw,
+            () => { tab.RespRaw = raw; tab.RespWeb = false; });
+
+    /// <summary>The third view of an HTML body: rendered (<see cref="BuildWebPreview"/>).</summary>
+    private Element WebToggle(RequestTab tab) =>
+        BodyViewToggle("web", tab.RespWeb, () => tab.RespWeb = true);
+
+    private Element BodyViewToggle(string label, bool active, Action choose)
     {
-        bool active = tab.RespRaw == raw;
-        var label = raw ? "raw" : "pretty";
         var b = Box.New()
             .Padding(new Thickness(3, Azimuth.S2, 3, Azimuth.S2))
             .CornerRadius(Azimuth.Radius1)
@@ -311,7 +321,7 @@ public partial class MeridianApp
             .AutomationId("body-" + label)
             .Children(Ui.Mono(label, 10f, active ? Azimuth.Accent300 : Azimuth.TextMuted));
         if (active) b.Background(Azimuth.Tint(Azimuth.Accent));
-        b.OnClick(_ => { tab.RespRaw = raw; ResponseDirty(); });
+        b.OnClick(_ => { choose(); ResponseDirty(); });
         return b;
     }
 
@@ -328,6 +338,7 @@ public partial class MeridianApp
 
     private BoxElement BuildBodyTab(RequestTab tab, HttpResponseData response)
     {
+        if (tab.RespWeb && IsHtml(response)) return BuildWebPreview(response);
         var col = Flex.Column(gap: 0).FlexGrow(1);
 
         if (_responseFind.IsOpen)

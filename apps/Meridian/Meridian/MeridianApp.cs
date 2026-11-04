@@ -73,6 +73,8 @@ public partial class MeridianApp : Component, IDisposable
         public bool UrlEditing;
         public ResponseTab RespTab = ResponseTab.Body;
         public bool RespRaw;
+        /// <summary>The HTML body rendered (the web preview) rather than as text.</summary>
+        public bool RespWeb;
         /// <summary>The document as it read when the last response arrived —
         /// what the stale-preview banner compares against.</summary>
         public string? ResultSnapshot;
@@ -156,8 +158,12 @@ public partial class MeridianApp : Component, IDisposable
     public MeridianApp(Application app, Window window, IFileDialogs? fileDialogs = null,
         int viewerCapBytes = 1024 * 1024,
         IKeyring? keyring = null,
-        IFileTrash? trash = null)
+        IFileTrash? trash = null,
+        HultUI.WebView.IWebEngine? webEngine = null)
     {
+        // A given engine is the caller's (a test's fake); one made for the preview is ours.
+        _webEngine = webEngine;
+        _ownsWebEngine = webEngine == null;
         _app = app;
         _window = window;
         // The built-in widgets read the Application theme rather than the colours this app
@@ -783,6 +789,7 @@ public partial class MeridianApp : Component, IDisposable
         foreach (var tab in _tabs) tab.Sending?.Cancel();
         StopResponseWork();
         _watcher?.Dispose();
+        DisposePreview();
         Engine.Dispose();
     }
 }
