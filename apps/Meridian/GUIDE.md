@@ -12,6 +12,7 @@ command and every request by name.
 - [Start a collection](#start-a-collection)
 - [Make requests and folders](#make-requests-and-folders)
 - [Edit and send a request](#edit-and-send-a-request)
+- [Read the response](#read-the-response)
 - [Set up environments](#set-up-environments)
 - [Keep a secret out of the files](#keep-a-secret-out-of-the-files)
 - [Walkthrough: OAuth2 client credentials](#walkthrough-oauth2-client-credentials)
@@ -72,10 +73,40 @@ reason under the field.
   environment doesn't define is marked unresolved.
 - **Params**, **Headers** and **Body** are the tabs under the URL. **＋ add param** and
   **＋ add header** add a row; the body is a text area, JSON by default.
-- **Ctrl+Enter** sends and **Esc** cancels. **Ctrl+F** finds text in the response, and
-  **Ctrl+\\** moves the response pane between the right and the bottom.
+- **Ctrl+Enter** sends and **Esc** cancels.
 - **Ctrl+S** saves, and **Ctrl+W** closes the tab. If the file changes on disk while you
   have unsaved edits, a bar offers **reload** or **keep mine**.
+
+## Read the response
+
+The response pane sits beside the editor, or under it in a narrower window. **Ctrl+\\**
+moves it between the two. To resize it, drag its inner edge: the left edge beside the
+editor, the top edge under it. Dragging the top edge up gives a long body more room. With
+the edge focused, the arrow keys move it too (Shift for bigger steps). The editor always
+keeps room for its tabs and URL.
+
+Its tabs:
+
+- **Body** is what came back. **pretty** re-indents JSON, HTML and XML; **raw** shows the
+  bytes as they came; **web**, for an HTML page, renders it (see below). **Ctrl+F** finds
+  text in it.
+- **Headers** and **Cookies** are the *response's*: what the server sent back, and the
+  cookies it set.
+- **Timeline** shows where the time went: DNS, connect, TLS, waiting for the first byte,
+  and download.
+- **Request** is what Meridian *sent*: the method and URL with every variable filled in,
+  each header (including the `Authorization` header that auth adds, an OAuth2 token too),
+  the cookies sent, and the body. Credentials show masked, as **Bearer ••••••••**, and so
+  does any secret's value wherever it appears. **reveal (5 s)** shows them briefly.
+
+![The Request tab after a send to the OAuth2 demo: the URL with its variable filled in, Host, and the Authorization header masked as Bearer ••••••••](guide/11-request-tab.png)
+
+**web** renders the page the way a browser would, with one difference: nothing in it
+runs and nothing loads. Scripts are blocked, so are images, styles and fonts from
+elsewhere, and links don't open. Only the page's own inline styles apply. It's a look at
+the markup, safe for any API's HTML. It uses Microsoft Edge's WebView2 on Windows and
+the system's Chromium Embedded Framework on Linux (on Fedora, `sudo dnf install cef`).
+Where neither is available, the pane says why.
 
 ## Set up environments
 
