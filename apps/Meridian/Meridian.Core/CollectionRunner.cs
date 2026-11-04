@@ -55,9 +55,14 @@ public sealed record RunSummary(
 /// failed; infra failures don't stop the run; <c>stopOnFailure</c> stops on
 /// the first red (assertion) failure; with no assertions, 2xx is the pass.</para>
 /// </summary>
-public sealed class CollectionRunner(HttpEngine engine)
+public sealed class CollectionRunner(HttpEngine engine, OAuth2? oauth = null)
 {
-    public sealed record Request(string Path, string DisplayName, ReqDocument Doc);
+    /// <param name="Auth">The auth in effect for the request — its own <c>auth</c>
+    /// line or the one inherited from a <c>_folder.req</c> (<see cref="Meridian.Core.Auth.Effective"/>).
+    /// The caller resolves it, since only the caller knows the collection root.</param>
+    public sealed record Request(string Path, string DisplayName, ReqDocument Doc, AuthSpec? Auth = null);
+
+    private readonly OAuth2 _oauth = oauth ?? new OAuth2(engine);
 
     public async Task<RunSummary> RunAsync(
         IReadOnlyList<Request> scope,
@@ -169,7 +174,11 @@ public sealed class CollectionRunner(HttpEngine engine)
         SendResult send;
         try
         {
-            send = await engine.SendAsync(new RequestSpec(method, url.Text, headers, bodyText,
+            var (authedUrl, authError) = await Core.Auth.ApplyAsync(
+                request.Auth ?? AuthSpec.None, resolver, _oauth, headers, url.Text, ct);
+            if (authError != null)
+                return Done(RunVerdict.Infra, null, [], authError);
+            send = await engine.SendAsync(new RequestSpec(method, authedUrl, headers, bodyText,
                 bodyText != null && doc.Body!.Type == "json" ? "application/json" : null), ct);
         }
         catch (OperationCanceledException)

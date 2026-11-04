@@ -160,6 +160,34 @@ public class CollectionRunnerTests : IClassFixture<TestHttpServer>
         });
     }
 
+    [Fact]
+    public async Task ARunSendsTheAuthInheritedFromAFolderFile()
+    {
+        // The CLI's path: loader resolves _folder.req auth, the runner sends it.
+        var root = Directory.CreateTempSubdirectory("meridian-auth-").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, "envs"));
+            File.WriteAllText(Path.Combine(root, "envs", "ci.env"), "user=svc\nsecret password\n");
+            File.WriteAllText(Path.Combine(root, "_folder.req"), "auth basic {{user}} {{password}}\n");
+            Directory.CreateDirectory(Path.Combine(root, "api"));
+            File.WriteAllText(Path.Combine(root, "api", "whoami.req"), $"GET {_server.Origin}/whoami\n");
+
+            var keyring = new EnvironmentsViewTests.FakeKeyring();
+            keyring.Set(root, "ci", "password", "s3cret");
+            var loaded = CollectionLoader.Load(root, "ci", keyring, out var error);
+            Assert.Null(error);
+
+            using var engine = new HttpEngine();
+            var summary = await new CollectionRunner(engine).RunAsync(
+                loaded!.Requests, loaded.Environment, false, null, default);
+
+            var expected = "Basic " + Convert.ToBase64String("svc:s3cret"u8.ToArray());
+            Assert.Equal(expected, summary.Results.Single().Send!.Response!.Body.Text);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     // ── Reports ──────────────────────────────────────────────────────────
 
     [Fact]
