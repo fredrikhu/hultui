@@ -541,8 +541,14 @@ public class ReviewTests
                 TimeSpan.FromSeconds(20));
             session.PumpFrames(4);
 
+            // The diff's colours are tokenized off the UI thread, and the one landing for the file
+            // on screen builds the view. On a loaded runner it can land inside a measured key and
+            // read as that key's second build, so each measured stretch starts once none is left.
+            void SettleColours() => session.PumpUntil(() => app.HighlightsPending == 0, TimeSpan.FromSeconds(20));
+
             void TypeAndCheck(string text, string card)
             {
+                SettleColours();
                 int quiet = 0;
                 foreach (var ch in text)
                 {
@@ -588,6 +594,7 @@ public class ReviewTests
             var boldButton = () => LayoutProbe.Descendants<ButtonElement>(ById(session, "review-composer")!, b => b.AutomationId == "richtext-bold").Single();
             Assert.NotEqual(true, boldButton().AccessibleToggled);
             var typedIn = Focused(session);
+            SettleColours();
             int moved = 0;
             for (int i = 0; i < 2; i++)
             {
