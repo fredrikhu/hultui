@@ -438,11 +438,18 @@ public partial class MeridianApp
             MarkDirty();
         });
 
+    /// <summary>The keyring refused a value. Says why when the machine has no keyring at all (a Linux
+    /// machine without libsecret or a running Secret Service), and the variable that works instead.</summary>
     /// <param name="envName">The environment the value was for, or null for every environment.</param>
-    private void FlashNoKeyring(string? envName, string key) =>
+    private void FlashNoKeyring(string? envName, string key)
+    {
+        string problem = _keyring is DefaultKeyring { Unavailable: { } why }
+            ? $"No keyring on this machine: {why}"
+            : $"The keyring didn't store {key}";
         Flash(envName == null
-            ? $"No keyring on this platform — set the environment variable {key} instead"
-            : $"No keyring on this platform — set the environment variable {Secrets.VariableName(envName, key)} (or {key} for every environment) instead");
+            ? $"{problem} — set the environment variable {key} instead"
+            : $"{problem} — set the environment variable {Secrets.VariableName(envName, key)} (or {key} for every environment) instead");
+    }
 
     /// <summary>Makes <paramref name="envName"/>'s own value the shared one, and every environment
     /// then uses it: the own values of the others on this machine go too, after a confirmation that

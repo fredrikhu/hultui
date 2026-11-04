@@ -61,13 +61,28 @@ first of:
 3. the shared value in the keyring;
 4. the environment variable `client_secret`.
 
-The variables are what a machine without a keyring has: CI, and Linux and
-macOS, where Meridian has no keyring store yet. `<env>__<key>` is the one that
-holds a different value per environment there. On Windows the keyring is the
-Credential Manager (generic credentials): `meridian:staging|<collection>|client_secret`
-for one environment's value, `meridian|<collection>|client_secret` for the
-shared one. Values stored before they were per environment have the shared
-name, so they keep serving every environment; nothing needs moving.
+The keyring is the platform's own, and an entry is named the same way on each:
+`meridian:staging|<collection>|client_secret` for one environment's value,
+`meridian|<collection>|client_secret` for the shared one. Values stored before
+they were per environment have the shared name, so they keep serving every
+environment; nothing needs moving.
+
+| OS | Keyring | Where to see an entry |
+|---|---|---|
+| Windows | Credential Manager, a generic credential named as above | Control Panel → Credential Manager → Windows Credentials |
+| macOS | the login keychain, a generic password whose service is named as above and whose account is the key | Keychain Access → login |
+| Linux | the Secret Service (GNOME Keyring, KWallet, KeePassXC) through libsecret: an item of the default collection with the schema `io.github.fredrikhu.Meridian` and the attributes `collection`, `environment` (`*` for the shared value) and `key` | Seahorse ("Passwords and Keys") or KWallet Manager, labelled `Meridian: client_secret (staging) in <collection>` |
+
+macOS ties a keychain item to the program that stored it, so a newer build of
+Meridian may ask once to read an item an older one stored. Meridian reads each
+entry once per run and remembers the answer, so a change made in one of the
+tools above shows after a restart.
+
+The variables are what a machine without a keyring has: CI, or a Linux machine
+without libsecret or a running Secret Service (a server, a container, an SSH
+session with no desktop). Setting a value there says why, and names the
+variable to set instead. `<env>__<key>` is the one that holds a different value
+per environment.
 
 **Collections, requests and folders are made in the app** (key 1), with no
 file to write by hand:
