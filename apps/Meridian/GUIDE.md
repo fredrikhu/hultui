@@ -27,8 +27,14 @@ command and every request by name.
 1. Press **Ctrl+N**, or choose **New collection** on the start screen.
 2. Pick the folder to put the collection in.
 3. Type a name, for example `payments-api`, and press **Enter**.
-4. Type the API's base URL, for example `https://api.example.com`, or leave it blank to
-   fill in later. Press **Enter**.
+4. Type your API's base URL, or leave it blank to fill in later. Press **Enter**.
+
+> **Addresses in this guide are placeholders.** `api.example.com` and its kin are
+> reserved for documentation and answer nothing, so a send to them says **could not
+> resolve host**. Use your own API's address. To try Meridian without one, use
+> `https://httpbin.org`, a public test service: `{{base_url}}/get` returns what you
+> sent, and `{{base_url}}/status/404` returns that status. You can change the base URL
+> at any time on the Environments view (**5**).
 
 Meridian creates the folder with a first request (`GET {{base_url}}/`) and a `local`
 environment holding `base_url`, then opens both. Nothing is written until the last
@@ -136,10 +142,11 @@ instead.
 ## Walkthrough: OAuth2 client credentials
 
 This sets up a collection that fetches a token with the client-credentials grant and
-sends it with every request, without any hand-written files.
+sends it with every request, without any hand-written files. It needs a real API with
+an OAuth2 token endpoint and a client registered on it; the test service above has none.
 
 1. **Make the collection.** Press **Ctrl+N**, pick a folder, name it `payments-api`, and
-   give `https://api.example.com` as the base URL.
+   give your API's base URL.
 2. **Add the client's id.** Press **5**. `local` is active. Click **＋ add key**, type
    `client_id`, press **Enter**, and type the id in the `local` column.
 3. **Add the client's secret as a secret.** Click **＋ add key**, type `client_secret`
