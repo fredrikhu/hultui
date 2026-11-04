@@ -80,6 +80,8 @@ public sealed class TestHttpServer : IDisposable
                     "/echo" => Respond(stream, 200, "OK", "text/plain",
                         Encoding.UTF8.GetBytes($"{method}|{Encoding.UTF8.GetString(body)}")),
                     "/big" => Respond(stream, 200, "OK", "text/plain", Encoding.UTF8.GetBytes(new string('a', 5000))),
+                    "/page" => Respond(stream, 200, "OK", "text/html; charset=utf-8",
+                        "<!doctype html><html><head><title>A page</title></head><body><h1>Hello</h1><script>alert(1)</script></body></html>"u8.ToArray()),
                     "/binary" => Respond(stream, 200, "OK", "image/png",
                         [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D]),
                     "/redirect" => Respond(stream, 302, "Found", "text/plain", [], "Location: /ok\r\n"),

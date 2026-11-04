@@ -91,16 +91,19 @@ public partial class MeridianApp
         var col = Flex.Column(gap: 0).FlexShrink(0);
         if (bottom)
         {
-            // 380 when the window has room for it above the editor's floor; shorter windows
-            // shrink the pane, never below its own floor (see EditorMinHeight).
-            col.Height(Azimuth.ResponseBottom).FlexShrink(1).MinHeight(BottomPaneMinHeight)
+            // 380 (or as dragged) when the window has room for it above the editor's floor;
+            // shorter windows shrink the pane, never below its own floor (see EditorMinHeight).
+            float room = _window.LayoutHeight - TitleBarHeight - EditorMinHeight;
+            col.Height(ResponsePaneSize(_responseHeight, room)).FlexShrink(1).MinHeight(BottomPaneMinHeight)
                .BorderColor(Azimuth.BorderStrong).BorderWidth(new Thickness(0, 2, 0, 0));
         }
         else
         {
-            col.Width(Azimuth.ResponseRight)
+            float room = _window.LayoutWidth - Azimuth.RailWidth - Azimuth.TreeWidth - EditorMinWidth;
+            col.Width(ResponsePaneSize(_responseWidth, room))
                .BorderColor(Azimuth.BorderStrong).BorderWidth(new Thickness(2, 0, 0, 0));
         }
+        col.AddChild(BuildResponseResizeHandle(bottom));
         // A role, so the panel itself lands in the accessibility tree (and is
         // findable by automation id — containers without one are invisible there).
         col.AccessibleRole(AccessibilityRole.TabPanel).AccessibleName("Response");
@@ -136,6 +139,33 @@ public partial class MeridianApp
         contentBox.AddChild(content);
         col.AddChild(contentBox);
         return col;
+    }
+
+    /// <summary>The size the pane is built at: the splitter's, never more than the room the
+    /// editor's floor leaves (<see cref="PaneSplitter.SetMax"/>). A drag stops there, and a
+    /// pane a smaller window cut short comes back when it grows.</summary>
+    private static float ResponsePaneSize(PaneSplitter split, float room)
+    {
+        split.SetMax(room);
+        return split.Size;
+    }
+
+    /// <summary>The grip on the pane's inner edge — its left beside the editor, its top under it —
+    /// laid over the pane's border rather than beside it, so it takes nothing from the editor's
+    /// floor or the breakpoint. Arrow keys move it too, with Shift for bigger steps.</summary>
+    private Element BuildResponseResizeHandle(bool bottom)
+    {
+        var split = bottom ? _responseHeight : _responseWidth;
+        var handle = split.Handle(Azimuth.Alpha(Azimuth.Accent, 0.18f), Azimuth.Alpha(Azimuth.Accent, 0.40f));
+        handle.AccessibleName = bottom ? "Resize the response pane's height" : "Resize the response pane's width";
+        handle.AutomationId("response-resize");
+        handle.Position.Type = PositionType.Absolute;
+        handle.Position.Top = Dimension.Px(0);
+        handle.Position.Left = Dimension.Px(0);
+        if (bottom) handle.Width(Dimension.Percent(100)).Height(6);
+        else handle.Width(6).Height(Dimension.Percent(100));
+        handle.ZIndex(5);
+        return handle;
     }
 
     private static Element CenterNote(string text) =>
@@ -237,14 +267,19 @@ public partial class MeridianApp
         bar.AddChild(RespTabButton(tab, ResponseTab.Headers, $"Headers {CountLabel(response.Headers.Count)}"));
         bar.AddChild(RespTabButton(tab, ResponseTab.Cookies, $"Cookies {CountLabel(cookieCount)}"));
         bar.AddChild(RespTabButton(tab, ResponseTab.Timeline, "Timeline"));
+        if (tab.Result?.Request != null) bar.AddChild(RespTabButton(tab, ResponseTab.Request, "Request"));
         bar.AddChild(Box.New().FlexGrow(1));
 
         if (tab.RespTab == ResponseTab.Body && response.Body.Kind == BodyKind.Text)
         {
             bar.AddChild(PrettyRawToggle(tab, raw: false));
             bar.AddChild(PrettyRawToggle(tab, raw: true));
-            bar.AddChild(Box.New().Width(Azimuth.S2));
-            bar.AddChild(Ui.Kbd(Shortcuts.Keys("find")));
+            if (IsHtml(response)) bar.AddChild(WebToggle(tab));
+            if (!(tab.RespWeb && IsHtml(response)))
+            {
+                bar.AddChild(Box.New().Width(Azimuth.S2));
+                bar.AddChild(Ui.Kbd(Shortcuts.Keys("find")));
+            }
         }
         return bar;
     }
@@ -267,10 +302,16 @@ public partial class MeridianApp
         return b;
     }
 
-    private Element PrettyRawToggle(RequestTab tab, bool raw)
+    private Element PrettyRawToggle(RequestTab tab, bool raw) =>
+        BodyViewToggle(raw ? "raw" : "pretty", !tab.RespWeb && tab.RespRaw == raw,
+            () => { tab.RespRaw = raw; tab.RespWeb = false; });
+
+    /// <summary>The third view of an HTML body: rendered (<see cref="BuildWebPreview"/>).</summary>
+    private Element WebToggle(RequestTab tab) =>
+        BodyViewToggle("web", tab.RespWeb, () => tab.RespWeb = true);
+
+    private Element BodyViewToggle(string label, bool active, Action choose)
     {
-        bool active = tab.RespRaw == raw;
-        var label = raw ? "raw" : "pretty";
         var b = Box.New()
             .Padding(new Thickness(3, Azimuth.S2, 3, Azimuth.S2))
             .CornerRadius(Azimuth.Radius1)
@@ -280,7 +321,7 @@ public partial class MeridianApp
             .AutomationId("body-" + label)
             .Children(Ui.Mono(label, 10f, active ? Azimuth.Accent300 : Azimuth.TextMuted));
         if (active) b.Background(Azimuth.Tint(Azimuth.Accent));
-        b.OnClick(_ => { tab.RespRaw = raw; ResponseDirty(); });
+        b.OnClick(_ => { choose(); ResponseDirty(); });
         return b;
     }
 
@@ -289,6 +330,7 @@ public partial class MeridianApp
         ResponseTab.Headers => BuildHeadersTable(response),
         ResponseTab.Cookies => BuildCookiesTable(response),
         ResponseTab.Timeline => BuildTimeline(response),
+        ResponseTab.Request when tab.Result?.Request is { } sent => BuildSentRequest(sent),
         _ => BuildBodyTab(tab, response),
     };
 
@@ -296,6 +338,7 @@ public partial class MeridianApp
 
     private BoxElement BuildBodyTab(RequestTab tab, HttpResponseData response)
     {
+        if (tab.RespWeb && IsHtml(response)) return BuildWebPreview(response);
         var col = Flex.Column(gap: 0).FlexGrow(1);
 
         if (_responseFind.IsOpen)
@@ -530,6 +573,125 @@ public partial class MeridianApp
     private IReadOnlyList<TextHighlight>? _highlights;
     private int[]? _highlightsStarts;
     private (string Query, bool MatchCase, bool UseRegex, int Index, int Count) _highlightsSearch;
+
+    // ── Request: what went out ───────────────────────────────────────────
+
+    private const string Masked = "••••••••";
+
+    /// <summary>Headers whose whole value is a credential.</summary>
+    private static readonly HashSet<string> CredentialHeaders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Authorization", "Proxy-Authorization", "Cookie",
+    };
+
+    private long _sentRevealUntilTs;
+
+    /// <summary>
+    /// The request as it went out — the line, every header, the body — which the editor can't
+    /// show: it holds <c>{{variables}}</c>, and the auth header (an OAuth2 token too) is added at
+    /// send time. Credentials are masked until <see cref="RevealSent"/>: the credential headers
+    /// (keeping an <c>Authorization</c> scheme, "Bearer ••••••••"), and anywhere a secret's stored
+    /// value appears — in the URL, a header or the body.
+    /// </summary>
+    private BoxElement BuildSentRequest(SentRequest sent)
+    {
+        bool revealed = System.Diagnostics.Stopwatch.GetTimestamp() < _sentRevealUntilTs;
+        var secrets = revealed ? [] : SecretValuesInUse();
+        bool masked = false;
+        string Hide(string text)
+        {
+            foreach (var secret in secrets)
+                if (text.Contains(secret, StringComparison.Ordinal))
+                {
+                    masked = true;
+                    text = text.Replace(secret, Masked, StringComparison.Ordinal);
+                }
+            return text;
+        }
+
+        var col = Flex.Column(gap: 2).Padding(new Thickness(Azimuth.S2, Azimuth.S3, Azimuth.S3, Azimuth.S3));
+        col.AddChild(Flex.Row(gap: Azimuth.S2).AlignItems(AlignItems.FlexStart).FlexShrink(0)
+            .AutomationId("sent-request-line")
+            .Children(
+                Ui.Mono(sent.Method, 11.5f, Azimuth.Accent300).FlexShrink(0),
+                Ui.Mono(Hide(sent.Url), 11.5f, Azimuth.TextDim).FlexShrink(1)));
+
+        col.AddChild(Ui.Mono("HEADERS", 10f, Azimuth.TextMuted).FlexShrink(0)
+            .Margin(new Thickness(Azimuth.S2, 0, 0, 0)));
+        foreach (var (name, value) in sent.Headers)
+        {
+            string shown;
+            if (!revealed && CredentialHeaders.Contains(name))
+            {
+                masked = true;
+                int space = value.IndexOf(' ');
+                shown = space > 0 && !name.Equals("Cookie", StringComparison.OrdinalIgnoreCase)
+                    ? value[..space] + " " + Masked
+                    : Masked;
+            }
+            else shown = Hide(value);
+            col.AddChild(Flex.Row(gap: Azimuth.S3).AlignItems(AlignItems.FlexStart).FlexShrink(0)
+                .AutomationId("sent-header-" + name.ToLowerInvariant())
+                .Children(
+                    Ui.Mono(name, 11.5f, Azimuth.TextMuted).Width(180).FlexShrink(0),
+                    Ui.Mono(shown, 11.5f, Azimuth.TextDim).FlexShrink(1)));
+        }
+
+        if (sent.Body is { Length: > 0 } body)
+        {
+            bool json = sent.Headers.Any(h => h.Name.Equals("Content-Type", StringComparison.OrdinalIgnoreCase)
+                && h.Value.Contains("json", StringComparison.OrdinalIgnoreCase));
+            col.AddChild(Ui.Mono("BODY", 10f, Azimuth.TextMuted).FlexShrink(0)
+                .Margin(new Thickness(Azimuth.S3, 0, 0, 0)));
+            col.AddChild(Ui.Mono(Hide((json ? ResponseView.PrettyJson(body) : null) ?? body), 11.5f, Azimuth.TextDim)
+                .FlexShrink(0).AutomationId("sent-body"));
+        }
+        else
+            col.AddChild(Text.New("no body").FontSize(11f).TextColor(Azimuth.TextFaint).FlexShrink(0)
+                .Margin(new Thickness(Azimuth.S3, 0, 0, 0)));
+
+        var bar = Flex.Row(gap: Azimuth.S2).Height(30).FlexShrink(0).AlignItems(AlignItems.Center)
+            .Padding(new Thickness(0, Azimuth.S3, 0, Azimuth.S3));
+        bar.AddChild(Text.New("as sent — variables resolved, auth added").FontSize(10.5f).TextColor(Azimuth.TextFaint));
+        bar.AddChild(Box.New().FlexGrow(1));
+        if (masked)
+            bar.AddChild(BarAction($"reveal ({RevealSeconds} s)", "sent-reveal", RevealSent));
+
+        var scroll = ScrollView.New();
+        scroll.AddChild(col);
+        var scrollBox = Box.New().FlexGrow(1).FlexBasis(Dimension.Px(0));
+        scrollBox.AddChild(scroll);
+        var box = Flex.Column(gap: 0).FlexGrow(1);
+        box.AddChild(bar);
+        box.AddChild(scrollBox);
+        return box;
+    }
+
+    /// <summary>Every secret's value this machine would send, in any environment — the request
+    /// may predate a switch. Longest first, so one inside another is masked whole. Values under
+    /// four characters are left alone: masking each "ab" in a body would hide the body.</summary>
+    private List<string> SecretValuesInUse()
+    {
+        var values = new List<string>();
+        if (_workspace is not { } ws) return values;
+        foreach (var env in _envFiles)
+            if (_envDocs.GetValueOrDefault(env.Name) is { } doc)
+                foreach (var key in doc.Keys)
+                    if (doc.IsSecret(key) && Secrets.Resolve(_keyring, ws.Root, env.Name, key)?.Value is { Length: >= 4 } value
+                        && !values.Contains(value))
+                        values.Add(value);
+        values.Sort((a, b) => b.Length.CompareTo(a.Length));
+        return values;
+    }
+
+    private async void RevealSent()
+    {
+        _sentRevealUntilTs = System.Diagnostics.Stopwatch.GetTimestamp()
+            + System.Diagnostics.Stopwatch.Frequency * RevealSeconds;
+        ResponseDirty();
+        await Task.Delay(TimeSpan.FromSeconds(RevealSeconds));
+        ResponseDirty();
+    }
 
     // ── Headers / Cookies / Timeline ─────────────────────────────────────
 

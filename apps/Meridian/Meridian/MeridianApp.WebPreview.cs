@@ -1,0 +1,116 @@
+using HultUI.Core.Builders;
+using HultUI.Core.Elements;
+using HultUI.Core.Layout;
+using HultUI.Core.Primitives;
+using HultUI.WebView;
+using HultUI.WebView.Cef;
+using HultUI.WebView.WebView2;
+using Meridian.Core;
+using Meridian.Theme;
+
+namespace Meridian;
+
+public partial class MeridianApp
+{
+    // ── The body's web preview: an HTML response, rendered ───────────────
+    //
+    // An API's HTML is untrusted, so the page is shown as a string document under a policy that
+    // lets nothing run and nothing load: no scripts, no requests (images, styles, fonts, frames,
+    // fetch), only the page's own inline styles and data: images. A link, a form or a refresh
+    // that would leave the document is refused. Pretty and raw stay the way to read the bytes.
+
+    /// <summary>The policy the preview's document carries ahead of its own markup. A page's own
+    /// policy can only narrow it: every policy a document has must allow a load.</summary>
+    internal const string PreviewPolicy =
+        "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:";
+
+    private IWebEngine? _webEngine;
+    private readonly bool _ownsWebEngine;
+    private bool _webEngineTried;
+    private WebViewController? _preview;
+    private HttpResponseData? _previewShown;
+
+    /// <summary>The preview's page, once one was made: for tests.</summary>
+    internal WebViewController? PreviewWeb => _preview;
+
+    private static bool IsHtml(HttpResponseData response) =>
+        response.Body.Kind == BodyKind.Text
+        && response.ContentType?.Contains("html", StringComparison.OrdinalIgnoreCase) == true;
+
+    /// <summary>The engine, made the first time a preview is asked for: it owns a browser process.
+    /// WebView2 on Windows, CEF on Linux; none on macOS yet.</summary>
+    private IWebEngine? PreviewEngine()
+    {
+        if (_webEngine != null || _webEngineTried) return _webEngine;
+        _webEngineTried = true;
+        _webEngine = OperatingSystem.IsWindows() ? new WebView2Engine()
+            : OperatingSystem.IsLinux() ? new CefEngine()
+            : null;
+        return _webEngine;
+    }
+
+    /// <summary>
+    /// The HTML with <see cref="PreviewPolicy"/> as a <c>&lt;meta&gt;</c> before any of its own
+    /// markup, so it holds before the first script could run. After a doctype rather than ahead
+    /// of it: a document whose doctype isn't first renders in quirks mode.
+    /// </summary>
+    internal static string PreviewDocument(string html)
+    {
+        string meta = $"<meta http-equiv=\"Content-Security-Policy\" content=\"{PreviewPolicy}\">";
+        int start = 0;
+        while (start < html.Length && (char.IsWhiteSpace(html[start]) || html[start] == '﻿')) start++;
+        if (string.Compare(html, start, "<!doctype", 0, 9, StringComparison.OrdinalIgnoreCase) == 0
+            && html.IndexOf('>', start) is var end and >= 0)
+            return html[..(end + 1)] + meta + html[(end + 1)..];
+        return meta + html;
+    }
+
+    private WebViewController NewPreview(IWebEngine engine)
+    {
+        var web = new WebViewController(engine, new WebViewOptions { MessageOrigins = [] });
+        // The string document loads (about: or data:, by engine); nothing else does.
+        web.NavigationStarting += request =>
+        {
+            if (request.Uri.Scheme is not ("about" or "data")) request.Cancel();
+        };
+        return web;
+    }
+
+    private BoxElement BuildWebPreview(HttpResponseData response)
+    {
+        var col = Flex.Column(gap: 0).FlexGrow(1);
+        var engine = PreviewEngine();
+        if (engine is not { Availability.IsAvailable: true })
+        {
+            string reason = engine?.Availability.Reason ?? "there is no web engine for this platform yet";
+            col.JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
+                .Padding(new Thickness(Azimuth.S4))
+                .Children(
+                    Text.New("No web preview on this machine").FontSize(12f).TextColor(Azimuth.TextDim),
+                    Text.New(reason).FontSize(11f).TextColor(Azimuth.TextFaint).AutomationId("web-unavailable"));
+            return col;
+        }
+
+        _preview ??= NewPreview(engine);
+        if (!ReferenceEquals(_previewShown, response))
+        {
+            _previewShown = response;
+            _preview.NavigateToString(PreviewDocument(response.Body.Text));
+        }
+        col.AddChild(Flex.Row(gap: 0).Height(22).FlexShrink(0).AlignItems(AlignItems.Center)
+            .Padding(new Thickness(0, Azimuth.S3, 0, Azimuth.S3))
+            .Children(Text.New("rendered without scripts or network — links don't open")
+                .FontSize(10.5f).TextColor(Azimuth.TextFaint)));
+        var view = WebViewElement.New(_preview).FlexGrow(1);
+        view.AutomationId("body-web-view");
+        col.AddChild(view);
+        return col;
+    }
+
+    private void DisposePreview()
+    {
+        _preview?.Dispose();
+        _preview = null;
+        if (_ownsWebEngine) _webEngine?.Dispose();
+    }
+}

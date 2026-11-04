@@ -73,6 +73,8 @@ public partial class MeridianApp : Component, IDisposable
         public bool UrlEditing;
         public ResponseTab RespTab = ResponseTab.Body;
         public bool RespRaw;
+        /// <summary>The HTML body rendered (the web preview) rather than as text.</summary>
+        public bool RespWeb;
         /// <summary>The document as it read when the last response arrived —
         /// what the stale-preview banner compares against.</summary>
         public string? ResultSnapshot;
@@ -86,7 +88,7 @@ public partial class MeridianApp : Component, IDisposable
     private readonly Dictionary<string, int> _extractedRun = new(StringComparer.Ordinal);
     private readonly Dictionary<(string Path, string Variable), int> _extractLastMatched = new();
     private int _runCounter;
-    internal enum ResponseTab { Body, Headers, Cookies, Timeline }
+    internal enum ResponseTab { Body, Headers, Cookies, Timeline, Request }
 
     // Response pane orientation: right 560dip by default, Ctrl+\ flips to
     // bottom 380dip, and below the breakpoint bottom is forced regardless.
@@ -123,6 +125,14 @@ public partial class MeridianApp : Component, IDisposable
     internal const int MinWindowHeight = 540;
     private bool _responseBottomChoice;
     private bool _forceResponseBottom;
+
+    // The response pane's size, dragged by the handle on its inner edge: its width beside the
+    // editor, its height under it. Session state, as the flip is. Moving it rebuilds the pane
+    // alone (ResponseDirty): the handle and the size are both the pane's.
+    internal const float ResponseMinWidth = 480f;
+    private const float TitleBarHeight = 40f;
+    private readonly PaneSplitter _responseWidth;
+    private readonly PaneSplitter _responseHeight;
     internal bool ResponseAtBottom => _responseBottomChoice || _forceResponseBottom;
 
     // Small anchored popover (method picker). Junction's idiom.
@@ -148,8 +158,12 @@ public partial class MeridianApp : Component, IDisposable
     public MeridianApp(Application app, Window window, IFileDialogs? fileDialogs = null,
         int viewerCapBytes = 1024 * 1024,
         IKeyring? keyring = null,
-        IFileTrash? trash = null)
+        IFileTrash? trash = null,
+        HultUI.WebView.IWebEngine? webEngine = null)
     {
+        // A given engine is the caller's (a test's fake); one made for the preview is ours.
+        _webEngine = webEngine;
+        _ownsWebEngine = webEngine == null;
         _app = app;
         _window = window;
         // The built-in widgets read the Application theme rather than the colours this app
@@ -171,6 +185,12 @@ public partial class MeridianApp : Component, IDisposable
         _responseFind = NewResponseFind();
         // History's search, walk and filters show in the History view alone (see Part).
         _historyFind = new TextSearch(MarkViewDirty);
+        // Each pane is after its handle (right of it, under it). The largest is the window's
+        // room less the editor's floor, held at build time (ResponsePaneSize).
+        _responseWidth = new PaneSplitter(ResponseDirty, null, ResponseMinWidth, 10_000f, Azimuth.ResponseRight,
+            SplitterAxis.Horizontal, trailing: true);
+        _responseHeight = new PaneSplitter(ResponseDirty, null, BottomPaneMinHeight, 10_000f, Azimuth.ResponseBottom,
+            SplitterAxis.Vertical, trailing: true);
 
         View = MeridianView.Requests;
 
@@ -230,6 +250,9 @@ public partial class MeridianApp : Component, IDisposable
             .TextColor(Azimuth.Text)
             .FontSize(12f)
             .Children(titleBar, body);
+        // A drag ends wherever the button comes up, so its move and release are heard here.
+        _responseWidth.AttachDrag(root);
+        _responseHeight.AttachDrag(root);
 
         // Overlays are conditional; keys keep each reconciling only against its
         // own kind rather than by position.
@@ -766,6 +789,7 @@ public partial class MeridianApp : Component, IDisposable
         foreach (var tab in _tabs) tab.Sending?.Cancel();
         StopResponseWork();
         _watcher?.Dispose();
+        DisposePreview();
         Engine.Dispose();
     }
 }

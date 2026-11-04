@@ -229,6 +229,47 @@ public class HttpEngineTests : IClassFixture<TestHttpServer>
             engine.SendAsync(Get($"{_server.Origin}/stall"), cts.Token));
     }
 
+    // ── What went out ────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task TheResultSaysWhatWentOut_HostFirstAndTheBodysLength()
+    {
+        using var engine = new HttpEngine();
+        var result = await engine.SendAsync(new RequestSpec("POST", $"{_server.Origin}/echo",
+            [("Authorization", "Bearer tok-123"), ("X-Trace", "abc")], """{"a":1}""", "application/json"));
+
+        var sent = result.Request!;
+        Assert.Equal("POST", sent.Method);
+        Assert.Equal($"{_server.Origin}/echo", sent.Url);
+        Assert.Equal(("Host", new Uri(_server.Origin).Authority), sent.Headers[0]);
+        Assert.Contains(("Authorization", "Bearer tok-123"), sent.Headers);
+        Assert.Contains(("X-Trace", "abc"), sent.Headers);
+        Assert.Contains(("Content-Type", "application/json"), sent.Headers);
+        Assert.Contains(("Content-Length", "7"), sent.Headers);
+        Assert.Equal("""{"a":1}""", sent.Body);
+    }
+
+    [Fact]
+    public async Task TheJarsCookiesAreInTheSentHeaders()
+    {
+        using var engine = new HttpEngine();
+        await engine.SendAsync(Get($"{_server.Origin}/setcookie"));
+        var result = await engine.SendAsync(Get($"{_server.Origin}/ok"));
+
+        Assert.Contains(("Cookie", "sid=s3cr3t"), result.Request!.Headers);
+    }
+
+    [Fact]
+    public async Task AFailedSendStillSaysWhatWentOut()
+    {
+        using var engine = new HttpEngine();
+        int deadPort = FreePort();
+        var result = await engine.SendAsync(Get($"http://127.0.0.1:{deadPort}/x"));
+
+        Assert.NotNull(result.Failure);
+        Assert.Equal($"http://127.0.0.1:{deadPort}/x", result.Request!.Url);
+    }
+
     private static int FreePort()
     {
         var probe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);

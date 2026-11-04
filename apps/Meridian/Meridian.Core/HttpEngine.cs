@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Security;
 using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 using System.Security.Authentication;
 
 namespace Meridian.Core;
@@ -115,7 +116,15 @@ public sealed class HttpEngine : IDisposable
         _client = new HttpClient(_handler) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
     }
 
+    /// <summary>Sends, and says what went out (<see cref="SendResult.Request"/>) whatever came back.</summary>
     public async Task<SendResult> SendAsync(RequestSpec spec, CancellationToken ct = default)
+    {
+        var sent = new StrongBox<SentRequest?>();
+        var result = await SendCoreAsync(spec, sent, ct);
+        return result.Sent(sent.Value);
+    }
+
+    private async Task<SendResult> SendCoreAsync(RequestSpec spec, StrongBox<SentRequest?> sent, CancellationToken ct)
     {
         var state = new ConnectionState();
         CurrentState.Value = state;
@@ -144,6 +153,7 @@ public sealed class HttpEngine : IDisposable
                     request.Headers.TryAddWithoutValidation(name, value);
             }
 
+            sent.Value = Describe(request, spec.BodyText);
             using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, linked.Token);
             gotHeaders = true;
             var ttfb = total.Elapsed;
@@ -211,6 +221,24 @@ public sealed class HttpEngine : IDisposable
         {
             CurrentState.Value = null;
         }
+    }
+
+    /// <summary>The request as the wire will carry it: <c>Host</c>, the headers as set (not
+    /// re-parsed), the content's (its length computed), and the jar's cookies for the URL.</summary>
+    private SentRequest Describe(HttpRequestMessage request, string? body)
+    {
+        var uri = request.RequestUri!;
+        var headers = new List<(string Name, string Value)> { ("Host", uri.Authority) };
+        foreach (var (name, values) in request.Headers.NonValidated)
+            foreach (var value in values) headers.Add((name, value));
+        if (request.Content is { } content)
+        {
+            _ = content.Headers.ContentLength;   // computed on first ask, and then listed
+            foreach (var (name, values) in content.Headers.NonValidated)
+                foreach (var value in values) headers.Add((name, value));
+        }
+        if (Cookies.GetCookieHeader(uri) is { Length: > 0 } cookie) headers.Add(("Cookie", cookie));
+        return new SentRequest(request.Method.Method, uri.AbsoluteUri, headers, body);
     }
 
     private async ValueTask<Stream> ConnectAsync(SocketsHttpConnectionContext context, CancellationToken ct)
