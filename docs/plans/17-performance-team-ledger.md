@@ -8,8 +8,11 @@ file after every step and commits it with the step's work. Full survey reports a
 - **Phase:** build — round 8, **step 2 PAUSED by the user (2026-11-03)**; the loop is stopped. Step 2's agent was
   stopped mid-step with no commit: its uncommitted edits stay in the worktree (AccessibilityTreeBuilder.cs and
   .Refresh.cs, AccessibilityRebuildAllocationTests.cs, PerfSuite Scenarios.Accessibility.cs and Scenarios.Virtual.cs —
-  change 1 and its suite row and tests, not yet measured; change 2 not started). On resuming, give a step 2 agent
-  those edits to review and finish, or undo them by reverse edit. 9 steps; step 1 landed; question 11 answered yes,
+  change 1 and its suite row and tests, not yet measured; change 2 not started). **Resume (user, 2026-11-08): at the
+  weekly reset, 2026-11-08 03:00 UTC (04:00 local); a one-shot cron at 04:07 local fires the loop.** First check
+  weekly usage: if it has not reset yet (still ≥ 90 %), wait 5 minutes (`ScheduleWakeup` 300 s) and check again. Once
+  reset, spawn the step 2 agent with the resume brief `brief-r8b2-resume.md` (session 64e7e0e2's old scratchpad,
+  beside `brief-r8b2.md`): it reviews and finishes those edits. 9 steps; step 1 landed; question 11 answered yes,
   it joins step 2. The survey's eight
   reports are `17-reports/r8-*.md` (common brief: session 64e7e0e2's scratchpad `brief-r8-survey.md`). Weekly usage 86 %
   after the survey (it cost ~5 %): the 90 % pause applies to build steps (the user waived it for the survey only), so
