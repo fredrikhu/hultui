@@ -79,7 +79,15 @@ public sealed partial class ApertureApp
         // The list keeps a row while its item is equal — its place and the column the cursor
         // is in, so an arrow makes the row or two the cursor left and reached. Everything else
         // a row shows is in the shape, and a change makes the rows on screen again.
+        bool columnsChanged = perRow != _gridRowShape.PerRow && _gridList.Current is { IsHosted: true };
         if (GridRowShapeChanged(perRow)) _gridList.Current?.InvalidateRows();
+        // A change of columns on screen moves the cursor's card to another row, and a card handed
+        // back keeps the keyboard. One made again does not: its ring moved with no build since it
+        // was made (its state is the old cursor's), or it was the last card of the first row, the
+        // one row both widths key alike, which the list patches and so lets go of it first. That one
+        // takes the keyboard once the frame that makes it is drawn, as after a key that builds.
+        if (columnsChanged && _cursorCard.Current is { IsFocused: true })
+            _window.RequestPostFrameCallback(FocusCursorCardMadeInTheFrame);
         // A row made again keeps the cards whose item, cursor and picture did not change (GridRow),
         // as long as what every card shows besides those is what they were made with.
         var cardShape = new GridCardShape(_settings.Data.ShowCardTitles, Ui.DisplayScale);

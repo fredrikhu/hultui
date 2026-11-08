@@ -773,7 +773,10 @@ cursor is within a page of the loaded end, where the build asks for the next pag
 off the live card it leaves and puts it on the one it reaches, if that one is live, and then builds.
 A card the list makes in the frame after the build takes the keyboard once that frame is drawn
 (`Window.RequestPostFrameCallback`); asked straight after the build, it does not exist yet, which is
-why the grid's cursor never had the keyboard. Aperture's grid, 600 films, 1440×900, a key and three
+why the grid's cursor never had the keyboard. A change of columns asks the same when the keyboard is on
+the cursor's card: handed back, the card keeps it, but one made again in its new row (its ring moved
+with no build since it was made, or it was the first row's last card, which the patched first row lets
+go of) would leave nothing focused. Aperture's grid, 600 films, 1440×900, a key and three
 frames, JIT: Right 49.2 → 0.3 KB a key, Down 81.9 → 29.1 (what is left is the rows scrolling in), no
 build a key; with a reader the same, and no tree built. Home's shelves do the same when a move builds:
 onto a watchlist title card, which every build makes (the card left kept its ring, two rings on

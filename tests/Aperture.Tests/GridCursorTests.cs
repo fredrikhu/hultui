@@ -153,6 +153,75 @@ public class GridCursorTests
         }, library: new FirstPageOnlyLibrary(1000));
     }
 
+    /// <summary>A change of columns after keys that built nothing: the cursor's card was made without
+    /// the ring it shows now, so its new row makes it again, and the new card takes the keyboard once
+    /// the frame is drawn. It was left with nothing focused.</summary>
+    [Fact]
+    public void AChangeOfColumns_AfterKeysThatBuiltNothing_LeavesTheKeyboardOnTheCursor()
+    {
+        Host((session, app) =>
+        {
+            Keys(session, KeyCode.Right);
+            int builds = app.Builds;
+            Keys(session, KeyCode.Down);
+            Keys(session, KeyCode.Right);
+            Assert.Equal(builds, app.Builds);
+            AssertRingAndKeyboardOnTheCursor(session, app);
+
+            foreach (int width in new[] { 1300, 1440, 1140 })
+            {
+                session.Window.SetClientSize(width, 900);
+                Settle(session);
+                AssertRingAndKeyboardOnTheCursor(session, app);
+            }
+        });
+    }
+
+    /// <summary>A narrower window takes the first row's last card to the second row. The first row
+    /// is the one row both widths key alike: the list patches it, and the patch lets go of that card
+    /// before the second row asks for it, so it is made again, and takes the keyboard.</summary>
+    [Fact]
+    public void ANarrowerWindow_HandsTheKeyboardToTheFirstRowsLastCard()
+    {
+        Host((session, app) =>
+        {
+            Keys(session, KeyCode.Right);
+            for (int i = 0; i < 6; i++) Keys(session, KeyCode.Right);
+            Rebuild(session, app);
+            Assert.Equal(6, app.CursorIndex);   // the last of seven across
+            var card = Assert.Single(Cards(session), c => c.Outline.Width > 0);
+            Assert.Same(card, session.Window.Window.FocusedElement);
+
+            session.Window.SetClientSize(1300, 900);
+            Settle(session);
+
+            Assert.False(card.IsHosted);
+            AssertRingAndKeyboardOnTheCursor(session, app);
+        });
+    }
+
+    /// <summary>A change of columns with the keyboard elsewhere leaves it there.</summary>
+    [Fact]
+    public void AChangeOfColumns_LeavesAKeyboardThatIsNotOnTheGrid()
+    {
+        Host((session, app) =>
+        {
+            Keys(session, KeyCode.Right);
+            Keys(session, KeyCode.Down);
+            Keys(session, KeyCode.Right);
+            var found = session.Window.FindByAutomationId("filter-unwatched")!;
+            found.Focus();
+            session.PumpFrames(2);
+            var chip = found.Element;
+            Assert.Same(chip, session.Window.Window.FocusedElement);
+
+            session.Window.SetClientSize(1300, 900);
+            Settle(session);
+
+            Assert.Same(chip, session.Window.Window.FocusedElement);
+        });
+    }
+
     private static void AssertRingAndKeyboardOnTheCursor(HeadlessSession session, ApertureApp app)
     {
         var ringed = Assert.Single(Cards(session), c => c.Outline.Width > 0);
