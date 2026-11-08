@@ -311,7 +311,8 @@ public class GridRowKeepTests
         {
             var hovered = Card(session, "m009");
             var box = hovered.Layout.AbsoluteBorderBox;
-            session.Window.MoveMouse(box.X + box.Width / 2, box.Y + 40);
+            float px = box.X + box.Width / 2, py = box.Y + 40;
+            session.Window.MoveMouse(px, py);
             session.PumpFrames(2);
             Assert.True(hovered.IsHovered);
             var other = Card(session, "m010");
@@ -321,7 +322,15 @@ public class GridRowKeepTests
 
             Assert.NotSame(hovered, Card(session, "m009"));
             Assert.Same(other, Card(session, "m010"));
-            Assert.DoesNotContain(Rows(session).SelectMany(Cards), c => c.IsHovered);
+            // The old card is let go, and hover is hit-tested again where the pointer rests (ff6125a6): only a card
+            // under the still pointer may show it, never one moved there.
+            Assert.False(hovered.IsHovered);
+            foreach (var card in Rows(session).SelectMany(Cards).Where(c => c.IsHovered))
+            {
+                var b = card.Layout.AbsoluteBorderBox;
+                Assert.True(px >= b.X && px < b.X + b.Width && py >= b.Y && py < b.Y + b.Height,
+                    "only the card under the still pointer is hovered");
+            }
         });
     }
 
