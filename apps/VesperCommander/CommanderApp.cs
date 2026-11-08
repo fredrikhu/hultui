@@ -1167,7 +1167,9 @@ public partial class CommanderApp : Component, IDisposable
         FileOps.LaunchEditor(template, e.FullPath);
     }
 
-    private void MoveCursor(char side, int delta, bool clearSearch = false)
+    /// <summary>Moves the cursor by <paramref name="delta"/> rows. <paramref name="marked"/>: the
+    /// caller changed a mark first (Insert), which the move's build shows.</summary>
+    private void MoveCursor(char side, int delta, bool clearSearch = false, bool marked = false)
     {
         if (clearSearch) _search = "";   // arrows keep the filter; nav within the matches
         var list = Rows(side);
@@ -1175,21 +1177,82 @@ public partial class CommanderApp : Component, IDisposable
         // A Shift sweep anchors before the move, so the range covers the row the cursor
         // started on as well as the one it lands on.
         if (_shiftMarking) BeginMarkSweep(side, list);
-        int next = Math.Clamp(Cursor(side) + delta, 0, list.Count - 1);
+        int was = Cursor(side);
+        int next = Math.Clamp(was + delta, 0, list.Count - 1);
+        // Nothing but the cursor moves, unless a sweep moves the marks with it, a filter was
+        // cleared or the caller changed a mark.
+        bool cursorOnly = !_shiftMarking && !clearSearch && !marked;
         // The cursor is the view's alone: the parts stay (a sweep's marks reach the footer, and a
         // cleared filter the footer and the command line, through MarkViewDirty's compare).
-        if (next == Cursor(side))
+        if (next == was)
         {
             // Already at the end of the list: the row under the cursor still joins the
-            // range, so Shift+End on the last row marks it rather than doing nothing.
+            // range, so Shift+End on the last row marks it rather than doing nothing. A plain
+            // key there changes nothing, and builds nothing.
             if (_shiftMarking) ApplyMarkSweep(side, list);
-            MarkViewDirty();
+            if (!cursorOnly) MarkViewDirty();
             return;
         }
         SetCursor(side, next);
         if (_shiftMarking) ApplyMarkSweep(side, list);
+        if (cursorOnly && MoveCursorLive(side)) return;
         RequestScroll(side);
         MarkViewDirty();
+    }
+
+    /// <summary>
+    /// A move of the cursor alone, shown on the live elements with no build, where nothing else on
+    /// screen shows the cursor: in Detail the pane's list draws it (<see cref="ListDrawsCursor"/>),
+    /// so the mounted list is told its new selection and scrolled to it, as the command palette
+    /// does. A key used to build the window and both panes' lists (17 KB a key in Detail). False,
+    /// for a build, when something else shows the move: the preview (it reads the cursor), an
+    /// overlay or a full-shell view, a drag over a folder, the F3 partner moving in the other pane
+    /// (<see cref="PartnerStays"/>), no element with the keyboard (a build gives it to the pane),
+    /// or a pane the latest build did not draw in this view.
+    /// </summary>
+    private bool MoveCursorLive(char side)
+    {
+        int si = Si(side);
+        if (side != _active || AnyOverlayOpen || FullShellOpen || _settings.PreviewPane || _dropTarget is not null
+            || _window.FocusedElement is null || _fitBuild[si] != _builds || _fit[si].View != ViewOf(side)) return false;
+        switch (ViewOf(side))
+        {
+            case ViewMode.Detail:
+                // The list on screen draws the cursor (with the zebra tint, or a drag over a folder
+                // here, the rows draw it: ListDrawsCursor).
+                if (VList(side).Current is not { IsHosted: true, SelectionHighlight: not null } list || !PartnerStays(side)) return false;
+                list.SelectedIndex = Cursor(side);
+                ScrollCursorIntoView(side);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether the F3 partner the other pane shows (<see cref="DiffTargetPath"/>, ringed in a Detail
+    /// list) is the same for the cursor's row now as the latest build drew it with. Decided on the
+    /// names first, which costs nothing: a folder has no partner, and a same-named row over there is
+    /// the partner and moves with each key, so that builds. Otherwise only the other pane's cursor
+    /// can pair, and then the rule F3 uses decides, as the build does.
+    /// </summary>
+    private bool PartnerStays(char side)
+    {
+        char other = side == 'L' ? 'R' : 'L';
+        int oi = Si(other);
+        if (_fitBuild[oi] != _builds || _fit[oi].View != ViewMode.Detail) return true;   // no list over there draws one
+        string? shown = PaneRows(other).Partner;
+        var e = Rows(side)[Cursor(side)];
+        if (e.IsParent || e.IsDir) return shown is null;
+        var there = Rows(other);
+        for (int i = 0; i < there.Count; i++)
+            if (string.Equals(there[i].Name, e.Name, StringComparison.OrdinalIgnoreCase)) return false;
+        int oc = Cursor(other);
+        if (oc < 0 || oc >= there.Count || there[oc] is not { IsParent: false, IsDir: false } pair) return shown is null;
+        // No row over there has the name, so F3's answer is the other cursor's row or names no row.
+        string? partner = DiffTargetPath();
+        if (!string.Equals(partner, pair.FullPath, StringComparison.Ordinal)) partner = null;
+        return string.Equals(partner, shown, StringComparison.Ordinal);
     }
 
     private static int IndexOfName(IReadOnlyList<FileEntry> list, string name)
@@ -1317,7 +1380,7 @@ public partial class CommanderApp : Component, IDisposable
         // The move builds the window, the mark already in it: a MarkDirty after it built the
         // window a second time for every Insert. A mark shows in the rows and the footer's
         // count, which MarkViewDirty compares.
-        if (advance) MoveCursor(side, 1, clearSearch: false);
+        if (advance) MoveCursor(side, 1, marked: true);
         else MarkViewDirty();
     }
 
