@@ -114,6 +114,27 @@ hover allocates nothing beyond the platform's own input record. A `PointerMoveEv
 handler makes an event on every move over its element or anything inside it — on a root,
 every move in the window — so attach a move handler to the element that needs it.
 
+**Hover follows a build under a still pointer.** Enter and leave work as the DOM's
+`mouseenter` and `mouseleave` do: moving between an element and one inside it tells the outer
+one nothing. When a build removes the element under the pointer (a key switches the view, a
+list makes its rows again, an overlay closes), the window hit-tests hover again at the end of
+that frame, where the pointer rests, as a browser does. Each element that went gets one
+`PointerLeave`; each element now under the pointer that was not before gets one `PointerEnter`
+and its `.OnHover` look in the next frame; the part of the chain that survived hears nothing,
+and what it is no longer over gets its leave. A tooltip owned by what went closes, and the new
+element's opens after the usual delay. Nothing happens while a press holds the pointer (a
+capture, a drag, a text selection, a slider, an autoscroll): hover stays where it is until the
+release, as it does on a move, and the frame after the release settles it. Nothing happens
+when the pointer is outside the window or has never been in it, or when the build kept the
+hovered element. Until plan 17's round 9, hover stayed on the removed element until the
+pointer moved, and through its parents that element kept the whole old view alive: in
+Meridian with a 2,000-endpoint spec, 7.8 MB of a 28 MB heap after a key switched the view.
+
+So an enter or leave handler must not rebuild the element the pointer is over into a new one:
+the next frame's hit-test enters the new one, the handler builds another, and the window
+rebuilds every frame while the pointer rests. Keep the element (the same kind at the same
+place, or the same key) and change what it shows, as Vesper Commander's column headers do.
+
 **Which inputs draw a frame.** An input draws a frame when it changes something: an element
 marked itself dirty (a control's own state, a scroll, a hover or pressed style, an overlay),
 the hover moved to another element, a drag is under way or has just ended, or the focus ring

@@ -25,6 +25,14 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     private readonly DevToolsOverlay _devTools;
     private Element? _root;
     private Element? _lastHoveredElement;
+    // Where the pointer last was in the window, its modifiers and the buttons held down: where a
+    // hover settled without a move is hit-tested, and whether it may be yet (SettleHover).
+    private Point _pointerAt;
+    private KeyModifiers _pointerModifiers;
+    private int _buttonsDown;
+    // Whether the hovered element may have left the window since hover was last settled: a frame
+    // changed some tree's children, a hit-testable overlay closed, or the root was replaced.
+    private bool _hoverMayBeStale;
     // The cursor the pointer move last took from the hovered element's style, and whether
     // the cursor on screen is still that one (not a scrollbar's, a drag's, an autoscroll's).
     // Lets a style change show without waiting for the next move.
@@ -1334,6 +1342,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             _root.OverlayHost = null;
         _root = root;
         _maxButtonCache = null;
+        _hoverMayBeStale = true;   // hover may be on the old tree: settled after the next frame
         SetScrollbarHover(null, default);
         root.OverlayHost = this;
         root.FocusManager = _focusManager;
@@ -1860,12 +1869,14 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             if (layoutWasDirty || styleWasDirty || (_root.DirtyFlags & DirtyFlags.Children) != 0
                 || (overlayChanges & OverlayChanges.Work) != 0)
                 _root.MarkPaintDirty();
+            NoteStructureForHover();
             ClearFlags(_root, DirtyFlags.Children);
             // The overlays' too: they are styled and laid out in such a frame now, and left set,
             // an overlay's structural flag would rebuild the tree on every pass.
             for (int i = 0; i < _overlays.Count; i++)
                 ClearFlags(_overlays[i].Content, DirtyFlags.Children);
             ServiceUndrawnSources();
+            if (_hoverMayBeStale) SettleHover();
             return false;
         }
         if (!PlatformWindow.Surface.BeginFrame()) return false;
@@ -1916,7 +1927,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             ctx.EndFrame();
         _perf.EndFlush();
 
-        // Clear remaining dirty flags after full render
+        // Clear remaining dirty flags after full render. Read first whether some tree's children
+        // changed in this frame: a build before it, or a list that realized rows as it was drawn.
+        NoteStructureForHover();
         ClearAllFlags(_root);
         foreach (var overlay in _overlays)
             ClearAllFlags(overlay.Content);
@@ -1931,6 +1944,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             PlatformWindow.SwapBuffers();
         }
         _perf.EndPresent();
+
+        // After the present, against the tree this frame drew: what it marks shows in the next.
+        if (_hoverMayBeStale) SettleHover();
 
         // Fire one-shot post-frame callbacks now that this frame is on screen.
         // Swap to a local list first so a callback that registers another one
@@ -2056,6 +2072,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     {
         if (_root is null) return;
 
+        NotePointer(evt);
         if (TryHandleDevToolsInput(evt)) return;
 
         // Snapshot the state that decides whether the input needs a frame (see the tail of
@@ -2155,43 +2172,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     }
                 }
 
-                // Check overlays first (topmost layer), then main tree
-                var (overlayMoveTarget, overlayMoveOffset) = HitTestOverlays(pos);
-                var target = overlayMoveTarget ?? HitTester.HitTest(_root, pos);
-                // The Windows custom frame owns the maximize button as non-client
-                // (HTMAXBUTTON); keep the client pipeline out of it.
-                if (overlayMoveTarget is null && IsNonClientMaximizeButton(target)) target = null;
-                var effectivePos = overlayMoveTarget is not null
-                    ? new Point(pos.X - overlayMoveOffset.X, pos.Y - overlayMoveOffset.Y)
-                    : pos;
-                _pointerState.UpdateHover(target, effectivePos, move.Modifiers);
-                _lastHoveredElement = target;
-
-                // Update cursor based on hovered element's resolved style. A scrollbar
-                // track overrides to the default arrow, so a scrollable element's own
-                // cursor (e.g. a TextArea's text caret) doesn't bleed onto its bar.
-                var cursor = target?.ResolvedInherited.Cursor ?? CursorType.Default;
-                IScrollbarDraggable? overScrollbar = null;
-                for (var el = target; el is not null; el = el.Parent)
-                {
-                    if (el is IScrollbarDraggable sb && sb.IsPointOverScrollbar(pos))
-                    {
-                        cursor = CursorType.Default;
-                        overScrollbar = sb;
-                        break;
-                    }
-                }
-                PlatformWindow.SetCursor(cursor);
-                _hoverCursor = cursor;
-                _cursorFollowsHover = overScrollbar is null;
-                SetScrollbarHover(overScrollbar, pos);
-
-                // Tooltip tracking
-                UpdateTooltipHover(target);
-
-                // Update DevTools inspector
-                if (_devTools.IsEnabled)
-                    _devTools.HoveredElement = target;
+                var (target, effectivePos) = HoverAt(pos, move.Modifiers);
 
                 // The event is made only when something on the path listens for moves.
                 if (target is not null)
@@ -2235,8 +2216,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
                     var hoverPos = overlayHover is not null
                         ? new Point(pos.X - overlayHoverOffset.X, pos.Y - overlayHoverOffset.Y) : pos;
-                    _pointerState.UpdateHover(nowUnder, hoverPos, button.Modifiers);
-                    _lastHoveredElement = nowUnder;
+                    MoveHoverTo(nowUnder, hoverPos, button.Modifiers);
                     break;
                 }
 
@@ -2478,8 +2458,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 // page) keeps its hover state until the pointer comes back. Not while a press
                 // holds the pointer — the platform keeps sending that element moves outside.
                 if (_pointerCaptureTarget is not null || _isDragging || _autoScrollTarget is not null) break;
-                _pointerState.UpdateHover(null, default, KeyModifiers.None);
-                _lastHoveredElement = null;
+                MoveHoverTo(null, default, KeyModifiers.None);
                 _cursorFollowsHover = false;
                 SetScrollbarHover(null, default);
                 UpdateTooltipHover(null);
@@ -2751,6 +2730,15 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         {
             _root.MarkPaintDirty();
         }
+
+        // The hovered element may have gone (a build while a press held the pointer that this input
+        // let go of, an overlay this input closed): the end of a frame settles hover
+        // (SettleHover), so there has to be one.
+        if (_hoverMayBeStale && !PointerHeld)
+        {
+            if (_lastHoveredElement is { } hovered && !IsShownInWindow(hovered)) _root.MarkPaintDirty();
+            else _hoverMayBeStale = false;
+        }
     }
 
     // ── Cross-label (group) text selection ──
@@ -3014,6 +3002,169 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             new CornerRadius(2f), theme.TextColor, Color.Transparent, default);
     }
 
+    // ──── Hover ────
+
+    /// <summary>
+    /// Points hover at what is under <paramref name="pos"/> (the overlays first, the topmost
+    /// layer, then the main tree), and the cursor, the scrollbar's hover, the tooltip and the
+    /// DevTools inspector with it. Returns the element and the point in its tree's coordinates.
+    /// </summary>
+    private (Element? Target, Point At) HoverAt(Point pos, KeyModifiers modifiers)
+    {
+        var (overlayTarget, overlayOffset) = HitTestOverlays(pos);
+        var target = overlayTarget ?? HitTester.HitTest(_root!, pos);
+        // The Windows custom frame owns the maximize button as non-client
+        // (HTMAXBUTTON); keep the client pipeline out of it.
+        if (overlayTarget is null && IsNonClientMaximizeButton(target)) target = null;
+        var at = overlayTarget is not null
+            ? new Point(pos.X - overlayOffset.X, pos.Y - overlayOffset.Y)
+            : pos;
+        MoveHoverTo(target, at, modifiers);
+
+        // Update cursor based on hovered element's resolved style. A scrollbar
+        // track overrides to the default arrow, so a scrollable element's own
+        // cursor (e.g. a TextArea's text caret) doesn't bleed onto its bar.
+        var cursor = target?.ResolvedInherited.Cursor ?? CursorType.Default;
+        IScrollbarDraggable? overScrollbar = null;
+        for (var el = target; el is not null; el = el.Parent)
+        {
+            if (el is IScrollbarDraggable sb && sb.IsPointOverScrollbar(pos))
+            {
+                cursor = CursorType.Default;
+                overScrollbar = sb;
+                break;
+            }
+        }
+        PlatformWindow.SetCursor(cursor);
+        _hoverCursor = cursor;
+        _cursorFollowsHover = overScrollbar is null;
+        SetScrollbarHover(overScrollbar, pos);
+
+        // Tooltip tracking
+        UpdateTooltipHover(target);
+
+        // Update DevTools inspector
+        if (_devTools.IsEnabled)
+            _devTools.HoveredElement = target;
+        return (target, at);
+    }
+
+    /// <summary>
+    /// Moves hover to <paramref name="target"/>. When a build has removed the element hover was on
+    /// since (or its overlay closed), the removed part of the chain leaves first and hover goes on
+    /// from the deepest part still shown, which never lost the pointer: exactly one leave for each
+    /// element that went and one enter for each that is new.
+    /// </summary>
+    private void MoveHoverTo(Element? target, Point at, KeyModifiers modifiers)
+    {
+        if (_lastHoveredElement is { } was && !ReferenceEquals(was, target) && !IsShownInWindow(was))
+            _pointerState.LeaveRemoved(DeepestHoveredShown(), at, modifiers);
+        _pointerState.UpdateHover(target, at, modifiers);
+        _lastHoveredElement = target;
+    }
+
+    /// <summary>
+    /// Hit-tests hover again where the pointer rests when the element it was over has left the
+    /// window: a build removed it (a key switched the view, a list made its rows again) or its
+    /// overlay closed. Left there, that element kept the whole old view alive through its Parent
+    /// and Children links until the pointer next moved or left the window: Meridian with a
+    /// 2,000-endpoint spec, 7.8 of 28 MB after a key switched the view. As a move there would,
+    /// and as browsers do, the removed part of the chain gets its leave and the element now under
+    /// the pointer its enter and its hover look, which the next frame draws. A tooltip owned by
+    /// what went closes; one for the new element opens after the usual delay.
+    ///
+    /// <para>Not while a press holds the pointer (a capture, a drag, a selection, a slider, an
+    /// autoscroll): hover stays as it is until the release, as on a move, and the frame after the
+    /// release settles it. Nothing when nothing is hovered (the pointer is outside the window or has
+    /// never been in it), or when the hovered element is still shown, as after most builds: then this
+    /// is one walk up from the hovered element, and only in a frame that changed some tree's children.</para>
+    /// </summary>
+    private void SettleHover()
+    {
+        if (PointerHeld) return;
+        _hoverMayBeStale = false;
+        if (_lastHoveredElement is not { } hovered || IsShownInWindow(hovered)) return;
+        HoverAt(_pointerAt, _pointerModifiers);
+        _root?.MarkPaintDirty();   // the hover chain changed, as after a move (HandleInputEvent's tail)
+    }
+
+    /// <summary>Whether a press holds the pointer: a button is down (a press, a capture, a drag, a
+    /// selection, a scrollbar thumb, an autoscroll), or an OS drag is over the window.</summary>
+    private bool PointerHeld => _buttonsDown != 0 || _isDragging;
+
+    /// <summary>Where the pointer is, its modifiers and its buttons, from every pointer input, before
+    /// anything (the DevTools picker) can swallow it.</summary>
+    private void NotePointer(InputEvent evt)
+    {
+        switch (evt)
+        {
+            case InputEvent.MouseMoveInput move:
+                _pointerAt = new Point(move.X, move.Y);
+                _pointerModifiers = move.Modifiers;
+                break;
+            case InputEvent.MouseButtonInput button:
+                _pointerAt = new Point(button.X, button.Y);
+                _pointerModifiers = button.Modifiers;
+                int bit = 1 << (button.Button & 31);
+                _buttonsDown = button.IsDown ? _buttonsDown | bit : _buttonsDown & ~bit;
+                break;
+            case InputEvent.MouseWheelInput wheel:
+                _pointerAt = new Point(wheel.MouseX, wheel.MouseY);
+                _pointerModifiers = wheel.Modifiers;
+                break;
+        }
+    }
+
+    /// <summary>Before a frame's flags are cleared: a change of some tree's children in it (a build
+    /// before it, or a list that realized its rows as it was drawn) may have taken the hovered
+    /// element away. A flag read, and one per open overlay.</summary>
+    private void NoteStructureForHover()
+    {
+        if (_lastHoveredElement is null) return;
+        if ((_root!.DirtyFlags & DirtyFlags.Children) != 0) { _hoverMayBeStale = true; return; }
+        for (int i = 0; i < _overlays.Count; i++)
+        {
+            if ((_overlays[i].Content.DirtyFlags & DirtyFlags.Children) != 0)
+            {
+                _hoverMayBeStale = true;
+                return;
+            }
+        }
+    }
+
+    /// <summary>Whether <paramref name="element"/> is in this window's tree or an open overlay's: what
+    /// the pointer can be over. Not one a build removed, nor one in an overlay that has closed (which
+    /// keeps its host, so <see cref="Element.IsHosted"/> does not tell).</summary>
+    private bool IsShownInWindow(Element element)
+    {
+        var top = element;
+        while (top.Parent is { } parent) top = parent;
+        if (ReferenceEquals(top, _root)) return true;
+        for (int i = 0; i < _overlays.Count; i++)
+            if (ReferenceEquals(_overlays[i].Content, top)) return true;
+        return false;
+    }
+
+    /// <summary>The deepest element still shown of a hover chain whose bottom has gone: down from the
+    /// root, or the open overlay the chain is in, through the child that still has the hover. Null
+    /// when nothing of it is shown (its overlay closed, or the root was replaced).</summary>
+    private Element? DeepestHoveredShown()
+    {
+        Element? at = _root is { IsHovered: true } ? _root : null;
+        for (int i = 0; at is null && i < _overlays.Count; i++)
+            if (_overlays[i].Content.IsHovered) at = _overlays[i].Content;
+        while (at is not null)
+        {
+            var children = at.Children;   // by index: foreach over the interface boxes an enumerator
+            Element? next = null;
+            for (int i = 0; i < children.Count && next is null; i++)
+                if (children[i].IsHovered) next = children[i];
+            if (next is null) return at;
+            at = next;
+        }
+        return null;
+    }
+
     /// <summary>
     /// After a style pass: the hovered element may want a different cursor now — a web page
     /// reports the one it wants just after the move that caused it — and the pointer need not
@@ -3142,6 +3293,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             // The modal loop swallowed the button release, so the press is still armed and
             // its :active styling still on — drop it rather than leave the row lit.
             _pointerState.CancelPress();
+            _buttonsDown = 0;
             PlatformWindow.SetCursor(CursorType.Default);
             return;
         }
@@ -3571,6 +3723,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     {
         var entry = _overlays[index];
         _overlays.RemoveAt(index);
+        // The pointer may have been over it (a menu closed by its own item): hover is settled
+        // after the next frame. A tooltip is never hovered.
+        if (entry.IsHitTestable) _hoverMayBeStale = true;
         // What changes in it from now on is nothing a reader sees.
         if (ReferenceEquals(entry.Content.AccessibilityObserver, _a11yObserver))
             entry.Content.AccessibilityObserver = null;

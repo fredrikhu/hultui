@@ -197,6 +197,32 @@ public class DiscoveryViewTests : IClassFixture<TestHttpServer>, IDisposable
     // ── Detail + promotion ───────────────────────────────────────────────
 
     [Fact]
+    public void AViewSwitchedUnderAStillPointer_LetsTheMapGo()
+    {
+        // A row clicked, then 1 for the Requests view with the pointer at rest. The element under the
+        // pointer used to stay hovered after the build removed it, and through its parents it kept the
+        // whole map alive until the pointer moved: 7.8 of 28 MB with a 2,000-endpoint spec.
+        Hosted((session, app) =>
+        {
+            ImportSpec(session, app);
+            Click(session, "ep-GET-v1-charges-id");
+            var row = Weak(session, "ep-GET-v1-charges-id");
+
+            session.Window.PressKey(KeyCode.Digit1);
+            session.PumpFrames(3);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            Assert.False(row.IsAlive, "the Discovery view outlived its build under a still pointer");
+        });
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static WeakReference Weak(HeadlessSession session, string automationId) =>
+        new(session.Window.FindByAutomationId(automationId)!.Element);
+
+    [Fact]
     public void SelectingAnEndpointShowsItsDetail()
     {
         Hosted((session, app) =>
