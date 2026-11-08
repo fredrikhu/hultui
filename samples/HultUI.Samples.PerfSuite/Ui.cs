@@ -145,6 +145,39 @@ static class Ui
         return Encoding.UTF8.GetString(buffer.WrittenSpan);
     }
 
+    /// <summary>
+    /// A minified script as a bundler writes it: a licence comment on the first line, then
+    /// about <paramref name="chars"/> characters of code on one line — short names, calls,
+    /// operators, numbers and string literals, a space only after a keyword or inside a string —
+    /// all of it printable ASCII.
+    /// </summary>
+    public static string MinifiedScript(Random rng, int chars)
+    {
+        var sb = new StringBuilder(chars + 256);
+        sb.Append("/*! perf-suite bundle v").Append(rng.Next(1, 9)).Append('.').Append(rng.Next(20)).Append(".0 | MIT License */\n");
+        int start = sb.Length;
+        string Name() => rng.Next(3) == 0
+            ? Nouns[rng.Next(Nouns.Length)] + char.ToUpperInvariant(Colours[rng.Next(Colours.Length)][0]) + Colours[rng.Next(Colours.Length)][1..]
+            : ((char)('a' + rng.Next(26))).ToString() + (rng.Next(2) == 0 ? ((char)('A' + rng.Next(26))).ToString() : "");
+        while (sb.Length - start < chars)
+            switch (rng.Next(12))
+            {
+                case 0: sb.Append("function ").Append(Name()).Append('(').Append(Name()).Append(',').Append(Name()).Append("){"); break;
+                case 1: sb.Append("return ").Append(Name()).Append('.').Append(Name()).Append('(').Append(rng.Next(1000)).Append(")}"); break;
+                case 2: sb.Append("var ").Append(Name()).Append('=').Append(Name()).Append("||{};"); break;
+                case 3: sb.Append("if(").Append(Name()).Append("===").Append(rng.Next(64)).Append("&&!").Append(Name()).Append(")"); break;
+                case 4: sb.Append('"').Append(Label(rng)).Append("\","); break;
+                case 5: sb.Append("for(var i=0;i<").Append(Name()).Append(".length;i++)").Append(Name()).Append(".push(i);"); break;
+                case 6: sb.Append(Name()).Append(".prototype.").Append(Name()).Append("=function(){return this.").Append(Name()).Append("};"); break;
+                case 7: sb.Append("}else{").Append(Name()).Append("=new ").Append(Name()).Append("(").Append(rng.NextDouble().ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)).Append(")}"); break;
+                case 8: sb.Append("typeof ").Append(Name()).Append("!==\"undefined\"?").Append(Name()).Append(':').Append(Name()).Append(';'); break;
+                case 9: sb.Append('[').Append(rng.Next(9999)).Append(',').Append(rng.Next(9999)).Append(",0x").Append(rng.Next(0x10000).ToString("x4")).Append("],"); break;
+                case 10: sb.Append(Name()).Append("+=").Append(Name()).Append("<<").Append(rng.Next(32)).Append('|').Append(Name()).Append(">>>").Append(rng.Next(8)).Append(';'); break;
+                default: sb.Append("{key:\"").Append(Name()).Append("\",value:").Append(rng.Next(2) == 0 ? "null" : "true").Append("},"); break;
+            }
+        return sb.ToString();
+    }
+
     // VS Code Dark+, the theme HultUI.Syntax colours with by default.
     public static readonly Color JsonKey = Color.FromHex("#4EC9B0");
     public static readonly Color JsonString = Color.FromHex("#CE9178");

@@ -268,6 +268,35 @@ static partial class Scenarios
                 };
             });
 
+        yield return new Scenario("text/open a minified file in a monospace TextArea",
+            $"Junction's file view handed a minified script, {MinifiedChars / 1024:N0} K characters on one line: a read-only monospace 13 px TextArea wraps it into rows, then draws the first screen",
+            ctx =>
+            {
+                // Three scripts in turn, so no prefix or word of the one opened is still cached
+                // from the step before.
+                var scripts = new string[3];
+                for (int d = 0; d < scripts.Length; d++) scripts[d] = Ui.MinifiedScript(ctx.Rng, MinifiedChars);
+                var area = TextArea.New("").FontFamily(FontFamilies.Monospace).FontSize(13f).FlexGrow(1);
+                area.ReadOnly = true;
+                ctx.Mount(Flex.Column().FlexGrow(1).Padding(8).Children(area));
+                return new Op
+                {
+                    Run = step => area.Text = scripts[step % scripts.Length],
+                    Check = step =>
+                    {
+                        var text = scripts[step % scripts.Length];
+                        if (!ReferenceEquals(area.Text, text)) return "the script did not reach the TextArea";
+                        // Wrapped: at least the rows of characters half the font size wide.
+                        float viewport = area.Layout.AbsoluteContentBox.Height;
+                        area.ScrollOffsetY = float.MaxValue;
+                        float height = area.ScrollOffsetY + viewport;
+                        area.ScrollOffsetY = 0;
+                        float rows = text.Length / (area.Layout.AbsoluteContentBox.Width / 6.5f);
+                        return height >= rows * 13f ? null : $"the TextArea is {height:0} px tall for {rows:N0} rows or more";
+                    },
+                };
+            });
+
         yield return new Scenario("text/wheel highlighted JSON in a TextArea",
             $"Wheel 3 notches in the middle of the {JsonLines:N0}-line JSON response: each line drawn takes its colour spans out of the whole response's",
             ctx =>
@@ -649,6 +678,9 @@ static partial class Scenarios
     /// <see cref="Ui.JsonResponse"/>).
     /// </summary>
     private const int JsonLines = 19_000;
+
+    // A minified script's length: about 2,000 rows at the suite's width.
+    private const int MinifiedChars = 256 * 1024;
 
     /// <summary>Meridian's response body: read-only, monospace 12 px, Dark+ colours on a dark field.</summary>
     private static TextAreaElement JsonViewer()
