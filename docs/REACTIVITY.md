@@ -675,7 +675,8 @@ Headless, 600 films with pictures, 1440×900, a key and two frames, NativeAOT wi
 
 **`KeptElements<TState>` holds these rules** (`HultUI.Core.Components`, round 7 step 11; ELEMENTS.md
 §28). Brief, Thumbnails and the library grid each wrote them out by hand, and Brief's marks slipped
-into the shape; new code uses the helper, and the three can move to it as they are next changed:
+into the shape; new code uses the helper, and all three are on it now (the grid since round 8 step 5,
+Brief and Thumbnails since step 7):
 
 - `Made(key, state, element)` keys the element and keeps a ref that follows it to the live one, so
   the first and third rules are its job; key the element's siblings too.
@@ -752,6 +753,41 @@ build a key; with a reader the same, and no tree built. Home's shelves do the sa
 onto a watchlist title card, which every build makes (the card left kept its ring, two rings on
 screen), and onto a card on another page of its shelf, which turns the shelf to that page (Discover
 too) so the card the cursor is on is the one on screen.
+
+**Every build puts the live ring back first, not only the key's** (Vesper, round 8 step 7). A key in
+Vesper that moves only the cursor builds nothing: Detail's list draws the cursor, so the key tells the
+mounted list its new `SelectedIndex` and scrolls it there, as the command palette does; Brief and
+Thumbnails take the ring off the live cell or tile left and put it on the one reached
+(`KeptElements.Live`). Moving the ring first on a key that builds was not enough there: a click, Tab
+(the pane it leaves shows no cursor) or a filter also builds after keys that did not, and handed back
+a cell the ring reached as it was — Tab left a ring in the pane it left. So each build of the pane
+first puts every cell and tile a key restyled back as it was made, and has the thumbnail list make its
+rows again; then every element shows what its state says, and the build compares states as always. A
+tile the list makes in a frame (its row scrolled in) reads the cursor as it is, not from its row's
+item, which is the last build's. Three more lessons:
+
+- **Decide by the cheap facts first.** A move also moves the F3 partner ring in the other pane. A folder
+  pairs with nothing, and a same-named row over there is the partner and moves with every key, so that
+  builds; only when the other pane's cursor can pair does the key ask F3's own rule (a path made, a file
+  looked up), and then the ring stays. Asked on every key, that rule cost 0.9 KB, a twentieth of the
+  build it saves.
+- **Restyle, so a hover keeps the ring.** A tile has a hover tint, and a ring set directly was gone once
+  the pointer left a tile hovered before (`Element.Restyle`, below). The tint reads the tile's border: no
+  tint while it is the ring, so a tile need not know at its build whether it will have it.
+- **A key that scrolls Brief builds**, as before: its columns are made for the scroll a build reads, so
+  the key after a page jump builds too, and the reader tree stays what a build makes.
+
+Headless, 400 files a pane, 1240×820, a key and three frames, idle-gated, JIT, UI-thread bytes a key
+(the three frames included): Detail Down/Up 17.1 → 1.7 KB (with a reader 17.5 → 2.1), Brief Down/Up
+31.9 → 1.8, Right/Left 32.2 → 1.7, Thumbnails Right/Left 27.7 → 1.2, Down/Up on screen 31.3 → 1.4, a
+30-key walk that scrolls 57.5 → 26.3 (what is left is the row of tiles each key scrolls in, as in
+Aperture's grid); no build a key. In 47 scenes, each in a dark and a light scheme (zebra, a sweep,
+Insert, a filter, both panes and the partner, the preview, the pointer on a tile), the pixels, the
+reader tree, the ring, focus and every text matched the app that builds every key, and a full build
+after them. The differences: a tooltip, which the headless pump draws only while frames are being made;
+after End in Thumbnails a list's height in the reader tree 0.0005 px from a later build's; and, as
+before the change, Brief's columns after a key that scrolls them, made for the scroll before it until
+the next key.
 
 A column whose cells are all kept is left with no children by the time the reconciler reaches
 it, since the build moved every one into its new tree. Until round 5 those came back one by one,

@@ -99,7 +99,7 @@ public class PartTests
         using var t = Open();
         var s = t.Session;
         void ViewOnly(string name, Action act, params string[] built) => Step(t, name, act, window: true, built);
-        // A key that moves only the cursor builds nothing in Detail (CursorNoBuildTests).
+        // A key that moves only the cursor builds nothing (CursorNoBuildTests, GridCursorNoBuildTests).
         void NoBuild(string name, Action act) => Step(t, name, act, window: false);
 
         NoBuild("Down", () => t.Press(KeyCode.Down));
@@ -133,7 +133,7 @@ public class PartTests
         t.Press(KeyCode.Tab);
         t.Press(KeyCode.F2, KeyModifiers.Ctrl);
         s.PumpFrames(2);
-        ViewOnly("Brief Right", () => t.Press(KeyCode.Right));
+        NoBuild("Brief Right", () => t.Press(KeyCode.Right));
         ViewOnly("Brief scrolled", () =>
         {
             var scroll = t.Field<Ref<ScrollViewElement>>("_briefScrollL").Current!;
@@ -142,7 +142,7 @@ public class PartTests
         });
         t.Press(KeyCode.F3, KeyModifiers.Ctrl);
         s.PumpFrames(2);
-        ViewOnly("Thumbnails Down", () => t.Press(KeyCode.Down));
+        NoBuild("Thumbnails Down", () => t.Press(KeyCode.Down));
         ViewOnly("Thumbnails Insert", () => t.Press(KeyCode.Insert), "left footer");
     }
 
@@ -343,14 +343,15 @@ public class PartTests
         AssertPartsAreAFullBuild(t, "decoded");
         Assert.Null(Text(Part(t, "left footer"), "decoding", required: false, within: true));
 
-        // A decode still running when a key rebuilds the view shows in the footer, and its landing
-        // takes it off. The grid realizes its tiles (and starts their decodes) after the build that
-        // made the footer, and the decodes race the frames, so one is put in flight by hand.
+        // A decode still running when the view builds shows in the footer, and its landing takes it
+        // off. The grid realizes its tiles (and starts their decodes) after the build that made the
+        // footer, and the decodes race the frames, so one is put in flight by hand. (A cursor key,
+        // which this used, builds nothing now.)
         var inFlight = (HashSet<string>)typeof(ThumbnailCache)
             .GetField("_inFlight", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cache())!;
-        Step(t, "a decode in flight", () => { inFlight.Add("held"); t.Press(KeyCode.Right); }, window: true, "left footer");
+        Step(t, "a decode in flight", () => { inFlight.Add("held"); t.Invoke("MarkViewDirty"); }, window: true, "left footer");
         Assert.NotNull(Text(Part(t, "left footer"), "decoding 1", within: true));
-        Step(t, "and landed", () => { inFlight.Remove("held"); t.Press(KeyCode.Left); }, window: true, "left footer");
+        Step(t, "and landed", () => { inFlight.Remove("held"); t.Invoke("MarkViewDirty"); }, window: true, "left footer");
         Assert.Null(Text(Part(t, "left footer"), "decoding", required: false, within: true));
     }
 

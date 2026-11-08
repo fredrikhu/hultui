@@ -1195,22 +1195,27 @@ public partial class CommanderApp : Component, IDisposable
         }
         SetCursor(side, next);
         if (_shiftMarking) ApplyMarkSweep(side, list);
-        if (cursorOnly && MoveCursorLive(side)) return;
+        if (cursorOnly && MoveCursorLive(side, was)) return;
         RequestScroll(side);
         MarkViewDirty();
     }
 
     /// <summary>
     /// A move of the cursor alone, shown on the live elements with no build, where nothing else on
-    /// screen shows the cursor: in Detail the pane's list draws it (<see cref="ListDrawsCursor"/>),
+    /// screen shows the cursor. In Detail the pane's list draws it (<see cref="ListDrawsCursor"/>),
     /// so the mounted list is told its new selection and scrolled to it, as the command palette
-    /// does. A key used to build the window and both panes' lists (17 KB a key in Detail). False,
-    /// for a build, when something else shows the move: the preview (it reads the cursor), an
-    /// overlay or a full-shell view, a drag over a folder, the F3 partner moving in the other pane
-    /// (<see cref="PartnerStays"/>), no element with the keyboard (a build gives it to the pane),
-    /// or a pane the latest build did not draw in this view.
+    /// does. In Brief and Thumbnails the ring moves off the live cell or tile at
+    /// <paramref name="from"/> and onto the cursor's (<see cref="MoveRing"/>), which takes the
+    /// cursor's ref, and the grid is scrolled to it; the pane's next build puts both back as they
+    /// were made first (<see cref="SettleRing"/>). A key used to build the window and both panes'
+    /// views (17 KB a key in Detail, about 30 in the grids). False, for a build, when something
+    /// else shows the move: the preview (it reads the cursor), an overlay or a full-shell view, a
+    /// drag over a folder, the F3 partner moving in the other pane (<see cref="PartnerStays"/>), no
+    /// element with the keyboard (a build gives it to the pane), a pane the latest build did not
+    /// draw in this view; in a grid, a cell or tile not made (its column or row is not realized),
+    /// and in Brief a column not in full view (the build makes the columns for the scroll).
     /// </summary>
-    private bool MoveCursorLive(char side)
+    private bool MoveCursorLive(char side, int from)
     {
         int si = Si(side);
         if (side != _active || AnyOverlayOpen || FullShellOpen || _settings.PreviewPane || _dropTarget is not null
@@ -1225,7 +1230,16 @@ public partial class CommanderApp : Component, IDisposable
                 ScrollCursorIntoView(side);
                 return true;
             default:
-                return false;
+            {
+                var rows = Rows(side);
+                if (LiveCell(side, rows[Cursor(side)]) is not { } reached || !PartnerStays(side)
+                    || (ViewOf(side) == ViewMode.Brief && !BriefCursorShown(side))) return false;
+                if (from >= 0 && from < rows.Count && LiveCell(side, rows[from]) is { } left) MoveRing(side, left, on: false);
+                MoveRing(side, reached, on: true);
+                CursorRowRef(side).Current = reached;
+                if (ViewOf(side) == ViewMode.Thumbnails) ScrollThumbToCursor(side);
+                return true;
+            }
         }
     }
 

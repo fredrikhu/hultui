@@ -68,12 +68,20 @@ public class CursorNoBuildTests
     }
 
     /// <summary>What a subtree shows: element kinds, text, colours, where each lies, a list's
-    /// selection and scroll, and which element has the keyboard.</summary>
+    /// selection and scroll, and which element has the keyboard. A virtual list's first child is
+    /// its spacer, whose laid-out height the list does not keep (it places its rows itself), so
+    /// only its place is compared.</summary>
     internal static string Sig(Element root)
     {
         var sb = new StringBuilder();
         void Walk(Element el, int depth)
         {
+            if (el.Parent is ScrollViewElement { } owner && owner.GetType().Name.StartsWith("VirtualListElement", StringComparison.Ordinal)
+                && owner.Children.Count > 0 && ReferenceEquals(owner.Children[0], el))
+            {
+                sb.Append(' ', depth).Append("spacer\n");
+                return;
+            }
             sb.Append(' ', depth).Append(el.GetType().Name);
             if (el is TextElement t) sb.Append(" text=").Append(t.Content);
             if (el is BoxElement b) sb.Append(" bg=").Append(b.BackgroundColor).Append(" border=").Append(b.BorderColor);
