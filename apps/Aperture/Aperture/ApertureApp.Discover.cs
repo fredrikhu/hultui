@@ -90,7 +90,7 @@ public sealed partial class ApertureApp
                 var genres = row.Genres;
                 var kind = row.Kind == SliderKind.MovieGenres ? DiscoverKind.Movie : DiscoverKind.Tv;
                 var title = row.Title;
-                _discoverShelves.Add(new DiscoverShelf(start, genres, cards));
+                AddDiscoverShelf(start, genres, cards, row.Key, GenreCardWidth);
                 // The row holds every genre already, a few at a time; "See all" is all of
                 // them at once — only worth offering when they do not fit on one page.
                 page.AddChild(CardRow(row.Title, genres.Count,
@@ -107,7 +107,7 @@ public sealed partial class ApertureApp
                 var companies = row.Companies;
                 var studios = row.Kind == SliderKind.Studios;
                 var heading = row.Title;
-                _discoverShelves.Add(new DiscoverShelf(start, companies, cards));
+                AddDiscoverShelf(start, companies, cards, row.Key, CompanyCardWidth);
                 // As with genres: the row has them all, a few at a time; "See all" is all at once.
                 page.AddChild(CardRow(row.Title, companies.Count,
                     i => DiscoverShelfCard(cards, companies[i], start + i), CompanyCardWidth, "discover-row-" + row.Key,
@@ -119,7 +119,7 @@ public sealed partial class ApertureApp
                 continue;
             }
             var items = row.Items;
-            _discoverShelves.Add(new DiscoverShelf(start, items, cards));
+            AddDiscoverShelf(start, items, cards, row.Key, Halide.PosterWidth);
             page.AddChild(CardRow(row.Title, items.Count,
                 i => DiscoverShelfCard(cards, items[i], start + i),
                 Halide.PosterWidth, "discover-row-" + row.Key,
@@ -184,11 +184,28 @@ public sealed partial class ApertureApp
     }
 
     /// <summary>A shelf as Discover's latest build drew it: where it starts in the walk, its titles,
-    /// genres or studios, and its cards.</summary>
+    /// genres or studios, its cards, and its row, how many a page holds and the page it showed.</summary>
     private readonly record struct DiscoverShelf(int Start, IReadOnlyList<object> Entries,
-        KeptElements<DiscoverCardState> Cards);
+        KeptElements<DiscoverCardState> Cards, string RowId, int PerPage, int Page);
 
     private readonly List<DiscoverShelf> _discoverShelves = [];
+
+    private void AddDiscoverShelf(int start, IReadOnlyList<object> entries, KeptElements<DiscoverCardState> cards,
+        string rowKey, float cardWidth)
+    {
+        string rowId = "discover-row-" + rowKey;
+        int page = ShelfPage(rowId, entries.Count, cardWidth, out int perPage);
+        _discoverShelves.Add(new DiscoverShelf(start, entries, cards, rowId, perPage, page));
+    }
+
+    /// <summary>Turns the shelf the cursor is on to the cursor's page when it shows another
+    /// (<see cref="TurnShelfTo"/>): true when it turned.</summary>
+    private bool TurnDiscoverShelfToCursor()
+    {
+        foreach (var shelf in _discoverShelves)
+            if (TurnShelfTo(_cursorIndex, shelf.Start, shelf.Entries.Count, shelf.RowId, shelf.PerPage, shelf.Page)) return true;
+        return false;
+    }
 
     /// <summary>The app build that last built Discover's shelves, or -1.</summary>
     private int _discoverBuild = -1;

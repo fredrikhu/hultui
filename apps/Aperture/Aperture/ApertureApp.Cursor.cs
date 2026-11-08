@@ -162,21 +162,25 @@ public sealed partial class ApertureApp
     /// what a build would make of the move, as nothing else on these views shows the cursor. The next
     /// build compares each card with what it was made with, so the two moved are made again then.
     /// <list type="bullet">
-    /// <item>Home, while it is on screen as its latest build left it, and only between library cards
-    /// (a watchlist title card is built). A card on another page of its shelf is not on screen: as
-    /// after a build, it takes no ring and no keyboard. A key used to build all of Home, every
-    /// shelf's cards with it.</item>
+    /// <item>Home, while it is on screen as its latest build left it. A key used to build all of Home,
+    /// every shelf's cards with it. A move onto a watchlist title card builds, as that card is made
+    /// by every build; so does one off it, whose ring only a build takes off.</item>
     /// <item>Discover the same, while it is on screen as its latest build left it: a key used to build
     /// every shelf, the LINQ that finds them and the walk's key with them.</item>
+    /// <item>On both, a card on another page of its shelf turns the shelf to that page, and a build
+    /// draws it, the ring and the keyboard on the card (one build a page turned). The shelf used to
+    /// stay where it was, and the cursor walked on with no card ringed.</item>
     /// <item>The library grid, while its latest build drew it. The grid is scrolled to the cursor as a
     /// build does it, and the rows that brings in are made in the frame, the ring on the cursor's. A
     /// key used to build the view and make the two rows it moved between, and never handed over the
     /// keyboard, as the card it reached was made in the frame after the build. It still builds when
     /// the card the cursor reaches is not in a realized row, and within a page of the loaded end,
-    /// where the build asks for the next page. The live cards take the move then too: the list keeps
-    /// a row while its item is equal, and its items are its last build's, which know nothing of the
-    /// moves made since, so a row the ring reached without a build would keep it.</item>
+    /// where the build asks for the next page.</item>
     /// </list>
+    /// A move that builds moves the ring on the live cards first: a card the ring reached with no build
+    /// was made without it, so a build at another cursor would hand it back ringed, and a grid row with
+    /// it would not even be made again (the list keeps a row while its item is equal, and its items are
+    /// its last build's, which know nothing of the moves made since).
     /// </summary>
     private bool MoveRingWithoutBuild(int from)
     {
@@ -185,10 +189,13 @@ public sealed partial class ApertureApp
         switch (Current.View)
         {
             case ApertureView.Home:
-                if (_homeBuild != Builds || !HomeCardAt(from, out left) || !HomeCardAt(_cursorIndex, out reached)) return false;
+                if (_homeBuild != Builds || !HomeCardAt(from, out left)) return false;
+                if (!HomeCardAt(_cursorIndex, out reached)) build = true;
+                build |= TurnHomeShelfToCursor();
                 break;
             case ApertureView.Discover:
                 if (_discoverBuild != Builds || !DiscoverCardAt(from, out left) || !DiscoverCardAt(_cursorIndex, out reached)) return false;
+                build = TurnDiscoverShelfToCursor();
                 break;
             case ApertureView.Library:
                 if (!GridCardAt(from, out left) || !GridCardAt(_cursorIndex, out reached)) return false;

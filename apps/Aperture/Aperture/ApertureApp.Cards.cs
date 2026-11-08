@@ -546,9 +546,8 @@ public sealed partial class ApertureApp
     {
         var column = Flex.Column(gap: Halide.S3).FlexShrink(0).AutomationId(automationId);
 
-        int perPage = Math.Max(1, VisibleCards(cardWidth));
+        int page = ShelfPage(automationId, count, cardWidth, out int perPage);
         int pages = Math.Max(1, (count + perPage - 1) / perPage);
-        int page = Math.Clamp(_rowPages.GetValueOrDefault(automationId), 0, pages - 1);
 
         var heading = Flex.Row(gap: Halide.S2).AlignItems(AlignItems.Center);
         heading.AddChild(Text.New(title).FontSize(15f).FontWeight(FontWeight.SemiBold).TextColor(Halide.Text));
@@ -576,6 +575,32 @@ public sealed partial class ApertureApp
 
     /// <summary>Which page each home row is showing, by row id. View state, never stored.</summary>
     private readonly Dictionary<string, int> _rowPages = new(StringComparer.Ordinal);
+
+    /// <summary>The page the row <paramref name="rowId"/> of <paramref name="count"/> cards shows (see
+    /// <see cref="CardRow(string, int, Func{int, Element}, float, string, string?, Element?)"/>), and
+    /// how many cards a page holds.</summary>
+    private int ShelfPage(string rowId, int count, float cardWidth, out int perPage)
+    {
+        perPage = Math.Max(1, VisibleCards(cardWidth));
+        int pages = Math.Max(1, (count + perPage - 1) / perPage);
+        return Math.Clamp(_rowPages.GetValueOrDefault(rowId), 0, pages - 1);
+    }
+
+    /// <summary>
+    /// The cursor's place <paramref name="index"/> on a shelf that starts at <paramref name="start"/> in
+    /// the walk and holds <paramref name="count"/> cards, <paramref name="perPage"/> a page, showing
+    /// <paramref name="page"/>: when the place is on the shelf but on another page, turns the shelf to
+    /// it and says so, and the build to come draws that page. A shelf used to stay where it was, so the
+    /// cursor walked on with no card ringed and the keyboard left behind.
+    /// </summary>
+    private bool TurnShelfTo(int index, int start, int count, string rowId, int perPage, int page)
+    {
+        if (index < start || index >= start + count) return false;
+        int wanted = (index - start) / perPage;
+        if (wanted == page) return false;
+        _rowPages[rowId] = wanted;
+        return true;
+    }
 
     private Element PageButton(string glyph, string label, string rowId, int target, bool enabled)
     {

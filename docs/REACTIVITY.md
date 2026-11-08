@@ -719,7 +719,10 @@ A card the list makes in the frame after the build takes the keyboard once that 
 (`Window.RequestPostFrameCallback`); asked straight after the build, it does not exist yet, which is
 why the grid's cursor never had the keyboard. Aperture's grid, 600 films, 1440×900, a key and three
 frames, JIT: Right 49.2 → 0.3 KB a key, Down 81.9 → 29.1 (what is left is the rows scrolling in), no
-build a key; with a reader the same, and no tree built.
+build a key; with a reader the same, and no tree built. Home's shelves do the same when a move builds:
+onto a watchlist title card, which every build makes (the card left kept its ring, two rings on
+screen), and onto a card on another page of its shelf, which turns the shelf to that page (Discover
+too) so the card the cursor is on is the one on screen.
 
 A column whose cells are all kept is left with no children by the time the reconciler reaches
 it, since the build moved every one into its new tree. Until round 5 those came back one by one,

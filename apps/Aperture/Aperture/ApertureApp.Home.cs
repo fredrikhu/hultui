@@ -76,9 +76,10 @@ public sealed partial class ApertureApp
     }
 
     /// <summary>A shelf as Home's latest build drew it: where it starts in the walk, how many it
-    /// holds, its items and its cards (null for the watchlist's titles).</summary>
+    /// holds, its items and its cards (null for the watchlist's titles), and its row, how many a page
+    /// holds and the page it showed.</summary>
     private readonly record struct HomeShelf(int Start, int Count, IReadOnlyList<MediaItem> Items,
-        KeptElements<HomeCardState>? Cards);
+        KeptElements<HomeCardState>? Cards, string RowId, int PerPage, int Page);
 
     private readonly List<HomeShelf> _homeShelves = [];
 
@@ -101,6 +102,15 @@ public sealed partial class ApertureApp
             card = shelf.Cards.Live(shelf.Items[index - shelf.Start].Id);
             return true;
         }
+        return false;
+    }
+
+    /// <summary>Turns the shelf the cursor is on to the cursor's page when it shows another
+    /// (<see cref="TurnShelfTo"/>): true when it turned.</summary>
+    private bool TurnHomeShelfToCursor()
+    {
+        foreach (var shelf in _homeShelves)
+            if (TurnShelfTo(_cursorIndex, shelf.Start, shelf.Count, shelf.RowId, shelf.PerPage, shelf.Page)) return true;
         return false;
     }
 
@@ -148,11 +158,13 @@ public sealed partial class ApertureApp
             var items = row.Items;
             var titles = row.Titles;
             var cards = titles is null ? HomeCardsOf(row.Key) : null;
-            _homeShelves.Add(new HomeShelf(start, row.Count, items, cards));
+            string rowId = "row-" + row.Key;
+            int shownPage = ShelfPage(rowId, row.Count, row.CardWidth, out int perPage);
+            _homeShelves.Add(new HomeShelf(start, row.Count, items, cards, rowId, perPage, shownPage));
             page.AddChild(CardRow(row.Title, row.Count,
                 i => cards is null ? DiscoverCard(titles![i], row.CardWidth, cursorIndex: start + i)
                     : HomeCard(cards, items[i], row.Stills, start + i),
-                row.CardWidth, "row-" + row.Key,
+                row.CardWidth, rowId,
                 headingExtra: HomeRowHeadingExtra(row, all)));
             cursorBase += row.Count;
         }
