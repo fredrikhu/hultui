@@ -5,10 +5,10 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 9
-- **Phase:** build — round 9, step 16 next (taken ahead while the user can hover by hand), then step 3 (steps 1–2 landed 2026-11-08; 16 steps in "Round 9 build order"). Build
+- **Phase:** build — round 9, step 3 next (steps 1, 2 and 16 landed 2026-11-08; 16 steps in "Round 9 build order"). Build
   agents run one at a time in this worktree; their briefs go in session c484f5ac's scratchpad as `brief-r9b<N>.md`.
   Questions 14–19 answered. Open for the user: question 10 (`TokenizeDiff` public), the live screen-reader check of
-  menus and disabled menu items (ACCESSIBILITY-PLAN.md), and the hand checks step 16 needs. Weekly usage 17 % after the survey
+  menus and disabled menu items (ACCESSIBILITY-PLAN.md). Weekly usage 17 % after the survey
   (reset 2026-11-15 03:00 UTC; extra usage off); the 90 % pause applies to build steps (user, 2026-10-27). Older rounds are in [the archive](17-performance-team-ledger-archive.md)
   (search it, don't read it whole). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a
   pre-push hook refuses pushes built on the old history). To resume in a fresh context, run in this worktree: `/loop
@@ -271,6 +271,7 @@ Rounds 8 and 9 (round 8 is the round round 9's survey reviewed; it moves to the 
 | 8 | 307ee07c | paint-meridian-history-faded-row-layers | Approved (question 13; pixels). An older send's row has no `Opacity`: its 5 texts, the method chip's tint and label and its hover tint draw at 60 % of their alpha (`Azimuth.Fade`, `MethodChip` `opacity`); app code only. Real window 1440×900 at 150 %, AOT, idle-gated, one ABAB launch a renderer, medians: layers 29.0–29.4 → 0 a frame; GL wheel 0.912 → 0.614 ms (GPU 0.954 → 0.261), Down 0.971 → 0.702 (GPU 0.902 → 0.269); Vulkan 8-bit wheel 0.898 → 0.681 (GPU 0.607 → 0.084), Down 1.063 → 0.829 (GPU 0.573 → 0.091); F16 wheel 1.063 → 0.816 (GPU 2.208 → 0.494), Down 1.105 → 0.893 (GPU 2.19 → 0.498, one segment; another process on the GPU in the second). Pixels: at rest 18–50k at 1/255, chips ≤ 8/255 (8-bit) / 6 (F16); hovered older row ≤ 5/255 outside its chip, **its chip label up to 13/255 in 55 pixels** (label over tint and faded hover fill); selected ≤ 1/255, selected and hovered ≤ 3, chips ≤ 10; hover and selection fills unchanged. Headless bytes flat JIT + AOT, CPU per step −57…−73 %; 25 History scenes' tree, focus, texts identical. `AnOlderSendFadesItsColours_NotItsRow` (3 reverse edits fail); Meridian 587 + 4 skipped, Headless 1,459 (goldens) pass. 4 guarded launches, 0 foreground takes, no `nvlddmkm` events. |
 | 9 | 4142ee85, 0a9a9c64, 71f95ff1, 96dbc917 | apps-aperture-grid-columns-keep-cards | The objection to d366505b. A card goes back while its own row is still a child of the list (`CanTakeCard`, `place: null`, as round 7's `GridCards.TakeBack`); a hovered or pressed card only into its own row. d366505b's `place: key` remade every card on a change of columns, though a place moves to another row only then, and that invalidates every row first. Follow-up: across a change of columns the keyboard goes back to the cursor's card after the frame (that card and the first row's last card on a narrowing are still made again). Headless, 600 films, JIT idle-gated ×2: a column change each step 235.6 → 62.5 KB, elements 249 → 58, leaf/text measures 369 → 60 / 110 → 14.5; resize over 40 widths 13.6 → 4.9 KB (round 8 base 6.1); cursor keys unchanged (Right 0.3, Down 21.5, no build); AOT walk `library-resize-4px` 6.4 → 3.2 KB (below round 8's 3.6), CPU within noise. New suite rows (kept image grid across a change of columns: own-row 194 KB / 32.4 cards, kept 32 KB / 3.0); shared rows 0/0 ×2 (captures 96dbc917). d366505b's 7 scenes + a last-column scene, 96 checkpoints: pixels and tree as HEAD, 32 column changes as a forget-all grid, one ring on the cursor's card, the keyboard on it at all 48 (HEAD 4 of 16). Aperture 356, Headless 1,459 pass; GridRowKeepTests +4, GridCursorTests +3. REACTIVITY.md "A grid whose columns change passes no place". |
 | 9 | 3a08f828, b4f182b5, 01f0886d | paint-label-lines-cull | The objection to 967ce1ac. Both `DrawText` overloads skip lines wholly outside `Canvas.LocalClipBounds` with `DrawParagraph`'s line-height slack (one helper, `LineOutsideClip`, now shared), checked before a line's runs are read; one-line labels read no clip; internal `CullsTextLines` (on) is the tests' pixel reference. Meridian Request tab, 89k-character body, JIT idle-gated ×2: open runs 1,911 → 192, blobs 1,771 → 61, render 538.5 → 13.8 KB (−97 %), step 3,797 → 3,277 KB (−14 %); wheel runs a frame 1,903 → 194 (−90 %), render 0 → 0.61 KB a frame (lines scrolling in, once each); AOT the same counts. New suite row `text/wheel over a 2,000-line plain label in a ScrollView`: min 0.361 → 0.238 ms JIT (−34 %), 0.383 → 0.227 AOT (−41 %), 0.10 → 3.10 KB a step; full suite 217 rows JIT + AOT ×2: 0 slower, 1 faster, allocations identical elsewhere (captures 01f0886d). Pixels: 14 in-process dumps, before/after differ only in the elapsed-time label, as A/A. `LabelLinesCullTests` 27 cases (plain/spanned, translated, 1.5×, rotated, in a layer, cut lines, stacked marks); 4 reverse edits fail; Skia 387, Core 5,064, Headless 1,459 (goldens) pass. |
+| 9 | b44b4db5 | frame-restore-keeps-no-sysmenu | Correctness, found by the user's Snap Layouts hover. SDL's WM_WINDOWPOSCHANGED handler calls `WIN_SetWindowResizable` whenever a window leaves maximized or minimized, which rebuilds the style with `STYLE_NORMAL` (includes `WS_SYSMENU`): restore from maximized or minimized, full screen from maximized, a placement moving a maximized window turned 16C70000 into 16CF0000, and Windows then validated the flyout against the standard caption band (a bottom entry missed on both monitors for the window's life). The frame's WndProc answers `WM_STYLECHANGING` (GWL_STYLE) by clearing `WS_SYSMENU` from `styleNew` unless `ShowSystemMenu` is lending it (`_lendingSysMenu`); the lend strips from the current style afterwards. `CustomFrameSystemMenuTests` ([UiTheory], both frames, guarded): after every transition and monitor moves the custom frame has no `WS_SYSMENU` (the default frame keeps it), HTMAXBUTTON at the button's middle and 2 dip above its bottom, HTCAPTION on the title bar, Alt+Space and a caption right-click open the menu; 2 reverse edits fail. UiTests 21/21 (handedBack 0), Platform.SDL3 53, Core 5,064 pass. The user hovered by hand on the 4K and the 1440p after maximize, restore, minimize and monitor moves: "works now in every case". |
 
 ## Examined, not worth it
 
@@ -549,16 +550,6 @@ Standing notes (from earlier rounds):
 
 ## Open
 
-- **f9bceb6d's window checks** (round 6 step 4; expert 3 again in round 7): maximize on both monitors, the DPI
-  hop and the Snap Layouts flyout on the lower-DPI monitor need the 4K monitor at 150 % attached and primary at
-  sign-in; only the 1440p at 100 % has been attached. Then the UiTests `WindowPlacementTests` and the Borderless
-  `WindowStateActivationTests` (`HULTUI_UITESTS=1`), plus a Snap Layouts hover by hand. **Round 9 (2026-11-08): done
-  but the 4K's Snap hover.** The 4K at 150 % is primary (system DPI 144), the 1440p at 100 % on its left. The UiTests
-  pass 11 of 11 (placements land at dpi 96 and 144), and a held scratch check, watched by the user on the 4K, passed:
-  each style placed and maximized at dpi 144, the Borderless maximized client 0,0 3840×2088 = the work area to the
-  pixel. The user's Snap hover: the 1440p works in every direction; on the 4K, Meridian misses a bottom entry
-  (step 16), Vesper works; the flyout's first frame at the monitor's top-left (often in Vesper, once in Meridian) is
-  the Windows shell's (memory `snap-layouts-caption-band`: Electron apps flash the same).
 - **8a38ef4 on Linux/KWin and on AMD/Intel Windows:** not measured. Linux keeps the chained
   path. If AMD/Intel do not stall, destroy-first may cost them 21–24 ms per resize, as it
   cost NVIDIA's IMMEDIATE and FIFO. A real Aperture resize run is also still to do.
@@ -722,3 +713,10 @@ From 2026-11-03 (round 8's survey); earlier entries are in the archive ([to 2026
   label culls by its clip like a selectable one — no need to switch a long read-only text to a TextArea for paint;
   a colour stretch clips its glyphs to their line's box, so stacked marks above a line are cut in spanned text, not
   plain (an existing difference); publish the AOT suite through a wrapper project that sets `PublishAot` (NETSDK1207).
+- 2026-11-08: round 9 step 16 landed (b44b4db5): a custom-frame window keeps `WS_SYSMENU` off whatever rewrites its
+  style (SDL's `WIN_SetWindowResizable` on leaving maximized or minimized), so the Snap Layouts flyout covers the whole
+  maximize button after a restore; the user checked by hand on both monitors: "works now in every case". With that,
+  f9bceb6d's window checks (Open since round 6) are all done and the item is closed. Guideline notes: SDL rebuilds a
+  window's style on every change out of maximized or minimized, so a frame that needs a style removed must refuse it
+  in WM_STYLECHANGING, not only at install; synthetic cursor moves don't open the flyout on an inactive window — a
+  hover check is by hand.
