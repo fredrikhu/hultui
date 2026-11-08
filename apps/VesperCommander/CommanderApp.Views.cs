@@ -46,11 +46,31 @@ public partial class CommanderApp
     private readonly Ref<VirtualListElement<ThumbRowItem>> _thumbVListL = new(), _thumbVListR = new();
     private Ref<VirtualListElement<ThumbRowItem>> ThumbVList(char side) => side == 'L' ? _thumbVListL : _thumbVListR;
 
-    // Shared thumbnail decode cache. A decode lands on a worker thread and marshals a
-    // rebuild so the tile swaps its thumbnail in.
+    // Shared thumbnail decode cache. A decode lands on a worker thread and posts a rebuild so
+    // the tile swaps its thumbnail in, one post at a time (see PostThumbnailLanded).
     private ThumbnailCache? _thumbsCache;
-    private ThumbnailCache Thumbs => _thumbsCache ??= new ThumbnailCache(
-        () => HultUI.Application.InvokeOnMainThread(MarkViewDirty));
+    private ThumbnailCache Thumbs => _thumbsCache ??= new ThumbnailCache(PostThumbnailLanded);
+
+    /// <summary>1 while a build for decoded thumbnails is posted to the UI thread and has not
+    /// run. The cache calls back once per decode, and a screenful of tiles decodes at once: a
+    /// build posted for each made 44 thumbnails 45 builds, up to 44 of them in one frame.
+    /// Posted one at a time, the decodes that land before the build runs share it. The build
+    /// clears the flag before it reads the cache, so a decode that lands while it runs posts the
+    /// next one.</summary>
+    private int _thumbnailPosted;
+
+    /// <summary>The cache's callback, on a worker thread.</summary>
+    private void PostThumbnailLanded()
+    {
+        if (Interlocked.Exchange(ref _thumbnailPosted, 1) == 0)
+            HultUI.Application.InvokeOnMainThread(OnThumbnailLanded);
+    }
+
+    private void OnThumbnailLanded()
+    {
+        Interlocked.Exchange(ref _thumbnailPosted, 0);
+        MarkViewDirty();
+    }
 
     private const float ViewToggleWidth = 88f;   // reserved so breadcrumbs truncate first
 

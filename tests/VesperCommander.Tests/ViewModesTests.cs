@@ -329,6 +329,40 @@ public class ViewModesTests
                 : e.Children.Select(Thumbnail).FirstOrDefault(x => x is not null);
     }
 
+    /// <summary>Thumbnails that decode together build the view once: the cache calls back once
+    /// per decode, and the app posts one build at a time, which shows every thumbnail decoded
+    /// before it ran. A build posted per decode made a screenful of tiles a screenful of builds
+    /// in one frame (45 builds for 44 thumbnails, up to 44 in a frame).</summary>
+    [Fact]
+    public void ThumbnailsThatLandTogether_BuildTheViewOnce()
+    {
+        const int Pictures = 8;
+        using var t = new DiffViewTests.Fixture();
+        for (int i = 0; i < Pictures; i++) WritePng(Path.Combine(t.Left, $"picture{i}.png"), 200, 150);
+        t.Open();
+        t.Press(KeyCode.F3, KeyModifiers.Ctrl);   // view: Thumbnails; its frame starts the decodes
+        var cache = t.Field<ThumbnailCache?>("_thumbsCache");
+        Assert.NotNull(cache);
+
+        // Every decode lands while the UI thread is not pumping, so their callbacks wait for the
+        // same drain. The pause after the last one leaves its callback time to post.
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while ((cache.PendingCount > 0 || cache.Landed < Pictures) && sw.Elapsed < System.TimeSpan.FromSeconds(10))
+            System.Threading.Thread.Sleep(5);
+        Assert.Equal(Pictures, cache.Landed);
+        System.Threading.Thread.Sleep(200);
+
+        int builds = t.Field<int>("_builds");
+        t.Session.PumpFrame();
+
+        Assert.Equal(1, t.Field<int>("_builds") - builds);
+        var list = t.Field<Ref<VirtualListElement<CommanderApp.ThumbRowItem>>>("_thumbVListL");
+        Assert.Equal(Pictures, Thumbnails(list.Current!).Count());
+
+        static IEnumerable<ImageElement> Thumbnails(Element e) =>
+            e is ImageElement im && e.Box.Width == Dimension.Percent(100) ? [im] : e.Children.SelectMany(Thumbnails);
+    }
+
     // ── ThumbnailCache ───────────────────────────────────────────────────
     [Fact]
     public void ThumbnailCache_MissIsPendingThenClassifies()
