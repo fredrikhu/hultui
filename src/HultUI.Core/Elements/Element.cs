@@ -560,6 +560,23 @@ public abstract class Element
     }
 
     /// <summary>
+    /// Changes the live element's own look with no build, such as moving a ring from one card to
+    /// another (<see cref="Components.KeptElements{TState}.Live"/>), so that its hover, press and
+    /// focus styles layer over the new look. Set directly instead, a background or border lasts only
+    /// until the next of those states comes or goes: the element goes back to the look it was built
+    /// with or first hovered with, which those styles keep to lay themselves over. Here the element
+    /// takes that look back first, so a hover tint showing now does not stay in it, then
+    /// <paramref name="change"/> runs, and the states that hold are applied again. With no such
+    /// styles, <paramref name="change"/> just runs. A build's patch does all this itself.
+    /// </summary>
+    /// <param name="change">Sets the properties to change; a static lambda allocates nothing.</param>
+    public void Restyle(Action<Element> change)
+    {
+        if (_interaction is { } s) s.Restyle(this, change);
+        else change(this);
+    }
+
+    /// <summary>
     /// True for an element that creates its children itself rather than receiving them from
     /// a build — a virtualised list, whose rows are realized from a template during layout.
     /// The reconciler then leaves the live children alone when it patches the element: the

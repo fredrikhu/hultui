@@ -61,6 +61,20 @@ internal sealed class InteractionStyles
     public void InvalidateBase() => _base = null;
 
     /// <summary>
+    /// An owner's change to the element's resting look (<see cref="Element.Restyle"/>): back to the
+    /// base first, so no state's override is taken into the new one, then the change, then the
+    /// states that hold, without animating. Before the first recompute no override was ever applied,
+    /// so the element is at its base already.
+    /// </summary>
+    public void Restyle(Element owner, Action<Element> change)
+    {
+        if (_base is { } resting) VisualState.Restore(owner, resting);
+        change(owner);
+        _base = VisualState.Capture(owner);
+        Recompute(owner, animate: false);
+    }
+
+    /// <summary>
     /// Resets the element to its base visual state and re-applies the active state
     /// overrides. When <paramref name="animate"/> is true, properties with a
     /// registered transition tween from their current value to the new target.

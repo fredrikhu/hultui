@@ -964,6 +964,8 @@ btn.On<ClickEvent>(e => OpenPopoverUnder(e.CurrentTarget.Layout.AbsoluteBorderBo
 
 Interaction config (`.OnHover`/`.OnPressed`/`.OnFocus` and transitions) follows the latest build just like handlers: the incoming element's config replaces the retained one, and an incoming element *without* any interaction clears it — so conditionally attaching a hover style (`if (!active) el.OnHover(...)`) behaves correctly across state flips. For *cross*-element references (a button that focuses an input), use `Ref<T>` via `.WithRef(...)` — refs are repointed to the live element during patching.
 
+**Change a live element's look with `Restyle`.** The styles lay themselves over a base look the element takes when it is patched or first hovered, and put it back when the state ends. A background or border set on the live element directly, with no build (a ring moved from one cell to another, `KeptElements.Live`), lasts only until the next hover or press comes or goes: the element goes back to the base, without the ring. `el.Restyle(static e => ((BoxElement)e).BorderColor = ring)` takes the base look back first (so a hover tint showing now is not kept), makes the change, takes the result as the new base and lays the states that hold over it again. With no styles it just makes the change. A style that should differ with that look reads it from the element: it runs after the base is put back.
+
 Keys still matter for *state*: an unkeyed patch preserves the retained element's transient state (focus, caret, scroll position), so when a slot switches between logically different content — a settings page behind a nav list, a wizard step — key the slot by what it shows so unrelated state doesn't bleed across.
 
 ### Keys and animations
