@@ -345,6 +345,11 @@ Round 9 questions (asked 2026-11-08, from the survey reports as they came in). R
     Linux and macOS have (22–66 `CredReadW` calls a key in the Environments table, ~59 a frame dragging the response
     pane with the Request tab). A secret changed outside the app (the CLI, Credential Manager) is then seen only after a
     restart, as on Linux and macOS today. Acceptable? [Yes.] → **yes** (2026-11-08).
+16. **text-textarea-mono-ascii-breaks-by-count** (r9-5): break a wrapped row of printable ASCII in a proven monospace
+    face by its character count, with the proof round 4 approved for fits by count (a476866c: 95 characters, every
+    ordered pair within 1/4096 of one advance). Same risk: a face that kerned ASCII past the proof would clip instead of
+    wrap. Does that approval cover it? [Yes: same proof, rows identical on every width tested.] → **yes, covered**
+    (2026-11-08).
 
 Round 8 questions 11–13, round 7 questions 1–4, round 6 questions 1–9 and round 5's question 5, all answered, are in
 the archive ([round 8](17-performance-team-ledger-archive.md#needs-the-user-round-8),
@@ -496,3 +501,5 @@ From 2026-11-03 (round 8's survey); earlier entries are in the archive ([to 2026
 - 2026-11-08: survey reports in so far: r9-1 layout, r9-4 .NET, r9-2 painting, r9-6 reactivity (all not satisfied).
   The user answered expert 4's two questions early: a rebuild under a still pointer re-hit-tests hover (question 14),
   and Windows memoizes keyring reads as Linux and macOS do (question 15).
+- 2026-11-08: r9-5 text in (not satisfied). The user answered question 16: round 4's monospace fits-by-count approval
+  covers breaking wrapped ASCII rows by count.
