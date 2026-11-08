@@ -716,6 +716,13 @@ Home build 66.0 → 26.3 KB, elements made 46 → 4; Home opening while its 36 p
 build 3,368–3,433 → 2,281–2,312 KB (−32 %), six a build 1,547 → 1,371 KB (−11 %); at 1000 px a walk
 that turns a shelf's page 13.8 → 6.8 KB a key.
 
+**Remember what the asking makes.** What is left of that build is mostly the asking: each card's
+picture address, made again for every card each build with its string, which the cache keys on (577 B a
+card against the fake library, 1,136 B against Jellyfin's). Aperture now keeps each address by the item,
+the kind and the size in pixels, checks it against the item's picture tags, and lets them all go when
+the data is reloaded or 1,024 are held: a Home build 26.3 → 11.1 KB, one poster landing a build
+2,260–2,265 → 1,721–1,730 KB to open Home (−24 %, NativeAOT the same).
+
 **A key that moves only a ring needs no build.** Nothing on Home shows the cursor but the ring on one
 card and the keyboard on it. So a cursor key there takes the ring off the live card it leaves and
 puts it on the one it reaches (`KeptElements.Live`), hands that card the cursor's ref and the

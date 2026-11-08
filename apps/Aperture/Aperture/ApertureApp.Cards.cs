@@ -124,10 +124,48 @@ public sealed partial class ApertureApp
         // rounds both sides up, and the spare pixel on the side that already fits shifts
         // the picture by half a pixel, which is soft at one to one.
         bool byHeight = ArtAspect(item, kind) is { } aspect && aspect > width / height * 1.005;
-        var url = ArtworkUrl(item, kind, width, height, byHeight, _artworkScale);
+        var url = CardArtworkUrl(item, kind, width, height, byHeight);
         var (image, status) = _posters.Get(url, _standInScale is { } old && _posters.HasRetired
             ? ArtworkUrl(item, kind, width, height, byHeight, old) : null);
         return status == PosterCache.Status.Ready && image is { IsLoaded: true } ? image : null;
+    }
+
+    /// <summary>
+    /// Each card's picture address as it was made, by the item, the kind and the size in pixels (which
+    /// carries the display scale), and checked against the item's picture tags, so an item whose
+    /// picture changed asks for the new one. Every build asks for every card's picture, kept or not,
+    /// and made the address and its string again each time: 577 B a card against the fake library,
+    /// 1,136 B against Jellyfin's. The cache's lookup reads the string the address keeps. Let go when
+    /// the data is (a sign-in, a refresh: <see cref="_dataGeneration"/>), and whenever it holds
+    /// <see cref="ArtworkUrlsKept"/>, which is many screenfuls.
+    /// </summary>
+    private readonly Dictionary<ArtworkKey, ArtworkAddress> _artworkUrls = new();
+    private int _artworkUrlsGeneration;
+    private const int ArtworkUrlsKept = 1024;
+
+    private readonly record struct ArtworkKey(string Id, ImageKind Kind, int Pixels, bool ByHeight);
+
+    private readonly record struct ArtworkAddress(string? Primary, string? Backdrop, string? BackdropItem, Uri? Url);
+
+    /// <summary>Card picture addresses made, not remembered, for tests.</summary>
+    internal int ArtworkUrlsMade { get; private set; }
+
+    /// <summary><see cref="ArtworkUrl"/> at the current scale, remembered; see <see cref="_artworkUrls"/>.</summary>
+    private Uri? CardArtworkUrl(MediaItem item, ImageKind kind, float width, float height, bool byHeight)
+    {
+        if (_artworkUrlsGeneration != _dataGeneration || _artworkUrls.Count >= ArtworkUrlsKept)
+        {
+            _artworkUrls.Clear();
+            _artworkUrlsGeneration = _dataGeneration;
+        }
+        var key = new ArtworkKey(item.Id, kind, ArtworkPixels(byHeight ? height : width), byHeight);
+        if (_artworkUrls.TryGetValue(key, out var known) && known.Primary == item.PrimaryImageTag
+            && known.Backdrop == item.BackdropImageTag && known.BackdropItem == item.BackdropItemId)
+            return known.Url;
+        ArtworkUrlsMade++;
+        var url = ArtworkUrl(item, kind, width, height, byHeight, _artworkScale);
+        _artworkUrls[key] = new ArtworkAddress(item.PrimaryImageTag, item.BackdropImageTag, item.BackdropItemId, url);
+        return url;
     }
 
     private Element Artwork(MediaItem item, float width, float height, float radius,
