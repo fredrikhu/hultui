@@ -5,18 +5,13 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 8
-- **Phase:** build — round 8, **step 2 PAUSED by the user (2026-11-03)**; the loop is stopped. Step 2's agent was
-  stopped mid-step with no commit: its uncommitted edits stay in the worktree (AccessibilityTreeBuilder.cs and
-  .Refresh.cs, AccessibilityRebuildAllocationTests.cs, PerfSuite Scenarios.Accessibility.cs and Scenarios.Virtual.cs —
-  change 1 and its suite row and tests, not yet measured; change 2 not started). **Resume (user, 2026-11-08): at the
-  weekly reset, 2026-11-08 03:00 UTC (04:00 local); a one-shot cron at 04:07 local fires the loop.** First check
-  weekly usage: if it has not reset yet (still ≥ 90 %), wait 5 minutes (`ScheduleWakeup` 300 s) and check again. Once
-  reset, spawn the step 2 agent with the resume brief `brief-r8b2-resume.md` (session 64e7e0e2's old scratchpad,
-  beside `brief-r8b2.md`): it reviews and finishes those edits. 9 steps; step 1 landed; question 11 answered yes,
-  it joins step 2. The survey's eight
-  reports are `17-reports/r8-*.md` (common brief: session 64e7e0e2's scratchpad `brief-r8-survey.md`). Weekly usage 86 %
-  after the survey (it cost ~5 %): the 90 % pause applies to build steps (the user waived it for the survey only), so
-  small steps go first and the rest wait for the reset if a step would cross 90 %. Round 7
+- **Phase:** build — round 8, **step 2 resumed 2026-11-08** after the weekly reset (usage 0 %; next reset 2026-11-15
+  03:00 UTC). Main merged in first (3a15b5b1: 32 commits, mostly Meridian). The step 2 agent works from the resume
+  brief `brief-r8b2-resume.md` (session 64e7e0e2's old scratchpad, beside `brief-r8b2.md`): it reviews and finishes the
+  first agent's uncommitted edits (AccessibilityTreeBuilder.cs and .Refresh.cs, AccessibilityRebuildAllocationTests.cs,
+  PerfSuite Scenarios.Accessibility.cs and Scenarios.Virtual.cs), then change 2 (question 11: yes). 9 steps; step 1
+  landed. The survey's eight reports are `17-reports/r8-*.md` (common brief: session 64e7e0e2's scratchpad
+  `brief-r8-survey.md`). The 90 % weekly pause applies to build steps (user, 2026-10-27). Round 7
   released: main's app-support merge (f64e4674, another session) merged into the branch as c655b411 with fixes
   7dfd2ce3, then the branch merged into main as df45b4a2; CI run 41691075588 green (test, test-linux, docs). Open for
   the user, none blocking: question 10 (`TokenizeDiff` public), the live screen-reader check of menus (script in
@@ -644,3 +639,6 @@ From 2026-11-02 (round 7's survey); earlier entries are in the archive ([to 2026
   VulkanProbeTests skip without `HULTUI_UITESTS=1` and an all-skipped run exits 0. Usage 87 % weekly (~1 % a small step).
 - 2026-11-03: the user paused step 2 while its agent was adding tests; the agent was stopped (no commit, 5 files of
   uncommitted work kept in the worktree) and the loop stopped. Usage 87 % weekly.
+- 2026-11-08: the weekly limit reset (0 %); the loop resumed at 04:07 local as the user asked. Main had moved 32
+  commits (12d0392e: Meridian discovery and runner auth, text selection in scrolled views; none in step 2's files):
+  merged as 3a15b5b1. Step 2 resumes from the first agent's uncommitted edits.
