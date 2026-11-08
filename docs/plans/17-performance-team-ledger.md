@@ -4,29 +4,27 @@ State of [the performance team](17-performance-team.md). The orchestrator update
 file after every step and commits it with the step's work. Full survey reports are in
 [`17-reports/`](17-reports/).
 
-- **Round:** 8
-- **Phase:** release — round 8: every build step done and the full suite passed on 1b75f86e; merge into main, push, wait for CI. Step 2 resumed 2026-11-08 after the weekly
-  reset (next reset 2026-11-15 03:00 UTC) on top of main's merge 3a15b5b1 (32 commits, mostly Meridian). Briefs and
-  probes stay in session 64e7e0e2's old scratchpad (see Probe code). The survey's eight reports are
-  `17-reports/r8-*.md` (common brief `brief-r8-survey.md`). The 90 % weekly pause applies to build steps (user,
-  2026-10-27). Round 7
-  released: main's app-support merge (f64e4674, another session) merged into the branch as c655b411 with fixes
-  7dfd2ce3, then the branch merged into main as df45b4a2; CI run 41691075588 green (test, test-linux, docs). Open for
-  the user, none blocking: question 10 (`TokenizeDiff` public), the live screen-reader check of menus (script in
-  ACCESSIBILITY-PLAN.md, round 7 step 13), f9bceb6d's window checks (Open). Weekly usage resets 2026-11-08 03:00 UTC
-  (extra usage off); pause at 90 % (user, 2026-10-27). Older rounds are in
-  [the archive](17-performance-team-ledger-archive.md) (search it, don't read it whole). History note: rewritten
-  2026-10-25 (every commit after 3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history).
-  To resume in a fresh context, run in this worktree: `/loop Run the next step of the performance team: follow
-  docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md. Read both once per
-  session (afterwards only the ledger's Phase and the part the step needs), do the step the ledger's Phase calls
+- **Round:** 9
+- **Phase:** survey — round 9, to start in a fresh context (the loop stopped 2026-11-08 after round 8's release). Round 8
+  released: main's 32 Meridian commits merged into the branch as 3a15b5b1, then the branch merged into main as 10acc8c0;
+  CI run 42497326336 green (test, test-linux, docs, meridian-keyring on Ubuntu and macOS). Questions 11–13 answered
+  (all yes). Open for the user, none blocking: question 10 (`TokenizeDiff` public), the live screen-reader check of
+  menus and now of disabled menu items (ACCESSIBILITY-PLAN.md), f9bceb6d's window checks (Open). Weekly usage ~12 %
+  (reset 2026-11-15 03:00 UTC; extra usage off); the 90 % pause applies to build steps (user, 2026-10-27). Older
+  rounds are in [the archive](17-performance-team-ledger-archive.md) (search it, don't read it whole). History note:
+  rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a pre-push hook refuses pushes built on the old
+  history). To resume in a fresh context, run in this worktree: `/loop Run the next step of the performance team:
+  follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md. Read both once
+  per session (afterwards only the ledger's Phase and the part the step needs), do the step the ledger's Phase calls
   for, record it in the ledger, and commit.` Before resuming, `git fetch` and merge main if it moved. The common
-  survey brief from round 7 is reusable: session 855f4ddd's scratchpad `brief-r7-survey.md`.
+  survey brief from round 8 is reusable: session 64e7e0e2's old scratchpad `brief-r8-survey.md` (see Probe code).
+  Round 9's survey archives round 7's Landed rows, round 8's build order and answered questions 11–13, and the log
+  entries before 2026-11-03 (round 7's).
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`)
-- **Review commits since:** round 7's survey reviewed cd3b6c8f..1939afcb (round 6's build); round 8's survey reviews
-  round 7's build, 17d4220a..df45b4a2 (the last survey report to the round 7 release), which also brings main's
-  app-support merge f64e4674 (25 commits from another session: headless locators, frame robustness, lock privacy,
-  UIA, overlays, rich text) — review it like the rest.
+- **Review commits since:** round 8's survey reviewed 17d4220a..df45b4a2 (round 7's build); round 9's survey reviews
+  round 8's build, eaa1ec29..10acc8c0 (the last survey report to the round 8 release), which also brings main's merge
+  3a15b5b1 (32 commits from other sessions: Meridian discovery and runner auth, text selection in scrolled views) —
+  review it like the rest.
 - **Probe code:** round 8 surveys in session 64e7e0e2's scratchpad
   `C:\Users\fredr\AppData\Local\Temp\claude\C--Users-fredr-source-repos-fredrikhu-hului-revamped--claude-worktrees-distracted-mendel-5071ba\64e7e0e2-bc1c-4069-9d42-9311fee04c9e\scratchpad\r8-<area>\`;
   round 7 surveys (and builds) in session 855f4ddd's scratchpad `r7-<area>\`; round 6 surveys in session 855f4ddd's scratchpad
@@ -741,3 +739,8 @@ From 2026-11-02 (round 7's survey); earlier entries are in the archive ([to 2026
 - 2026-11-08: round 8 merged into main as 10acc8c0 (detached origin/main merge in this worktree, tree identical to the
   tested branch; origin/main 12d0392e was in the branch, so the push gate held). Primary checkout fast-forwarded behind
   the guard; branch pushed. CI run 42497326336 queued.
+- 2026-11-08: CI run 42497326336 on 10acc8c0 green: test 18 min, test-linux 4 min, docs 2 min, meridian-keyring
+  (ubuntu-24.04, macos-15) 1 min each. Round 8 landed 9 steps (17 kept changes, 2 bugs fixed in passing: a Meridian
+  History crash after a search, an Aperture Home double ring) and 3 public additions the user approved
+  (`IAccessibleItemSource.ItemIsEnabled`, `Element.Restyle`; pixel change in Meridian History). Round → 9, Phase →
+  survey; the loop stops, and round 9 starts in a fresh context.
