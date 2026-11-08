@@ -334,6 +334,18 @@ From the round 1 surveys (details in `17-reports/`):
 
 ## Needs the user
 
+Round 9 questions (asked 2026-11-08, from the survey reports as they came in). Recommendations in brackets.
+
+14. **dotnet-hover-holds-removed-view** (r9-4): `Window._lastHoveredElement` and `PointerState._hoveredElement` keep a
+    view a build removed alive until the pointer moves (Meridian, imported spec, pointer at rest: 471 KB of 4.9 MB at 50
+    endpoints, 15.5 MB of 38.3 MB at 2,000). Should a rebuild under a still pointer re-hit-test hover, so the new element
+    under it shows its hover style without a move (as browsers do), or only release the removed elements (no pixel
+    change)? [Release only.] → **yes, re-hit-test** (2026-11-08).
+15. **dotnet-meridian-windows-keyring-memo** (r9-4, r9-6): give Windows' `WindowsCredentialKeyring` the `KeyringMemo`
+    Linux and macOS have (22–66 `CredReadW` calls a key in the Environments table, ~59 a frame dragging the response
+    pane with the Request tab). A secret changed outside the app (the CLI, Credential Manager) is then seen only after a
+    restart, as on Linux and macOS today. Acceptable? [Yes.] → **yes** (2026-11-08).
+
 Round 8 questions 11–13, round 7 questions 1–4, round 6 questions 1–9 and round 5's question 5, all answered, are in
 the archive ([round 8](17-performance-team-ledger-archive.md#needs-the-user-round-8),
 [round 7](17-performance-team-ledger-archive.md#needs-the-user-round-7), [round 6](17-performance-team-ledger-archive.md#needs-the-user-round-6)).
@@ -481,3 +493,6 @@ From 2026-11-03 (round 8's survey); earlier entries are in the archive ([to 2026
   note, round 8's answered questions 11–13, and round 7's 139 log lines (2026-11-02 to its release on 2026-11-03).
   Weekly usage 12 %. The eight experts run in their own worktrees, reviewing eaa1ec29..10acc8c0 (78 commits, main's
   merge 3a15b5b1 with 32 commits from other sessions included).
+- 2026-11-08: survey reports in so far: r9-1 layout, r9-4 .NET, r9-2 painting, r9-6 reactivity (all not satisfied).
+  The user answered expert 4's two questions early: a rebuild under a still pointer re-hit-tests hover (question 14),
+  and Windows memoizes keyring reads as Linux and macOS do (question 15).
