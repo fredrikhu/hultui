@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 8
-- **Phase:** build — round 8, step 7 next (9 steps; steps 1–6 landed). Step 2 resumed 2026-11-08 after the weekly
+- **Phase:** build — round 8, step 8 next (9 steps; steps 1–7 landed; question 12 open, not blocking). Step 2 resumed 2026-11-08 after the weekly
   reset (next reset 2026-11-15 03:00 UTC) on top of main's merge 3a15b5b1 (32 commits, mostly Meridian). Briefs and
   probes stay in session 64e7e0e2's old scratchpad (see Probe code). The survey's eight reports are
   `17-reports/r8-*.md` (common brief `brief-r8-survey.md`). The 90 % weekly pause applies to build steps (user,
@@ -152,6 +152,8 @@ its brief quotes (`r8-k` = `17-reports/r8-k-<area>.md`).
 
 Re-ranked by the next survey.
 
+- **brief-columns-lag-a-key** (1/6; round 8 step 7) — Vesper Brief's columns lag one key after a key that scrolls them
+  (in the base too): a programmatic scroll fires no `ScrollEvent`, so nothing builds the new columns until the next key.
 - **live-reader check of menus** (user) — the six-step script in ACCESSIBILITY-PLAN.md (round 7 step 13) for Narrator,
   NVDA and Orca; a silent move would mean moving focus to the selected item (needs the user's approval).
 - **junction-changes-leads** (6/7/8, reader behaviour, no perf number) — only the caret is told to a reader, not a
@@ -246,6 +248,9 @@ Rounds 7 and 8 (round 8 is the round the next survey reviews; round 7 moves to t
 | 8 | fa10f889, f20b045f | aperture-home-cursor-turns-page | Bug fix, Home and Discover (same row code): the cursor turns its shelf's page. Home at 1000 px across a page 0.23 → 13.77 KB (0.125 builds a key, one a page turned; new cards fetch pictures); ring and focus on the cursor's card in every scene (cursors 5–7 had none). Discover: Right onto page 2 16.1 KB, 0.10 builds; Down (a shelf's next page) 105 KB, 0.67 builds (was 340). Also fixed: with a watchlist, moving onto a title card left two rings. Home Right/Down stays 0.26 KB. `component/shelf walk` rows within 2 %, bytes equal. `GridCursorTests`, `DiscoverCursorTests`, `ShelfPageTests` (reverse edits fail); Aperture 342 + 21 skipped, Headless 1,459 pass. REACTIVITY.md: "A key that still builds moves the live ring first". |
 | 8 | 7a12f5a9 | aperture-home-build-diet (a) | A Home shelf comes back whole (by row key) when every card on its page came back live and its `HomeShelfState` matches: title, count, page, cards per page, See all, scale, and the row's place among all rows and their number (the prototype missed the place: a row moved below a hidden row kept a stale menu); every child of Home's page keyed. Headless 1440×900, 6 shelves, 36 cards, idle-gated JIT ×2 + AOT: Home build 66.02 → 26.29 KB (−60 %), elements 46 → 4, time flat (AOT 65.61 → 26.44); Home open, posters released one per build 3,368–3,433 → 2,281–2,312 KB (−32 %; AOT −34 %), six per build 1,547 → 1,371 (−11 %); page-turn walk at 1000 px 13.77 → 6.80 KB a key; Right/Down 0.26 KB, no build. |
 | 8 | 2e10b549, 07e5b3f9 | aperture-home-build-diet (b) | A card's picture address is memoized by item id, kind, pixel size and sizing side, checked against the item's 3 picture tags, cleared on a new data generation or at 1,024 entries. Home build 26.29 → 11.10 KB (−58 %; −83 % for the step; AOT 26.44 → 11.21); Home open one poster a build 2,260–2,265 → 1,721–1,730 (−24 %), six a build −6.5 %; page-turn walk 6.80 → 5.72. 18 scenes (landings, page turns, Move up, Hide then Move down, Combine, rename, watched, resize, watchlist) identical to a forget-all build and to HEAD: pixels, tree, every row menu, ring, focus. `component/shelf walk` rows flat. `HomeShelfKeepTests` (4: a build with nothing changed makes exactly 4 elements), `CardArtworkUrlTests` (3); reverse edits fail; Aperture 349 + 21 skipped, Headless 1,459 pass. REACTIVITY.md two paragraphs. |
+| 8 | 081921c7 | vesper-cursor-no-build (Detail) | A plain cursor key sets the mounted list's `SelectedIndex` and scrolls; the F3 partner is checked by name first (`DiffTargetPath` only when the other pane's cursor can pair, still no build); Insert builds through a new `marked` flag. Detail 17.09 → 1.74 KB a key (−90 %; AOT 16.54 → 1.64), headless reader 17.45 → 2.09, 0 trees, builds 1 → 0; with a pairing partner 17.32 → 2.78. |
+| 8 | 80f31170 | element-restyle (API, **question 12**) | **Public `Element.Restyle(Action<Element> change)`** (not in the brief): changes a live element's look past its hover, press and focus styles (internal `InteractionStyles.Restyle`); without it a ring set directly on a once-hovered tile vanished when the pointer left (hover restores the look it first captured). `KeptElements` and REACTIVITY.md use it. Three `InteractionStyleTests`. |
+| 8 | 4048e35b, 74739a89 | vesper-cursor-no-build (Brief, Thumbnails) | Both grids on `KeptElements`; a cursor key restyles the two live cells or tiles; every pane build first puts restyled cells back and has the thumbnail list remake its rows (Tab, a click or a filter build after keys that built nothing); Brief still builds when a key scrolls and on the key after a page jump. KB a key JIT: Brief Down/Up 31.88 → 1.79, Right/Left 32.20 → 1.74; Thumbnails Right/Left 27.68 → 1.22, Down/Up on screen 31.25 → 1.41, a 30-key scrolling walk 57.51 → 26.33 (the tiles scrolled in); builds 1 → 0, 0 trees with the reader, time −3…−9 %, AOT within 1 KB. 47 scenes × dark/light identical to the base and a full build (three pre-existing or harness differences: an idle hover tooltip, a 0.0005 px tree rect after End, Brief's columns lagging a key after a scroll — in the base too). Insert then Up 21.55 → 13.88; Tab, type-to-find, partner flat; suite shelf and image-grid rows within 4 %. `CursorNoBuildTests` (5), `GridCursorNoBuildTests` (12); 19 reverse edits fail; Vesper 896 + 4 skipped, Core 5,064, Headless 1,459 pass. |
 
 ## Examined, not worth it
 
@@ -445,6 +450,12 @@ Round 8 question (asked 2026-11-03). Recommendations in brackets.
     adds a public default interface member, `IAccessibleItemSource.ItemIsEnabled(int)` (default: enabled), which
     `ContextMenuElement` answers from `IsDisabled`. Additive; no existing implementer has to change. [Yes: a reader bug,
     small.] → **yes, with step 2** (2026-11-03).
+12. **element-restyle** (step 7, 80f31170; not blocking): step 7's agent added a public `Element.Restyle(Action<Element>
+    change)`: it changes a live element's look (a ring, a background) so that its hover, press and focus styles layer over
+    the new look. Set directly, the look is lost when a hover or press ends (the style restores what it first captured).
+    Vesper needs it from another assembly; `KeptElements.Live` users will too. Keep it public? [Yes: it is the fix for a
+    real trap, and REACTIVITY.md now tells authors to use it. The other way is an internal method plus friend access
+    for the app.]
 
 Round 7 questions 1–4, round 6 questions 1–9 and round 5's question 5, all answered, are in the archive
 ([round 7](17-performance-team-ledger-archive.md#needs-the-user-round-7), [round 6](17-performance-team-ledger-archive.md#needs-the-user-round-6)).
@@ -684,3 +695,10 @@ From 2026-11-02 (round 7's survey); earlier entries are in the archive ([to 2026
   each child every build and only when all came back live; the kept state covers what the handlers read, not only
   what is drawn (the row menu's captured list and the row's place). Measuring tip: landings at random times move the
   build count ~10 % run to run — release held pictures in fixed batches (driver mode `openb`).
+- 2026-11-08: round 8 step 7 landed (081921c7, 80f31170, 4048e35b; captures 74739a89): a plain cursor key in Vesper's
+  Detail, Brief and Thumbnails builds nothing (−90…−96 % a key; a scrolling Thumbnails walk −54 %), 47 scenes
+  identical. The agent added a public `Element.Restyle(Action<Element>)` the brief did not ask for (a ring set directly
+  on a once-hovered tile was lost when the pointer left): question 12 for the user. Guideline notes: change a live
+  element's look with `Restyle`, never by setting it directly; every build resets live restyles first, not only the
+  key's own build; rows a list makes in a frame read the live cursor, not their stale item. Lead (Waiting): Brief's
+  columns lag one key because a programmatic scroll fires no `ScrollEvent`.
