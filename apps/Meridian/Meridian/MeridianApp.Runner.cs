@@ -45,7 +45,8 @@ public partial class MeridianApp
                 var open = _tabs.FirstOrDefault(t => t.Path.Equals(request.Path, StringComparison.OrdinalIgnoreCase));
                 var doc = open?.Doc ?? (TryReadFile(request.Path) is { } text ? ReqDocument.Parse(text) : null);
                 if (doc != null)
-                    list.Add(new CollectionRunner.Request(request.Path, request.DisplayName, doc));
+                    list.Add(new CollectionRunner.Request(request.Path, request.DisplayName, doc,
+                        EffectiveAuth(request.Path, doc).Spec));
             }
         }
         CollectionFolder? Scoped(CollectionFolder folder) =>
@@ -69,7 +70,7 @@ public partial class MeridianApp
         var cts = _runCts = new CancellationTokenSource();
         MarkDirty();
 
-        var runner = new CollectionRunner(Engine);
+        var runner = new CollectionRunner(Engine, _oauth);
         // Awaits resume on the UI thread, so the stream callback mutates state
         // exactly where Build reads it.
         var summary = await runner.RunAsync(scope, EnvironmentValues(), _runBail,

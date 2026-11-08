@@ -497,10 +497,17 @@ public class TextElement : Element
     // Maps a screen point to a character index in Content, through the paragraph
     // laid out at render time: the drawn runs, so a bold word, a larger one or a
     // centred line maps where it is seen.
+    //
+    // Measured from where the label is on screen (ScreenContentBox), not from its layout box:
+    // layout is unscrolled, and every scroll view above the label moves it when painting. A
+    // label of one line hides the difference, since any height maps to its only line; one long
+    // label in a scrolled pane selected the lines as far above the pointer as the pane had
+    // scrolled.
     private int PositionFromPoint(Point screenPos)
     {
         if (_paragraph is null || _paragraph.Text != _content) return 0;
-        int offset = _paragraph.OffsetAt(screenPos.X - _contentBox.X, screenPos.Y - _contentBox.Y);
+        var drawn = ScreenContentBox;
+        int offset = _paragraph.OffsetAt(screenPos.X - drawn.X, screenPos.Y - drawn.Y);
         return SnapToBoundary(Math.Clamp(offset, 0, _content.Length));
     }
 

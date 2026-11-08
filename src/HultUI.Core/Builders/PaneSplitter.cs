@@ -23,7 +23,7 @@ public sealed class PaneSplitter
     private readonly Action _onChanged;
     private readonly Action? _onCommitted;
     private readonly float _min;
-    private readonly float _max;
+    private float _max;
     private float _size;
     private float _grabAt;
     private float _grabSize;
@@ -45,8 +45,10 @@ public sealed class PaneSplitter
     /// <param name="max">Largest the pane may be.</param>
     /// <param name="initial">Starting size, clamped.</param>
     /// <param name="axis">Side by side (the pane's width) or stacked (its height).</param>
+    /// <param name="trailing">The sized pane comes after the handle (right of it, or below):
+    /// a drag or an arrow key toward it shrinks it, and End takes it to its smallest.</param>
     public PaneSplitter(Action onChanged, Action? onCommitted, float min, float max, float initial,
-        SplitterAxis axis = SplitterAxis.Horizontal)
+        SplitterAxis axis = SplitterAxis.Horizontal, bool trailing = false)
     {
         _onChanged = onChanged;
         _onCommitted = onCommitted;
@@ -54,12 +56,20 @@ public sealed class PaneSplitter
         _max = max;
         _size = Math.Clamp(initial, min, max);
         Axis = axis;
+        Trailing = trailing;
     }
 
     public SplitterAxis Axis { get; }
 
-    /// <summary>Current size of the pane before the splitter (its width side by side, its
-    /// height stacked), always within range.</summary>
+    /// <summary>The sized pane is after the handle rather than before it.</summary>
+    public bool Trailing { get; }
+
+    /// <summary>How a move along the axis changes the size: with it before the handle, against
+    /// it after.</summary>
+    private float Sign => Trailing ? -1f : 1f;
+
+    /// <summary>Current size of the sized pane — before the splitter, or after it when
+    /// <see cref="Trailing"/> (its width side by side, its height stacked), always within range.</summary>
     public float Size => Math.Clamp(_size, _min, _max);
 
     /// <summary>True while a drag is in progress — the handle paints itself lit.</summary>
@@ -68,6 +78,15 @@ public sealed class PaneSplitter
     /// <summary>Sets the size directly (restoring a remembered one). No callback: this is
     /// the owner telling the splitter, not the splitter telling the owner.</summary>
     public void Restore(float size) => _size = Math.Clamp(size, _min, _max);
+
+    /// <summary>
+    /// Moves the largest size, for a pane whose room depends on the window: the owner sets it at
+    /// each build, from what its neighbour's floor leaves. <see cref="Size"/> reads clamped to
+    /// it and a drag stops at it, so the handle never runs on past the pane, and dragging back
+    /// moves the pane at once. The size asked for is kept: a pane a smaller window cut short
+    /// comes back when the window grows. Never below the smallest size.
+    /// </summary>
+    public void SetMax(float max) => _max = Math.Max(max, _min);
 
     /// <summary>The handle, themed. Place it between the pane and its neighbour.</summary>
     public SplitterHandleElement Handle() => Wire(new SplitterHandleElement(Axis));
@@ -97,12 +116,12 @@ public sealed class PaneSplitter
         handle.OnKeyStep = delta =>
         {
             _follow?.Flush();
-            if (Resize(Size + delta)) _onCommitted?.Invoke();
+            if (Resize(Size + Sign * delta)) _onCommitted?.Invoke();
         };
         handle.OnKeyEnd = toEnd =>
         {
             _follow?.Flush();
-            if (Resize(toEnd ? _max : _min)) _onCommitted?.Invoke();
+            if (Resize(toEnd != Trailing ? _max : _min)) _onCommitted?.Invoke();
         };
         return handle;
     }
@@ -142,7 +161,7 @@ public sealed class PaneSplitter
     /// size actually moved.</summary>
     public bool DragTo(float pointer)
     {
-        bool moved = Resize(_grabSize + (pointer - _grabAt));
+        bool moved = Resize(_grabSize + Sign * (pointer - _grabAt));
         _dragMoved |= moved;
         return moved;
     }

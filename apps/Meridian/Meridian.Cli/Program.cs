@@ -47,7 +47,8 @@ if (loaded.Requests.Count == 0)
 // A secret this machine lacks is named before the run rather than surfacing as
 // a puzzling unresolved-variable failure on every request that uses it.
 foreach (var key in loaded.MissingSecrets)
-    Console.Error.WriteLine($"meridian: secret {key} is not set on this machine (keyring or ${key})");
+    Console.Error.WriteLine($"meridian: secret {key} is not set on this machine for {options.Env} "
+        + $"(keyring, ${Secrets.VariableName(options.Env!, key)} or ${key})");
 
 using var engine = new HttpEngine();
 var runner = new CollectionRunner(engine);

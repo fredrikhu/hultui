@@ -26,6 +26,43 @@ public static class OpenApi
         "/v3/api-docs",
     ];
 
+    /// <summary>
+    /// What discovery tries for a pasted URL, and the API base it maps. The
+    /// pasted URL itself goes first, so a spec URL works as pasted. A spec at a
+    /// well-known path, or a Swagger UI page (<c>…/swagger/index.html</c>), maps
+    /// the part before it; anything else is taken as the base.
+    /// </summary>
+    public static (string BaseUrl, IReadOnlyList<string> SpecUrls) ProbeCandidates(string pasted)
+    {
+        var url = pasted.Trim().TrimEnd('/');
+        var baseUrl = url;
+        // Longest first: …/swagger/v1/swagger.json also ends in /swagger.json.
+        if (WellKnownPaths.Where(p => url.EndsWith(p, StringComparison.OrdinalIgnoreCase))
+                .MaxBy(p => p.Length) is { } known)
+            baseUrl = url[..^known.Length];
+        else if (url.LastIndexOf("/swagger/", StringComparison.OrdinalIgnoreCase) is var swagger and >= 0)
+            baseUrl = url[..swagger];
+
+        var urls = new List<string> { url };
+        foreach (var path in WellKnownPaths)
+            if (!urls.Contains(baseUrl + path, StringComparer.OrdinalIgnoreCase))
+                urls.Add(baseUrl + path);
+        return (baseUrl, urls);
+    }
+
+    /// <summary>A response's whole text. Past the viewer cap the engine keeps
+    /// only the head in memory and the full body on disk, and a spec cut at
+    /// the cap is not JSON.</summary>
+    public static string FullText(ResponseBody body)
+    {
+        if (body.Truncated && body.SpillPath is { } spill)
+        {
+            try { return File.ReadAllText(spill); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
+        return body.Text;
+    }
+
     private static readonly string[] Methods =
         ["get", "put", "post", "delete", "options", "head", "patch", "trace"];
 

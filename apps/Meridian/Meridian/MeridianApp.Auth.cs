@@ -16,52 +16,11 @@ public partial class MeridianApp
 
     /// <summary>The auth a tab really uses, and the folder it came from when
     /// inherited — what the inheritance bar reports.</summary>
-    internal (AuthSpec Spec, string? InheritedFrom) EffectiveAuth(RequestTab tab) =>
-        Auth.Effective(tab.Path, tab.Doc, _workspace?.Root ?? Path.GetDirectoryName(tab.Path) ?? ".",
+    internal (AuthSpec Spec, string? InheritedFrom) EffectiveAuth(RequestTab tab) => EffectiveAuth(tab.Path, tab.Doc);
+
+    private (AuthSpec Spec, string? InheritedFrom) EffectiveAuth(string requestPath, ReqDocument doc) =>
+        Auth.Effective(requestPath, doc, _workspace?.Root ?? Path.GetDirectoryName(requestPath) ?? ".",
             path => TryReadFile(path) is { } text ? ReqDocument.Parse(text) : null);
-
-    /// <summary>
-    /// Applies auth to a request being sent: the header (or query pair), with
-    /// OAuth2 fetching a token first. Returns an error string when auth cannot
-    /// be satisfied — the send stops rather than going out unauthenticated and
-    /// puzzling someone with a 401.
-    /// </summary>
-    private async Task<string?> ApplyAuthAsync(
-        RequestTab tab, VariableResolver resolver,
-        List<(string, string)> headers, CancellationToken ct)
-    {
-        var (spec, _) = EffectiveAuth(tab);
-        if (spec.Kind == AuthKind.None) return null;
-
-        string? token = null;
-        if (spec.Kind == AuthKind.OAuth2)
-        {
-            var (fetched, error) = await _oauth.TokenFor(spec, resolver, DateTimeOffset.Now, ct);
-            if (error != null) return error;
-            token = fetched?.AccessToken;
-        }
-
-        if (Auth.HeaderFor(spec, resolver, token, out var unresolved) is { } header)
-        {
-            if (unresolved.Count > 0)
-                return $"auth needs {string.Join(", ", unresolved.Distinct().Select(n => "{{" + n + "}}"))}";
-            // An explicit header on the request wins: someone who wrote
-            // "header Authorization: …" meant it.
-            if (!headers.Any(h => h.Item1.Equals(header.Name, StringComparison.OrdinalIgnoreCase)))
-                headers.Add(header);
-        }
-        return null;
-    }
-
-    /// <summary>The query pair <c>apikey query</c> adds, appended to the URL
-    /// after variable resolution.</summary>
-    private string ApplyAuthQuery(RequestTab tab, VariableResolver resolver, string url)
-    {
-        var (spec, _) = EffectiveAuth(tab);
-        if (Auth.QueryFor(spec, resolver) is not { } pair) return url;
-        var separator = url.Contains('?') ? '&' : '?';
-        return $"{url}{separator}{Uri.EscapeDataString(pair.Name)}={Uri.EscapeDataString(pair.Value)}";
-    }
 
     // ── The Auth sub-tab ─────────────────────────────────────────────────
 

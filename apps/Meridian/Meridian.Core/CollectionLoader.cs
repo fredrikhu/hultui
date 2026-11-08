@@ -35,7 +35,7 @@ public static class CollectionLoader
         var root = FindRoot(scope.Root);
         var tree = CollectionScanner.Scan(root);
         var requests = new List<CollectionRunner.Request>();
-        Walk(tree.Root, scope.Root, requests);
+        Walk(tree.Root, scope.Root, root.Root, requests);
 
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         var missing = new List<string>();
@@ -61,10 +61,10 @@ public static class CollectionLoader
             {
                 if (doc.IsSecret(key))
                 {
-                    // Keyring, then the CI-injected environment variable. A
-                    // secret this machine lacks is reported, not silently
-                    // resolved to its placeholder.
-                    if (keyring.Get(root.Root, key) is { } secret) values[key] = secret;
+                    // This environment's value, else the shared one — keyring, then the
+                    // CI-injected environment variable, as the app does. A secret this
+                    // machine lacks is reported, not silently resolved to its placeholder.
+                    if (Secrets.Resolve(keyring, root.Root, envName, key) is { } secret) values[key] = secret.Value;
                     else missing.Add(key);
                 }
                 else if (doc.Values.TryGetValue(key, out var value))
@@ -79,16 +79,18 @@ public static class CollectionLoader
     }
 
     /// <summary>Requests at or below <paramref name="scopeRoot"/>, in tree order.</summary>
-    private static void Walk(CollectionFolder folder, string scopeRoot, List<CollectionRunner.Request> into)
+    private static void Walk(CollectionFolder folder, string scopeRoot, string collectionRoot,
+        List<CollectionRunner.Request> into)
     {
-        foreach (var sub in folder.Folders) Walk(sub, scopeRoot, into);
+        foreach (var sub in folder.Folders) Walk(sub, scopeRoot, collectionRoot, into);
         foreach (var request in folder.Requests)
         {
             if (!IsUnder(request.Path, scopeRoot)) continue;
             try
             {
-                into.Add(new CollectionRunner.Request(request.Path, request.DisplayName,
-                    ReqDocument.Parse(File.ReadAllText(request.Path))));
+                var doc = ReqDocument.Parse(File.ReadAllText(request.Path));
+                var (auth, _) = Auth.Effective(request.Path, doc, collectionRoot, ReadFolderFile);
+                into.Add(new CollectionRunner.Request(request.Path, request.DisplayName, doc, auth));
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
@@ -96,6 +98,12 @@ public static class CollectionLoader
                 // on what it could load.
             }
         }
+    }
+
+    private static ReqDocument? ReadFolderFile(string path)
+    {
+        try { return File.Exists(path) ? ReqDocument.Parse(File.ReadAllText(path)) : null; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
     }
 
     private static bool IsUnder(string path, string root)

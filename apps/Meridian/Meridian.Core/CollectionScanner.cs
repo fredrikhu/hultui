@@ -2,9 +2,10 @@ namespace Meridian.Core;
 
 public sealed record CollectionTree(CollectionFolder Root, IReadOnlyList<EnvFileRef> Environments);
 
-/// <summary>A folder that (transitively) contains requests. Folders that don't —
-/// <c>src/</c>, <c>docs/</c> — are pruned: the tree shows the collection, not
-/// the whole repository.</summary>
+/// <summary>A folder that (transitively) contains requests, or has a <c>_folder.req</c> of its
+/// own: the folder defaults file says the folder is part of the collection, requests or not
+/// (the app's ＋ new folder writes one). Folders that don't — <c>src/</c>, <c>docs/</c> — are
+/// pruned: the tree shows the collection, not the whole repository.</summary>
 public sealed record CollectionFolder(
     string Name,
     string Path,
@@ -77,7 +78,7 @@ public static class CollectionScanner
             return null;
         }
 
-        if (folders.Count == 0 && requests.Count == 0)
+        if (folders.Count == 0 && requests.Count == 0 && !hasDefaults)
             return null;
         return new CollectionFolder(name, path, folders, requests, hasDefaults);
     }

@@ -21,6 +21,10 @@ public static class Icons
     public const string Plus = "plus";
     public const string ImportSpec = "download-simple";
 
+    // The Requests tree's actions: ＋ request, ＋ folder.
+    public const string NewRequest = "plus";
+    public const string NewFolder = "folder-plus";
+
     // Window controls (Windows/Linux style; bold so the marks survive caption size).
     public const string WinMinimize = "minus-bold";
     public const string WinMaximize = "square-bold";

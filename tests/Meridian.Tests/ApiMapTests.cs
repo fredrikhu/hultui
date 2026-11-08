@@ -192,6 +192,40 @@ public class ApiMapTests
         Assert.Contains("no \"paths\"", failure!.Message);
     }
 
+    // ── Probing ──────────────────────────────────────────────────────────
+
+    [Theory]
+    // A Swagger UI page: the base is before /swagger/.
+    [InlineData("https://h/api/swagger/index.html", "https://h/api")]
+    // A spec at a well-known path: the base is before it.
+    [InlineData("https://h/api/swagger/v1/swagger.json", "https://h/api")]
+    [InlineData("https://h/api/openapi.json", "https://h/api")]
+    // Anything else is the base itself.
+    [InlineData("https://h/api/", "https://h/api")]
+    public void APastedUrlIsTriedFirstAndMapsItsBase(string pasted, string expectedBase)
+    {
+        var (baseUrl, urls) = OpenApi.ProbeCandidates(pasted);
+
+        Assert.Equal(expectedBase, baseUrl);
+        Assert.Equal(pasted.TrimEnd('/'), urls[0]);
+        Assert.Contains("https://h/api/swagger/v1/swagger.json", urls);
+        Assert.Equal(urls.Count, urls.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+    }
+
+    [Fact]
+    public void ASpecPastTheViewerCapIsReadInFull()
+    {
+        var spill = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(spill, """{"paths":{"/a":{"get":{}}}}""");
+            var body = new ResponseBody(BodyKind.Text, """{"paths":{"/a""", [], 27, Truncated: true, spill);
+
+            Assert.NotNull(OpenApi.Parse(OpenApi.FullText(body), "https://h", "x.json", out _));
+        }
+        finally { File.Delete(spill); }
+    }
+
     // ── Promotion ────────────────────────────────────────────────────────
 
     [Fact]

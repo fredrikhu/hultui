@@ -73,10 +73,15 @@ public partial class MeridianApp
             .Width(Azimuth.TreeWidth)
             .BorderColor(Azimuth.Border).BorderWidth(new Thickness(0, 0, 0, 1));
 
-        panel.AddChild(Flex.Row(gap: 0).Height(36).FlexShrink(0)
+        // The collection's own ＋ request and ＋ folder, for its root; each folder has a pair too.
+        panel.AddChild(Flex.Row(gap: 2).Height(36).FlexShrink(0)
             .AlignItems(AlignItems.Center)
-            .Padding(new Thickness(0, Azimuth.S3, 0, Azimuth.S3))
-            .Children(Text.New("Collections").FontSize(13f).FontWeight(FontWeight.Medium).TextColor(Azimuth.TextDim)));
+            .Padding(new Thickness(0, Azimuth.S2, 0, Azimuth.S3))
+            .Children(
+                Text.New("Collections").FontSize(13f).FontWeight(FontWeight.Medium).TextColor(Azimuth.TextDim)
+                    .MaxLines(1).FlexGrow(1),
+                TreeAction(Icons.NewRequest, "New request", "tree-new-request", () => OpenNewRequestDialog(ws.Root)),
+                TreeAction(Icons.NewFolder, "New folder", "tree-new-folder", () => OpenNewFolderDialog(ws.Root))));
 
         var scroll = ScrollView.New();
         var list = Flex.Column(gap: 0);
@@ -85,9 +90,13 @@ public partial class MeridianApp
             if (tree.Root.Folders.Count == 0 && tree.Root.Requests.Count == 0)
                 list.AddChild(Flex.Column(gap: Azimuth.S1)
                     .Padding(new Thickness(Azimuth.S3))
+                    .AlignItems(AlignItems.FlexStart)
                     .Children(
                         Text.New("no requests yet").FontSize(12f).TextColor(Azimuth.TextMuted),
-                        Text.New("Create a .req file and it appears here.").FontSize(11f).TextColor(Azimuth.TextFaint)));
+                        Text.New("A request is a .req file in this folder.").FontSize(11f).TextColor(Azimuth.TextFaint),
+                        Box.New().Height(Azimuth.S1),
+                        Ui.Button(ButtonVariant.Secondary, "New request…", () => OpenNewRequestDialog(ws.Root),
+                            "tree-first-request", style: Ui.Small)));
             AddFolderRows(list, tree.Root, depth: 0, isRoot: true);
         }
         scroll.AddChild(list);
@@ -107,15 +116,37 @@ public partial class MeridianApp
 
     private void AddFolderRows(BoxElement list, CollectionFolder folder, int depth, bool isRoot)
     {
+        int childDepth = isRoot ? 0 : depth + 1;
         if (!isRoot)
         {
-            // Folders in mono — they are real directories.
-            list.AddChild(Flex.Row(gap: Azimuth.S1).Height(Azimuth.RowList).FlexShrink(0)
+            // Folders in mono — they are real directories. ＋ request and ＋ folder make them in
+            // this folder; rename and delete are the ⋯ at the row's end, or a right-click on the row.
+            string relative = Relative(folder.Path);
+            string id = relative.Replace('/', '-');
+            var path = folder.Path;
+            var row = Flex.Row(gap: 2).Height(Azimuth.RowList).FlexShrink(0)
                 .AlignItems(AlignItems.Center)
-                .Padding(new Thickness(0, 0, 0, Azimuth.S3 + depth * Azimuth.S3))
-                .Children(Ui.Mono(folder.Name + "/", 12f, Azimuth.TextMuted)));
+                .Padding(new Thickness(0, Azimuth.S2, 0, Azimuth.S3 + depth * Azimuth.S3))
+                .AccessibleRole(AccessibilityRole.Group).AccessibleName($"folder {folder.Name}")
+                .AutomationId("folder-" + id)
+                .Children(
+                    Ui.Mono(folder.Name + "/", 12f, Azimuth.TextMuted).MaxLines(1).TextOverflow(TextOverflow.Ellipsis),
+                    Box.New().FlexGrow(1),
+                    TreeAction(Icons.NewRequest, $"New request in {relative}", "tree-new-request-" + relative,
+                        () => OpenNewRequestDialog(path)),
+                    TreeAction(Icons.NewFolder, $"New folder in {relative}", "tree-new-folder-" + relative,
+                        () => OpenNewFolderDialog(path)),
+                    RowActionsButton($"actions for folder {folder.Name}", "folder-actions-" + id, () => FolderActions(folder)));
+            RowContextMenu(row, () => FolderActions(folder));
+            list.AddChild(row);
+            // A folder made in the app shows before its first request (its _folder.req keeps it).
+            if (folder.Folders.Count == 0 && folder.Requests.Count == 0)
+                list.AddChild(Flex.Row(gap: 0).Height(Azimuth.RowList).FlexShrink(0)
+                    .AlignItems(AlignItems.Center)
+                    .Padding(new Thickness(0, Azimuth.S2, 0, Azimuth.S3 + childDepth * Azimuth.S3))
+                    .Children(Text.New("empty").FontSize(11f).TextColor(Azimuth.TextFaint)
+                        .AutomationId("tree-empty-" + relative)));
         }
-        int childDepth = isRoot ? 0 : depth + 1;
         foreach (var sub in folder.Folders)
             AddFolderRows(list, sub, childDepth, isRoot: false);
         foreach (var request in folder.Requests)
@@ -151,8 +182,12 @@ public partial class MeridianApp
             row.AddChild(Ui.Mono("⛓" + request.UsesCount, 8f, Azimuth.TextFaint).FlexShrink(0));
         if (openTab is { Dirty: true })
             row.AddChild(Dot(Azimuth.Accent));
+        var path = request.Path;
+        row.AddChild(RowActionsButton($"actions for {request.DisplayName}",
+            "req-actions-" + System.IO.Path.GetFileNameWithoutExtension(path), () => RequestActions(path)));
 
         row.OnClick(_ => OpenRequest(request.Path));
+        RowContextMenu(row, () => RequestActions(path));
         if (!active) row.HoverBg(Azimuth.Raised, Color.Transparent);
         return row;
     }

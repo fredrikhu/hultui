@@ -43,6 +43,7 @@ public partial class MeridianApp
         var list = new List<PaletteCommand>
         {
             new PaletteCommand("Open a folder…", OpenFolder) { Group = "Collection", Keys = Shortcuts.Keys("open") },
+            new PaletteCommand("New collection…", NewCollection) { Group = "Collection", Keys = Shortcuts.Keys("new") },
             new PaletteCommand("Go to Requests", () => SetView(MeridianView.Requests)) { Group = "Go", Keys = "1" },
             new PaletteCommand("Go to Runner", () => SetView(MeridianView.Runner)) { Group = "Go", Keys = "2" },
             new PaletteCommand("Go to Discovery", () => SetView(MeridianView.Discovery)) { Group = "Go", Keys = "3" },
@@ -50,8 +51,11 @@ public partial class MeridianApp
             new PaletteCommand("Go to Environments", () => SetView(MeridianView.Environments)) { Group = "Go", Keys = "5" },
         };
 
-        if (_workspace != null)
+        if (_workspace is { } ws)
         {
+            // In the collection's root, as the tree header's ＋ does; a folder's own ＋ is on its row.
+            list.Add(Command("New request…", "Collection", "", () => { SetView(MeridianView.Requests); OpenNewRequestDialog(ws.Root); }));
+            list.Add(Command("New folder…", "Collection", "", () => { SetView(MeridianView.Requests); OpenNewFolderDialog(ws.Root); }));
             list.Add(new PaletteCommand("Switch environment…", OpenEnvSwitcher) { Group = "Environment", Keys = Shortcuts.Keys("env") });
             list.Add(Command("Run the collection", "Run", Shortcuts.Keys("run"), () =>
             {
@@ -67,6 +71,15 @@ public partial class MeridianApp
             // Ctrl S saves whatever is on screen, so it is shown on the one row it does now.
             list.Add(Command("Save environments", "Environment",
                 View == MeridianView.Environments ? Shortcuts.Keys("save") : "", SaveEnvironments));
+            if (_envName is { } env)
+            {
+                // F2 and Delete reach the active environment on its own view.
+                bool here = View == MeridianView.Environments;
+                list.Add(Command($"Rename environment {env}…", "Environment", here ? Shortcuts.Keys("rename") : "",
+                    () => OpenRenameEnvironmentDialog(env)));
+                list.Add(Command($"Delete environment {env}…", "Environment", here ? Shortcuts.Keys("delete") : "",
+                    () => ConfirmDeleteEnvironment(env)));
+            }
 
             // Every request in the collection is a command — the fastest way
             // to a known request in a large tree.
@@ -89,6 +102,15 @@ public partial class MeridianApp
             list.Add(Command("Save request", "Request",
                 View != MeridianView.Environments ? Shortcuts.Keys("save") : "", SaveActiveTab));
             list.Add(new PaletteCommand("Close tab", CloseActiveTab) { Group = "Request", Keys = Shortcuts.Keys("close") });
+            if (_workspace != null)
+            {
+                var path = ActiveTab.Path;
+                bool here = View == MeridianView.Requests;
+                list.Add(Command("Rename request…", "Request", here ? Shortcuts.Keys("rename") : "",
+                    () => OpenRenameRequestDialog(path)));
+                list.Add(Command("Delete request…", "Request", here ? Shortcuts.Keys("delete") : "",
+                    () => ConfirmDeleteRequest(path)));
+            }
             if (!_forceResponseBottom)
                 list.Add(Command("Flip the response pane", "Request",
                     View == MeridianView.Requests ? Shortcuts.Keys("flip") : "", FlipResponsePane));

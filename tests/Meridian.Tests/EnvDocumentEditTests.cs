@@ -58,6 +58,71 @@ public class EnvDocumentEditTests
     }
 
     [Fact]
+    public void MarkSecretKeepsEveryOtherByte()
+    {
+        // CRLF, a comment, odd spacing, no final newline: all of it survives.
+        const string text = "# staging\r\n  base_url = http://x\r\nclient_secret=\r\ntimeout_ms=30000";
+        var doc = EnvDocument.Parse(text);
+        doc.MarkSecret("client_secret");
+
+        Assert.Equal(text + "\r\nsecret client_secret\r\n", doc.Serialize());
+    }
+
+    [Fact]
+    public void UnmarkSecretDropsTheFlagAndKeepsTheValueLine()
+    {
+        var doc = EnvDocument.Parse("a=1\r\ntoken=placeholder\r\nsecret token\r\nb=2\r\n");
+        doc.UnmarkSecret("token");
+
+        Assert.Equal("a=1\r\ntoken=placeholder\r\nb=2\r\n", doc.Serialize());
+        Assert.False(doc.IsSecret("token"));
+        Assert.True(doc.Edited);
+    }
+
+    [Fact]
+    public void UnmarkingAFlagOnlyKeyTurnsItsLineIntoAnEmptyValue()
+    {
+        // No token= line: the key keeps its place instead of vanishing.
+        var doc = EnvDocument.Parse("a=1\nsecret token\nb=2\nsecret token\n");
+        doc.UnmarkSecret("token");
+
+        Assert.Equal("a=1\ntoken=\nb=2\n", doc.Serialize());
+        Assert.Equal(["a", "token", "b"], doc.Keys);
+        Assert.Equal("", doc.Values["token"]);
+    }
+
+    [Fact]
+    public void UnmarkSecretOnAPlainKeyChangesNothing()
+    {
+        var doc = EnvDocument.Parse("a=1\n");
+        doc.UnmarkSecret("a");
+
+        Assert.Equal("a=1\n", doc.Serialize());
+        Assert.False(doc.Edited);
+    }
+
+    [Fact]
+    public void RemoveKeyDropsEveryLineForItAndNothingElse()
+    {
+        var doc = EnvDocument.Parse("# keep\r\ntoken=x\r\na=1\r\n  token = y\r\nsecret token\r\n# token=commented\r\nb=2");
+        doc.RemoveKey("token");
+
+        Assert.Equal("# keep\r\na=1\r\n# token=commented\r\nb=2", doc.Serialize());
+        Assert.Equal(["a", "b"], doc.Keys);
+        Assert.False(doc.IsSecret("token"));
+    }
+
+    [Fact]
+    public void RemoveKeyOfAnAbsentKeyChangesNothing()
+    {
+        var doc = EnvDocument.Parse("a=1\n");
+        doc.RemoveKey("b");
+
+        Assert.Equal("a=1\n", doc.Serialize());
+        Assert.False(doc.Edited);
+    }
+
+    [Fact]
     public void MarkSavedClearsEdited()
     {
         var doc = EnvDocument.Parse("a=1\n");

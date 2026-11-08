@@ -4,6 +4,10 @@ A native, keyboard-first HTTP/API client. Collections are **folders of plain
 text files** — no cloud, no login, no account wall — so a request is something
 you review in a pull request, and the same files run in CI.
 
+**New to Meridian?** [GUIDE.md](GUIDE.md) walks through every task in the app —
+a new collection, environments, secrets, an OAuth2 client-credentials setup, runs
+and CI — without a file to write by hand. This README is the reference.
+
 Three projects:
 
 | Project | What it is |
@@ -50,8 +54,133 @@ extract body $.id -> charge_id
 **Variables** resolve environment-first, then values extracted by earlier
 requests; `{{$uuid}}` and `{{$timestamp}}` are built-ins and can't be shadowed.
 **Secrets** are flagged in the `.env` file and stored in the OS keyring (or, in
-CI, read from an environment variable of the same name) — never in the
-collection.
+CI, read from an environment variable) — never in the collection. A value
+belongs to one environment, so `local` and `staging` can each hold their own
+`client_secret`; a **shared** value serves every environment that has none of
+its own. For the active environment, say `staging`, a secret resolves from the
+first of:
+
+1. `staging`'s own value in the keyring;
+2. the environment variable `staging__client_secret`;
+3. the shared value in the keyring;
+4. the environment variable `client_secret`.
+
+The keyring is the platform's own, and an entry is named the same way on each:
+`meridian:staging|<collection>|client_secret` for one environment's value,
+`meridian|<collection>|client_secret` for the shared one. Values stored before
+they were per environment have the shared name, so they keep serving every
+environment; nothing needs moving.
+
+| OS | Keyring | Where to see an entry |
+|---|---|---|
+| Windows | Credential Manager, a generic credential named as above | Control Panel → Credential Manager → Windows Credentials |
+| macOS | the login keychain, a generic password whose service is named as above and whose account is the key | Keychain Access → login |
+| Linux | the Secret Service (GNOME Keyring, KWallet, KeePassXC) through libsecret: an item of the default collection with the schema `io.github.fredrikhu.Meridian` and the attributes `collection`, `environment` (`*` for the shared value) and `key` | Seahorse ("Passwords and Keys") or KWallet Manager, labelled `Meridian: client_secret (staging) in <collection>` |
+
+macOS ties a keychain item to the program that stored it, so a newer build of
+Meridian may ask once to read an item an older one stored. Meridian reads each
+entry once per run and remembers the answer, so a change made in one of the
+tools above shows after a restart.
+
+The variables are what a machine without a keyring has: CI, or a Linux machine
+without libsecret or a running Secret Service (a server, a container, an SSH
+session with no desktop). Setting a value there says why, and names the
+variable to set instead. `<env>__<key>` is the one that holds a different value
+per environment.
+
+**Collections, requests and folders are made in the app** (key 1), with no
+file to write by hand:
+
+- **New collection** (the front door's card, **Ctrl+N**, or the palette) asks
+  for the folder to put it in, a name, and the API's base URL (blank is fine:
+  fill it in later on key 5). It writes `<name>/first-request.req`
+  (`GET {{base_url}}/`) and `<name>/envs/local.env` (`base_url=…`), opens the
+  collection and the request. Nothing is written until the last prompt's OK.
+- **＋** and the **folder ＋** beside **Collections** make a request or a folder
+  in the collection's root; the pair on each folder's row makes them in that
+  folder (the palette's **New request…** and **New folder…** use the root). A
+  request is `<name>.req` (the `.req` is optional when you type it), starts as
+  `GET {{base_url}}/`, and opens with its URL box taking the keyboard. A folder
+  gets a `_folder.req` for its defaults, which keeps it in the tree before its
+  first request.
+- Every name prompt refuses, before anything is written: an empty name, `/`,
+  `\`, `..`, a leading or trailing dot, a character Windows refuses
+  (`< > : " | ? *`), a Windows device name (`con`, `nul`, `com1` …), and a name
+  already taken in any letter case — plus `_folder` for a request and `envs`
+  for a folder in the root. Files are created, never overwritten.
+
+**Environments are made in the app** (key 5), with no file to write by hand:
+
+- **New environment…** (the empty state, or **＋ new environment** under the
+  list) asks for a name and writes an empty `envs/<name>.env`, making `envs/`
+  when the collection has none. The new environment becomes the active one.
+  Its name follows the same rules as above.
+- **＋ add key** adds a key to the active environment; a key another
+  environment lacks shows **missing — add to …** in that column (a secret
+  arrives as its flag alone); **✕** at a row's end removes the key from every
+  environment. Removing a secret also forgets this machine's keyring values for
+  it (the shared one and every environment's own), on the save that writes the
+  files without it.
+- The **SECRET** column's **○ / ●** toggles a key's secret flag in every file
+  that has it: on appends `secret <key>`, off takes it out again (a key with
+  only the flag keeps its place as `key=`). A flagged key's cell then asks for
+  that environment's value — **not set on this machine — set value** — which
+  goes to the OS keyring. A value already typed into the file shows **still in
+  local.env — move to keyring** (it becomes `local`'s own value), or **— clear**
+  when `local` already has one.
+- A secret's cell is per environment: masked, with **reveal (5 s)**, and where
+  the value comes from — **keyring** (the environment's own), **shared**, or
+  the environment variable it was read from. Its **⋯** (or a right-click on the
+  cell) manages the stored value, acting on the keyring at once and changing
+  no file:
+  - on an own value: **Change…** asks for a new value in an empty field, never
+    showing the old one; **Use everywhere** makes it the shared value, so every
+    environment uses it — when others have values of their own it asks first
+    and names them, since those are forgotten; **Forget** asks first, then drops
+    it, and the environment falls back to the shared value or asks for one;
+  - on a shared value: **Set own value…** gives that environment one of its
+    own; **Change shared…** and **Forget shared** act on the value every
+    environment without its own uses, and their questions name those
+    environments;
+  - on a value from an environment variable: **Set own value…** only — the
+    variable is not Meridian's to change.
+- Turning **●** off when this machine stores a value asks what becomes of it:
+  **Move into local.env** writes the value each environment used into its own
+  file, as plain text anyone who can read the file or its repository can read
+  (a value with a line break can't move); **Forget value** drops it and the key
+  takes the file's value. Either way the keyring entries (shared and every
+  environment's own) go on the **Ctrl+S** that writes the files, never before,
+  and turning **○** back on before saving keeps them. No value is left behind
+  in the keyring.
+- Every edit waits in the table until **Ctrl+S**, which rewrites only the lines
+  that changed.
+
+**Files are renamed and deleted in the app** too. Every row of the Requests
+tree (requests and folders) and of the environment list has a **⋯** at its end,
+and a right-click on the row opens the same menu: **Rename…** and **Delete…**.
+**F2** and **Delete** do the same for the request open in the editor, or for
+the active environment on the Environments view.
+
+- **Rename** moves the file (`get-charge.req`, `envs/staging.env`) or folder,
+  under the same name rules as a new one, refusing a name a sibling already
+  has in any letter case; a change of letter case alone is allowed.
+  An open tab follows its file, unsaved edits and all, and saves to the new
+  name; a folder takes its `_folder.req` defaults and everything else in it
+  along. A renamed environment keeps its unsaved edits, its own keyring values
+  and stays active. The
+  tree shows a request's `name` line when it has one, so renaming the file
+  leaves that label as it is.
+- **Delete** asks first, naming what goes: the file, or the folder with the
+  number of requests and other files in it, and any open tab with unsaved
+  changes. It goes to the **Recycle Bin** on Windows and the **Trash** on
+  Linux (the freedesktop.org trash the file managers restore from). Where
+  there is no bin the confirmation says the delete is permanent, and where the
+  bin refuses a path (a network share, another file system than the trash) a
+  second confirmation offers to delete it for good. Open tabs of what went
+  close. Deleting the active environment makes `local` active, else the first
+  left — as opening a collection does. Its own keyring values are forgotten
+  (the confirmation names them), so an environment made later under the same
+  name starts without them; the shared values stay for the others.
 
 ## Running in CI
 
@@ -98,6 +227,21 @@ GitHub Actions:
     client_secret: ${{ secrets.CLIENT_SECRET }}   # a flagged secret, injected
 ```
 
+A job that runs two environments with different values names them per
+environment instead, `<env>__<key>`:
+
+```yaml
+- run: |
+    meridian run payments-api/ --env staging
+    meridian run payments-api/ --env prod
+  env:
+    staging__client_secret: ${{ secrets.STAGING_CLIENT_SECRET }}
+    prod__client_secret: ${{ secrets.PROD_CLIENT_SECRET }}
+```
+
+A secret the run can't resolve is named before the first request:
+`meridian: secret client_secret is not set on this machine for ci (keyring, $ci__client_secret or $client_secret)`.
+
 ## Keys
 
 | | |
@@ -105,8 +249,10 @@ GitHub Actions:
 | `Ctrl+P` | command palette — every command, and every request by name |
 | `1`–`5` | Requests · Runner · Discovery · History · Environments |
 | `Ctrl+Enter` / `Esc` | send · cancel |
-| `Ctrl+O` / `Ctrl+S` / `Ctrl+W` | open a collection · save (the request, or the environments on their view) · close tab |
+| `Ctrl+O` / `Ctrl+N` | open a collection · make a new one |
+| `Ctrl+S` / `Ctrl+W` | save (the request, or the environments on their view) · close tab |
 | `Ctrl+E` | switch environment |
+| `F2` / `Delete` | rename · delete the open request, or the active environment on its view |
 | `Ctrl+R` | run the collection, from any view |
 | `Ctrl+I` | import an OpenAPI spec |
 | `Ctrl+F` | find in the response |
@@ -120,8 +266,9 @@ the buttons come from it too.
 
 Tagging `meridian-v<x.y.z>` builds the Windows installer and publishes a
 release ([workflow](../../.github/workflows/meridian-installer.yml)). The
-installer ships the app and the `meridian` CLI, and offers to put the CLI on
-PATH.
+installer ships the app as `Meridian.exe` and the `meridian` CLI in a `cli`
+folder beside it, and offers to put that folder on PATH. The folder is not
+optional: Windows file names ignore case, so the two cannot share one.
 
 The app icon is generated, not hand-drawn — `python
 scripts/generate-meridian-icon.py` redraws it from the Azimuth palette.

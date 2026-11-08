@@ -123,6 +123,41 @@ public static class Auth
             : null;
 
     /// <summary>
+    /// Applies auth to a request about to be sent: adds the header (or the
+    /// query pair to <paramref name="url"/>), fetching an OAuth2 token first.
+    /// Returns an error when auth cannot be satisfied, so the request stops
+    /// instead of going out unauthenticated and coming back 401. An explicit
+    /// header on the request wins: someone who wrote "header Authorization: …"
+    /// meant it. Both a single send and a collection run go through here.
+    /// </summary>
+    public static async Task<(string Url, string? Error)> ApplyAsync(
+        AuthSpec spec, VariableResolver resolver, OAuth2 oauth,
+        List<(string, string)> headers, string url, CancellationToken ct)
+    {
+        if (spec.Kind == AuthKind.None) return (url, null);
+
+        string? token = null;
+        if (spec.Kind == AuthKind.OAuth2)
+        {
+            var (fetched, error) = await oauth.TokenFor(spec, resolver, DateTimeOffset.Now, ct);
+            if (error != null) return (url, error);
+            token = fetched?.AccessToken;
+        }
+
+        if (HeaderFor(spec, resolver, token, out var unresolved) is { } header)
+        {
+            if (unresolved.Count > 0)
+                return (url, $"auth needs {string.Join(", ", unresolved.Distinct().Select(n => "{{" + n + "}}"))}");
+            if (!headers.Any(h => h.Item1.Equals(header.Name, StringComparison.OrdinalIgnoreCase)))
+                headers.Add(header);
+        }
+
+        if (QueryFor(spec, resolver) is { } pair)
+            url = $"{url}{(url.Contains('?') ? '&' : '?')}{Uri.EscapeDataString(pair.Name)}={Uri.EscapeDataString(pair.Value)}";
+        return (url, null);
+    }
+
+    /// <summary>
     /// The auth a request actually uses: its own <c>auth</c> line, or the
     /// nearest <c>_folder.req</c> above it that has one. Walking up stops at
     /// the collection root — a folder default is a folder's business, not the

@@ -146,8 +146,10 @@ it opens and rewrites the user's real settings.
 - **Isolate the config before mounting anything.** All the apps read real settings on startup
   and write them back, so an unguarded run reorders the user's Junction workspaces or leaves
   their file manager showing whatever folder the driver visited. Junction reads
-  `XDG_CONFIG_HOME`, Vesper reads `VESPER_CONFIG_DIR`, Meridian persists nothing. The driver
-  sets both to a temp directory before constructing anything — keep it that way.
+  `XDG_CONFIG_HOME`, Vesper reads `VESPER_CONFIG_DIR`. The driver sets both to a temp
+  directory before constructing anything — keep it that way. Meridian persists nothing but
+  secrets, and the driver hands it an in-memory keyring, so a value set while driving never
+  reaches the machine's real one.
 - **Vesper ignores the folders passed to its constructor.** They are a seed; the app then
   restores the panes from its saved session, so it shows wherever it was last left. The
   driver calls the private `NavigateTo` for both panes after mounting, which is what the
