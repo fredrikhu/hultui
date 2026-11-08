@@ -5,13 +5,11 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 8
-- **Phase:** build — round 8, **step 2 resumed 2026-11-08** after the weekly reset (usage 0 %; next reset 2026-11-15
-  03:00 UTC). Main merged in first (3a15b5b1: 32 commits, mostly Meridian). The step 2 agent works from the resume
-  brief `brief-r8b2-resume.md` (session 64e7e0e2's old scratchpad, beside `brief-r8b2.md`): it reviews and finishes the
-  first agent's uncommitted edits (AccessibilityTreeBuilder.cs and .Refresh.cs, AccessibilityRebuildAllocationTests.cs,
-  PerfSuite Scenarios.Accessibility.cs and Scenarios.Virtual.cs), then change 2 (question 11: yes). 9 steps; step 1
-  landed. The survey's eight reports are `17-reports/r8-*.md` (common brief: session 64e7e0e2's scratchpad
-  `brief-r8-survey.md`). The 90 % weekly pause applies to build steps (user, 2026-10-27). Round 7
+- **Phase:** build — round 8, step 3 next (9 steps; steps 1–2 landed). Step 2 resumed 2026-11-08 after the weekly
+  reset (next reset 2026-11-15 03:00 UTC) on top of main's merge 3a15b5b1 (32 commits, mostly Meridian). Briefs and
+  probes stay in session 64e7e0e2's old scratchpad (see Probe code). The survey's eight reports are
+  `17-reports/r8-*.md` (common brief `brief-r8-survey.md`). The 90 % weekly pause applies to build steps (user,
+  2026-10-27). Round 7
   released: main's app-support merge (f64e4674, another session) merged into the branch as c655b411 with fixes
   7dfd2ce3, then the branch merged into main as df45b4a2; CI run 41691075588 green (test, test-linux, docs). Open for
   the user, none blocking: question 10 (`TokenizeDiff` public), the live screen-reader check of menus (script in
@@ -236,6 +234,8 @@ Rounds 7 and 8 (round 8 is the round the next survey reviews; round 7 moves to t
 | 7 | 637811cc, bdd8cd1c | kept-elements-helper (API) | Approved (question 3). Suite rows `component/shelf walk Right/Down, 5 shelves of 7 cards` (every card made / cards kept / ring moved without a build). **Public `KeptElements<TState>` (HultUI.Core.Components)**: `Begin(build)` (only what the owner's previous build made or handed back can come back — a build can patch a dropped element by position into something else that stays in the window), `TryKeep(key, state, out element, place)` (equal state, still hosted, optional row-place check for virtual-list rows), `Made(key, state, element)` (sets the key, one ref per key that follows the patch), `Live(key)` (the live element, for a change made with no build), `Clear()`, `Count`; entries pruned each time the count doubles. 8 tests; ELEMENTS.md §28, REACTIVITY.md. |
 | 7 | 31e1aaa7 | aperture-home-cursor-no-build | Aperture Home on `KeptElements`, and a cursor key builds nothing: it moves the ring on the live cards through `Live` (one ring value for the build and the move; checks the owner's latest build drew that view). AOT KB a key (before / cards kept / both): one shelf Right 63.7 / 32.9 / 0.2, Down 65.3 / 31.9 / 0.2, min 0.526 → 0.482 / 0.505 → 0.476 ms; five shelves Right 255.7 / 70.7 / 0.3, Down 249.3 / 69.3 / 0.3, min 0.801 → 0.729 / 0.784 → 0.730; builds a key 1 → 0; UIA same bytes, min −3…−12 %; JIT min −8…−29 %. Suite rows 218.4 → 38.2 → 0.3 KB, cards made 35 → 2 → 0; `--compare` 0/0 JIT + AOT (captures 80f14806). 34 Home scenes: pixels, a11y tree (bounds, offscreen) and focus identical for both routes, A/A identical. Core 5,044, Headless 1,347, Aperture 332 pass; 7 reverse edits. REACTIVITY.md "A key that moves only a ring needs no build". |
 | 8 | f3302209, bda4dad3 | paint-beginframe-keeps-surface-clip | Correctness, the objection to d04464f6: `SkiaRenderContext.SetCanvas(canvas, baseSaveCount = 1)` and `BeginFrame` restores to that count; the Vulkan surface records `SaveCount` after its 8-bit kept-target and F16 offscreen clips (`WrappedImage.BaseSaveCount`, `_offscreenBaseSaveCount`, reset on `Hold` and a new offscreen); GL and raster still restore to 1. 2400×1600 canvas at 1.5× clipped to 1200×800: after `BeginFrame` save count 1 → 2, device clip 2400×1600 → 1200×800, `ClipBounds` 1601×1068 → 801×535. In-process saves over a 16-step Vulkan drag: a clip 64 px too narrow differs in exactly 64 columns with the fix (142–176k channels 8-bit, 139–173k F16) and in 0 without; shown pixels identical. Suite 0/0 ×2 alternated, allocKB flat, steady frame 0 B; goldens identical. `SurfaceClipThroughBeginFrameTests` (3 cases, reverse edits fail 2 each). Skia 360, Core 5,054, Headless 1,443, VulkanProbe 38 (`HULTUI_UITESTS=1`) pass. |
+| 8 | 61a82eba, e0530518 | a11y-walk-name-without-string | The in-place walk's `Compare` checks a name from content with `NameIs` (the same rules as `ResolveName`, nothing built); folds a11y-walk-unchanged-bytes. Junction Changes at 300 files, KB a step, alternated ×2 (identical), same trees, diffs and events: caret Down tree/UIA/AT-SPI 92.0/94.7/96.8 → 81.6/84.3/86.4 (−11 %), wheel a notch every 120 ms 22.8/25.4/27.4 → 16.2/18.8/20.7 (−24…−29 %), bridge off flat (78.5, 16.6); a walk of the unchanged tree 6.86 → 0.02 KB. New suite row `a11y/selection walk 1,000 composite item rows named by their texts, UIA`: JIT 40.0 → 27.4 KB (−32 %), AOT 39.9 → 27.3, time flat. Suite JIT 0 slower ×2; AOT 1 then 0 (selection-walk rows +6–10 % in render only, rows without a reader too: AOT code layout). Audit 0 STALE, 0 WALK-VALUE/EVENT, fallbacks 125. |
+| 8 | f35c3df9 | a11y-disabled-menu-item (API) | Approved (question 11). **Public default member `IAccessibleItemSource.ItemIsEnabled(int) => true`**; `ContextMenuElement` answers it; `MatchItems` compares it (enabling an entry in an open menu patches, no tree); items served past 2,000 read it. A dimmed context-menu or menu-bar entry was read as enabled; now UIA IsEnabled false, AT-SPI without enabled/sensitive (not yet heard with a live reader). Menu suite rows bytes flat, times within 3 %. ACCESSIBILITY-PLAN.md, ELEMENTS.md; docfx 0 warnings. Core 5,060, Headless 1,456, Linux bridge 104, Junction a11y 131 pass; Fedora 104 + 297; 11 reverse-edit failures. |
 
 ## Examined, not worth it
 
@@ -642,3 +642,10 @@ From 2026-11-02 (round 7's survey); earlier entries are in the archive ([to 2026
 - 2026-11-08: the weekly limit reset (0 %); the loop resumed at 04:07 local as the user asked. Main had moved 32
   commits (12d0392e: Meridian discovery and runner auth, text selection in scrolled views; none in step 2's files):
   merged as 3a15b5b1. Step 2 resumes from the first agent's uncommitted edits.
+- 2026-11-08: round 8 step 2 landed (61a82eba, f35c3df9; captures e0530518): the in-place a11y walk compares a name
+  from content without building it (Junction Changes with a reader: caret −11 %, wheel −24…−29 %; new suite row −32 %
+  JIT and AOT; audit clean), and disabled menu items are read as disabled through the new default member
+  `IAccessibleItemSource.ItemIsEnabled` (question 11). The first agent's diff was complete; the resumed agent measured
+  it. Guideline notes: an AOT before/after can move render time on rows the change never runs — split the timing by
+  phase before calling a row slower; for a probe, put the old code behind a temporary switch in the same build so old
+  and new share one binary. Usage 2 % weekly (~2 % for the step).
