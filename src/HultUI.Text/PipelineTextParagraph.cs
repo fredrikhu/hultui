@@ -14,7 +14,7 @@ public sealed class PipelineTextParagraph : TextParagraph
 {
     private readonly TextPipeline _pipeline;
     private readonly TextLine[] _textLines;
-    private readonly TextLineBox[] _boxes;
+    private TextLineBox[]? _boxes;
     private readonly float _alignFactor;
     // RangesInLine's scratch, made the first time a selection or a span background is drawn on
     // this paragraph: most paragraphs never are.
@@ -29,43 +29,60 @@ public sealed class PipelineTextParagraph : TextParagraph
         _alignFactor = TextAlignment.Factor(style.TextAlign, layout.IsRtlParagraph);
 
         // The pipeline gives empty text no line, and puts none after a final newline: the
-        // newline sits between lines and nothing follows it. A caret needs a line in both.
-        // One array of exactly the lines, copied straight from the layout's (a list and then an
-        // array of it were 10 % of what opening a long rich text document allocated).
+        // newline sits between lines and nothing follows it. A caret needs a line in both. With
+        // no line to add, the layout's own array of its lines, shared with the layout cache; else
+        // one array of exactly the lines, copied straight from the layout's. A copy every time
+        // and the boxes made up front were 13 % of what opening a long rich text document
+        // allocated (plan 17, round 8).
         var laid = layout.Lines;
         int count = laid.Count;
         bool addEmpty = count == 0 || (text.EndsWith('\n') && (maxLines is null || count < maxLines));
-        var lines = new TextLine[count + (addEmpty ? 1 : 0)];
-        for (int i = 0; i < count; i++)   // indexed: Lines is an interface, and a foreach boxes
-            lines[i] = laid[i];
-        if (addEmpty)
+        if (!addEmpty && laid is TextLine[] exact)
+            _textLines = exact;
+        else
         {
-            var empty = pipeline.EmptyLine(style, text.Length);
-            empty.OffsetY = layout.Size.Height;
-            lines[count] = empty;
+            var lines = new TextLine[count + (addEmpty ? 1 : 0)];
+            for (int i = 0; i < count; i++)   // indexed: Lines is an interface, and a foreach boxes
+                lines[i] = laid[i];
+            if (addEmpty)
+            {
+                var empty = pipeline.EmptyLine(style, text.Length);
+                empty.OffsetY = layout.Size.Height;
+                lines[count] = empty;
+            }
+            _textLines = lines;
         }
-        _textLines = lines;
 
-        _boxes = new TextLineBox[_textLines.Length];
         float width = 0;
         for (int i = 0; i < _textLines.Length; i++)
-        {
-            var l = _textLines[i];
-            _boxes[i] = new TextLineBox(l.Start, l.Length, l.OffsetY, l.Height, l.Width);
-            width = Math.Max(width, l.Width);
-        }
+            width = Math.Max(width, _textLines[i].Width);
         var last = _textLines[^1];
         Size = new Size(width, last.OffsetY + last.Height);
+    }
+
+    // The boxes, the first time Lines is read. Without a reader the rich text editor reads them
+    // only for the caret's block, a selection, find hits and list markers it draws; a reader reads
+    // every paragraph's.
+    private TextLineBox[] MakeBoxes()
+    {
+        var boxes = new TextLineBox[_textLines.Length];
+        for (int i = 0; i < boxes.Length; i++)
+        {
+            var l = _textLines[i];
+            boxes[i] = new TextLineBox(l.Start, l.Length, l.OffsetY, l.Height, l.Width);
+        }
+        return boxes;
     }
 
     /// <summary>The layout as the pipeline returned it, shared with its cache.</summary>
     public TextLayout Layout { get; }
 
     /// <summary>The lines to draw: <see cref="TextLayout.Lines"/>, and the empty line the
-    /// paragraph adds after a final newline or for empty text.</summary>
+    /// paragraph adds after a final newline or for empty text. Read-only: when the paragraph adds
+    /// no line this is the layout's own list, shared with the pipeline's layout cache.</summary>
     public IReadOnlyList<TextLine> TextLines => _textLines;
 
-    public override IReadOnlyList<TextLineBox> Lines => _boxes;
+    public override IReadOnlyList<TextLineBox> Lines => _boxes ??= MakeBoxes();
     public override Size Size { get; }
 
     public override float LineLeft(int line)

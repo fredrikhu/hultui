@@ -98,20 +98,22 @@ public partial class RichTextEditorElement
     }
 
     /// <summary>A block's marks as the spans its paragraph is shaped and drawn with: what each
-    /// mark looks like is decided here, from the theme.</summary>
-    private List<TextSpan>? SpansOf(RichBlock block, ResolvedInheritedStyle style)
+    /// mark looks like is decided here, from the theme. An exact array: a list of them was a
+    /// list and its array for every block laid out.</summary>
+    private TextSpan[]? SpansOf(RichBlock block, ResolvedInheritedStyle style)
     {
         if (block.IsPreformatted || block.Spans.Length == 0) return null;
-        var spans = new List<TextSpan>(block.Spans.Length);
-        foreach (var span in block.Spans)
+        var spans = new TextSpan[block.Spans.Length];
+        for (int i = 0; i < spans.Length; i++)
         {
+            var span = block.Spans[i];
             var m = span.Marks;
             bool code = m.Has(InlineStyle.Code);
             var decoration = TextDecoration.None;
             if (m.Has(InlineStyle.Underline) || m.Link is not null) decoration |= TextDecoration.Underline;
             if (m.Has(InlineStyle.Strike)) decoration |= TextDecoration.LineThrough;
 
-            spans.Add(new TextSpan(
+            spans[i] = new TextSpan(
                 span.Start, span.Length,
                 m.Link is not null ? _linkColor : m.Color ?? (m.Highlight is { } marker ? TextOn(marker) : default),
                 m.Highlight ?? (code ? _codeBackground : default),
@@ -119,7 +121,7 @@ public partial class RichTextEditorElement
                 m.Has(InlineStyle.Bold) ? FontWeight.Bold : null,
                 m.Has(InlineStyle.Italic) ? FontSlant.Italic : null,
                 m.Size ?? (code ? style.FontSize * _rt.CodeScale : null),
-                m.Family ?? (code ? _rt.CodeFamily : null)));
+                m.Family ?? (code ? _rt.CodeFamily : null));
         }
         return spans;
     }

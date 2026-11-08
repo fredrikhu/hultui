@@ -1,5 +1,6 @@
 using System.Text;
 using HultUI.Core.RichText;
+using HultUI.Testing;
 using Xunit;
 
 namespace HultUI.Core.Tests.RichText;
@@ -58,6 +59,19 @@ public class RichTableTests
             "cell[0,0] \"h1\" | cell[0,1]@End \"h2\" | cell[1,0] \"a\" | cell[1,1]@End \"\" | cell[2,0] \"b\" | cell[2,1] \"c\"",
             fixedDoc.ToString());
         Assert.Same(ragged[0], fixedDoc[0]);
+    }
+
+    [Fact]
+    public void Normalize_OfADocumentWithNoTable_AllocatesNothingABlock()
+    {
+        // Every editor's document is normalized when it is handed in. A lambda in the loop that
+        // captured the column count made its closure for every block, table or not: 24 B a block.
+        static RichDocument Paragraphs(int n) => new([.. Enumerable.Range(0, n).Select(i => P("paragraph " + i))]);
+        RichDocument ten = Paragraphs(10), hundred = Paragraphs(100);
+        Assert.Same(hundred, RichTable.Normalize(hundred));
+        long a = Allocations.Least(() => RichTable.Normalize(ten));
+        long b = Allocations.Least(() => RichTable.Normalize(hundred));
+        Assert.Equal(0, b - a);
     }
 
     [Fact]
