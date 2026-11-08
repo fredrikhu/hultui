@@ -228,14 +228,19 @@ The agent:
 1. **Baseline.** Builds Release, runs `scripts/perf/idle-gate.ps1`, then captures the
    rows that matter (perf suite `--json` with `--filter`, Benchmark `--profile`, a
    frame trace, or a purpose-built probe). Uses `--no-build` after the gate so the build
-   is not inside the quiet window.
+   is not inside the quiet window. For perf-suite rows use `scripts/perf/step-ab.ps1`
+   (user, 2026-11-08): it builds the base commit and the working tree, runs them
+   idle-gated and alternated (JIT and/or NativeAOT), prints the verdicts, the moved
+   allocations, an A/A noise line and the step's own rows, and copies the captures to
+   commit with `-Slug`. Don't write a suite-running script of your own.
 2. **Change.** Implements it in the style of the surrounding code.
 3. **Tests.** Adds or updates a test that pins the behaviour and, where possible, the
    win (a call count, an allocation count, a cache hit). Checks the test fails with the
    change reverted by a reverse edit — never `git checkout --` — then restores it. Runs
    the affected test projects.
 4. **After.** Idle-gated capture of the same rows, then the full perf suite against the
-   baseline with `--compare`. Runs before and after alternately at least twice.
+   baseline with `--compare`. Runs before and after alternately at least twice
+   (`scripts/perf/step-ab.ps1 -Base <commit before the change>`, no `-Filter`, `-Pairs 2`).
 5. **Decides.** Keeps the change if it clears its bar and no row got slower beyond
    noise; otherwise reverts only the files it changed and records the numbers as
    "examined, not worth it".
