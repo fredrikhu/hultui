@@ -49,6 +49,14 @@ public sealed class FakeMediaLibrary : IMediaLibrary
         return this;
     }
 
+    /// <summary>Renames a library, as an administrator does on the server: the next
+    /// <see cref="GetLibrariesAsync"/> answers with the new name.</summary>
+    public void RenameLibrary(string id, string name)
+    {
+        int at = _libraries.FindIndex(l => l.Id == id);
+        if (at >= 0) _libraries[at] = _libraries[at] with { Name = name };
+    }
+
     public FakeMediaLibrary AddItem(MediaItem item, string? parentId = null)
     {
         _items[item.Id] = item;

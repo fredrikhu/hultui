@@ -694,6 +694,28 @@ Aperture's Home is its first user (one helper per shelf, as one film can stand o
 perf suite pins it: `component/shelf walk Right, 5 shelves of 7 cards, every card made` against `…,
 cards kept`.
 
+**A shelf whose cards all come back can come back whole** (round 8, step 6). Home builds mostly when
+pictures land, and with every card handed back it still made each shelf's heading and row around them:
+39 of a build's 46 elements. Each shelf is kept too now, by its row's key, with three rules on top of
+the cards':
+
+- **Ask for the children first, every build.** Each card on the page is asked for before the shelf is
+  decided: that asks for its picture (how a landing finds the card it changed) and keeps its entry
+  current for the next build and for a ring moved with no build. The shelf comes back only when every
+  card came back as the live element (`IsHosted`).
+- **The state is what the heading's handlers read, not only what it draws.** The row's menu worked out
+  "Move up" and "Move down" from the list of rows its build captured, so a row moved past a hidden one
+  drew the same and offered a stale menu. The row's place among all the rows is in the state, with the
+  title, the count, the page and how many a page holds, "See all" and the scale. What a handler reads
+  when it runs (the settings) needs nothing.
+- **Key every child of the parent**: the watchlist's shelf, made every build, and the hidden-rows
+  footer too.
+
+Headless, 1440×900, six shelves and 36 cards with pictures, JIT (NativeAOT the same within 1 %): a
+Home build 66.0 → 26.3 KB, elements made 46 → 4; Home opening while its 36 posters land, one poster a
+build 3,368–3,433 → 2,281–2,312 KB (−32 %), six a build 1,547 → 1,371 KB (−11 %); at 1000 px a walk
+that turns a shelf's page 13.8 → 6.8 KB a key.
+
 **A key that moves only a ring needs no build.** Nothing on Home shows the cursor but the ring on one
 card and the keyboard on it. So a cursor key there takes the ring off the live card it leaves and
 puts it on the one it reaches (`KeptElements.Live`), hands that card the cursor's ref and the
