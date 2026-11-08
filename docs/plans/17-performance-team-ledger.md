@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 8
-- **Phase:** build — round 8, step 5 next (9 steps; steps 1–4 landed). Step 2 resumed 2026-11-08 after the weekly
+- **Phase:** build — round 8, step 6 next (9 steps; steps 1–5 landed). Step 2 resumed 2026-11-08 after the weekly
   reset (next reset 2026-11-15 03:00 UTC) on top of main's merge 3a15b5b1 (32 commits, mostly Meridian). Briefs and
   probes stay in session 64e7e0e2's old scratchpad (see Probe code). The survey's eight reports are
   `17-reports/r8-*.md` (common brief `brief-r8-survey.md`). The 90 % weekly pause applies to build steps (user,
@@ -241,6 +241,9 @@ Rounds 7 and 8 (round 8 is the round the next survey reviews; round 7 moves to t
 | 8 | 7aaae4c8 | text-richtext-block-list-no-copy | Block layouts in a `List` shifted in place when an edit changes their count: richtext/enter in 5,000 blocks 81.5 → 42.4 (−48.0 %), resize −1.6 %; an Enter test 16 → 8 B a block (the rest is `RichDocument.Blocks`' own copy, declined). Wheel through 5,000 blocks +2.7 / +0.7 % min, inside its base's spread. |
 | 8 | 48ed3a35, 734a6cd7 | richtext-short-viewport-jitter | Bug fix: a caret at least as tall as the view scrolls to its top (was 18.6 px off, key after key). Step 3 overall ec5d1275 → 48ed3a35: JIT open −31.1 % (min −5.7 %), resize −28.8 %, enter −48.2 %; AOT open 3,267.2 → 2,250.2, resize 654.7 → 466.0, enter 81.8 → 42.4, times within 3 %. Suite 214 rows 0/0 ×2 and base/base. 902 in-process frames A/A = A/B, goldens pass; 147 reader trees (2.24 M character bounds) identical. Text 293, Core Rich 135, Skia 360, Headless 492, Junction MR/review 40 pass. |
 | 8 | ad8e6fbd, 4960997d, 561c5659 | apps-coalesce-landing-builds | Aperture's `PosterCache` and Vesper's `ThumbnailCache` callbacks post at most one build at a time (an `Interlocked` flag cleared before the build reads the cache, so a later landing still builds); framework unchanged; REACTIVITY.md rule. Pictures served after 15–30 ms, idle-gated, alternated ×2 JIT + one AOT pair: Aperture Home 36 posters builds 41 → 15–16, most in a frame 8–10 → 4, 3,614 → 1,825–1,896 KB (−48…−50 %; AOT −51 %); grid 42 posters 46 → 14–15, 10–13 → 3, −39…−42 % (AOT −36 %); Vesper Thumbnails 44 decodes 45 → 2–3, 42–44 → 1–2, −45…−49 % (AOT −42 %). At 60–120 ms: Home 41 → 26 builds, grid 46 → 25. Same pictures at the end (55/58/97), settled frames identical. Tests `PicturesThatLandTogether_BuildTheViewOnce` (42 builds without), `ThumbnailsThatLandTogether_BuildTheViewOnce` (8 without); `PartTests.APictureLanding_BuildsNoPart` waits for every poster. Aperture 333, Vesper 879, Headless 1,459 pass. No suite scenario opens these views (no captures). |
+| 8 | d366505b | aperture-grid-cursor-no-build | The library grid's cards on `KeptElements`; `MoveRingWithoutBuild` handles the grid; a move that falls back to a build moves the live ring first (else PageDown twice left two rings: the list keeps an unchanged row); a card made the frame after a build takes focus in a post-frame callback. 600 films, idle-gated JIT ×2 + AOT: Right 49.20 → 0.29 KB a key (AOT 48.70 → 0.29), Down 81.93 → 29.07 (AOT 81.28 → 28.96; rows scrolling in); headless reader Right 49.23 → 0.32, Down 85.54 → 32.69, 0 trees; builds a key 1 → 0; min −3…−8 % JIT, −5…−16 % AOT. Pixels, ring and tree (focus aside) match the base in 7 scenes; focus now lands on the cursor's card (before: nowhere). |
+| 8 | 24d63eb5 | apps-aperture-discover-cursor-no-build | Discover's cursor key moves the ring on live cards: along a page 340.2 → 0.35 KB (AOT 337.5 → 0.35), builds 1 → 0, gen-0 GCs 8 → 0, min −9 % JIT, −12 % AOT. Pixels and tree (focus included) match the base. |
+| 8 | fa10f889, f20b045f | aperture-home-cursor-turns-page | Bug fix, Home and Discover (same row code): the cursor turns its shelf's page. Home at 1000 px across a page 0.23 → 13.77 KB (0.125 builds a key, one a page turned; new cards fetch pictures); ring and focus on the cursor's card in every scene (cursors 5–7 had none). Discover: Right onto page 2 16.1 KB, 0.10 builds; Down (a shelf's next page) 105 KB, 0.67 builds (was 340). Also fixed: with a watchlist, moving onto a title card left two rings. Home Right/Down stays 0.26 KB. `component/shelf walk` rows within 2 %, bytes equal. `GridCursorTests`, `DiscoverCursorTests`, `ShelfPageTests` (reverse edits fail); Aperture 342 + 21 skipped, Headless 1,459 pass. REACTIVITY.md: "A key that still builds moves the live ring first". |
 
 ## Examined, not worth it
 
@@ -667,3 +670,9 @@ From 2026-11-02 (round 7's survey); earlier entries are in the archive ([to 2026
   landed state; an out-of-repo AOT probe sets `PublishAot` in its own project (`-p` reaches the source generator:
   NETSDK1207); hash a tightly packed `ReadPixels` buffer with varying text (pid paths, free space) removed — Pillow's
   `getbbox()` on RGBA checks alpha only.
+- 2026-11-08: round 8 step 5 landed (d366505b, 24d63eb5, fa10f889; captures f20b045f): Aperture's library grid and
+  Discover cursor keys build nothing (−99 % a key; grid Down −65 %, the rest rows scrolling in), the grid's cursor card
+  takes focus, and the cursor turns its shelf's page on Home and Discover (a ring and focus where none showed; a
+  watchlist double ring fixed too). Guideline notes: a key that still builds moves the live ring first (a kept row
+  keeps its old ring); a headless session runs async loads in its pump, so a fake library that waits on a gate hangs
+  it — use a failing page. For later (UX): on Discover, Down walks a shelf's own pages, not to the next shelf.
