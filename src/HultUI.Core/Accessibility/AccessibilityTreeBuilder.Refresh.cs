@@ -655,7 +655,8 @@ public static partial class AccessibilityTreeBuilder
         if (!ReferenceEquals(node.TextSource, textSource)) return Sameness.Untellable;
         var versioned = textSource as IVersionedAccessibleTextSource;
         if (node.Role != ResolveRole(element)
-            || node.Name != ResolveName(element)
+            // As ResolveName would make it, without joining the texts of a name from content.
+            || !NameIs(element, node.Name)
             || node.Description != element.AccessibleDescription
             || node.IsFocused != (focusManager is not null && ReferenceEquals(focusManager.FocusedElement, element))
             || node.IsEnabled != element.IsEnabledForAccessibility

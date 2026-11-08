@@ -224,6 +224,98 @@ public class AccessibilityRebuildAllocationTests
         Assert.Null(AccessibilityTreeBuilder.GetContentText(none));
     }
 
+    /// <summary>The in-place walk asks whether a node's name is the one a build would make
+    /// (<see cref="AccessibilityTreeBuilder.NameIs"/>) without making it: the answer is the
+    /// comparison's with <see cref="AccessibilityTreeBuilder.ResolveName"/>, for every way a name
+    /// is made and every way a name can differ from it.</summary>
+    [Fact]
+    public void AName_IsMatchedAsABuildWouldMakeIt_TextByText()
+    {
+        var joined = BoxElement.New();
+        joined.On<ClickEvent>(_ => { });
+        var wrapper = BoxElement.New();
+        wrapper.AddChild(TextElement.New("Save"));
+        wrapper.AddChild(TextElement.New(""));
+        joined.AddChild(wrapper);
+        joined.AddChild(TextElement.New("as"));
+        joined.AddChild(TextElement.New("PDF"));
+
+        var single = BoxElement.New();
+        single.On<ClickEvent>(_ => { });
+        single.AddChild(TextElement.New("Open"));
+
+        var untexted = BoxElement.New();
+        untexted.On<ClickEvent>(_ => { });
+        untexted.AddChild(TextElement.New(""));
+        untexted.Name = "fallback";
+
+        var named = BoxElement.New();
+        named.On<ClickEvent>(_ => { });
+        named.AccessibleName = "Explicit";
+        named.AddChild(TextElement.New("Shown"));
+
+        // Not a button: its texts do not name it.
+        var group = BoxElement.New();
+        group.Role = AccessibilityRole.Group;
+        group.AddChild(TextElement.New("Inner"));
+        group.AddChild(TextElement.New("Text"));
+
+        Element[] elements = [joined, single, untexted, named, group, TextElement.New("Label"), CheckboxElement.New(true, "Wrap lines")];
+        string?[] names = [null, "", "Save", "Save ", "Save as", "Save as PDF", "Save as PDF ", "Save as PDFs", "Save  as PDF",
+            "Saveas PDF", "save as PDF", "Open", "Open ", "fallback", "Explicit", "Shown", "Inner Text", "Label", "Wrap lines"];
+        foreach (var element in elements)
+        {
+            string? built = AccessibilityTreeBuilder.ResolveName(element);
+            Assert.True(AccessibilityTreeBuilder.NameIs(element, built), $"{element.GetType().Name} is not named {built}");
+            foreach (var name in names)
+                Assert.True(AccessibilityTreeBuilder.NameIs(element, name) == (built == name),
+                    $"{element.GetType().Name} named {built ?? "null"}, asked {name ?? "null"}");
+        }
+    }
+
+    /// <summary>
+    /// A walk of the applied tree finds each node's name as a build would make it. A button named by
+    /// two or more texts in it was named by joining them, a builder and a string for each such button
+    /// on every walk, on a tree that had not changed (plan 17 round 8, step 2: 7.67 KB a walk of
+    /// Junction's Changes view at 300 files). The name is matched text by text, and a walk of an
+    /// unchanged tree of such buttons allocates nothing.
+    /// </summary>
+    [Fact]
+    public void AWalkOfAnUnchangedTree_OfButtonsNamedByTheirTexts_AllocatesNothing()
+    {
+        var root = BoxElement.New();
+        root.Role = AccessibilityRole.Application;
+        root.Box.Width = 600;
+        root.Box.Height = 900;
+        for (int i = 0; i < 100; i++)
+        {
+            var button = BoxElement.New();
+            button.On<ClickEvent>(_ => { });
+            var lines = BoxElement.New();
+            lines.AddChild(TextElement.New($"file{i:000}.cs"));
+            lines.AddChild(TextElement.New($"src/area{i % 6}"));
+            button.AddChild(lines);
+            button.AddChild(TextElement.New("modified"));
+            root.AddChild(button);
+        }
+        _layout.PerformLayout(root, 600, 900);
+        var tree = AccessibilityTreeBuilder.Build(root);
+        Assert.Equal("file007.cs src/area1 modified", tree.Children[7].Name);
+
+        var refresh = new AccessibilityTreeBuilder.LayoutRefresh();
+        IReadOnlyList<(Element, float, float)> overlays = [];
+        long walk = Bytes(() =>
+        {
+            refresh.Clear();
+            Assert.True(AccessibilityTreeBuilder.TryRefreshInPlace(tree, root, overlays, null, refresh), refresh.Mismatch);
+        });
+
+        Assert.Empty(refresh.Changes);
+        Assert.False(refresh.Structural);
+        // It joined the 100 names before, 28.8 KB a walk.
+        Assert.Equal(0, walk);
+    }
+
     [Fact]
     public void OverlayTrees_AddedAfterTheBuild_JoinTheRoot()
     {

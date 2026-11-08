@@ -171,15 +171,17 @@ static partial class Scenarios
     /// <paramref name="chrome"/> the pane sits in a window's chrome (<see cref="WalkChrome"/>).
     /// The list holds <paramref name="count"/> commits. With <paramref name="composite"/> each row
     /// is a keyed button a reader reads as its own, selected or not, as the command palette's rows
-    /// are (<c>RowsAreComposite</c>). With <paramref name="countTrees"/> the row reports the
+    /// are (<c>RowsAreComposite</c>); with <paramref name="namedByTexts"/> as well, the button has no
+    /// name of its own and is named by the two texts in it, as Junction's Changes rows are. With
+    /// <paramref name="countTrees"/> the row reports the
     /// accessibility trees a key builds instead, and <paramref name="clear"/> runs before each key.
     /// </summary>
     internal static Op SelectionWalk(Ctx ctx, Func<int, string?>? check, Action? reset = null, bool itemRows = false,
         WalkChrome chrome = WalkChrome.None, bool listHighlight = false, int count = 1_000, bool composite = false,
-        bool countTrees = false, Action? clear = null)
+        bool countTrees = false, Action? clear = null, bool namedByTexts = false)
     {
         var pane = new WalkPane(WalkItems(ctx.Rng, count), itemRows, chrome: chrome, listHighlight: listHighlight,
-            composite: composite);
+            composite: composite, namedByTexts: namedByTexts);
         var host = pane.Mount();
         host.On<KeyDownEvent>(e =>
         {
@@ -292,10 +294,12 @@ enum WalkChrome
 /// Build makes again, unchanged, on every move. With <paramref name="listHighlight"/> the list
 /// draws the selection itself, the fill the rows drew, and makes its rows unselected. With
 /// <paramref name="composite"/> each row is a button keyed by its commit, named and selected or not
-/// for a reader, which reads the rows rather than the list's items, as the command palette's.
+/// for a reader, which reads the rows rather than the list's items, as the command palette's; with
+/// <paramref name="namedByTexts"/> named by its texts, not by a name of its own.
 /// </summary>
 sealed class WalkPane(List<WalkItem> items, bool itemRows = false, bool details = false,
-    WalkChrome chrome = WalkChrome.None, bool listHighlight = false, bool composite = false) : Component
+    WalkChrome chrome = WalkChrome.None, bool listHighlight = false, bool composite = false,
+    bool namedByTexts = false) : Component
 {
     public const float RowHeight = 46f;
 
@@ -558,7 +562,9 @@ sealed class WalkPane(List<WalkItem> items, bool itemRows = false, bool details 
         row.OnClick(_ => Select(item.Index));
         if (composite)
         {
-            row.AccessibleRole(AccessibilityRole.Button).AccessibleName(Label(item)).AccessibleSelected(selected);
+            row.AccessibleRole(AccessibilityRole.Button).AccessibleSelected(selected);
+            // Named from content otherwise: the subject and the line of detail, joined.
+            if (!namedByTexts) row.AccessibleName(Label(item));
             row.Key = item.Index.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
         return row;
