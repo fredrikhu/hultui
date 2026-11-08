@@ -39,7 +39,9 @@ public class PartTests
                 session.PumpFrames(2);
             }
 
-            Assert.True(app.Builds - builds >= 7, $"{app.Builds - builds} builds");
+            // A key whose card is on screen moves the ring and builds nothing (GridCursorTests); End
+            // reaches a row not made yet, and builds the view.
+            Assert.True(app.Builds - builds >= 1, $"{app.Builds - builds} builds");
             Assert.Equal(0, app.PartBuilds - partBuilds);
             Assert.Equal(parts, PartHosts(session));
             AssertPartsAreAFullBuild(session, app, "the walk");

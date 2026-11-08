@@ -16,8 +16,9 @@ namespace Aperture.Tests;
 
 /// <summary>
 /// The library grid keeps a row of posters until its item changes — its place and the column
-/// the cursor is in there — so an arrow makes the row or two the cursor left and reached
-/// instead of every row on screen. What else a row shows is in a shape that makes the rows on
+/// the cursor is in there — so a build after an arrow makes the row or two the cursor left and
+/// reached instead of every row on screen. (The arrow itself moves the ring on the live cards and
+/// builds nothing: GridCursorTests.) What else a row shows is in a shape that makes the rows on
 /// screen again: one test per input, each failing with that input left out.
 /// </summary>
 // Serial: the display-scale test changes process-wide state (the glyph caches) that other
@@ -26,14 +27,15 @@ namespace Aperture.Tests;
 public class GridRowKeepTests
 {
     [Fact]
-    public void ARightArrow_MakesTheRowTheCursorMovesIn_AndKeepsTheRest()
+    public void ABuildAfterARightArrow_MakesTheRowTheCursorMovedIn_AndKeepsTheRest()
     {
         Host((session, app, _, _) =>
         {
             Keys(session, KeyCode.Right);   // the first press lands on the first card
+            Keys(session, KeyCode.Right);
             int made = app.GridRowsMade;
 
-            Keys(session, KeyCode.Right);
+            Rebuild(session, app);
 
             Assert.Equal(1, app.GridRowsMade - made);
             Assert.True(Card(session, "m001").Outline.Width > 0, "the cursor's card has no ring");
@@ -42,17 +44,26 @@ public class GridRowKeepTests
     }
 
     [Fact]
-    public void ADownArrow_MakesTheTwoRowsItMovedBetween()
+    public void ABuildAfterADownArrow_MakesTheTwoRowsTheCursorMovedBetween()
     {
         Host((session, app, _, _) =>
         {
             Keys(session, KeyCode.Right);
+            Rebuild(session, app);
+            Keys(session, KeyCode.Down);
             int made = app.GridRowsMade;
 
-            Keys(session, KeyCode.Down);
+            Rebuild(session, app);
 
             Assert.Equal(2, app.GridRowsMade - made);
         });
+    }
+
+    /// <summary>A view-only rebuild, as a picture landing asks for, and the frames that make its rows.</summary>
+    private static void Rebuild(HeadlessSession session, ApertureApp app)
+    {
+        typeof(ApertureApp).GetMethod("RerenderView", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(app, null);
+        session.PumpFrames(3);
     }
 
     /// <summary>A narrower window fits fewer posters across: every row on screen holds other
@@ -167,19 +178,22 @@ public class GridRowKeepTests
         foreach (var card in cards) card.AccessibleDescription = Untouched;
     }
 
-    /// <summary>A move along a row makes the row again, and the row hands back every card but the
-    /// two the cursor moved between. The row is patched in place, the cards are the same cards.</summary>
+    /// <summary>A build after a move along a row makes the row again, and the row hands back every
+    /// card but the two the cursor moved between. The row is patched in place, the cards are the same
+    /// cards.</summary>
     [Fact]
-    public void ARightArrow_MakesTheTwoCardsItMovedBetween_AndLeavesTheRestUntouched()
+    public void ABuildAfterARightArrow_MakesTheTwoCardsItMovedBetween_AndLeavesTheRestUntouched()
     {
         Host((session, app, _, _) =>
         {
             Keys(session, KeyCode.Right);
+            Rebuild(session, app);
             var row = Rows(session)[0];
             var cards = Cards(row);
             Stamp(cards);
 
             Keys(session, KeyCode.Right);
+            Rebuild(session, app);
 
             Assert.Same(row, Rows(session)[0]);
             Assert.Equal(cards, Cards(row));
@@ -191,17 +205,19 @@ public class GridRowKeepTests
     }
 
     [Fact]
-    public void ADownArrow_MakesTheTwoCardsItMovedBetween_InBothRows()
+    public void ABuildAfterADownArrow_MakesTheTwoCardsItMovedBetween_InBothRows()
     {
         Host((session, app, _, _) =>
         {
             Keys(session, KeyCode.Right);
+            Rebuild(session, app);
             var rows = Rows(session);
             var cards = rows.SelectMany(Cards).ToList();
             Stamp(cards);
             int across = Cards(rows[0]).Count;
 
             Keys(session, KeyCode.Down);
+            Rebuild(session, app);
 
             Assert.Equal(rows, Rows(session));
             Assert.Equal(cards, Rows(session).SelectMany(Cards));
@@ -211,36 +227,23 @@ public class GridRowKeepTests
         });
     }
 
-    /// <summary>The cursor leaves no focus behind on the card it left, which stays now: a move
-    /// that makes its card in the frame hands the keyboard to nothing, as it always has.</summary>
-    [Fact]
-    public void ACursorMove_LeavesNoFocusOnTheCardItLeft()
-    {
-        Host((session, app, _, _) =>
-        {
-            Keys(session, KeyCode.Right);
-            Keys(session, KeyCode.Right);
-            Assert.Null(session.Window.Window.FocusedElement);
-            Keys(session, KeyCode.Right);
-            Assert.Null(session.Window.Window.FocusedElement);
-        });
-    }
-
-    /// <summary>A card Tab reached is a kept element: the cursor moving elsewhere leaves it focused.</summary>
+    /// <summary>A card with the keyboard is a kept element: its row made again (a toggle on another
+    /// card in it) leaves it focused.</summary>
     [Fact]
     public void ACardWithTheKeyboard_KeepsItWhenItsRowIsMadeAgain()
     {
         Host((session, app, _, _) =>
         {
-            Keys(session, KeyCode.Tab);
-            Keys(session, KeyCode.Tab);
-            Keys(session, KeyCode.Tab);
+            Keys(session, KeyCode.Right);
+            Keys(session, KeyCode.Right);
             var focused = session.Window.Window.FocusedElement;
-            Assert.StartsWith("card-", focused?.AutomationId ?? "");
+            Assert.Equal("card-m001", focused?.AutomationId);
+            int made = app.GridRowsMade;
 
-            Keys(session, KeyCode.Right);
-            Keys(session, KeyCode.Right);
+            app.CardMenu(app.GridItems[3]).First(m => m.Label == "Mark watched").Action!();
+            Settle(session);
 
+            Assert.True(app.GridRowsMade > made, "no row was made again");
             Assert.Same(focused, session.Window.Window.FocusedElement);
         });
     }
@@ -471,8 +474,7 @@ public class GridRowKeepTests
     private static void ForgetCards(ApertureApp app)
     {
         var cards = typeof(ApertureApp).GetField("_gridCards", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
-        var kept = cards.GetType().GetField("_kept", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cards)!;
-        kept.GetType().GetMethod("Clear")!.Invoke(kept, null);
+        cards.GetType().GetMethod("Clear")!.Invoke(cards, null);
     }
 
     private static string Told(AccessibilityNode root)

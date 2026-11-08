@@ -708,6 +708,19 @@ without the ring move (a build a key that hands back all but two cards) took 32.
 suite pins it: `component/shelf walk Right, 5 shelves of 7 cards, ring moved without a build` (219 →
 0 KB a key against every card made).
 
+**A key that still builds moves the live ring first.** A card the ring reached with no build was made
+without the ring, so a build at another cursor finds it equal to what it was made with and hands it
+back, ring and all. In a virtual list the row is not even made again: the list keeps a row while its
+item is equal, and its items are its last build's, which know nothing of the moves since. So when a
+key has to build (Aperture's library grid: the card it reaches is not in a realized row, or the
+cursor is within a page of the loaded end, where the build asks for the next page), it takes the ring
+off the live card it leaves and puts it on the one it reaches, if that one is live, and then builds.
+A card the list makes in the frame after the build takes the keyboard once that frame is drawn
+(`Window.RequestPostFrameCallback`); asked straight after the build, it does not exist yet, which is
+why the grid's cursor never had the keyboard. Aperture's grid, 600 films, 1440×900, a key and three
+frames, JIT: Right 49.2 → 0.3 KB a key, Down 81.9 → 29.1 (what is left is the rows scrolling in), no
+build a key; with a reader the same, and no tree built.
+
 A column whose cells are all kept is left with no children by the time the reconciler reaches
 it, since the build moved every one into its new tree. Until round 5 those came back one by one,
 each marking the column's structure, so with a reader listening every key built the whole
