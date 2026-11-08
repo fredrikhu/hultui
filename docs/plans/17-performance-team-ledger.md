@@ -18,8 +18,8 @@ file after every step and commits it with the step's work. Full survey reports a
   per session (afterwards only the ledger's Phase and the part the step needs), do the step the ledger's Phase calls
   for, record it in the ledger, and commit.` Before resuming, `git fetch` and merge main if it moved. The common
   survey brief from round 8 is reusable: session 64e7e0e2's old scratchpad `brief-r8-survey.md` (see Probe code).
-  Round 9's survey archives round 7's Landed rows, round 8's build order and answered questions 11–13, and the log
-  entries before 2026-11-03 (round 7's).
+  Round 9's survey archives round 7's Landed rows, round 8's build order and answered questions 11–13, and round 7's
+  log entries (2026-11-02 to its release entry on 2026-11-03; round 8's start with its survey).
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`)
 - **Review commits since:** round 8's survey reviewed 17d4220a..df45b4a2 (round 7's build); round 9's survey reviews
   round 8's build, eaa1ec29..10acc8c0 (the last survey report to the round 8 release), which also brings main's merge
