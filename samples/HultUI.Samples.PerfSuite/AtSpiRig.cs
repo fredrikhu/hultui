@@ -22,10 +22,12 @@ interface IBridgeRig
 /// it runs on any desk, as its own tests do. For the rows that time what a Linux screen reader adds
 /// on top of the tree build and diff: the bridge's objects, kept or made again on each apply, and
 /// the signals it decides to send (not their D-Bus marshalling). The window disposes it with the
-/// session. Active whether or not a client listens.
+/// session. Active whether or not a client listens. It keeps nothing of a diff past the call, as
+/// the bridge does, so the window lends it its diff for patches as it lends the bridge
+/// (<see cref="ITreeDiffBorrower"/>).
 /// </summary>
 #pragma warning disable CA1416 // Linux's bridge, with a signal sink and no bus: any OS
-sealed class AtSpiRig : IBridgeRig, IAccessibilityBridge, IDisposable
+sealed class AtSpiRig : IBridgeRig, IAccessibilityBridge, ITreeDiffBorrower, IDisposable
 {
     private readonly CountingSignals _signals = new();
     private readonly LinuxAccessibilityBridge _bridge;

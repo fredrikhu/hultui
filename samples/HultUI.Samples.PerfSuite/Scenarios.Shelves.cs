@@ -183,7 +183,7 @@ sealed class ShelfPane(List<ImageGridFilm> films, bool keepCards = false) : Comp
         return ScrollView.Vertical().FlexGrow(1).Background(Ground).Children(page);
     }
 
-    protected override void OnAfterBuild() => _cursorCard.Current?.Focus();
+    protected internal override void OnAfterBuild() => _cursorCard.Current?.Focus();
 
     private BoxElement Card(ImageGridFilm film, int index, bool cursor)
     {

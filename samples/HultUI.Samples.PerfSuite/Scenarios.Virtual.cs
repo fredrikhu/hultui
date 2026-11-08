@@ -548,7 +548,7 @@ sealed class WalkPane(List<WalkItem> items, bool itemRows = false, bool details 
                 ScrollView.New().FlexGrow(1).Children(Flex.Column().FlexShrink(0).Children(files)));
     }
 
-    protected override void OnAfterBuild()
+    protected internal override void OnAfterBuild()
     {
         if (!_reveal) return;
         _reveal = false;
@@ -678,7 +678,7 @@ sealed class PartnerPane(List<WalkItem> items, bool oneRow) : Component
         return Flex.Row(gap: 0).FlexGrow(1).Children(left.WithRef(_left), right.WithRef(_right));
     }
 
-    protected override void OnAfterBuild()
+    protected internal override void OnAfterBuild()
     {
         if (!_reveal) return;
         _reveal = false;

@@ -228,6 +228,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     // the open overlays whose parts follow the root's children in the tree.
     private readonly AccessibilityTreeBuilder.LayoutRefresh _a11yRefresh = new();
     private readonly List<(Element Content, float X, float Y)> _a11yOverlayParts = [];
+    // The diff a patch or a layout refresh made in place hands a bridge that is done with it when the
+    // call returns (A11yPatchDiff), emptied after each call. Null until the first.
+    private TreeDiff? _a11yLentDiff;
     // Layout refreshes in a row that a build made other nodes for, and how many of the next ones go
     // straight to a build. A list its owner filters as one types, a grid of composite rows that
     // scrolls, makes other nodes on every refresh, and a walk that finds that at its end costs
@@ -968,7 +971,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 target.Node.Parent!.ReplaceChild(_a11yPaths[target.PathStart + target.PathLength - 1], node);
             foreach (var (node, count, selected) in served) node.ReplaceServedItems(count, selected);
             if (changes.Count == 0) return true;   // moved back: nothing to tell
-            var patch = new TreeDiff();
+            var patch = A11yPatchDiff();
             foreach (var change in changes)
             {
                 if (change.PropertyName == AccessibilityProperties.IsSelected)
@@ -986,8 +989,20 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             versions.Clear();
             remade.Clear();
             served.Clear();
+            _a11yLentDiff?.Clear();
         }
     }
+
+    /// <summary>
+    /// The diff a patch or a layout refresh made in place hands the bridge. For a bridge that is done
+    /// with it when the call returns (<see cref="ITreeDiffBorrower"/>: the UIA and AT-SPI bridges),
+    /// the window's own, empty, which the caller empties again after the call: a new one was four
+    /// lists and the changes' array, about 280 bytes a keystroke, a check box's click or a list
+    /// cursor's key. For any other bridge, a new one, which it may keep (the headless bridge records
+    /// every diff it is handed).
+    /// </summary>
+    private TreeDiff A11yPatchDiff() =>
+        _accessibilityBridge is ITreeDiffBorrower ? _a11yLentDiff ??= new TreeDiff() : new TreeDiff();
 
     /// <summary>Adds each element's node in the applied tree to <see cref="_a11yPatchTargets"/>, with
     /// its place in the tree. A leaf told twice (a number field's value and its range) is added once.
@@ -1209,7 +1224,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 // What a build's diff would be, of the tree that is that build now: the bridge takes
                 // the nodes added and lets go of those removed, as it does for a build.
                 AccessibilityStructureRefreshesInPlace++;
-                var diff = new TreeDiff();
+                var diff = A11yPatchDiff();
                 diff.Added.AddRange(refresh.Added);
                 diff.Removed.AddRange(refresh.Removed);
                 diff.Reordered.AddRange(refresh.Reordered);
@@ -1218,7 +1233,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             }
             else if (refresh.Changes.Count > 0)
             {
-                var patch = new TreeDiff();
+                var patch = A11yPatchDiff();
                 patch.PropertyChanged.AddRange(refresh.Changes);
                 _accessibilityBridge.ApplyPatchedProperties(patch, tree);
             }
@@ -1230,6 +1245,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         {
             refresh.Clear();
             parts.Clear();
+            _a11yLentDiff?.Clear();
         }
     }
 

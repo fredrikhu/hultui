@@ -94,7 +94,7 @@ static partial class Scenarios
             return column;
         }
 
-        protected override void OnAfterBuild() => Find.Service();
+        protected internal override void OnAfterBuild() => Find.Service();
 
         private static readonly Color HitTint = Color.FromHex("#613315"), CurrentTint = Color.FromHex("#9E6A03");
 

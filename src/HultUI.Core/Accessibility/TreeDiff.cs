@@ -30,6 +30,16 @@ public sealed class TreeDiff
         Added.Count == 0 && Removed.Count == 0 &&
         Reordered.Count == 0 && PropertyChanged.Count == 0;
 
+    /// <summary>Empties the four lists, keeping their room: the window's diff that it lends a
+    /// bridge (<see cref="ITreeDiffBorrower"/>), after each call, so it holds no node of the tree.</summary>
+    internal void Clear()
+    {
+        Added.Clear();
+        Removed.Clear();
+        Reordered.Clear();
+        PropertyChanged.Clear();
+    }
+
     /// <summary>
     /// The distinct parents that actually gained children in this diff,
     /// excluding parents that are themselves newly added. A structure-changed

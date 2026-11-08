@@ -144,7 +144,7 @@ static partial class Scenarios
             return $"no held row at {top:0.#} at offset {offset:0.#} (section of row {first})";
         }
 
-        protected override void OnAfterBuild()
+        protected internal override void OnAfterBuild()
         {
             if (!_reveal) return;
             _reveal = false;

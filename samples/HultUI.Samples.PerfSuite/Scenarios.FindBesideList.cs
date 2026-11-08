@@ -162,7 +162,7 @@ sealed class FindBesideList : Component
         return Flex.Row(gap: 0).FlexGrow(1).Children(side, main);
     }
 
-    protected override void OnAfterBuild() => Find.Service();
+    protected internal override void OnAfterBuild() => Find.Service();
 
     private Element Row(int line)
     {

@@ -32,8 +32,10 @@ namespace HultUI.Headless.Tests;
 /// </summary>
 public class A11yPatchedPropertyTests
 {
-    /// <summary>A real bridge, reported active whether or not a client listens.</summary>
-    private sealed class Active(IAccessibilityBridge inner) : IAccessibilityBridge
+    /// <summary>A real bridge, reported active whether or not a client listens. Done with a diff when
+    /// the call returns, as the bridge is, so the window lends it its diff for patches as it lends the
+    /// bridge in an app (<see cref="ITreeDiffBorrower"/>).</summary>
+    private sealed class Active(IAccessibilityBridge inner) : IAccessibilityBridge, ITreeDiffBorrower
     {
         public bool IsActive => true;
         public void ApplyChanges(TreeDiff diff, AccessibilityNode root) => inner.ApplyChanges(diff, root);

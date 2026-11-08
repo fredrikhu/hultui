@@ -27,8 +27,10 @@ namespace HultUI.Headless.Tests;
 /// </summary>
 public class A11yLayoutRefreshInPlaceTests
 {
-    /// <summary>Counts patches and keeps the applied tree; a real bridge behind it.</summary>
-    private sealed class Counting(IAccessibilityBridge inner) : IAccessibilityBridge
+    /// <summary>Counts patches and keeps the applied tree; a real bridge behind it, or the recording
+    /// one. It keeps nothing of a diff past the call, as they do not, so the window lends it its diff
+    /// for each refresh made in place, as it lends the real bridges (<see cref="ITreeDiffBorrower"/>).</summary>
+    private sealed class Counting(IAccessibilityBridge inner) : IAccessibilityBridge, ITreeDiffBorrower
     {
         public int Patches;
         public AccessibilityNode? Tree;

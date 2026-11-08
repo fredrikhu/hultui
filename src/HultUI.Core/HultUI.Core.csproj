@@ -36,6 +36,9 @@
     <!-- Both bridges read what a list whose items are served on demand carries for them: how many
          there are and which are selected (AccessibilityNode.Served), and where one is. -->
     <InternalsVisibleTo Include="HultUI.Platform.Accessibility.Windows" />
+    <!-- The perf suite's UIA and AT-SPI rigs stand in front of the bridges and, as they do, keep
+         nothing of a diff past the call (ITreeDiffBorrower): the window lends them its diff. -->
+    <InternalsVisibleTo Include="HultUI.Samples.PerfSuite" />
   </ItemGroup>
 
 </Project>

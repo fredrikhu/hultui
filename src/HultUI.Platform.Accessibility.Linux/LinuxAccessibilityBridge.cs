@@ -28,7 +28,9 @@ namespace HultUI.Platform.Accessibility.Linux;
 /// selected state of its two items, all on the UI thread; a keystroke or a caret move in text made
 /// on request is told through the same call, with nothing in the objects to change. The
 /// <see cref="TreeDiff"/> drives which change signals to emit — the same delta
-/// the render side already computed, reused as the AT-SPI event stream.
+/// the render side already computed, reused as the AT-SPI event stream. It is read during the
+/// call and nothing of it is kept (<see cref="ITreeDiffBorrower"/>): the window lends the bridge
+/// one diff for its patches, emptied after each call.
 /// </para>
 /// <para>
 /// <b>Active only while assistive technology is on.</b> The bus is reachable in every GNOME and
@@ -45,7 +47,7 @@ namespace HultUI.Platform.Accessibility.Linux;
 /// </para>
 /// </remarks>
 [SupportedOSPlatform("linux")]
-public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree, IDisposable
+public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBorrower, IAtSpiTree, IDisposable
 {
     // The published objects, by element: one for every node of the applied tree but the root. Written
     // on the UI thread, read on the bus thread. One lock: the UI thread is the only writer, reads take
