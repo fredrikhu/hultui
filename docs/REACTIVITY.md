@@ -236,6 +236,56 @@ included. A handler of yours that calls `MarkDirty()` from a `PointerMoveEvent` 
 every move: build a drag on these controls where you can, or keep it out of `Build()` (write
 the live element through a `Ref<T>`).
 
+### A background callback that fires once per item posts one build at a time
+
+A cache or a worker that calls back once per item it finishes, on another thread, usually
+ends in `Application.InvokeOnMainThread(MarkDirty)`. The UI thread runs everything posted
+since the last frame in one go, and `MarkDirty()` rebuilds on the calling stack, so N items
+that land between two frames are N builds in that frame, each making the whole view again for
+one more picture. Aperture's `PosterCache` and Vesper's `ThumbnailCache` call back once per
+picture and leave the coalescing to the caller. Until plan 17 neither caller did: opening
+Aperture's Home (36 posters) built it 41 times, up to 10 times in one frame, and Vesper's
+Thumbnails (44 pictures) 45 times, up to 44 in one frame.
+
+Post one build at a time: a flag set when the build is posted and cleared when it runs.
+
+```csharp
+private int _landingPosted;
+
+// The cache's callback, on the thread pool.
+private void PostLanded()
+{
+    if (Interlocked.Exchange(ref _landingPosted, 1) == 0)
+        Application.InvokeOnMainThread(OnLanded);
+}
+
+private void OnLanded()
+{
+    Interlocked.Exchange(ref _landingPosted, 0);   // first: a landing from now on posts the next build
+    MarkDirty();
+}
+```
+
+Every item that landed before the build ran is in it, and nothing waits longer than it did:
+the first landing posts exactly as before. Clear the flag before the build reads what landed,
+not after it: cleared after, an item that lands while the build runs finds the flag still set,
+posts nothing, and its picture waits for something else to build. A throttle by time (at most
+one post every 80 ms) is not the same thing either: it drops the post for the last items of a
+burst, so the burst needs a final refresh of its own (Vesper's find has one).
+
+With the flag, from opening the view until every picture landed (headless, a picture served
+after 15–30 ms; JIT, then NativeAOT):
+
+| View | Builds | Most builds in one frame | Allocated |
+|---|---|---|---|
+| Aperture Home, 36 posters | 41 → 14–16 | 8–10 → 4 | 3,614 → 1,825–1,896 KB (−48…−50 %); AOT 3,446 → 1,696 KB |
+| Aperture library grid, 42 posters | 46 → 14–15 | 9–13 → 2–3 | 2,419–2,473 → 1,442–1,564 KB (−36…−42 %) |
+| Vesper Thumbnails, 44 pictures | 45 → 2–4 | 24–44 → 1–2 | 1,409–1,491 → 756–819 KB (−42…−49 %) |
+
+The same pictures are drawn at the end, and the settled frame has the same pixels. With
+pictures served more slowly (60–120 ms) fewer land together: Home 41 → 26 builds (−29 %), the
+grid 46 → 25 (−26 %).
+
 ### A value that changes ten times a second
 
 Some signals move on their own, many times a second: `MediaPlayer.Position` while a film
