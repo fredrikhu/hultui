@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 9
-- **Phase:** build — round 9, step 2 next (step 1 landed 2026-11-08; 16 steps in "Round 9 build order"). Build
+- **Phase:** build — round 9, step 16 next (taken ahead while the user can hover by hand), then step 3 (steps 1–2 landed 2026-11-08; 16 steps in "Round 9 build order"). Build
   agents run one at a time in this worktree; their briefs go in session c484f5ac's scratchpad as `brief-r9b<N>.md`.
   Questions 14–19 answered. Open for the user: question 10 (`TokenizeDiff` public), the live screen-reader check of
   menus and disabled menu items (ACCESSIBILITY-PLAN.md), and the hand checks step 16 needs. Weekly usage 17 % after the survey
@@ -172,16 +172,21 @@ lines its brief quotes (`r9-k` = `17-reports/r9-k-<area>.md`).
     `Restyle` call (a patch, 0 trees a key). (b) meridian-focus-lost (from Waiting): the new-request prompt's Escape
     puts focus back on "New request"; the Request tab's "reveal" keeps focus where a keyboard user expects it; History
     walks with an element focused. Check 0 trees a key and the audit. Small, app.
-16. **frame-snap-flyout-bottom-entry-high-dpi** (3, correctness; found by the user's Snap Layouts hover, 2026-11-08) —
-    Meridian on the 4K at 150 %: the flyout doesn't open when the pointer enters the maximize button from below until
-    about a third of the way in (restored and maximized); every other direction works, and the 1440p at 100 % works
-    in every direction. Vesper on the 4K does not have it. Meridian's `WM_NCHITTEST` reports `HTMAXBUTTON` over the
-    whole 69×60 px button (rows 548–608, probe `r9-snap\hitcol.ps1`), and its window has no `WS_SYSMENU`; a dead
-    bottom third fits a DWM caption region of 41 px (the 100 % value of `UpdateCaptionHeight`, Window.cs:4328) on a
-    61 px button. Find why Meridian's region (or what the shell trusts) is short where Vesper's isn't, and fix it in the
-    framework if it is the framework's. Synthetic cursor moves (`SetCursorPos`, `SendInput`) did not open the flyout on
-    a window that isn't active (probes `r9-snap\flyout.ps1`, `diff3.ps1`): the user allows moving the mouse; ask the
-    user to activate the window or to hover by hand. Small–medium.
+16. **frame-restore-keeps-no-sysmenu** (3, correctness; found by the user's Snap Layouts hover, 2026-11-08; **taken
+    next, ahead of step 3**) — a custom-frame window **restored from maximized gets `WS_SYSMENU` back** (style 16C70000
+    → 16CF0000) and nothing strips it again: our code only clears it in `Install` (WindowsCustomFrame.cs:188-190) and
+    lends it in `ShowSystemMenu` (:581-591), so SDL's restore path rewrites the style. With `WS_SYSMENU`, Windows
+    validates the Snap Layouts flyout against the standard caption band (memory `snap-layouts-caption-band`: 45 px at
+    150 %, ~31 at 100 %), so a pointer entering the maximize button from below misses on both monitors (button 60 / 40
+    px) and stays broken for the window's life. Found with the user's hand checks in Meridian and Vesper: a fresh
+    window works and keeps working across monitors (read: no `WS_SYSMENU`, `HTMAXBUTTON` over the whole button, probe
+    `r9-snap\hitcol.ps1`); maximize alone is fine; restore breaks it. Clearing `WS_SYSMENU` from outside
+    (`r9-snap\strip.ps1`: SetWindowLongPtr + SWP_FRAMECHANGED) made the whole button arm the flyout again (the user).
+    Fix: the frame's WndProc answers `WM_STYLECHANGING` (GWL_STYLE) by clearing `WS_SYSMENU` from `styleNew` unless
+    `ShowSystemMenu` has lent it. Test (UiTests, guarded real window): after maximize, restore, full screen and back,
+    and a monitor move, the style has no `WS_SYSMENU` (fails under a reverse edit); Alt+Space still opens the system
+    menu. Synthetic cursor moves don't open the flyout on an inactive window (probes `r9-snap\flyout.ps1`,
+    `diff3.ps1`), so the user hovers by hand at the end. Small, framework.
 
 ### Waiting
 
@@ -265,6 +270,7 @@ Rounds 8 and 9 (round 8 is the round round 9's survey reviewed; it moves to the 
 | 8 | 66e31aa7 | meridian-history-up-after-search (bug) | Pre-existing crash on 43f7e106: walk 30 rows down, search down to 20 rows, press Up → `ArgumentOutOfRangeException`. Up clamps the cursor to the rows. HistoryTests `UpAfterASearchThatShortenedTheRows_SelectsTheLastRow`, `AKeyBuildsTheArchiveAlone_AndASearchCharacterBuildsNoArchive`; PartTests check History keys as panel-only builds; 9 reverse edits fail; Meridian 586 + 4 skipped, Headless 1,459 pass. REACTIVITY.md, ELEMENTS.md. |
 | 8 | 307ee07c | paint-meridian-history-faded-row-layers | Approved (question 13; pixels). An older send's row has no `Opacity`: its 5 texts, the method chip's tint and label and its hover tint draw at 60 % of their alpha (`Azimuth.Fade`, `MethodChip` `opacity`); app code only. Real window 1440×900 at 150 %, AOT, idle-gated, one ABAB launch a renderer, medians: layers 29.0–29.4 → 0 a frame; GL wheel 0.912 → 0.614 ms (GPU 0.954 → 0.261), Down 0.971 → 0.702 (GPU 0.902 → 0.269); Vulkan 8-bit wheel 0.898 → 0.681 (GPU 0.607 → 0.084), Down 1.063 → 0.829 (GPU 0.573 → 0.091); F16 wheel 1.063 → 0.816 (GPU 2.208 → 0.494), Down 1.105 → 0.893 (GPU 2.19 → 0.498, one segment; another process on the GPU in the second). Pixels: at rest 18–50k at 1/255, chips ≤ 8/255 (8-bit) / 6 (F16); hovered older row ≤ 5/255 outside its chip, **its chip label up to 13/255 in 55 pixels** (label over tint and faded hover fill); selected ≤ 1/255, selected and hovered ≤ 3, chips ≤ 10; hover and selection fills unchanged. Headless bytes flat JIT + AOT, CPU per step −57…−73 %; 25 History scenes' tree, focus, texts identical. `AnOlderSendFadesItsColours_NotItsRow` (3 reverse edits fail); Meridian 587 + 4 skipped, Headless 1,459 (goldens) pass. 4 guarded launches, 0 foreground takes, no `nvlddmkm` events. |
 | 9 | 4142ee85, 0a9a9c64, 71f95ff1, 96dbc917 | apps-aperture-grid-columns-keep-cards | The objection to d366505b. A card goes back while its own row is still a child of the list (`CanTakeCard`, `place: null`, as round 7's `GridCards.TakeBack`); a hovered or pressed card only into its own row. d366505b's `place: key` remade every card on a change of columns, though a place moves to another row only then, and that invalidates every row first. Follow-up: across a change of columns the keyboard goes back to the cursor's card after the frame (that card and the first row's last card on a narrowing are still made again). Headless, 600 films, JIT idle-gated ×2: a column change each step 235.6 → 62.5 KB, elements 249 → 58, leaf/text measures 369 → 60 / 110 → 14.5; resize over 40 widths 13.6 → 4.9 KB (round 8 base 6.1); cursor keys unchanged (Right 0.3, Down 21.5, no build); AOT walk `library-resize-4px` 6.4 → 3.2 KB (below round 8's 3.6), CPU within noise. New suite rows (kept image grid across a change of columns: own-row 194 KB / 32.4 cards, kept 32 KB / 3.0); shared rows 0/0 ×2 (captures 96dbc917). d366505b's 7 scenes + a last-column scene, 96 checkpoints: pixels and tree as HEAD, 32 column changes as a forget-all grid, one ring on the cursor's card, the keyboard on it at all 48 (HEAD 4 of 16). Aperture 356, Headless 1,459 pass; GridRowKeepTests +4, GridCursorTests +3. REACTIVITY.md "A grid whose columns change passes no place". |
+| 9 | 3a08f828, b4f182b5, 01f0886d | paint-label-lines-cull | The objection to 967ce1ac. Both `DrawText` overloads skip lines wholly outside `Canvas.LocalClipBounds` with `DrawParagraph`'s line-height slack (one helper, `LineOutsideClip`, now shared), checked before a line's runs are read; one-line labels read no clip; internal `CullsTextLines` (on) is the tests' pixel reference. Meridian Request tab, 89k-character body, JIT idle-gated ×2: open runs 1,911 → 192, blobs 1,771 → 61, render 538.5 → 13.8 KB (−97 %), step 3,797 → 3,277 KB (−14 %); wheel runs a frame 1,903 → 194 (−90 %), render 0 → 0.61 KB a frame (lines scrolling in, once each); AOT the same counts. New suite row `text/wheel over a 2,000-line plain label in a ScrollView`: min 0.361 → 0.238 ms JIT (−34 %), 0.383 → 0.227 AOT (−41 %), 0.10 → 3.10 KB a step; full suite 217 rows JIT + AOT ×2: 0 slower, 1 faster, allocations identical elsewhere (captures 01f0886d). Pixels: 14 in-process dumps, before/after differ only in the elapsed-time label, as A/A. `LabelLinesCullTests` 27 cases (plain/spanned, translated, 1.5×, rotated, in a layer, cut lines, stacked marks); 4 reverse edits fail; Skia 387, Core 5,064, Headless 1,459 (goldens) pass. |
 
 ## Examined, not worth it
 
@@ -704,3 +710,15 @@ From 2026-11-03 (round 8's survey); earlier entries are in the archive ([to 2026
   closed. Guideline notes: the row-place check is for rows that keep their place — a grid that reflows checks the
   card's own row is still in the list; leave a hovered or pressed card in its own row (as VirtualList's moved rows);
   a card whose ring moved with no build is made again, so if it held the keyboard ask for it back after the frame.
+- 2026-11-08: step 16's cause found with the user's hand checks (Meridian from main in the primary checkout, then
+  Vesper): restoring a window from maximized puts `WS_SYSMENU` back, so Windows validates the Snap Layouts flyout
+  against the standard caption band and a bottom entry misses on both monitors, for the window's life. Not DPI: a
+  fresh window dragged across monitors kept the full button. Clearing the style from outside fixed it (the user saw
+  it). Step 16 runs next, ahead of step 3, while the user can hover by hand. The flyout's first frame at the
+  monitor's top-left is the Windows shell's (memory snap-layouts-caption-band).
+- 2026-11-08: round 9 step 2 landed (3a08f828, b4f182b5; captures 01f0886d): a plain label draws only the lines its
+  clip reaches — Meridian's Request tab with an 89k body: wheel runs a frame −90 %, open render −97 % (step −14 %);
+  new suite row −34 % JIT, −41 % AOT; pixels identical; the objection to 967ce1ac closed. Guideline notes: a plain
+  label culls by its clip like a selectable one — no need to switch a long read-only text to a TextArea for paint;
+  a colour stretch clips its glyphs to their line's box, so stacked marks above a line are cut in spanned text, not
+  plain (an existing difference); publish the AOT suite through a wrapper project that sets `PublishAot` (NETSDK1207).
