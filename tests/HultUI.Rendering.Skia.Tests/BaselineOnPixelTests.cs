@@ -41,6 +41,9 @@ public class BaselineOnPixelTests(ITestOutputHelper output)
         SkiaRenderContext ctx, string text, float size, float y, float scrollY = 0f,
         Matrix3x2? transform = null, TextSpan[]? spans = null)
     {
+        // The scrolls put most texts far off the surface, and a text the size of 40 px wraps: every
+        // line drawn, so the last blob is this text's wherever its clip is.
+        ctx.CullsTextLines = false;
         float[] at = new float[2];
         for (int pass = 0; pass < 2; pass++)
         {
