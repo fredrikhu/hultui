@@ -33,6 +33,7 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
     private const int WS_SYSMENU = 0x00080000;
 
     private const uint WM_SIZE = 0x0005;
+    private const uint WM_STYLECHANGING = 0x007C;
     private const uint WM_NCCALCSIZE = 0x0083;
     private const uint WM_NCHITTEST = 0x0084;
     private const uint WM_MOUSEMOVE = 0x0200;
@@ -125,6 +126,7 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
     private bool _maxPressed;      // a left-press landed on the maximize button
     private bool _maxLeaveTracked; // WM_NCMOUSELEAVE is armed for the current NC hover
     private bool _wasZoomed;       // maximized state at the last WM_SIZE (see ExtendFrame)
+    private bool _lendingSysMenu;  // ShowSystemMenu has WS_SYSMENU on for its menu (see WM_STYLECHANGING)
 
     // ──── Windowed fullscreen ────
     private RECT _rectBeforeFullscreen;   // window rect to come back to
@@ -185,6 +187,8 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
         // HTMAXBUTTON is honoured across the full button (this is why Electron apps
         // get full-height flyouts — they drop WS_SYSMENU too). Costs the Alt+Space
         // system menu, which a custom-chrome window doesn't surface anyway.
+        // Stripping it once is not enough: SDL writes it back whenever it recomputes the
+        // style, so WM_STYLECHANGING keeps it off for the window's life (see WndProc).
         long style = GetWindowLongPtrW(hwnd, GWL_STYLE).ToInt64();
         SetWindowLongPtrW(hwnd, GWL_STYLE,
             (IntPtr)((style | WS_MAXIMIZEBOX | WS_MINIMIZEBOX) & ~(long)WS_SYSMENU));
@@ -340,6 +344,21 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
                 case WM_NCHITTEST:
                     return (IntPtr)frame.HandleNcHitTest(hwnd, lParam);
 
+                // WS_SYSMENU stays off whoever rewrites the style (see Install). SDL does on
+                // every change that leaves maximized or minimized — its WM_WINDOWPOSCHANGED
+                // calls WIN_SetWindowResizable, which rebuilds the style from SDL's flags, with
+                // WS_SYSMENU — and in its bordered, resizable and full screen calls. A window
+                // restored once kept the style for its life (plan 17, round 9, step 16), and a
+                // pointer entering the maximize button from below missed the Snap Layouts
+                // flyout until about a third of the way in. ShowSystemMenu lends it.
+                case WM_STYLECHANGING when unchecked((int)wParam.ToUInt64()) == GWL_STYLE
+                                           && lParam != IntPtr.Zero && !frame._lendingSysMenu:
+                {
+                    IntPtr res = CallWindowProcW(frame._originalProc, hwnd, msg, wParam, lParam);
+                    ((STYLESTRUCT*)lParam)->styleNew &= ~(uint)WS_SYSMENU;
+                    return res;
+                }
+
                 // The maximize button lives in the non-client area (we report it as
                 // HTMAXBUTTON so Windows shows Snap Layouts), so its hover and click
                 // arrive as NC messages. Drive the app's button highlight from them
@@ -490,8 +509,8 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
         // button's top). The button is never at a resize corner, so claiming its
         // whole rect costs no real resize target. We drive the button's own
         // highlight and click from the NC messages (see WndProc). The flyout
-        // works over the button's full height only because Install() strips
-        // WS_SYSMENU — see the comment there.
+        // works over the button's full height only because the frame keeps
+        // WS_SYSMENU off — see the comment in Install().
         if (_window.IsWindowMaximizePoint?.Invoke(dipX, dipY) == true)
             return HTMAXBUTTON;
 
@@ -577,17 +596,21 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
         // WS_SYSMENU (required for full-height Snap Layouts on the maximize
         // button). Flip it on for the duration of the menu; the flyout only
         // consults the style while hovering the button, so the transient flip —
-        // under a modal menu loop — is unobservable.
+        // under a modal menu loop — is unobservable. The lend tells WM_STYLECHANGING
+        // to let the style through until the menu is done.
         long style = GetWindowLongPtrW(hwnd, GWL_STYLE).ToInt64();
-        SetWindowLongPtrW(hwnd, GWL_STYLE, (IntPtr)(style | WS_SYSMENU));
+        _lendingSysMenu = true;
         try
         {
+            SetWindowLongPtrW(hwnd, GWL_STYLE, (IntPtr)(style | WS_SYSMENU));
             IntPtr menu = GetSystemMenu(hwnd, false);
             if (menu == IntPtr.Zero) return;
             ShowSystemMenuCore(hwnd, menu, atCursor);
         }
         finally
         {
+            _lendingSysMenu = false;
+            style = GetWindowLongPtrW(hwnd, GWL_STYLE).ToInt64();
             SetWindowLongPtrW(hwnd, GWL_STYLE, (IntPtr)(style & ~(long)WS_SYSMENU));
         }
     }
@@ -696,6 +719,9 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
 
     [StructLayout(LayoutKind.Sequential)]
     private struct MARGINS { public int CxLeftWidth, CxRightWidth, CyTopHeight, CyBottomHeight; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct STYLESTRUCT { public uint styleOld, styleNew; }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct TRACKMOUSEEVENT { public uint cbSize; public uint dwFlags; public IntPtr hwndTrack; public uint dwHoverTime; }
