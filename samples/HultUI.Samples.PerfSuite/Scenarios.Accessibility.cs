@@ -611,6 +611,14 @@ static partial class Scenarios
                 return SelectionWalk(ctx, Applied(rig), itemRows: true, composite: true);
             });
 
+        yield return new Scenario("a11y/selection walk 1,000 composite item rows named by their texts, UIA",
+            "The composite walk with each row's button named by its two texts, a subject and a line of detail, not by a name of its own, as Junction's Changes rows are: each key's walk of the tree compares every row's name with what its texts make (plan 17 round 8, step 2: it joined them in a new string, every row, every walk)",
+            ctx =>
+            {
+                var rig = UiaRig.Install(ctx.Window);
+                return SelectionWalk(ctx, Applied(rig), itemRows: true, composite: true, namedByTexts: true);
+            });
+
         yield return new Scenario("a11y/selection walk 1,000 composite item rows, the list draws the highlight, UIA",
             "The same walk with .SelectionHighlight(…): the list draws the selection under the selected row and its rows are made unselected",
             ctx =>

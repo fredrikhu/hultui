@@ -447,11 +447,12 @@ public class KeptRowTests
     private static BoxElement TileOf(Dictionary<string, Element> rows, string name) =>
         (BoxElement)rows.Values.SelectMany(r => r.Children).Single(tile => TileName(tile) == name);
 
-    /// <summary>A cursor move in Thumbnails makes the two rows it moved between again, and each
-    /// hands back the tiles that did not change: the list patches each row in place from its new
-    /// one, and the patch makes only the two tiles the cursor moved between. A patch copies what
-    /// the build gave the tile, so a mark left on a tile that no build gave it is still there on
-    /// the tiles nothing patched.</summary>
+    /// <summary>A build after a cursor move in Thumbnails makes the two rows the cursor moved
+    /// between again, and each hands back the tiles that did not change: the list patches each row
+    /// in place from its new one, and the patch makes only the two tiles the cursor moved between.
+    /// A patch copies what the build gave the tile, so a mark left on a tile that no build gave it
+    /// is still there on the tiles nothing patched. The key itself builds nothing; it moves the ring
+    /// on the live tiles (GridCursorNoBuildTests).</summary>
     [Fact]
     public void AThumbnailCursorMove_MakesTheTwoTilesItMovedBetween_AndLeavesTheRestUntouched()
     {
@@ -468,6 +469,8 @@ public class KeptRowTests
 
         t.Press(KeyCode.Right);                    // onto the first tile of the second row
         t.Session.PumpFrames(1);
+        Assert.All(ThumbRows(t, 'L').Values.SelectMany(r => r.Children), tile => Assert.Equal("untouched", tile.AutomationId));
+        Rebuild(t);
 
         var after = ThumbRows(t, 'L');
         Assert.Equal(before.Keys, after.Keys);
@@ -528,10 +531,11 @@ public class KeptRowTests
         return cells;
     }
 
-    /// <summary>The Brief grid keeps its cells: a key makes the two the cursor moved between (and
-    /// patches them into the ones they replace) and hands every other cell back untouched. A
-    /// patch copies what the build gave the cell, so a mark left on a cell that no build gave it
-    /// is still there on the cells nothing patched.</summary>
+    /// <summary>The Brief grid keeps its cells: a build after a key makes the two the cursor moved
+    /// between (and patches them into the ones they replace) and hands every other cell back
+    /// untouched. A patch copies what the build gave the cell, so a mark left on a cell that no
+    /// build gave it is still there on the cells nothing patched. The key itself builds nothing; it
+    /// moves the ring on the live cells (GridCursorNoBuildTests).</summary>
     [Fact]
     public void ABriefCursorMove_MakesTheTwoCellsItMovedBetween_AndLeavesTheRestUntouched()
     {
@@ -544,6 +548,8 @@ public class KeptRowTests
 
         t.Press(KeyCode.Down);
         t.Session.PumpFrames(1);
+        Assert.All(BriefCells(t, 'L').Values, cell => Assert.Equal("untouched", cell.AutomationId));
+        Rebuild(t);
 
         var after = BriefCells(t, 'L');
         Assert.Equal(before.Keys.Order(), after.Keys.Order());

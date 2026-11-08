@@ -467,6 +467,15 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         catch { return null; }
     }
 
+    /// <summary>Whether an on-demand item can be used, as its list answers it now
+    /// (<see cref="IAccessibleItemSource.ItemIsEnabled"/>), read as its label is: what an item node
+    /// carries for UIA's IsEnabled.</summary>
+    internal bool GetVirtualItemEnabled(ElementId listId, int index)
+    {
+        try { return ItemsOf(listId)?.ItemIsEnabled(index) ?? true; }
+        catch { return true; }
+    }
+
     /// <summary>Whether an on-demand item sits outside its list's viewport, at the scroll the tree
     /// carries.</summary>
     internal bool GetVirtualItemOffscreen(ElementId listId, int index) =>

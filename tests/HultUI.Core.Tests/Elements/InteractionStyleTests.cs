@@ -110,6 +110,54 @@ public class InteractionStyleTests
         Assert.Equal(Red, box.BackgroundColor);
     }
 
+    /// <summary>A change the owner makes to the live element with no build (a ring moved onto it)
+    /// is the look a hover lays itself over and gives back. Set directly, the hover's end put back
+    /// the look the element had when it was first hovered.</summary>
+    [Fact]
+    public void Restyle_IsTheLookAHoverGivesBack()
+    {
+        var box = Box.New().Background(Blue).OnHover(b => b.BorderColor = Green);
+        box.SetInteractionHovered(true);    // the base is taken: blue, no border
+        box.SetInteractionHovered(false);
+
+        box.Restyle(static e => ((BoxElement)e).BackgroundColor = Red);
+        Assert.Equal(Red, box.BackgroundColor);
+        box.SetInteractionHovered(true);
+        Assert.Equal(Red, box.BackgroundColor);
+        Assert.Equal(Green, box.BorderColor);
+        box.SetInteractionHovered(false);
+        Assert.Equal(Red, box.BackgroundColor);
+        Assert.Equal(Color.Transparent, box.BorderColor);
+    }
+
+    /// <summary>Restyled while hovered: the tint showing is not taken into the new look, and the
+    /// hover is laid over the new look until it ends.</summary>
+    [Fact]
+    public void Restyle_WhileHovered_LaysTheHoverOverTheNewLook()
+    {
+        var box = Box.New().Background(Blue).OnHover(b => b.Background(Green));
+        box.SetInteractionHovered(true);
+        Assert.Equal(Green, box.BackgroundColor);
+
+        box.Restyle(static e => ((BoxElement)e).BorderColor = Red);
+        Assert.Equal(Green, box.BackgroundColor);
+        Assert.Equal(Red, box.BorderColor);
+        box.SetInteractionHovered(false);
+        Assert.Equal(Blue, box.BackgroundColor);
+        Assert.Equal(Red, box.BorderColor);
+    }
+
+    [Fact]
+    public void Restyle_WithNoStyles_JustChangesTheElement()
+    {
+        var box = Box.New().Background(Blue);
+        box.Restyle(static e => ((BoxElement)e).BackgroundColor = Red);
+        Assert.Equal(Red, box.BackgroundColor);
+        box.SetInteractionHovered(true);
+        box.SetInteractionHovered(false);
+        Assert.Equal(Red, box.BackgroundColor);
+    }
+
     [Fact]
     public void Spring_StartsAtZeroEndsAtOne_AndOvershoots()
     {

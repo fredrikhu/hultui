@@ -70,7 +70,7 @@ public partial class RichTextEditorElement
 
         var selection = _state.Selection;
         TableLayout? drawnTable = null;
-        for (int i = first; i < _blocks.Length; i++)
+        for (int i = first; i < _blocks.Count; i++)
         {
             var bl = _blocks[i];
             if (bl.Top - bl.SpaceAbove > bottom) break;
@@ -86,7 +86,7 @@ public partial class RichTextEditorElement
                 ctx.DrawParagraph(para, new Point(originX + bl.TextX, originY + bl.Top + bl.TextY));
         }
 
-        if (IsEmpty && Placeholder.Length > 0 && !_composition.IsActive && _blocks.Length > 0)
+        if (IsEmpty && Placeholder.Length > 0 && !_composition.IsActive && _blocks.Count > 0)
         {
             var bl = _blocks[0];
             var style = bl.Style with { TextColor = PlaceholderColor };
@@ -302,7 +302,7 @@ public partial class RichTextEditorElement
     private void DrawCaret(IRenderContext ctx, float ox, float oy)
     {
         var focus = _state.Selection.Focus;
-        if (focus.Block < _blocks.Length && _blocks[focus.Block] is { Block.Kind: BlockKind.Image } picture)
+        if (focus.Block < _blocks.Count && _blocks[focus.Block] is { Block.Kind: BlockKind.Image } picture)
         {
             // A caret on a picture is the picture selected: a ring round it, not a bar.
             if (_state.Selection.IsCollapsed)
@@ -317,7 +317,7 @@ public partial class RichTextEditorElement
         var rect = CaretRect(focus, _upstream);
         float x = ox + rect.X, y = oy + rect.Y, h = rect.Height;
 
-        if (_composition.IsActive && _blocks.Length > focus.Block)
+        if (_composition.IsActive && _blocks.Count > focus.Block)
         {
             var style = _blocks[focus.Block].Style;
             string preedit = _composition.Text;
@@ -362,7 +362,9 @@ public partial class RichTextEditorElement
     private void ScrollCaretIntoView(float viewport)
     {
         var caret = CaretRect(_state.Selection.Focus, _upstream);
-        if (caret.Y < _scrollY) _scrollY = caret.Y;
+        // A caret taller than the view shows its top. Brought in by its bottom, it had its top
+        // above the view on the next pass, which brought it in by its top: it jumped every pass.
+        if (caret.Y < _scrollY || caret.Height >= viewport) _scrollY = caret.Y;
         else if (caret.Bottom > _scrollY + viewport) _scrollY = caret.Bottom - viewport;
     }
 

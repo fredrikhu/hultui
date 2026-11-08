@@ -1,5 +1,6 @@
 using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
+using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
@@ -99,20 +100,16 @@ public partial class MeridianApp
         switch (e.Key)
         {
             case KeyCode.Down when rows.Count > 0:
-                _historyCursor = Math.Min(_historyCursor + 1, rows.Count - 1);
-                _historySelection = rows[_historyCursor];
-                MarkViewDirty();
+                SelectHistoryCursor(rows, Math.Min(_historyCursor + 1, rows.Count - 1));
                 RevealHistoryCursor();
                 return true;
             case KeyCode.Up when rows.Count > 0:
-                _historyCursor = Math.Max(_historyCursor - 1, 0);
-                _historySelection = rows[_historyCursor];
-                MarkViewDirty();
+                // Clamped at the end too: a search or a filter can leave the cursor past the rows.
+                SelectHistoryCursor(rows, Math.Clamp(_historyCursor - 1, 0, rows.Count - 1));
                 RevealHistoryCursor();
                 return true;
             case KeyCode.Enter when _historyCursor >= 0 && _historyCursor < rows.Count:
-                _historySelection = rows[_historyCursor];
-                MarkViewDirty();
+                SelectHistoryCursor(rows, _historyCursor);
                 return true;
             default:
                 // r alone: Shift or Alt and r used to restore too.
@@ -123,6 +120,29 @@ public partial class MeridianApp
                 }
                 return false;
         }
+    }
+
+    /// <summary>Puts the keyboard cursor on <paramref name="cursor"/> and selects that row's send.
+    /// Only the list (which draws the selection) and the archived send beside it show the
+    /// selection, so with both on screen the list is told through its ref and the archive builds
+    /// alone: the window does not build. Otherwise — no archive yet (the first selection), or the
+    /// list on screen made from other rows or on another day than these — the view builds.</summary>
+    private void SelectHistoryCursor(List<HistoryEntry> rows, int cursor)
+    {
+        _historyCursor = cursor;
+        var selected = _historySelection = rows[cursor];
+        var now = DateTimeOffset.Now;
+        if (_historyListRef.Current is not { IsHosted: true } list || _historyArchiveRef.Current is not { IsHosted: true }
+            || !ReferenceEquals(rows, _historyListRows) || now.ToLocalTime().Date != _historyRowsDay)
+        {
+            MarkViewDirty();
+            return;
+        }
+        // What BuildHistoryList hands the list: the index SelectedHistoryIndex finds (the cursor's,
+        // the send being the cursor's row), and the highlight for the selected send's day.
+        list.SelectedIndex = cursor;
+        list.SelectionHighlight(HistoryHighlight(selected, now));
+        if (ArchiveStale(selected)) _historyArchiveRevision.Value++;
     }
 
     /// <summary>Scrolls the list so the keyboard cursor's row is on screen. The arrows come to the
@@ -185,11 +205,9 @@ public partial class MeridianApp
         var body = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
         var list = BuildHistoryList(rows); list.Key = "history-list";
         body.AddChild(list);
+        // The archived send is a part of its own (see PlaceHistoryArchive), keyed by its host.
         if (_historySelection is { } selected)
-        {
-            var archive = BuildHistoryArchive(selected); archive.Key = "history-archive";
-            body.AddChild(archive);
-        }
+            body.AddChild(PlaceHistoryArchive(selected).FlexShrink(0));
         col.AddChild(body);
 
         col.AddChild(Flex.Row(gap: Azimuth.S3).Height(24).FlexShrink(0).AlignItems(AlignItems.Center)
@@ -291,14 +309,14 @@ public partial class MeridianApp
         // VirtualList: history is the one surface that really does grow to
         // thousands of rows, and it is capped at ten thousand. Item rows: the list keeps a row
         // while its entry and its place are what they were, and draws the selection itself, under
-        // rows made unselected, so a key makes no row. A row older than today is drawn at 60 %
-        // opacity, its fill with it: the highlight under such a row is the fill at 60 %.
-        bool selectedToday = _historySelection is { } shown && HistoryLog.IsToday(shown, DateTimeOffset.Now);
+        // rows made unselected, so a key makes no row. A row older than today draws its colours at
+        // 60 %, its fill with them: the highlight under such a row is the fill at 60 %.
+        _historyListRows = rows;
         var list = VirtualListElement<HistoryRowItem>.New()
             .ItemHeight((int)Azimuth.RowRun)
             .Items(new HistoryRowItems(rows))
             .RenderWith((item, _) => HistoryRow(item.Entry, item.Index))
-            .SelectionHighlight(selectedToday ? Azimuth.Raised : Azimuth.Alpha(Azimuth.Raised, OlderRowOpacity))
+            .SelectionHighlight(HistoryHighlight(_historySelection, DateTimeOffset.Now))
             // One delegate from build to build, so the list keeps each row's label too.
             .AccessibleItemLabel(_historyItemLabel ??= item => HistoryRowName(item.Entry, DateTimeOffset.Now))
             .OnActivateItem(item => { _historySelection = item.Entry; MarkViewDirty(); })
@@ -332,6 +350,14 @@ public partial class MeridianApp
     private readonly Ref<VirtualListElement<HistoryRowItem>> _historyListRef = new();
     private Func<HistoryRowItem, string?>? _historyItemLabel;
     private DateTime _historyRowsDay;
+    /// <summary>The rows the last build handed the list (the filtered rows are kept while nothing
+    /// they are made from changes, so the same list means the same rows).</summary>
+    private List<HistoryEntry>? _historyListRows;
+
+    /// <summary>The list's selection fill: the row's own, at the 60 % a row older than today is
+    /// drawn at when the selected send is older.</summary>
+    private static Color HistoryHighlight(HistoryEntry? selected, DateTimeOffset now) =>
+        selected is { } shown && HistoryLog.IsToday(shown, now) ? Azimuth.Raised : Azimuth.Alpha(Azimuth.Raised, OlderRowOpacity);
 
     /// <summary>Rows History's template has made, for tests.</summary>
     internal int HistoryRowsMade { get; private set; }
@@ -358,7 +384,10 @@ public partial class MeridianApp
         return row;
     }
 
-    /// <summary>How opaque a row older than today is drawn — the mock's 60%.</summary>
+    /// <summary>How opaque a row older than today is drawn — the mock's 60%. The row fades each
+    /// colour it draws, not itself: <c>Opacity</c> on an element with children draws it offscreen,
+    /// as a layer of its own, so every visible row was a layer on every History frame (29 at
+    /// 1440×900, 20–32 % of a real frame on GL and Vulkan; plan 17 round 8 step 9).</summary>
     private const float OlderRowOpacity = 0.6f;
 
     /// <summary><paramref name="index"/> only names the row for automation —
@@ -378,31 +407,88 @@ public partial class MeridianApp
             .AccessibleRole(AccessibilityRole.Button)
             .AccessibleName(HistoryRowName(entry, now))
             .AutomationId($"hist-row-{Math.Max(index, 0)}");
-        // Older than today reads dimmer.
-        if (!today) row.Opacity(OlderRowOpacity);
+        // Older than today reads dimmer: every colour the row draws at 60 % (see OlderRowOpacity).
+        float opacity = today ? 1f : OlderRowOpacity;
 
-        row.AddChild(Ui.Mono(HistoryLog.TimeLabel(entry, now), 10.5f, Azimuth.TextMuted).Width(96).FlexShrink(0));
-        row.AddChild(MethodChip(entry.Method, treeScale: true));
-        row.AddChild(Ui.Mono(entry.Url, 11.5f, Azimuth.TextDim)
+        row.AddChild(Ui.Mono(HistoryLog.TimeLabel(entry, now), 10.5f, Faded(Azimuth.TextMuted, opacity)).Width(96).FlexShrink(0));
+        row.AddChild(MethodChip(entry.Method, treeScale: true, opacity));
+        row.AddChild(Ui.Mono(entry.Url, 11.5f, Faded(Azimuth.TextDim, opacity))
             .FlexGrow(1).TextOverflow(TextOverflow.Ellipsis).MaxLines(1));
-        row.AddChild(Ui.Mono(entry.Reached ? $"{glyph} {entry.StatusCode}" : $"! {entry.Detail}", 11f, color)
+        row.AddChild(Ui.Mono(entry.Reached ? $"{glyph} {entry.StatusCode}" : $"! {entry.Detail}", 11f, Faded(color, opacity))
             .FlexShrink(0));
-        row.AddChild(Ui.Mono($"{entry.DurationMs:0} ms", 10.5f, Azimuth.TextMuted).Width(60).FlexShrink(0));
-        row.AddChild(Ui.Mono(entry.EnvName ?? "—", 10f, Azimuth.TextFaint).Width(64).FlexShrink(0));
+        row.AddChild(Ui.Mono($"{entry.DurationMs:0} ms", 10.5f, Faded(Azimuth.TextMuted, opacity)).Width(60).FlexShrink(0));
+        row.AddChild(Ui.Mono(entry.EnvName ?? "—", 10f, Faded(Azimuth.TextFaint, opacity)).Width(64).FlexShrink(0));
 
         var captured = entry;
         row.OnClick(_ => { _historySelection = captured; MarkViewDirty(); });
         // The row's own hover tint, so a hovered row older than today stays at its 60 %: the list's
         // HoverHighlight would draw it whole. Over the highlight it is the highlight's colour again
         // (a row older than today hovered while selected reads a little lighter).
-        row.HoverBg(Azimuth.Raised, Color.Transparent);
+        row.HoverBg(Faded(Azimuth.Raised, opacity), Color.Transparent);
         return row;
+    }
+
+    /// <summary>A History row's colour at the row's <paramref name="opacity"/>.</summary>
+    private static Color Faded(Color c, float opacity) => opacity < 1f ? Azimuth.Fade(c, opacity) : c;
+
+    // ── The archived send: a part of its own ─────────────────────────────
+    //
+    // The panel beside the list shows the selected send, and nothing else in the view shows the
+    // selection but the list, which draws it. A key built the whole window for it (52 KB a key,
+    // 15 KB of it the panel, 23 KB the filter bar and the footer), and a search character built the
+    // panel again for a send that had not moved. The panel is now a part (see Part) with a revision
+    // of its own: a key tells the list through its ref and writes the revision, so the panel builds
+    // alone (SelectHistoryCursor). It builds with the view when the view places it showing another
+    // send than the selected one, when it read its time against another day, and after a full
+    // rebuild (_partRevision, safe by default); a view-only build that leaves the selection where it
+    // was — a search character, a filter, a chip — leaves it as it is.
+
+    private readonly PartGroup _historyParts = new();
+    private readonly Signal<int> _historyArchiveRevision = new(0);
+    private Part? _historyArchivePart;
+    private readonly Ref<BoxElement> _historyArchiveRef = new();
+    /// <summary>What the archive was last built from: the send, the day its time reads against,
+    /// and the full-rebuild revision.</summary>
+    private HistoryEntry? _archiveShown;
+    private DateTime _archiveDay;
+    private int _archiveRevision = -1;
+
+    /// <summary>Builds of the archived-send panel so far, for tests.</summary>
+    internal int HistoryArchiveBuilds => _historyParts.Builds;
+
+    /// <summary>Whether the archive on screen is not what a build of it for <paramref name="selected"/>
+    /// makes now.</summary>
+    private bool ArchiveStale(HistoryEntry selected) =>
+        !ReferenceEquals(_archiveShown, selected) || _archiveDay != DateTimeOffset.Now.ToLocalTime().Date
+        || _archiveRevision != _partRevision.Peek();
+
+    /// <summary>The archive's host, for the view's build to place beside the list: built again
+    /// first when it is stale (<see cref="ArchiveStale"/>). The host takes the panel's place in the
+    /// row: it never shrinks, and the panel fills its height as it filled the row's.</summary>
+    private ComponentHost PlaceHistoryArchive(HistoryEntry selected)
+    {
+        var part = _historyArchivePart ??= new(_historyParts, () =>
+        {
+            // Placed only beside a selected send, and its own build runs after a key selected one;
+            // nothing takes the selection away.
+            if (_historySelection is not { } entry) return Box.New();
+            _archiveShown = entry;
+            _archiveDay = DateTimeOffset.Now.ToLocalTime().Date;
+            _archiveRevision = _partRevision.Peek();
+            var archive = BuildHistoryArchive(entry);
+            archive.Key = "history-archive";
+            archive.FlexGrow(1);
+            archive.WithRef(_historyArchiveRef);
+            return archive;
+        }, own: _historyArchiveRevision);
+        part.Mount();   // the first build, before asking what it was built from
+        return part.Place(stale: ArchiveStale(selected));
     }
 
     /// <summary>The archived send, read-only. What it shows is what the log
     /// kept — the response body isn't stored, and the pane says so rather than
     /// implying an empty body.</summary>
-    private Element BuildHistoryArchive(HistoryEntry entry)
+    private BoxElement BuildHistoryArchive(HistoryEntry entry)
     {
         var panel = Flex.Column(gap: Azimuth.S2).FlexShrink(0)
             .Width(Azimuth.ResponseRight)

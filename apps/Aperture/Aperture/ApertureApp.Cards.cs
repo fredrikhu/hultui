@@ -124,10 +124,48 @@ public sealed partial class ApertureApp
         // rounds both sides up, and the spare pixel on the side that already fits shifts
         // the picture by half a pixel, which is soft at one to one.
         bool byHeight = ArtAspect(item, kind) is { } aspect && aspect > width / height * 1.005;
-        var url = ArtworkUrl(item, kind, width, height, byHeight, _artworkScale);
+        var url = CardArtworkUrl(item, kind, width, height, byHeight);
         var (image, status) = _posters.Get(url, _standInScale is { } old && _posters.HasRetired
             ? ArtworkUrl(item, kind, width, height, byHeight, old) : null);
         return status == PosterCache.Status.Ready && image is { IsLoaded: true } ? image : null;
+    }
+
+    /// <summary>
+    /// Each card's picture address as it was made, by the item, the kind and the size in pixels (which
+    /// carries the display scale), and checked against the item's picture tags, so an item whose
+    /// picture changed asks for the new one. Every build asks for every card's picture, kept or not,
+    /// and made the address and its string again each time: 577 B a card against the fake library,
+    /// 1,136 B against Jellyfin's. The cache's lookup reads the string the address keeps. Let go when
+    /// the data is (a sign-in, a refresh: <see cref="_dataGeneration"/>), and whenever it holds
+    /// <see cref="ArtworkUrlsKept"/>, which is many screenfuls.
+    /// </summary>
+    private readonly Dictionary<ArtworkKey, ArtworkAddress> _artworkUrls = new();
+    private int _artworkUrlsGeneration;
+    private const int ArtworkUrlsKept = 1024;
+
+    private readonly record struct ArtworkKey(string Id, ImageKind Kind, int Pixels, bool ByHeight);
+
+    private readonly record struct ArtworkAddress(string? Primary, string? Backdrop, string? BackdropItem, Uri? Url);
+
+    /// <summary>Card picture addresses made, not remembered, for tests.</summary>
+    internal int ArtworkUrlsMade { get; private set; }
+
+    /// <summary><see cref="ArtworkUrl"/> at the current scale, remembered; see <see cref="_artworkUrls"/>.</summary>
+    private Uri? CardArtworkUrl(MediaItem item, ImageKind kind, float width, float height, bool byHeight)
+    {
+        if (_artworkUrlsGeneration != _dataGeneration || _artworkUrls.Count >= ArtworkUrlsKept)
+        {
+            _artworkUrls.Clear();
+            _artworkUrlsGeneration = _dataGeneration;
+        }
+        var key = new ArtworkKey(item.Id, kind, ArtworkPixels(byHeight ? height : width), byHeight);
+        if (_artworkUrls.TryGetValue(key, out var known) && known.Primary == item.PrimaryImageTag
+            && known.Backdrop == item.BackdropImageTag && known.BackdropItem == item.BackdropItemId)
+            return known.Url;
+        ArtworkUrlsMade++;
+        var url = ArtworkUrl(item, kind, width, height, byHeight, _artworkScale);
+        _artworkUrls[key] = new ArtworkAddress(item.PrimaryImageTag, item.BackdropImageTag, item.BackdropItemId, url);
+        return url;
     }
 
     private Element Artwork(MediaItem item, float width, float height, float radius,
@@ -265,16 +303,33 @@ public sealed partial class ApertureApp
     /// <summary>The display scale artwork is fetched for; see <see cref="ArtworkScaleFor"/>.</summary>
     private float _artworkScale = 1f;
 
-    /// <summary>Pictures that have landed in the cache, counted on the UI thread: a card made
-    /// before its picture landed shows a placeholder (or an old size's stand-in) until it is
-    /// made again, so the grid's kept rows go with this. (A kept card does not ask the cache
+    /// <summary>Builds for pictures that landed in the cache, counted on the UI thread: a card
+    /// made before its picture landed shows a placeholder (or an old size's stand-in) until it
+    /// is made again, so the grid's kept rows go with this. (A kept card does not ask the cache
     /// again, so it does not refresh its picture's place in the LRU; the cache only drops a
-    /// picture when one lands, every landing makes the rows on screen again, and the cap is
-    /// many screenfuls, so a picture on screen is never the oldest.)</summary>
+    /// picture when one lands, every landing is followed by a build that makes the rows on
+    /// screen again, and the cap is many screenfuls, so a picture on screen is never the
+    /// oldest.)</summary>
     private int _artworkLanded;
+
+    /// <summary>1 while a build for landed pictures is posted to the UI thread and has not run.
+    /// The cache calls back once per picture, on the thread pool, and a whole screenful lands
+    /// within a few frames: a build posted for each made Home's 36 posters 41 builds, up to 10 of
+    /// them in one frame. Posted one at a time, the pictures that land before the build runs
+    /// share it. The build clears the flag before it reads the cache, so a picture that lands
+    /// while it runs posts the next one.</summary>
+    private int _artworkPosted;
+
+    /// <summary>The cache's callback, on the thread pool.</summary>
+    private void PostArtworkLanded()
+    {
+        if (Interlocked.Exchange(ref _artworkPosted, 1) == 0)
+            HultUI.Application.InvokeOnMainThread(OnArtworkLanded);
+    }
 
     private void OnArtworkLanded()
     {
+        Interlocked.Exchange(ref _artworkPosted, 0);
         _artworkLanded++;
         RerenderView();
         // A trickplay sheet is artwork too, and the card over the scrubber is the player's, which
@@ -529,9 +584,8 @@ public sealed partial class ApertureApp
     {
         var column = Flex.Column(gap: Halide.S3).FlexShrink(0).AutomationId(automationId);
 
-        int perPage = Math.Max(1, VisibleCards(cardWidth));
+        int page = ShelfPage(automationId, count, cardWidth, out int perPage);
         int pages = Math.Max(1, (count + perPage - 1) / perPage);
-        int page = Math.Clamp(_rowPages.GetValueOrDefault(automationId), 0, pages - 1);
 
         var heading = Flex.Row(gap: Halide.S2).AlignItems(AlignItems.Center);
         heading.AddChild(Text.New(title).FontSize(15f).FontWeight(FontWeight.SemiBold).TextColor(Halide.Text));
@@ -559,6 +613,32 @@ public sealed partial class ApertureApp
 
     /// <summary>Which page each home row is showing, by row id. View state, never stored.</summary>
     private readonly Dictionary<string, int> _rowPages = new(StringComparer.Ordinal);
+
+    /// <summary>The page the row <paramref name="rowId"/> of <paramref name="count"/> cards shows (see
+    /// <see cref="CardRow(string, int, Func{int, Element}, float, string, string?, Element?)"/>), and
+    /// how many cards a page holds.</summary>
+    private int ShelfPage(string rowId, int count, float cardWidth, out int perPage)
+    {
+        perPage = Math.Max(1, VisibleCards(cardWidth));
+        int pages = Math.Max(1, (count + perPage - 1) / perPage);
+        return Math.Clamp(_rowPages.GetValueOrDefault(rowId), 0, pages - 1);
+    }
+
+    /// <summary>
+    /// The cursor's place <paramref name="index"/> on a shelf that starts at <paramref name="start"/> in
+    /// the walk and holds <paramref name="count"/> cards, <paramref name="perPage"/> a page, showing
+    /// <paramref name="page"/>: when the place is on the shelf but on another page, turns the shelf to
+    /// it and says so, and the build to come draws that page. A shelf used to stay where it was, so the
+    /// cursor walked on with no card ringed and the keyboard left behind.
+    /// </summary>
+    private bool TurnShelfTo(int index, int start, int count, string rowId, int perPage, int page)
+    {
+        if (index < start || index >= start + count) return false;
+        int wanted = (index - start) / perPage;
+        if (wanted == page) return false;
+        _rowPages[rowId] = wanted;
+        return true;
+    }
 
     private Element PageButton(string glyph, string label, string rowId, int target, bool enabled)
     {

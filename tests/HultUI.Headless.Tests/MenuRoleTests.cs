@@ -220,24 +220,27 @@ public class MenuRoleTests
 
     public enum Opened { ContextMenu, MenuBar, Dropdown }
 
-    private static ContextMenuItem[] Choices(int count = 0)
+    /// <summary>The menu's entries; with <paramref name="disabled"/> its second item (index 1, after the
+    /// separators left out) is disabled.</summary>
+    private static ContextMenuItem[] Choices(int count = 0, bool disabled = false)
     {
         if (count > 0)
-            return [.. Enumerable.Range(0, count).Select(i => new ContextMenuItem { Label = $"Item {i}", Action = () => { } })];
+            return [.. Enumerable.Range(0, count).Select(i =>
+                new ContextMenuItem { Label = $"Item {i}", IsDisabled = disabled && i == 1, Action = () => { } })];
         return
         [
             new() { Label = "Copy", Action = () => { } },
             ContextMenuItem.Separator(),
-            new() { Label = "Paste", Action = () => { } },
+            new() { Label = "Paste", IsDisabled = disabled, Action = () => { } },
             new() { Label = "More", Children = [new() { Label = "Alpha", Action = () => { } }] },
         ];
     }
 
     /// <summary>Opens one of the three over a label, and returns the element it publishes its items from.</summary>
-    private static Element Open(HeadlessSession session, Opened what, int count = 0)
+    private static Element Open(HeadlessSession session, Opened what, int count = 0, bool disabled = false)
     {
         var dropdown = Dropdown.New(["Copy", "Paste", "More"], selectedIndex: 0).Width(Dimension.Px(160));
-        var bar = new MenuBar([new MenuBarItem("&File", Choices(count))]);
+        var bar = new MenuBar([new MenuBarItem("&File", Choices(count, disabled))]);
         session.Window.SetRoot(what switch
         {
             Opened.Dropdown => Flex.Column().Padding(8).Children(dropdown),
@@ -247,7 +250,7 @@ public class MenuRoleTests
         session.PumpFrames(2);
         switch (what)
         {
-            case Opened.ContextMenu: session.Window.Window.OpenContextMenu(Choices(count), new Point(40, 40)); break;
+            case Opened.ContextMenu: session.Window.Window.OpenContextMenu(Choices(count, disabled), new Point(40, 40)); break;
             case Opened.MenuBar: bar.Open(0, fromKeyboard: true); break;
             case Opened.Dropdown: session.Window.Click(dropdown); break;
         }
@@ -375,5 +378,114 @@ public class MenuRoleTests
             Has(item, opensMenu ? UiaInterop.UIA_ExpandCollapsePatternId : UiaInterop.UIA_InvokePatternId);
             Has(item, UiaInterop.UIA_SelectionItemPatternId);
         }
+    }
+
+    // ── A disabled entry (plan 17 round 8, step 2) ──
+    //
+    // Every item node was made enabled, so a reader offered a dimmed entry as one to run. The user
+    // approved IAccessibleItemSource.ItemIsEnabled (round 8, question 11).
+
+    /// <summary>The recording bridge: a disabled entry of a context menu or a menu bar's menu is not
+    /// enabled, the others are.</summary>
+    [Theory]
+    [InlineData(Opened.ContextMenu)]
+    [InlineData(Opened.MenuBar)]
+    public void ADisabledEntry_IsNotEnabled(Opened what)
+    {
+        using var session = HeadlessSession.Create(400, 300);
+        var bridge = session.Window.InstallAccessibilityBridge();
+        var popup = Open(session, what, disabled: true);
+
+        var node = Walk(bridge.CurrentTree!).Single(n => n.ElementId == popup.Id);
+        Assert.Equal([("Copy", true), ("Paste", false), ("More", true)], node.Children.Select(c => (c.Name, c.IsEnabled)));
+    }
+
+    /// <summary>An entry enabled while its menu is open is enabled at the next walk of the tree, told
+    /// as a change of its enabled state, and no tree is built for it.</summary>
+    [Fact]
+    public void AnEntryEnabledWhileTheMenuIsOpen_IsPatched_AndNoTreeIsBuilt()
+    {
+        using var session = HeadlessSession.Create(400, 300);
+        var bridge = session.Window.InstallAccessibilityBridge();
+        var column = Flex.Column().Children(TextB.New("Main"));
+        session.Window.SetRoot(column);
+        session.PumpFrames(2);
+        List<ContextMenuItem> items = [.. Choices(disabled: true)];
+        session.Window.Window.OpenContextMenu(items, new Point(40, 40));
+        session.PumpFrames(2);
+        var popup = session.Window.OverlayContents.Single();
+        AccessibilityNode Paste() => Walk(bridge.CurrentTree!).Single(n => n.ElementId == popup.Id).Children[1];
+        Assert.False(Paste().IsEnabled);
+        int trees = session.Window.AccessibilityTreesBuilt;
+        int walks = session.Window.Window.AccessibilityLayoutRefreshesInPlace;
+        bridge.ClearDiffs();
+
+        items[2] = new() { Label = "Paste", Action = () => { } };
+        // Something else in the window changes, and the tree is walked.
+        column.AddChild(TextB.New("Beside it"));
+        for (int i = 0; i < 3; i++) session.PumpFrame(TimeSpan.FromMilliseconds(120));
+
+        Assert.True(Paste().IsEnabled);
+        Assert.Contains(bridge.Diffs.SelectMany(d => d.PropertyChanged),
+            c => c.PropertyName == AccessibilityProperties.IsEnabled && c.Node.Name == "Paste");
+        Assert.True(session.Window.Window.AccessibilityLayoutRefreshesInPlace > walks);
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+    }
+
+    private static uint StatesOf(IAtSpiTree tree, AtSpiAccessible menu, int index) =>
+        AtSpiMarshal.StateBits(tree.Find(menu.ChildPathAt(index)!)!);
+
+    /// <summary>AT-SPI: a disabled entry has neither the enabled nor the sensitive state, which the
+    /// others have; past 2,000 items a menu's served on demand too.</summary>
+    [Theory]
+    [InlineData(Opened.ContextMenu, 0)]
+    [InlineData(Opened.MenuBar, 0)]
+    [InlineData(Opened.ContextMenu, 2_001)]
+    public void ToAtSpi_ADisabledEntry_IsNeitherEnabledNorSensitive(Opened what, int count)
+    {
+        using var session = HeadlessSession.Create(400, 300);
+        using var bridge = new LinuxAccessibilityBridge(new NoSignals());
+        session.Window.InstallAccessibilityBridge(new Active(bridge));
+        var popup = Open(session, what, count, disabled: true);
+
+        var tree = (IAtSpiTree)bridge;
+        var menu = tree.Find(AtSpiAccessible.PathFor(popup.Id))!;
+        const uint Usable = (1u << AtSpiConstants.StateEnabled) | (1u << AtSpiConstants.StateSensitive);
+        Assert.Equal([Usable, 0u, Usable], new[] { 0, 1, 2 }.Select(i => StatesOf(tree, menu, i) & Usable));
+    }
+
+    /// <summary>UIA: a disabled entry's IsEnabled is false, the others' true; past 2,000 items a
+    /// menu's served on demand too.</summary>
+    [WindowsTheory]
+    [InlineData(Opened.ContextMenu, 0)]
+    [InlineData(Opened.MenuBar, 0)]
+    [InlineData(Opened.ContextMenu, 2_001)]
+    public void ToUia_ADisabledEntry_IsNotEnabled(Opened what, int count)
+    {
+        using var hwnd = TestHwnd.Create();
+        using var session = HeadlessSession.Create(400, 300);
+        var window = session.Window.Window;
+        var router = new AccessibilityActionRouter(window);
+        var host = new UiaHostBridge(window, router);
+        window.SetUiaHostBridge(host);
+        window.SetActionRouter(router);
+        using var bridge = new WindowsAccessibilityBridge(hwnd.Handle, host);
+        session.Window.InstallAccessibilityBridge(new Active(bridge));
+        var popup = Open(session, what, count, disabled: true);
+
+        bool IsEnabled(int index)
+        {
+            var native = bridge.NativeVirtualItem(popup.Id, index);
+            try
+            {
+                var item = Assert.IsAssignableFrom<INativeSimple>(NativeProvider.LogicOf(native));
+                Assert.Equal(0, item.GetPropertyValue(UiaInterop.UIA_IsEnabledPropertyId, out var value));
+                Assert.Equal(UiaVariant.VT_BOOL, value.Vt);
+                return value.ShortValue != 0;
+            }
+            finally { Marshal.Release(native); }
+        }
+
+        Assert.Equal([true, false, true], new[] { 0, 1, 2 }.Select(IsEnabled));
     }
 }

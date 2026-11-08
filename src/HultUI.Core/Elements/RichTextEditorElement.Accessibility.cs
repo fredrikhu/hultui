@@ -148,7 +148,7 @@ public partial class RichTextEditorElement
     /// <paramref name="doc"/> to read. On the UI thread.</summary>
     private (int First, int Last) VisibleBlocks(RichDocument doc, bool laidOut)
     {
-        if (!laidOut || _blocks.Length != doc.BlockCount) return (-1, -1);
+        if (!laidOut || _blocks.Count != doc.BlockCount) return (-1, -1);
         int first = BlockAt(_scrollY), last = BlockAt(_scrollY + Layout.AbsoluteContentBox.Height);
         if (_blocks[first].Table is { } t) first = t.Range.Start;
         if (_blocks[last].Table is { } u) last = u.Range.End - 1;

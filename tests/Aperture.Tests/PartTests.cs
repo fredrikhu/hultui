@@ -39,7 +39,9 @@ public class PartTests
                 session.PumpFrames(2);
             }
 
-            Assert.True(app.Builds - builds >= 7, $"{app.Builds - builds} builds");
+            // A key whose card is on screen moves the ring and builds nothing (GridCursorTests); End
+            // reaches a row not made yet, and builds the view.
+            Assert.True(app.Builds - builds >= 1, $"{app.Builds - builds} builds");
             Assert.Equal(0, app.PartBuilds - partBuilds);
             Assert.Equal(parts, PartHosts(session));
             AssertPartsAreAFullBuild(session, app, "the walk");
@@ -74,8 +76,10 @@ public class PartTests
             OpenGrid(session);
             int builds = app.Builds, partBuilds = app.PartBuilds;
 
+            // The pictures that land together share a build (ApertureApp.PostArtworkLanded), so
+            // this waits for all of them rather than for a build each.
             artwork.Gate.SetResult();
-            session.PumpUntil(() => app.Builds > builds + 3, TimeSpan.FromSeconds(5));
+            session.PumpUntil(() => app.Builds > builds && app.Posters.PendingCount == 0, TimeSpan.FromSeconds(5));
             for (int i = 0; i < 20; i++) { session.PumpFrame(); Thread.Sleep(2); }
 
             Assert.Equal(0, app.PartBuilds - partBuilds);

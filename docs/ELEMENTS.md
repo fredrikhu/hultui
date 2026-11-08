@@ -1479,7 +1479,9 @@ at all: set `SelectedIndex` on the mounted list through its ref, and scroll the 
 index. A Down in Junction's palette made 32 elements and allocated 32 KB a key with its rows drawing
 the choice, each in a box of its own; 14 elements and 15 KB with the list drawing it and the card
 built again; and 3.9 elements (the rows scrolled in) and 3.7 KB with neither (plan 17, round 7,
-step 5).
+step 5). When one panel beside the list shows the selection too, make that panel a part with a
+signal of its own and write the signal with the move: only the panel builds (REACTIVITY.md, "Keep
+what a key does not change in a child component"; Meridian's History, 52.1 → 21.6 KB a key).
 
 **Rows held at the top.** `.StickyRows((item, index) => item.IsHeader)` says which rows are a
 section's header in one list of rows. The list keeps the last sticky row at or above the first row
@@ -1569,8 +1571,9 @@ row without realizing it, so a reader can walk 20,000 items that were never buil
 **Items that are drawn, not built.** `IAccessibleItemSource` is not only for lists that
 virtualize: a container that paints its own rows — the context menu does — implements it so
 those rows reach assistive tech at all. `ItemBounds(i)` places them when they are not a
-uniform height (a menu with separators in it), and `ItemIsToggled(i)` says which of them is
-the choice in force. The items are list items, or menu items when the container's role is
+uniform height (a menu with separators in it), `ItemIsToggled(i)` says which of them is
+the choice in force, and `ItemIsEnabled(i)` which of them are dimmed and do nothing (a reader
+says so; the default is enabled). The items are list items, or menu items when the container's role is
 `Menu`: a context menu and a menu bar's menu are read as a menu, a dropdown's open list as a
 list.
 

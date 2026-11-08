@@ -120,12 +120,14 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
             s.Window.Window.ClearFocus();
             s.PumpFrames(2);
 
-            // History.
+            // History. The first selection places the archived send beside the list (a part of its
+            // own); from then on the walk builds that part alone (ArchiveOnly), and a row click, a
+            // filter and a search character build the view, the archive only when the selection moved.
             Switch(fx, KeyCode.Digit4);
             ViewOnly("History Down", () => s.Window.PressKey(KeyCode.Down));
-            ViewOnly("History Down again", () => s.Window.PressKey(KeyCode.Down));
-            ViewOnly("History Up", () => s.Window.PressKey(KeyCode.Up));
-            ViewOnly("History Enter", () => s.Window.PressKey(KeyCode.Enter));
+            ArchiveOnly(fx, "History Down again", () => s.Window.PressKey(KeyCode.Down), archives: 1);
+            ArchiveOnly(fx, "History Up", () => s.Window.PressKey(KeyCode.Up), archives: 1);
+            ArchiveOnly(fx, "History Enter", () => s.Window.PressKey(KeyCode.Enter), archives: 0);
             ViewOnly("a History row clicked", () =>
                 s.Window.Click(Descendants(Root(s)).First(e => e.AutomationId == "hist-row-3")));
             ViewOnly("a History filter", () => Click(fx, "filter-GET"));
@@ -138,6 +140,22 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
             Switch(fx, KeyCode.Digit5);
             ViewOnly("environment value typing", () => { Click(fx, "cell-host-local"); s.Window.TypeText(".2"); });
         });
+    }
+
+    /// <summary>A path that builds the archived send beside History's list (<paramref name="archives"/>
+    /// times) and nothing else: not the window, not a part of the chrome. What it leaves on screen
+    /// is what a full build makes.</summary>
+    private static void ArchiveOnly(Fixture fx, string name, Action act, int archives)
+    {
+        AssertPartsAreAFullBuild(fx, "before " + name);
+        int builds = fx.App.Builds, parts = fx.App.PartBuilds, archived = fx.App.HistoryArchiveBuilds;
+        act();
+        fx.Session.PumpFrames(3);
+        Assert.True(fx.App.Builds == builds, $"{name} rebuilt the window");
+        Assert.True(fx.App.PartBuilds == parts, $"{name} built {fx.App.PartBuilds - parts} parts");
+        Assert.True(fx.App.HistoryArchiveBuilds - archived == archives,
+            $"{name} built the archive {fx.App.HistoryArchiveBuilds - archived} times, not {archives}");
+        AssertPartsAreAFullBuild(fx, "after " + name);
     }
 
     /// <summary>Typing in the URL makes no part per key, whatever the size of the collection — the
@@ -545,16 +563,17 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
 
     // ── The oracle ───────────────────────────────────────────────────────
 
-    private static readonly string[] PartKeys = ["titlebar", "rail", "tree", "response-right", "response-bottom"];
+    private static readonly string[] PartKeys = ["titlebar", "rail", "tree", "response-right", "response-bottom", "history-archive"];
 
     /// <summary>The parts on screen equal the parts a forced build of every one of them makes.</summary>
     private static void AssertPartsAreAFullBuild(Fixture fx, string? when = null)
     {
         var kept = PartSigs(fx);
-        int parts = fx.App.PartBuilds, onScreen = PartKeys.Count(k => TryPart(fx, k) is not null);
+        int parts = fx.App.PartBuilds + fx.App.HistoryArchiveBuilds, onScreen = PartKeys.Count(k => TryPart(fx, k) is not null);
         FullRebuild(fx.App);
         fx.Session.PumpFrames(2);
-        Assert.True(fx.App.PartBuilds >= parts + onScreen, $"the forced rebuild built {fx.App.PartBuilds - parts} of {onScreen} parts");
+        int built = fx.App.PartBuilds + fx.App.HistoryArchiveBuilds - parts;
+        Assert.True(built >= onScreen, $"the forced rebuild built {built} of {onScreen} parts");
         var full = PartSigs(fx);
         for (int i = 0; i < PartKeys.Length; i++)
         {

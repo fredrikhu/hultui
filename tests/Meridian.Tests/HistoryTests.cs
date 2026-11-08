@@ -1,5 +1,6 @@
 using HultUI.Core.Accessibility;
 using HultUI.Core.Events;
+using HultUI.Core.Primitives;
 using HultUI.Headless;
 using Meridian.Core;
 using Meridian.Tests.Fixtures;
@@ -125,9 +126,9 @@ public class HistoryTests : IClassFixture<TestHttpServer>, IDisposable
     // ── The view ─────────────────────────────────────────────────────────
 
 
-    private void Hosted(Action<HeadlessSession, MeridianApp> body)
+    private void Hosted(Action<HeadlessSession, MeridianApp> body, HeadlessOptions? options = null)
     {
-        using var session = HeadlessSession.Create(1600, 900);
+        using var session = HeadlessSession.Create(1600, 900, options: options);
         MeridianApp? app = null;
         try
         {
@@ -367,9 +368,8 @@ public class HistoryTests : IClassFixture<TestHttpServer>, IDisposable
                 session.Window.FindByAutomationId("history-rows")!.Element;
             for (int i = 0; i < 5; i++)
             {
-                int made = app.HistoryRowsMade, builds = app.Builds;
+                int made = app.HistoryRowsMade;
                 GoTo(session, KeyCode.Down);
-                Assert.Equal(1, app.Builds - builds);
                 Assert.Equal(0, app.HistoryRowsMade - made);
             }
             // Newest first: the sixth row is the 35th send.
@@ -397,6 +397,198 @@ public class HistoryTests : IClassFixture<TestHttpServer>, IDisposable
             Assert.Equal(11, app.FilteredHistory().Count);   // items/3 and items/30 … 39
             Assert.True(Contains(session, "11 of 42"), "the count should reflect the filter");
         });
+    }
+
+    /// <summary>A send older than today reads dimmer through its colours, not through its row: the
+    /// row has no <c>Opacity</c> (one on an element with children draws it offscreen, so every
+    /// visible row was a layer on every History frame: 29 at 1440×900, 20–32 % of a real frame,
+    /// plan 17 round 8 step 9), and everything it draws (its texts, the method chip's tint and
+    /// label, its hover tint) is today's row's colour at 60 % of its alpha.</summary>
+    [Fact]
+    public void AnOlderSendFadesItsColours_NotItsRow()
+    {
+        // The same send twice: two days old, then from today (newest first: today's is row 0).
+        var now = DateTimeOffset.Now;
+        HistoryLog.Append(_root, new HistoryEntry(now.AddDays(-2), "POST", "https://api.x/v1/same", 201, 12, "ci", null));
+        HistoryLog.Append(_root, new HistoryEntry(now.AddMinutes(-1), "POST", "https://api.x/v1/same", 201, 12, "ci", null));
+        static Color Fade(Color c) => new(c.R, c.G, c.B, (byte)Math.Round(c.A * 0.6));
+        Hosted((session, app) =>
+        {
+            GoTo(session, KeyCode.Digit4);
+            var list = session.Window.FindByAutomationId("history-rows")!.Element;
+            var todays = list.Children.Single(r => r.AutomationId == "hist-row-0");
+            var older = list.Children.Single(r => r.AutomationId == "hist-row-1");
+            Assert.True(HistoryLog.IsToday(app.FilteredHistory()[0], now));
+            Assert.False(HistoryLog.IsToday(app.FilteredHistory()[1], now));
+
+            var a = Descendants(todays).ToList();
+            var b = Descendants(older).ToList();
+            Assert.Equal(a.Count, b.Count);
+            Assert.All(b, e => Assert.Equal(1f, e.Opacity));
+            int texts = 0, fills = 0;
+            for (int i = 0; i < a.Count; i++)
+            {
+                Assert.Equal(a[i].GetType(), b[i].GetType());
+                if (a[i] is HultUI.Core.Elements.TextElement)
+                {
+                    Assert.NotNull(a[i].Inherited.TextColor);
+                    Assert.Equal(Fade(a[i].Inherited.TextColor!.Value), b[i].Inherited.TextColor);
+                    texts++;
+                }
+                else if (a[i] is HultUI.Core.Elements.BoxElement { BackgroundColor: { A: > 0 } fill })
+                {
+                    Assert.Equal(Fade(fill), ((HultUI.Core.Elements.BoxElement)b[i]).BackgroundColor);
+                    fills++;
+                }
+            }
+            Assert.Equal((6, 1), (texts, fills));   // five texts and the chip's label; the chip's tint
+
+            // Hovered, the older row's tint is at its 60 % too, and the frame draws no layer.
+            var log = session.Window.RenderLog;
+            log.Clear();
+            var box = older.WindowBorderBox;
+            session.Window.MoveMouse(box.X + box.Width / 2, box.Y + box.Height / 2);
+            session.PumpFrames(2);
+            Assert.Equal(Fade(Meridian.Theme.Azimuth.Raised), ((HultUI.Core.Elements.BoxElement)older).BackgroundColor);
+            Assert.Contains(log.Named("DrawText"), op => op.ToString().Contains("api.x/v1/same", StringComparison.Ordinal));
+            Assert.Empty(log.Named("PushOpacity"));
+        }, new HeadlessOptions { RecordDrawCalls = true });
+    }
+
+    /// <summary>A key in History builds the archived send beside the list and nothing else: the list
+    /// draws the selection and is told through its ref, so the window does not build (plan 17
+    /// round 8: 52 KB a key, the window built for a panel). The archive shows the send the key
+    /// reached, and the reader hears it selected. A search character builds the view and no
+    /// archive, whether its rows keep the selected send or not; a click on a row, which moves the
+    /// selection with a build of the view, builds the archive with it; and what each leaves on
+    /// screen is what a full build makes.</summary>
+    [Fact]
+    public void AKeyBuildsTheArchiveAlone_AndASearchCharacterBuildsNoArchive()
+    {
+        var start = DateTimeOffset.Now.AddMinutes(-90);
+        for (int i = 0; i < 40; i++)
+            HistoryLog.Append(_root, new HistoryEntry(start.AddMinutes(i), i % 3 == 0 ? "POST" : "GET",
+                $"https://api.x/v1/items/{i}", 200, 10 + i, null, null));
+        Hosted((session, app) =>
+        {
+            GoTo(session, KeyCode.Digit4);
+            GoTo(session, KeyCode.Down);   // the first selection places the archive: the view builds
+            var list = (HultUI.Core.Elements.VirtualListElement<MeridianApp.HistoryRowItem>)
+                session.Window.FindByAutomationId("history-rows")!.Element;
+            int cursor = 0;
+            void Key(KeyCode key, int archives)
+            {
+                int builds = app.Builds, parts = app.PartBuilds, archived = app.HistoryArchiveBuilds;
+                GoTo(session, key);
+                cursor = key == KeyCode.Down ? cursor + 1 : key == KeyCode.Up ? cursor - 1 : cursor;
+                Assert.Equal(0, app.Builds - builds);
+                Assert.Equal(0, app.PartBuilds - parts);
+                Assert.Equal(archives, app.HistoryArchiveBuilds - archived);
+                // Newest first: row n is the (39 - n)th send.
+                string url = $"https://api.x/v1/items/{39 - cursor}";
+                Assert.Equal(cursor, list.SelectedIndex);
+                Assert.EndsWith($"/items/{39 - cursor} 200", Walk(session.Window.AccessibilityTree).Single(n => n.IsSelected == true).Name);
+                Assert.Contains(url, ArchiveTexts(session));
+            }
+            for (int i = 0; i < 5; i++) Key(KeyCode.Down, archives: 1);
+            Key(KeyCode.Up, archives: 1);
+            Key(KeyCode.Up, archives: 1);
+            Key(KeyCode.Enter, archives: 0);   // the send it selects is the one shown
+            AssertTheArchiveIsAFullBuild(session, app);
+
+            // The selected send is items/36; "items/3" keeps it, "items/31" drops it from the list.
+            session.Window.FindByAutomationId("history-search")!.Click();
+            session.PumpFrames(2);
+            foreach (var ch in "items/31")
+            {
+                int builds = app.Builds, archived = app.HistoryArchiveBuilds;
+                session.Window.TypeText(ch.ToString());
+                session.PumpFrames(2);
+                Assert.Equal(1, app.Builds - builds);
+                Assert.Equal(0, app.HistoryArchiveBuilds - archived);
+                Assert.Contains("https://api.x/v1/items/36", ArchiveTexts(session));
+            }
+            Assert.Single(app.FilteredHistory());
+            AssertTheArchiveIsAFullBuild(session, app);
+
+            // A click on a row selects its send with a build of the view, and the archive with it.
+            for (int i = 0; i < "items/31".Length; i++) session.Window.PressKey(KeyCode.Backspace);
+            session.PumpFrames(2);
+            Assert.Equal(40, app.FilteredHistory().Count);
+            session.Window.Window.ClearFocus();
+            session.PumpFrames(2);
+            var listNow = (HultUI.Core.Elements.VirtualListElement<MeridianApp.HistoryRowItem>)
+                session.Window.FindByAutomationId("history-rows")!.Element;
+            int before = app.HistoryArchiveBuilds;
+            session.Window.Click(listNow.Children.Single(r => r.AutomationId == "hist-row-9"));
+            session.PumpFrames(2);
+            Assert.Equal(1, app.HistoryArchiveBuilds - before);
+            Assert.Contains("https://api.x/v1/items/30", ArchiveTexts(session));
+            AssertTheArchiveIsAFullBuild(session, app);
+
+            // A send logged with no build since (the list on screen holds the rows before it): a
+            // key builds the view, so the row the list selects is the send the archive shows.
+            app.RecordHistory("GET", "https://api.x/v1/late", SendResult.Infra(
+                new InfraFailure(InfraKind.Timeout, "timed out", "", TimeSpan.FromSeconds(1))));
+            int buildsBefore = app.Builds;
+            GoTo(session, KeyCode.Down);
+            var selectedRow = Walk(session.Window.AccessibilityTree).Single(n => n.IsSelected == true).Name!;
+            var shown = ArchiveTexts(session).Single(t => t.StartsWith("https://api.x/v1/", StringComparison.Ordinal));
+            Assert.Contains(shown + " ", selectedRow);
+            Assert.Equal(1, app.Builds - buildsBefore);
+        });
+    }
+
+    /// <summary>Up after a search that left fewer rows than the cursor had walked selects the last
+    /// row; it threw (the cursor, one above where it stood, was still past the rows).</summary>
+    [Fact]
+    public void UpAfterASearchThatShortenedTheRows_SelectsTheLastRow()
+    {
+        var start = DateTimeOffset.Now.AddMinutes(-90);
+        for (int i = 0; i < 40; i++)
+            HistoryLog.Append(_root, new HistoryEntry(start.AddMinutes(i), "GET",
+                $"https://api.x/v1/items/{i}", 200, 10 + i, null, null));
+        Hosted((session, app) =>
+        {
+            GoTo(session, KeyCode.Digit4);
+            for (int i = 0; i < 30; i++) GoTo(session, KeyCode.Down);
+            session.Window.FindByAutomationId("history-search")!.Click();
+            session.Window.TypeText("items/1");   // items/1 and items/10 … 19: eleven rows
+            session.PumpFrames(2);
+            session.Window.Window.ClearFocus();
+            session.PumpFrames(2);
+            Assert.Equal(11, app.FilteredHistory().Count);
+
+            GoTo(session, KeyCode.Up);
+            Assert.EndsWith("/items/1 200", Walk(session.Window.AccessibilityTree).Single(n => n.IsSelected == true).Name);
+            Assert.Contains("https://api.x/v1/items/1", ArchiveTexts(session));
+            GoTo(session, KeyCode.Up);
+            Assert.EndsWith("/items/10 200", Walk(session.Window.AccessibilityTree).Single(n => n.IsSelected == true).Name);
+        });
+    }
+
+    private static List<string> ArchiveTexts(HeadlessSession session) =>
+        Descendants(session.Window.FindByAutomationId("history-archive")!.Element)
+            .OfType<HultUI.Core.Elements.TextElement>().Select(t => t.Content).ToList();
+
+    /// <summary>The archive on screen is what a full build of the window (its parts with it) makes.</summary>
+    private static void AssertTheArchiveIsAFullBuild(HeadlessSession session, MeridianApp app)
+    {
+        var kept = ArchiveTexts(session);
+        int archived = app.HistoryArchiveBuilds;
+        typeof(MeridianApp).GetMethod("MarkDirty", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance,
+            Type.EmptyTypes)!.Invoke(app, null);
+        session.PumpFrames(2);
+        Assert.Equal(1, app.HistoryArchiveBuilds - archived);
+        Assert.Equal(kept, ArchiveTexts(session));
+    }
+
+    private static IEnumerable<HultUI.Core.Elements.Element> Descendants(HultUI.Core.Elements.Element element)
+    {
+        yield return element;
+        foreach (var child in element.Children)
+            foreach (var d in Descendants(child))
+                yield return d;
     }
 
     /// <summary>The arrows walk the rows past the bottom of the list and back past its top, and the

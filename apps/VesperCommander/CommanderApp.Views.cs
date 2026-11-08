@@ -1,4 +1,5 @@
 using HultUI.Core.Builders;
+using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
@@ -46,11 +47,31 @@ public partial class CommanderApp
     private readonly Ref<VirtualListElement<ThumbRowItem>> _thumbVListL = new(), _thumbVListR = new();
     private Ref<VirtualListElement<ThumbRowItem>> ThumbVList(char side) => side == 'L' ? _thumbVListL : _thumbVListR;
 
-    // Shared thumbnail decode cache. A decode lands on a worker thread and marshals a
-    // rebuild so the tile swaps its thumbnail in.
+    // Shared thumbnail decode cache. A decode lands on a worker thread and posts a rebuild so
+    // the tile swaps its thumbnail in, one post at a time (see PostThumbnailLanded).
     private ThumbnailCache? _thumbsCache;
-    private ThumbnailCache Thumbs => _thumbsCache ??= new ThumbnailCache(
-        () => HultUI.Application.InvokeOnMainThread(MarkViewDirty));
+    private ThumbnailCache Thumbs => _thumbsCache ??= new ThumbnailCache(PostThumbnailLanded);
+
+    /// <summary>1 while a build for decoded thumbnails is posted to the UI thread and has not
+    /// run. The cache calls back once per decode, and a screenful of tiles decodes at once: a
+    /// build posted for each made 44 thumbnails 45 builds, up to 44 of them in one frame.
+    /// Posted one at a time, the decodes that land before the build runs share it. The build
+    /// clears the flag before it reads the cache, so a decode that lands while it runs posts the
+    /// next one.</summary>
+    private int _thumbnailPosted;
+
+    /// <summary>The cache's callback, on a worker thread.</summary>
+    private void PostThumbnailLanded()
+    {
+        if (Interlocked.Exchange(ref _thumbnailPosted, 1) == 0)
+            HultUI.Application.InvokeOnMainThread(OnThumbnailLanded);
+    }
+
+    private void OnThumbnailLanded()
+    {
+        Interlocked.Exchange(ref _thumbnailPosted, 0);
+        MarkViewDirty();
+    }
 
     private const float ViewToggleWidth = 88f;   // reserved so breadcrumbs truncate first
 
@@ -76,8 +97,6 @@ public partial class CommanderApp
     private Element BuildThumbs(char side, IReadOnlyList<FileEntry> list, bool active)
     {
         var m = ThumbMetrics();
-        int n = list.Count;
-        int cur = Math.Clamp(Cursor(side), 0, Math.Max(0, n - 1));
         var marks = Marks(side);
 
         var (paneW, perRow, visRows) = ThumbGeometry(side);
@@ -89,18 +108,19 @@ public partial class CommanderApp
         // their entries and the cursor is in the shape — the marks, the files cut for a move, a
         // result set (the tooltips), a folder a drag hovers, the density, the scale the icons are
         // cut at, and the decodes landed so far, which turn placeholders into thumbnails. A
-        // change makes the rows again; the mounted list is told before this build patches it.
+        // change makes the rows again; the mounted list is told before this build patches it. So
+        // it is after a cursor key moved the ring with no build (SettleRing).
         var shape = new ThumbRowShape(m, ResultsOf(side), Icons.DisplayScale, _dropTarget, _thumbsCache?.Landed ?? 0);
         if (ThumbRowsState(side).Changed(shape, marks, _cutPending) && ThumbVList(side).Current is { } mounted)
             mounted.InvalidateRows();
         // A row made again keeps the tiles whose entry and state did not change (ThumbRow), as
         // long as everything a tile shows besides those is what they were made with.
-        ThumbTilesOf(side).Prepare(new ThumbTileShape(m, ResultsOf(side), Icons.DisplayScale, _dropTarget, _app.Theme),
-            ThumbVList(side).Current, perRow * (visRows + 4));
+        if (ThumbTileShapeState(side).Changed(new ThumbTileShape(m, ResultsOf(side), Icons.DisplayScale, _dropTarget, _app.Theme)))
+            ThumbTilesOf(side).Clear();
 
         return VirtualListElement<ThumbRowItem>.New()
             .ItemHeight((int)(m.TileH + m.Gap))
-            .Items(new ThumbRows(list, perRow, active && n > 0 ? cur : -1))
+            .Items(new ThumbRows(list, perRow, ThumbCursor(side, list)))
             .RenderWith((row, _) => ThumbRow(side, row, m, marks))
             // A row of tiles is one item to assistive technology (the tiles are not controls of
             // their own), named by the files on it, as the list view names one. One delegate per
@@ -259,12 +279,15 @@ public partial class CommanderApp
     }
 
     /// <summary>
-    /// A row of tiles. A row made again — the cursor moved onto it or off it, a mark, a
-    /// thumbnail landing — hands back each tile whose entry, cursor, mark, cut and thumbnail are
+    /// A row of tiles. A row made again — a mark, a thumbnail landing, the cursor moved onto it or
+    /// off it with a build — hands back each tile whose entry, cursor, mark, cut and thumbnail are
     /// what it was made with (REACTIVITY.md, "Hand back the elements a key does not change"): the
     /// row is keyed by its first entry's place, so the list patches the row it replaces from it,
     /// and the tiles are keyed by their paths, so the patch puts the live ones back untouched. A
-    /// cursor move makes the two tiles it moved between instead of both rows of them.
+    /// cursor key mostly makes no row at all (MoveCursorLive). The cursor is read as it is now, not
+    /// from the item: the list makes the rows that scroll in from its last build's items, which
+    /// know nothing of the keys that moved the ring since, and a row made from them would ring the
+    /// tile the cursor left.
     /// </summary>
     private Element ThumbRow(char side, ThumbRowItem item, ThumbM m, HashSet<string> marks)
     {
@@ -273,28 +296,31 @@ public partial class CommanderApp
         var row = Flex.Row(gap: m.Gap).Height(m.TileH).AlignItems(AlignItems.FlexStart)
             .Padding(new Thickness(0, 10, 0, 10));
         row.Key = key;
+        int cursorAt = ThumbCursor(side, item.List);
         for (int k = 0; k < item.Count; k++)
         {
             var e = item.List[item.Start + k];
-            bool cursor = k == item.Cursor;
+            bool cursor = item.Start + k == cursorAt;
             bool marked = marks.Contains(MarkKey(e));
             bool cut = !marked && _cutPending.Contains(e.FullPath);
             var (thumb, status) = TileThumb(e, m);
             var state = new ThumbTileState(e, cursor, marked, cut, thumb, status);
-            if (tiles.TakeBack(state, key) is { } live)
+            if (tiles.TryKeep(e.FullPath, state, out var kept, place: key))
             {
-                row.AddChild(live);
+                // A key may have moved the cursor's ref to another tile since this one was made.
+                if (cursor) CursorRowRef(side).Current = (BoxElement)kept;
+                row.AddChild(kept);
                 continue;
             }
-            var made = new Ref<BoxElement>();
-            var tile = Tile(side, e, m, cursor, marked, cut, thumb, status);
-            tile.Key = e.FullPath;
-            tile.WithRef(made);   // follows the tile to the live element it is patched into
-            row.AddChild(tile);
-            tiles.Made(state, made);
+            row.AddChild(tiles.Made(e.FullPath, state, Tile(side, e, m, cursor, marked, cut, thumb, status)));
         }
         return row;
     }
+
+    /// <summary>The cursor's place in a pane's grid now: -1 in the pane without the keyboard, which
+    /// shows none.</summary>
+    private int ThumbCursor(char side, IReadOnlyList<FileEntry> list) =>
+        side == _active && list.Count > 0 ? Math.Clamp(Cursor(side), 0, list.Count - 1) : -1;
 
     private static readonly List<string> ThumbRowKeys = [];
 
@@ -325,40 +351,16 @@ public partial class CommanderApp
 
     /// <summary>
     /// The tiles a pane's thumbnail rows were made with, by path, and the live element each is
-    /// now. A tile is handed back only into a row made again in its own row's place (its parent
-    /// carries that row's key): a row still on screen keeps its tiles, and a tile in a row that
-    /// scrolled away is out of the tree. All are let go when the shape changes; those no longer
-    /// under the list are let go once there are more than a few screens of them.
+    /// now. The rows are made in the frame, outside the app's builds, so there is no <c>Begin</c>:
+    /// a tile is handed back only into a row made again in its own row's place (its parent carries
+    /// that row's key), as a row still on screen keeps its tiles, and a tile in a row that
+    /// scrolled away is out of the tree. All are let go when what every tile shows changes
+    /// (<see cref="ThumbTileShape"/>); those out of the tree as more are made.
     /// </summary>
-    private sealed class ThumbTiles
-    {
-        private readonly Dictionary<string, (ThumbTileState State, Ref<BoxElement> Live)> _kept = new(StringComparer.Ordinal);
-        private readonly List<string> _gone = [];
-        private ThumbTileShape _shape;
-        private bool _made;
-
-        public void Prepare(ThumbTileShape shape, Element? list, int keep)
-        {
-            if (!_made || !shape.Equals(_shape)) _kept.Clear();
-            _made = true;
-            _shape = shape;
-            if (_kept.Count <= keep) return;
-            foreach (var (path, kept) in _kept)
-                if (kept.Live.Current?.Parent?.Parent is not { } owner || !ReferenceEquals(owner, list)) _gone.Add(path);
-            foreach (var path in _gone) _kept.Remove(path);
-            _gone.Clear();
-        }
-
-        public BoxElement? TakeBack(in ThumbTileState state, string rowKey) =>
-            _kept.TryGetValue(state.Entry.FullPath, out var kept) && kept.State == state
-                && kept.Live.Current is { IsDetached: false, Parent: { } row } live && row.Key == rowKey
-                ? live : null;
-
-        public void Made(in ThumbTileState state, Ref<BoxElement> live) => _kept[state.Entry.FullPath] = (state, live);
-    }
-
-    private readonly ThumbTiles _thumbTilesL = new(), _thumbTilesR = new();
-    private ThumbTiles ThumbTilesOf(char side) => side == 'L' ? _thumbTilesL : _thumbTilesR;
+    private readonly KeptElements<ThumbTileState> _thumbTilesL = new(), _thumbTilesR = new();
+    private KeptElements<ThumbTileState> ThumbTilesOf(char side) => side == 'L' ? _thumbTilesL : _thumbTilesR;
+    private readonly ShapeState<ThumbTileShape> _thumbTileShapeL = new(), _thumbTileShapeR = new();
+    private ShapeState<ThumbTileShape> ThumbTileShapeState(char side) => side == 'L' ? _thumbTileShapeL : _thumbTileShapeR;
 
     private BoxElement Tile(char side, FileEntry e, ThumbM m, bool cursor, bool marked, bool cut,
         IImageSource? thumb, ThumbnailCache.Status tstatus)
@@ -370,9 +372,9 @@ public partial class CommanderApp
 
         var tile = Flex.Column(gap: 4).Width(m.TileW).Height(m.TileH).AlignItems(AlignItems.Center)
             .Padding(new Thickness(4)).CornerRadius(Nocturne.RadiusRow)
-            .BorderWidth(1f).BorderColor(cursor ? Nocturne.Accent600 : Color.Transparent)
+            .BorderWidth(1f)
             .Cursor(CursorType.Default).Tooltip(EntryTooltip(side, e));
-        if (cursor) tile.Background(Nocturne.Alpha(Nocturne.Accent500, 0.13));
+        ShowCursor(tile, cursor);
 
         // Image area on a Neutral900 backing. P2 shows the kind icon (images use a dimmed
         // image glyph as a placeholder); P3 swaps in the decoded thumbnail.
@@ -415,10 +417,30 @@ public partial class CommanderApp
             .MaxLines(m.NameLines).TextOverflow(TextOverflow.Ellipsis).Width(m.TileW - 8));
 
         if (cut) tile.Opacity = 0.45f;                 // whole-tile ghost
-        else if (!cursor) tile.HoverBg(Nocturne.Alpha(Nocturne.Accent500, 0.06), Color.Transparent);
+        else tile.OnHover(TileHover);
         AttachEntryPointer(tile, side, e, cursor);
         return tile;
     }
+
+    /// <summary>The hover tint, on a tile without the cursor's ring: a key moves the ring with no
+    /// build (MoveCursorLive), so a tile cannot know at its build whether it will have it. The ring
+    /// is the tile's resting border, which the hover sees (Element.Restyle).</summary>
+    private static readonly Action<BoxElement> TileHover = static t =>
+    {
+        if (t.BorderColor == Color.Transparent) t.BackgroundColor = Nocturne.Alpha(Nocturne.Accent500, 0.06);
+    };
+
+    /// <summary>The cursor on a Brief cell or a thumbnail tile, as a build makes it and as a key
+    /// moves it with no build: the accent ring on the 1 px border every cell reserves, and the
+    /// accent fill.</summary>
+    private static void ShowCursor(BoxElement el, bool cursor)
+    {
+        el.BorderColor = cursor ? Nocturne.Accent600 : Color.Transparent;
+        el.BackgroundColor = cursor ? Nocturne.Alpha(Nocturne.Accent500, 0.13) : Color.Transparent;
+    }
+
+    private static readonly Action<Element> CursorOn = static e => ShowCursor((BoxElement)e, cursor: true);
+    private static readonly Action<Element> CursorOff = static e => ShowCursor((BoxElement)e, cursor: false);
 
     private static Element? ExtBadge(FileEntry e)
     {
@@ -520,11 +542,11 @@ public partial class CommanderApp
         // component. Only the cells that changed are made, and patched into the ones they
         // replace: a key in Brief makes two cells instead of every cell on screen, and a mark the
         // cell it marks. Kept only from the build just before (cells another build dropped are
-        // not in the tree any more).
+        // not in the tree any more). A cursor key mostly makes no cell at all (MoveCursorLive).
         var cells = BriefCells(side);
         var shape = new BriefCellShape(rowH, Icons.DisplayScale, _app.Theme, ResultsOf(side), _dropTarget);
-        bool keep = !BriefCellsState(side).Changed(shape) && cells.FilledBy == _builds - 1;
-        cells.Next.Clear();
+        if (BriefCellsState(side).Changed(shape)) cells.Clear();
+        cells.Begin(_builds);
 
         var content = Flex.Row(gap: 0).FlexShrink(0);
         if (g.Overflow) content.Width(g.TotalCols * BriefColWidth); else content.FlexGrow(1);
@@ -551,25 +573,18 @@ public partial class CommanderApp
                 bool cursor = cursorPath != null && PathEquals(e.FullPath, cursorPath);
                 bool marked = marks.Contains(MarkKey(e));
                 bool cut = !marked && _cutPending.Contains(e.FullPath);   // a mark shows over a cut
-                if (keep && cells.Kept.TryGetValue(e.FullPath, out var kept) && kept.Cursor == cursor
-                    && kept.Marked == marked && kept.Cut == cut
-                    && kept.Entry.Equals(e) && kept.Live.Current is { IsDetached: false } live)
+                var state = new BriefCellState(e, cursor, marked, cut);
+                if (cells.TryKeep(e.FullPath, state, out var kept))
                 {
-                    column.AddChild(live);
-                    cells.Next[e.FullPath] = kept;
+                    // A key may have moved the cursor's ref to another cell since this one was made.
+                    if (cursor) CursorRowRef(side).Current = (BoxElement)kept;
+                    column.AddChild(kept);
                     continue;
                 }
-                var made = new Ref<BoxElement>();
-                var cell = BriefCell(side, e, cursor, marked, cut);
-                cell.Key = e.FullPath;
-                cell.WithRef(made);   // follows the cell to the live element it is patched into
-                column.AddChild(cell);
-                cells.Next[e.FullPath] = new BriefKeptCell(e, cursor, marked, cut, made);
+                column.AddChild(cells.Made(e.FullPath, state, BriefCell(side, e, cursor, marked, cut)));
             }
             content.AddChild(column);
         }
-        (cells.Kept, cells.Next) = (cells.Next, cells.Kept);
-        cells.FilledBy = _builds;
 
         // Explicit width + height so the horizontal ScrollView can't shrink-wrap to content.
         var scroll = ScrollView.Horizontal().WithRef(BriefScroll(side)).FlexShrink(0)
@@ -617,27 +632,17 @@ public partial class CommanderApp
 
     private static string BriefColumnKey(int c) => "col" + c;
 
-    /// <summary>A Brief cell as it was made: its entry, whether the cursor was on it, whether it
-    /// was marked or cut for a move (only some cells show those, so they are the cell's and not
-    /// the shape's), and a ref to the live element (the cell itself, or the one it was patched
-    /// into).</summary>
-    private readonly record struct BriefKeptCell(FileEntry Entry, bool Cursor, bool Marked, bool Cut, Ref<BoxElement> Live);
-
-    private sealed class BriefCellCache
-    {
-        /// <summary>The cells the last build that built this pane in Brief made or kept, by path.</summary>
-        public Dictionary<string, BriefKeptCell> Kept = new(StringComparer.Ordinal);
-        /// <summary>The ones this build has made or kept so far; swapped with <see cref="Kept"/>.</summary>
-        public Dictionary<string, BriefKeptCell> Next = new(StringComparer.Ordinal);
-        /// <summary>The build that filled <see cref="Kept"/>.</summary>
-        public int FilledBy = -1;
-    }
+    /// <summary>What a Brief cell shows besides the grid's shape: its entry, whether the cursor is
+    /// on it, whether it is marked or cut for a move (only some cells show those, so they are the
+    /// cell's and not the shape's).</summary>
+    private readonly record struct BriefCellState(FileEntry Entry, bool Cursor, bool Marked, bool Cut);
 
     private readonly record struct BriefCellShape(float RowH, float IconScale, object? Theme,
         ResultListing? Results, (char Side, string Dir)? DropTarget);
 
-    private readonly BriefCellCache _briefCellsL = new(), _briefCellsR = new();
-    private BriefCellCache BriefCells(char side) => side == 'L' ? _briefCellsL : _briefCellsR;
+    /// <summary>The cells the last build that built a pane in Brief made or handed back, by path.</summary>
+    private readonly KeptElements<BriefCellState> _briefCellsL = new(), _briefCellsR = new();
+    private KeptElements<BriefCellState> BriefCells(char side) => side == 'L' ? _briefCellsL : _briefCellsR;
     private readonly ShapeState<BriefCellShape> _briefStateL = new(), _briefStateR = new();
     private ShapeState<BriefCellShape> BriefCellsState(char side) => side == 'L' ? _briefStateL : _briefStateR;
 
@@ -653,9 +658,9 @@ public partial class CommanderApp
 
         var cell = Flex.Row(gap: 7).Height(RowHeight).AlignItems(AlignItems.Center)
             .Padding(new Thickness(0, 9, 0, 9))
-            .BorderWidth(1f).BorderColor(cursor ? Nocturne.Accent600 : Color.Transparent)
+            .BorderWidth(1f)
             .Cursor(CursorType.Default).Tooltip(EntryTooltip(side, e));
-        if (cursor) cell.Background(Nocturne.Alpha(Nocturne.Accent500, 0.13));
+        ShowCursor(cell, cursor);
 
         var icon = Icons.Draw(Icons.KindFor(e), marked ? Nocturne.MarkRed : (Color?)null);
         if (cut) icon.Opacity = 0.45f;
@@ -663,6 +668,75 @@ public partial class CommanderApp
         cell.AddChild(Ui.Mono(e.Name, 11.5f, fg).MaxLines(1).TextOverflow(TextOverflow.Ellipsis).FlexGrow(1));
         AttachEntryPointer(cell, side, e, cursor);
         return cell;
+    }
+
+    // ── The ring a cursor key moves with no build ────────────────────────
+    // A key that moves only the cursor in Brief or Thumbnails takes the ring off the live cell or
+    // tile it leaves and puts it on the one it reaches (MoveCursorLive). Those two then show what
+    // no build made them with, and the next build would hand them back as they are: one made
+    // without the ring and reached by a key, in the pane Tab leaves, kept its ring. And the
+    // thumbnail list keeps a row while its item is unchanged, and its items are its last build's,
+    // so a row that a key moved the ring into or out of is not even made again. So each build of
+    // the pane first puts the cells and tiles back as they were made, and has the thumbnail list
+    // make its rows again; each then shows its new state as a build makes it.
+
+    /// <summary>Per pane: each cell or tile a key moved the ring on or off with no build since the
+    /// pane's last build, and whether it was made with the ring. One that is back as it was made is
+    /// dropped, so a long walk holds the two it is between.</summary>
+    private readonly List<(BoxElement Element, bool MadeRinged)>[] _ringMoved = [[], []];
+    private readonly bool[] _ringMovedSinceBuild = new bool[2];
+
+    /// <summary>The live Brief cell or thumbnail tile showing <paramref name="e"/>, as the pane's
+    /// latest build made or handed it back (a tile: in a row of the list on screen); null when
+    /// none is.</summary>
+    private BoxElement? LiveCell(char side, FileEntry e)
+    {
+        if (ViewOf(side) == ViewMode.Brief) return BriefCells(side).Live(e.FullPath) as BoxElement;
+        return ThumbTilesOf(side).Live(e.FullPath) is BoxElement { Parent.Parent: { } owner } tile
+            && ReferenceEquals(owner, ThumbVList(side).Current) ? tile : null;
+    }
+
+    /// <summary>The ring on or off a live cell or tile, with no build (<see cref="ShowCursor"/>,
+    /// as a build draws it; Restyle keeps it through a hover).</summary>
+    private void MoveRing(char side, BoxElement el, bool on)
+    {
+        bool shows = el.BorderColor == Nocturne.Accent600;
+        if (shows == on) return;
+        var moved = _ringMoved[Si(side)];
+        int i = 0;
+        while (i < moved.Count && !ReferenceEquals(moved[i].Element, el)) i++;
+        if (i == moved.Count) moved.Add((el, shows));
+        else if (moved[i].MadeRinged == on) moved.RemoveAt(i);
+        el.Restyle(on ? CursorOn : CursorOff);
+        _ringMovedSinceBuild[Si(side)] = true;
+    }
+
+    /// <summary>At the start of a pane's build: the cells and tiles a key moved the ring on or off
+    /// go back as they were made, and the thumbnail list makes its rows again (see above).</summary>
+    private void SettleRing(char side)
+    {
+        int si = Si(side);
+        if (!_ringMovedSinceBuild[si]) return;
+        _ringMovedSinceBuild[si] = false;
+        foreach (var (el, madeRinged) in _ringMoved[si])
+            if (el.IsHosted) el.Restyle(madeRinged ? CursorOn : CursorOff);
+        _ringMoved[si].Clear();
+        if (ThumbVList(side).Current is { IsHosted: true } list) list.InvalidateRows();
+    }
+
+    /// <summary>Whether the cursor's column is in full view in Brief, where
+    /// <see cref="ScrollBriefToCursor"/> leaves the scroll as it is, and the columns made are the
+    /// ones a build would make at this scroll. A key that scrolls builds before it scrolls (as it
+    /// always has), so its build made the columns for the scroll before it: the next key builds
+    /// again, as every key used to.</summary>
+    private bool BriefCursorShown(char side)
+    {
+        if (BriefScroll(side).Current is not { IsHosted: true } sv
+            || !BriefGeometry(side, Rows(side).Count).Fit.Equals(_fit[Si(side)].Brief)) return false;
+        int rows = Math.Max(1, _briefRows[Si(side)]);
+        float colW = _briefColW[Si(side)];
+        float x = (Cursor(side) / rows) * colW;
+        return x >= sv.ScrollOffsetX && x + colW <= sv.ScrollOffsetX + sv.Layout.AbsoluteContentBox.Width;
     }
 
     /// <summary>Keep the cursor's row in the vertical viewport (Thumbnails).</summary>
@@ -790,6 +864,7 @@ public partial class CommanderApp
 
     private void BeginFit(char side)
     {
+        SettleRing(side);
         // The path trail is a part the build may keep: what it noted when it last built stands
         // (it builds again when the trail would change, OnWindowResized).
         var trail = _fit[Si(side)];

@@ -1,6 +1,7 @@
 ﻿using Aperture.Core;
 using Aperture.Theme;
 using HultUI.Core.Builders;
+using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
@@ -81,8 +82,9 @@ public sealed partial class ApertureApp
         if (GridRowShapeChanged(perRow)) _gridList.Current?.InvalidateRows();
         // A row made again keeps the cards whose item, cursor and picture did not change (GridRow),
         // as long as what every card shows besides those is what they were made with.
-        _gridCards.Prepare(new GridCardShape(_settings.Data.ShowCardTitles, Ui.DisplayScale), _gridList.Current,
-            perRow * (visibleRows + 4));
+        var cardShape = new GridCardShape(_settings.Data.ShowCardTitles, Ui.DisplayScale);
+        if (cardShape != _gridCardShape) _gridCards.Clear();
+        _gridCardShape = cardShape;
 
         var list = VirtualListElement<GridRowItem>.New();
         // Each item here is a row of posters, and every poster is its own button — so the
@@ -366,12 +368,14 @@ public sealed partial class ApertureApp
     }
 
     /// <summary>
-    /// A row of posters. A row made again — the cursor moved onto it or off it, a picture landed —
-    /// hands back each card whose item, cursor and picture are what it was made with (REACTIVITY.md,
-    /// "Hand back the elements a key does not change"): the row is keyed by its first item's place,
-    /// so the list patches the row it replaces from it, and the cards by their items, so the patch
-    /// puts the live ones back untouched, with the pictures they show. A cursor move makes the two
-    /// cards it moved between instead of the whole of both rows.
+    /// A row of posters. A row made again — a picture landed, a page filled it, the cursor moved
+    /// onto it with a build — hands back each card whose item, cursor and picture are what it was
+    /// made with (REACTIVITY.md, "Hand back the elements a key does not change"): the row is keyed by
+    /// its first item's place, so the list patches the row it replaces from it, and the cards by
+    /// their items, so the patch puts the live ones back untouched, with the pictures they show. A
+    /// card is handed back only into the row that replaces its own: a change of columns, which moves
+    /// places to other rows, makes them. A cursor key mostly makes no row at all
+    /// (MoveRingWithoutBuild).
     /// </summary>
     private Element GridRow(IReadOnlyList<MediaItem> items, int start, int perRow)
     {
@@ -389,19 +393,31 @@ public sealed partial class ApertureApp
             // screen recent in the cache, and what shows the one that landed.
             var picture = ShownPicture(item, ImageKind.Primary, Halide.PosterWidth, Halide.PosterHeight);
             var state = new GridCardState(item, i, IsCursor(i), picture);
-            if (_gridCards.TakeBack(state, _gridList.Current) is { } live)
+            if (_gridCards.TryKeep(item.Id, state, out var kept, place: key))
             {
-                row.AddChild(live);
+                row.AddChild(kept);
                 continue;
             }
-            var made = new Ref<BoxElement>();
-            var card = PosterCard(item, Halide.PosterWidth, i, picture);
-            card.Key = item.Id;
-            card.WithRef(made);   // follows the card to the live element it is patched into
-            row.AddChild(card);
-            _gridCards.Made(state, made);
+            row.AddChild(_gridCards.Made(item.Id, state, PosterCard(item, Halide.PosterWidth, i, picture)));
         }
         return row;
+    }
+
+    /// <summary>
+    /// Whether the place <paramref name="index"/> in the grid (or -1, nowhere) can take or lose the
+    /// ring on the live cards, and its card while a realized row holds it: null when its row is not
+    /// realized. False unless the latest build drew the grid (not the list layout) and its list is on
+    /// screen.
+    /// </summary>
+    private bool GridCardAt(int index, out Element? card)
+    {
+        card = null;
+        if (_fitGridStride <= 0f || _settings.Data.Layout == LibraryLayout.List
+            || _gridList.Current is not { IsHosted: true } list) return false;
+        if (index < 0) return true;
+        if (index >= _cursorItems.Count || _cursorItems[index] is not MediaItem item) return false;
+        if (_gridCards.Live(item.Id) is { Parent.Parent: { } owner } live && ReferenceEquals(owner, list)) card = live;
+        return true;
     }
 
     private readonly List<string> _gridRowKeys = [];
@@ -424,43 +440,15 @@ public sealed partial class ApertureApp
     private readonly record struct GridCardShape(bool Titles, float Scale);
 
     /// <summary>
-    /// The cards the grid's rows were made with, by item, and the live element each is now. A card
-    /// is handed back only while its row is still a child of the list: the row the list holds back
-    /// to patch, or, when the columns changed, one it is about to let go of. A card in a row that
-    /// scrolled away is out of the tree. A row still on screen is not asked for its cards: a row
-    /// is made for the places it holds, and only a change of columns, which makes them all again,
-    /// moves a place to another row. All are let go when the shape changes; those no longer under
-    /// the list are let go once there are more than a few screens of them.
+    /// The cards the grid's rows were made with, by item, and the live element each is now. The rows
+    /// are made in the frame, outside the app's builds, so there is no <c>Begin</c>: a card is handed
+    /// back while it is in the window and its row is the one being made again (the place). A card in
+    /// a row that scrolled away is out of the tree. All are let go when what every card shows changes
+    /// (<see cref="GridCardShape"/>); those out of the tree as more are made.
     /// </summary>
-    private sealed class GridCards
-    {
-        private readonly Dictionary<string, (GridCardState State, Ref<BoxElement> Live)> _kept = new(StringComparer.Ordinal);
-        private readonly List<string> _gone = [];
-        private GridCardShape _shape;
+    private readonly KeptElements<GridCardState> _gridCards = new();
 
-        public int Count => _kept.Count;
-
-        public void Prepare(GridCardShape shape, Element? list, int keep)
-        {
-            if (shape != _shape) _kept.Clear();
-            _shape = shape;
-            if (_kept.Count <= keep) return;
-            foreach (var (id, kept) in _kept)
-                if (kept.Live.Current?.Parent?.Parent is not { } owner || !ReferenceEquals(owner, list)) _gone.Add(id);
-            foreach (var id in _gone) _kept.Remove(id);
-            _gone.Clear();
-        }
-
-        public BoxElement? TakeBack(in GridCardState state, Element? list) =>
-            _kept.TryGetValue(state.Item.Id, out var kept) && kept.State == state
-                && kept.Live.Current is { IsDetached: false, Parent: { } row } live
-                && list is not null && ReferenceEquals(row.Parent, list)
-                ? live : null;
-
-        public void Made(in GridCardState state, Ref<BoxElement> live) => _kept[state.Item.Id] = (state, live);
-    }
-
-    private readonly GridCards _gridCards = new();
+    private GridCardShape _gridCardShape;
 
     /// <summary>Cards the grid remembers, for tests.</summary>
     internal int GridCardsKept => _gridCards.Count;

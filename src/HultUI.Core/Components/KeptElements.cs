@@ -111,7 +111,8 @@ public sealed class KeptElements<TState> where TState : IEquatable<TState>
     /// while it is still there; null otherwise. For a change the owner makes to the live element itself,
     /// with no build, such as moving a ring from one card to another; the owner checks that no build of
     /// its own has run since that one without making these elements. The next build compares with the
-    /// state the element was made with, and makes it again if that moved.
+    /// state the element was made with, and makes it again if that moved. Change a background or a border
+    /// through <see cref="Element.Restyle"/>, or the element's hover style puts back the old one.
     /// </summary>
     public Element? Live(string key) =>
         _entries.TryGetValue(key, out var entry) && entry.Build == _build && entry.Live.Current is { IsHosted: true } live

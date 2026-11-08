@@ -905,6 +905,9 @@ public partial class CommanderApp
         private bool _made;
         private string? _partner;
 
+        /// <summary>The F3 partner the rows were made with: the one the pane shows.</summary>
+        public string? Partner => _partner;
+
         /// <summary>Whether the F3 partner the rows were made with is another one now, and which it
         /// was; takes the new one either way. Kept out of the shape because it moves with every key
         /// in a folder of the same names, and it changes only the row it leaves and the row it

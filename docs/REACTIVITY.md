@@ -236,6 +236,56 @@ included. A handler of yours that calls `MarkDirty()` from a `PointerMoveEvent` 
 every move: build a drag on these controls where you can, or keep it out of `Build()` (write
 the live element through a `Ref<T>`).
 
+### A background callback that fires once per item posts one build at a time
+
+A cache or a worker that calls back once per item it finishes, on another thread, usually
+ends in `Application.InvokeOnMainThread(MarkDirty)`. The UI thread runs everything posted
+since the last frame in one go, and `MarkDirty()` rebuilds on the calling stack, so N items
+that land between two frames are N builds in that frame, each making the whole view again for
+one more picture. Aperture's `PosterCache` and Vesper's `ThumbnailCache` call back once per
+picture and leave the coalescing to the caller. Until plan 17 neither caller did: opening
+Aperture's Home (36 posters) built it 41 times, up to 10 times in one frame, and Vesper's
+Thumbnails (44 pictures) 45 times, up to 44 in one frame.
+
+Post one build at a time: a flag set when the build is posted and cleared when it runs.
+
+```csharp
+private int _landingPosted;
+
+// The cache's callback, on the thread pool.
+private void PostLanded()
+{
+    if (Interlocked.Exchange(ref _landingPosted, 1) == 0)
+        Application.InvokeOnMainThread(OnLanded);
+}
+
+private void OnLanded()
+{
+    Interlocked.Exchange(ref _landingPosted, 0);   // first: a landing from now on posts the next build
+    MarkDirty();
+}
+```
+
+Every item that landed before the build ran is in it, and nothing waits longer than it did:
+the first landing posts exactly as before. Clear the flag before the build reads what landed,
+not after it: cleared after, an item that lands while the build runs finds the flag still set,
+posts nothing, and its picture waits for something else to build. A throttle by time (at most
+one post every 80 ms) is not the same thing either: it drops the post for the last items of a
+burst, so the burst needs a final refresh of its own (Vesper's find has one).
+
+With the flag, from opening the view until every picture landed (headless, a picture served
+after 15–30 ms; JIT, then NativeAOT):
+
+| View | Builds | Most builds in one frame | Allocated |
+|---|---|---|---|
+| Aperture Home, 36 posters | 41 → 14–16 | 8–10 → 4 | 3,614 → 1,825–1,896 KB (−48…−50 %); AOT 3,446 → 1,696 KB |
+| Aperture library grid, 42 posters | 46 → 14–15 | 9–13 → 2–3 | 2,419–2,473 → 1,442–1,564 KB (−36…−42 %) |
+| Vesper Thumbnails, 44 pictures | 45 → 2–4 | 24–44 → 1–2 | 1,409–1,491 → 756–819 KB (−42…−49 %) |
+
+The same pictures are drawn at the end, and the settled frame has the same pixels. With
+pictures served more slowly (60–120 ms) fewer land together: Home 41 → 26 builds (−29 %), the
+grid 46 → 25 (−26 %).
+
 ### A value that changes ten times a second
 
 Some signals move on their own, many times a second: `MediaPlayer.Position` while a film
@@ -488,6 +538,20 @@ counts: a URL character compares the two with what the last build showed, and bu
 neither moved and the request was already unsaved (round 7, step 10: 66.6 → 4.0 KB a character
 and −17 % time on NativeAOT, −27 % on JIT; a query typed out −83 %).
 
+**A selection a list and one panel show needs neither the window nor the view.** History's list
+draws its own selection, and the only other thing that shows it is the archived send beside the
+list; still a key built the whole window for that panel. The panel is now a part with a signal of
+its own (round 8, step 8): a key sets the mounted list's `SelectedIndex` and highlight through its
+ref (ELEMENTS.md, "the list is then the only thing that shows the selection") and writes the part's
+signal, so the panel builds alone. The view's build places it as Junction's composer is placed,
+comparing the send it shows, the day its time reads against and the full-rebuild revision, so a
+search character or a filter that leaves the selection where it was builds no panel. The key falls
+back to a build of the view when there is no panel yet, or when the list on screen was made from
+other rows than the key walked (a send logged with no build since). Headless, 300 sends, 1440×900,
+a key and three frames, JIT: Down 52.1 → 21.6 KB (−58 %; NativeAOT 51.4 → 21.6), no window build; a
+search character with a send selected 56.6 → 40.9 KB (−28 %; NativeAOT 61.1 → 45.5, −26 %). The
+key's time does not move: its frames are most of it.
+
 Vesper keeps its title bar, rail and command line, and each pane's tab strip, path trail, column
 header and footer, this way (round 5, step 12), and adds four lessons:
 
@@ -625,7 +689,8 @@ Headless, 600 films with pictures, 1440×900, a key and two frames, NativeAOT wi
 
 **`KeptElements<TState>` holds these rules** (`HultUI.Core.Components`, round 7 step 11; ELEMENTS.md
 §28). Brief, Thumbnails and the library grid each wrote them out by hand, and Brief's marks slipped
-into the shape; new code uses the helper, and the three can move to it as they are next changed:
+into the shape; new code uses the helper, and all three are on it now (the grid since round 8 step 5,
+Brief and Thumbnails since step 7):
 
 - `Made(key, state, element)` keys the element and keeps a ref that follows it to the live one, so
   the first and third rules are its job; key the element's siblings too.
@@ -644,6 +709,35 @@ Aperture's Home is its first user (one helper per shelf, as one film can stand o
 perf suite pins it: `component/shelf walk Right, 5 shelves of 7 cards, every card made` against `…,
 cards kept`.
 
+**A shelf whose cards all come back can come back whole** (round 8, step 6). Home builds mostly when
+pictures land, and with every card handed back it still made each shelf's heading and row around them:
+39 of a build's 46 elements. Each shelf is kept too now, by its row's key, with three rules on top of
+the cards':
+
+- **Ask for the children first, every build.** Each card on the page is asked for before the shelf is
+  decided: that asks for its picture (how a landing finds the card it changed) and keeps its entry
+  current for the next build and for a ring moved with no build. The shelf comes back only when every
+  card came back as the live element (`IsHosted`).
+- **The state is what the heading's handlers read, not only what it draws.** The row's menu worked out
+  "Move up" and "Move down" from the list of rows its build captured, so a row moved past a hidden one
+  drew the same and offered a stale menu. The row's place among all the rows is in the state, with the
+  title, the count, the page and how many a page holds, "See all" and the scale. What a handler reads
+  when it runs (the settings) needs nothing.
+- **Key every child of the parent**: the watchlist's shelf, made every build, and the hidden-rows
+  footer too.
+
+Headless, 1440×900, six shelves and 36 cards with pictures, JIT (NativeAOT the same within 1 %): a
+Home build 66.0 → 26.3 KB, elements made 46 → 4; Home opening while its 36 posters land, one poster a
+build 3,368–3,433 → 2,281–2,312 KB (−32 %), six a build 1,547 → 1,371 KB (−11 %); at 1000 px a walk
+that turns a shelf's page 13.8 → 6.8 KB a key.
+
+**Remember what the asking makes.** What is left of that build is mostly the asking: each card's
+picture address, made again for every card each build with its string, which the cache keys on (577 B a
+card against the fake library, 1,136 B against Jellyfin's). Aperture now keeps each address by the item,
+the kind and the size in pixels, checks it against the item's picture tags, and lets them all go when
+the data is reloaded or 1,024 are held: a Home build 26.3 → 11.1 KB, one poster landing a build
+2,260–2,265 → 1,721–1,730 KB to open Home (−24 %, NativeAOT the same).
+
 **A key that moves only a ring needs no build.** Nothing on Home shows the cursor but the ring on one
 card and the keyboard on it. So a cursor key there takes the ring off the live card it leaves and
 puts it on the one it reaches (`KeptElements.Live`), hands that card the cursor's ref and the
@@ -657,6 +751,57 @@ a key, and five shelves of seven 255.7 → 0.3 KB, no build, −8…−11 % time
 without the ring move (a build a key that hands back all but two cards) took 32.9 and 70.7 KB. The
 suite pins it: `component/shelf walk Right, 5 shelves of 7 cards, ring moved without a build` (219 →
 0 KB a key against every card made).
+
+**A key that still builds moves the live ring first.** A card the ring reached with no build was made
+without the ring, so a build at another cursor finds it equal to what it was made with and hands it
+back, ring and all. In a virtual list the row is not even made again: the list keeps a row while its
+item is equal, and its items are its last build's, which know nothing of the moves since. So when a
+key has to build (Aperture's library grid: the card it reaches is not in a realized row, or the
+cursor is within a page of the loaded end, where the build asks for the next page), it takes the ring
+off the live card it leaves and puts it on the one it reaches, if that one is live, and then builds.
+A card the list makes in the frame after the build takes the keyboard once that frame is drawn
+(`Window.RequestPostFrameCallback`); asked straight after the build, it does not exist yet, which is
+why the grid's cursor never had the keyboard. Aperture's grid, 600 films, 1440×900, a key and three
+frames, JIT: Right 49.2 → 0.3 KB a key, Down 81.9 → 29.1 (what is left is the rows scrolling in), no
+build a key; with a reader the same, and no tree built. Home's shelves do the same when a move builds:
+onto a watchlist title card, which every build makes (the card left kept its ring, two rings on
+screen), and onto a card on another page of its shelf, which turns the shelf to that page (Discover
+too) so the card the cursor is on is the one on screen.
+
+**Every build puts the live ring back first, not only the key's** (Vesper, round 8 step 7). A key in
+Vesper that moves only the cursor builds nothing: Detail's list draws the cursor, so the key tells the
+mounted list its new `SelectedIndex` and scrolls it there, as the command palette does; Brief and
+Thumbnails take the ring off the live cell or tile left and put it on the one reached
+(`KeptElements.Live`). Moving the ring first on a key that builds was not enough there: a click, Tab
+(the pane it leaves shows no cursor) or a filter also builds after keys that did not, and handed back
+a cell the ring reached as it was — Tab left a ring in the pane it left. So each build of the pane
+first puts every cell and tile a key restyled back as it was made, and has the thumbnail list make its
+rows again; then every element shows what its state says, and the build compares states as always. A
+tile the list makes in a frame (its row scrolled in) reads the cursor as it is, not from its row's
+item, which is the last build's. Three more lessons:
+
+- **Decide by the cheap facts first.** A move also moves the F3 partner ring in the other pane. A folder
+  pairs with nothing, and a same-named row over there is the partner and moves with every key, so that
+  builds; only when the other pane's cursor can pair does the key ask F3's own rule (a path made, a file
+  looked up), and then the ring stays. Asked on every key, that rule cost 0.9 KB, a twentieth of the
+  build it saves.
+- **Restyle, so a hover keeps the ring.** A tile has a hover tint, and a ring set directly was gone once
+  the pointer left a tile hovered before (`Element.Restyle`, below). The tint reads the tile's border: no
+  tint while it is the ring, so a tile need not know at its build whether it will have it.
+- **A key that scrolls Brief builds**, as before: its columns are made for the scroll a build reads, so
+  the key after a page jump builds too, and the reader tree stays what a build makes.
+
+Headless, 400 files a pane, 1240×820, a key and three frames, idle-gated, JIT, UI-thread bytes a key
+(the three frames included): Detail Down/Up 17.1 → 1.7 KB (with a reader 17.5 → 2.1), Brief Down/Up
+31.9 → 1.8, Right/Left 32.2 → 1.7, Thumbnails Right/Left 27.7 → 1.2, Down/Up on screen 31.3 → 1.4, a
+30-key walk that scrolls 57.5 → 26.3 (what is left is the row of tiles each key scrolls in, as in
+Aperture's grid); no build a key. In 47 scenes, each in a dark and a light scheme (zebra, a sweep,
+Insert, a filter, both panes and the partner, the preview, the pointer on a tile), the pixels, the
+reader tree, the ring, focus and every text matched the app that builds every key, and a full build
+after them. The differences: a tooltip, which the headless pump draws only while frames are being made;
+after End in Thumbnails a list's height in the reader tree 0.0005 px from a later build's; and, as
+before the change, Brief's columns after a key that scrolls them, made for the scroll before it until
+the next key.
 
 A column whose cells are all kept is left with no children by the time the reconciler reaches
 it, since the build moved every one into its new tree. Until round 5 those came back one by one,
@@ -868,6 +1013,8 @@ btn.On<ClickEvent>(e => OpenPopoverUnder(e.CurrentTarget.Layout.AbsoluteBorderBo
 ```
 
 Interaction config (`.OnHover`/`.OnPressed`/`.OnFocus` and transitions) follows the latest build just like handlers: the incoming element's config replaces the retained one, and an incoming element *without* any interaction clears it — so conditionally attaching a hover style (`if (!active) el.OnHover(...)`) behaves correctly across state flips. For *cross*-element references (a button that focuses an input), use `Ref<T>` via `.WithRef(...)` — refs are repointed to the live element during patching.
+
+**Change a live element's look with `Restyle`.** The styles lay themselves over a base look the element takes when it is patched or first hovered, and put it back when the state ends. A background or border set on the live element directly, with no build (a ring moved from one cell to another, `KeptElements.Live`), lasts only until the next hover or press comes or goes: the element goes back to the base, without the ring. `el.Restyle(static e => ((BoxElement)e).BorderColor = ring)` takes the base look back first (so a hover tint showing now is not kept), makes the change, takes the result as the new base and lays the states that hold over it again. With no styles it just makes the change. A style that should differ with that look reads it from the element: it runs after the base is put back.
 
 Keys still matter for *state*: an unkeyed patch preserves the retained element's transient state (focus, caret, scroll position), so when a slot switches between logically different content — a settings page behind a nav list, a wizard step — key the slot by what it shows so unrelated state doesn't bleed across.
 

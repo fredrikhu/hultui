@@ -7,11 +7,11 @@ using Xunit;
 namespace HultUI.Text.Tests;
 
 /// <summary>
-/// What a <see cref="PipelineTextParagraph"/> costs once its layout is cached: one array of
-/// exactly its lines and one of their boxes, the object itself and nothing that grows with the
-/// text but those two (a list of the lines and an array copied from it were 10 % of what
-/// opening a long rich text document allocated), and the list a selection is cut into only once
-/// a selection is drawn on it.
+/// What a <see cref="PipelineTextParagraph"/> costs once its layout is cached: the object itself
+/// and nothing that grows with the text — it keeps the layout's own array of lines and makes the
+/// boxes of its lines only when they are read (a copy of the lines and the boxes made up front
+/// were 13 % of what opening a long rich text document allocated) — and the list a selection is
+/// cut into only once a selection is drawn on it.
 /// </summary>
 public class ParagraphAllocationTests
 {
@@ -23,20 +23,37 @@ public class ParagraphAllocationTests
     private static string Lines(int n) => string.Join(' ', Enumerable.Repeat("abcdefgh", n));
 
     [Fact]
-    public void AParagraph_AllocatesItsTwoArraysAndAFewObjects()
+    public void AParagraph_SharesItsLayoutsLines_AndMakesTheirBoxesWhenRead()
     {
         var pipeline = new TextPipeline(new Fonts(), new Shaper());
         string ten = Lines(10), forty = Lines(40);
+        var paragraph = pipeline.LayoutParagraph(forty, Style, 60f, spans: null);
+        Assert.Equal(40, paragraph.TextLines.Count);
+        Assert.Same(paragraph.Layout.Lines, paragraph.TextLines);
         Assert.Equal(10, pipeline.LayoutParagraph(ten, Style, 60f, spans: null).TextLines.Count);
-        Assert.Equal(40, pipeline.LayoutParagraph(forty, Style, 60f, spans: null).TextLines.Count);
 
+        // Nothing a line: the paragraph (144 B) is the one object it makes. A copy of the lines was
+        // 8 B a line and their boxes made up front 20 B, with two array headers (48 B).
         long a = Allocations.Least(() => pipeline.LayoutParagraph(ten, Style, 60f, spans: null));
         long b = Allocations.Least(() => pipeline.LayoutParagraph(forty, Style, 60f, spans: null));
-        // 8 bytes a line in the lines' array, 20 in the boxes'.
-        Assert.Equal(30L * (8 + 20), b - a);
-        // The rest is the paragraph and the two arrays' headers (192 B): a selection list made up
-        // front would be 32 B more.
-        Assert.InRange(a - 10L * (8 + 20), 0, 200);
+        Assert.Equal(0, b - a);
+        Assert.InRange(a, 1, 150);
+
+        // The boxes, 20 B a line, the first time they are read; once.
+        long readA = Allocations.Least(() => _ = pipeline.LayoutParagraph(ten, Style, 60f, spans: null).Lines);
+        long readB = Allocations.Least(() => _ = pipeline.LayoutParagraph(forty, Style, 60f, spans: null).Lines);
+        Assert.Equal(30L * 20, readB - readA);
+        var boxes = paragraph.Lines;
+        Assert.Equal(40, boxes.Count);
+        Assert.Same(boxes, paragraph.Lines);
+        Assert.Equal(0, Allocations.Least(() => _ = paragraph.Lines));
+
+        // A paragraph that adds an empty line after a final newline copies the lines: 8 B a line.
+        string tenNewline = ten + "\n", fortyNewline = forty + "\n";
+        Assert.Equal(41, pipeline.LayoutParagraph(fortyNewline, Style, 60f, spans: null).TextLines.Count);
+        long newlineA = Allocations.Least(() => pipeline.LayoutParagraph(tenNewline, Style, 60f, spans: null));
+        long newlineB = Allocations.Least(() => pipeline.LayoutParagraph(fortyNewline, Style, 60f, spans: null));
+        Assert.Equal(30L * 8, newlineB - newlineA);
     }
 
     [Theory]

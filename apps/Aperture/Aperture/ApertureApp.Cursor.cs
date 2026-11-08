@@ -151,24 +151,60 @@ public sealed partial class ApertureApp
         _cursorIndex = _cursorItems.Count - 1;
         _cursorToEnd = _cursorTotal > _cursorItems.Count;   // before the build, which asks for the rest
         _pendingCursorFocus = true;
-        if (_cursorToEnd || !MoveRingWithoutBuild(was)) RerenderView();
+        // The grid moves its live ring first, whether or not the move builds (MoveRingWithoutBuild).
+        if (!MoveRingWithoutBuild(was) || _cursorToEnd) RerenderView();
         return true;
     }
 
     /// <summary>
-    /// A cursor move on Home, done on the live cards with no build: the ring off the card at
+    /// A cursor move done on the live cards with no build: the ring off the card at
     /// <paramref name="from"/> and onto the cursor's, which takes the cursor's ref and the keyboard —
-    /// what a build would make of the move, as nothing else on Home shows the cursor. Only while Home
-    /// is on screen as its latest build left it, and only between library cards (a watchlist title
-    /// card is built). A card on another page of its shelf is not on screen: as after a build, it
-    /// takes no ring and no keyboard. The next build compares each card with what it was made with
-    /// (ApertureApp.Home.cs), so the two moved are made again then. A key used to build all of
-    /// Home, every shelf's cards with it.
+    /// what a build would make of the move, as nothing else on these views shows the cursor. The next
+    /// build compares each card with what it was made with, so the two moved are made again then.
+    /// <list type="bullet">
+    /// <item>Home, while it is on screen as its latest build left it. A key used to build all of Home,
+    /// every shelf's cards with it. A move onto a watchlist title card builds, as that card is made
+    /// by every build; so does one off it, whose ring only a build takes off.</item>
+    /// <item>Discover the same, while it is on screen as its latest build left it: a key used to build
+    /// every shelf, the LINQ that finds them and the walk's key with them.</item>
+    /// <item>On both, a card on another page of its shelf turns the shelf to that page, and a build
+    /// draws it, the ring and the keyboard on the card (one build a page turned). The shelf used to
+    /// stay where it was, and the cursor walked on with no card ringed.</item>
+    /// <item>The library grid, while its latest build drew it. The grid is scrolled to the cursor as a
+    /// build does it, and the rows that brings in are made in the frame, the ring on the cursor's. A
+    /// key used to build the view and make the two rows it moved between, and never handed over the
+    /// keyboard, as the card it reached was made in the frame after the build. It still builds when
+    /// the card the cursor reaches is not in a realized row, and within a page of the loaded end,
+    /// where the build asks for the next page.</item>
+    /// </list>
+    /// A move that builds moves the ring on the live cards first: a card the ring reached with no build
+    /// was made without it, so a build at another cursor would hand it back ringed, and a grid row with
+    /// it would not even be made again (the list keeps a row while its item is equal, and its items are
+    /// its last build's, which know nothing of the moves made since).
     /// </summary>
     private bool MoveRingWithoutBuild(int from)
     {
-        if (Current.View != ApertureView.Home || _homeBuild != Builds) return false;
-        if (!HomeCardAt(from, out var left) || !HomeCardAt(_cursorIndex, out var reached)) return false;
+        Element? left, reached;
+        bool build = false;
+        switch (Current.View)
+        {
+            case ApertureView.Home:
+                if (_homeBuild != Builds || !HomeCardAt(from, out left)) return false;
+                if (!HomeCardAt(_cursorIndex, out reached)) build = true;
+                build |= TurnHomeShelfToCursor();
+                break;
+            case ApertureView.Discover:
+                if (_discoverBuild != Builds || !DiscoverCardAt(from, out left) || !DiscoverCardAt(_cursorIndex, out reached)) return false;
+                build = TurnDiscoverShelfToCursor();
+                break;
+            case ApertureView.Library:
+                if (!GridCardAt(from, out left) || !GridCardAt(_cursorIndex, out reached)) return false;
+                build = reached is null || (GridHasMore && _cursorIndex + 1 + GridPageSize > GridItems.Count);
+                if (!build) RevealGridCursor(_cursorPerRow, _fitGridStride);
+                break;
+            default:
+                return false;
+        }
         if (left is BoxElement l) l.Outline = default;
         if (reached is BoxElement r)
         {
@@ -176,6 +212,7 @@ public sealed partial class ApertureApp
             _cursorCard.Current = r;
             _cursorCardIndex = _cursorIndex;
         }
+        if (build) return false;
         FocusCursorCard();
         return true;
     }
@@ -250,12 +287,20 @@ public sealed partial class ApertureApp
 
     /// <summary>Hands the keyboard to the card the cursor moved to, once it is built.
     /// A card that is scrolled out of the realized window has no element to focus, and the
-    /// cursor ring is still correct — so a miss is not worth retrying. A list makes its rows in
-    /// the frame, after this: the ref still holds the card the cursor left, and that one stays.</summary>
+    /// cursor ring is still correct — so a miss is not worth retrying. The library's list makes
+    /// its rows in the frame, after this: the ref still holds the card the cursor left, so the
+    /// card the cursor reached is asked again once the frame is drawn (it used to stay with the
+    /// card left, which kept the keyboard, or with nothing once that one scrolled away).</summary>
     private void FocusCursorCard()
     {
         if (!_pendingCursorFocus) return;
         _pendingCursorFocus = false;
         if (_cursorCardIndex == _cursorIndex) _cursorCard.Current?.Focus();
+        else if (_fitGridStride > 0f) _window.RequestPostFrameCallback(FocusCursorCardMadeInTheFrame);
+    }
+
+    private void FocusCursorCardMadeInTheFrame()
+    {
+        if (Current.View == ApertureView.Library && _cursorCardIndex == _cursorIndex) _cursorCard.Current?.Focus();
     }
 }

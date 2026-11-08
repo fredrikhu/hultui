@@ -60,8 +60,9 @@ public class PartTests
 
     // ── What a cursor key builds ─────────────────────────────────────────
 
-    /// <summary>A cursor key in Detail, Brief or Thumbnails builds the window and no part, and the
-    /// other pane — its parts, its list, every element in it — is the one it was.</summary>
+    /// <summary>A cursor key in Detail, Brief or Thumbnails builds no part, at most the window once,
+    /// and the other pane — its parts, its list, every element in it — is the one it was. In Detail
+    /// it builds nothing (CursorNoBuildTests).</summary>
     [Theory]
     [InlineData(KeyCode.F1, KeyCode.Down, KeyCode.Up)]
     [InlineData(KeyCode.F2, KeyCode.Down, KeyCode.Right)]
@@ -78,7 +79,8 @@ public class PartTests
         foreach (var k in keys) t.Press(k);
         t.Session.PumpFrames(2);
 
-        Assert.Equal(keys.Length, Builds(t) - builds);
+        Assert.True(Builds(t) - builds <= keys.Length, $"{Builds(t) - builds} builds for {keys.Length} keys");
+        if (view == KeyCode.F1) Assert.Equal(0, Builds(t) - builds);
         Assert.Equal(0, t.App.PartBuilds - parts);
         Assert.Equal(right, Descendants(Pane(t, 'R')).ToList());
         AssertPartsAreAFullBuild(t);
@@ -97,26 +99,31 @@ public class PartTests
         using var t = Open();
         var s = t.Session;
         void ViewOnly(string name, Action act, params string[] built) => Step(t, name, act, window: true, built);
+        // A key that moves only the cursor builds nothing (CursorNoBuildTests, GridCursorNoBuildTests).
+        void NoBuild(string name, Action act) => Step(t, name, act, window: false);
 
-        ViewOnly("Down", () => t.Press(KeyCode.Down));
-        ViewOnly("PageDown", () => t.Press(KeyCode.PageDown));
-        ViewOnly("Home", () => t.Press(KeyCode.Home));
+        NoBuild("Down", () => t.Press(KeyCode.Down));
+        NoBuild("PageDown", () => t.Press(KeyCode.PageDown));
+        NoBuild("Home", () => t.Press(KeyCode.Home));
         t.PutCursorOn('L', Name(4));
         ViewOnly("Insert", () => t.Press(KeyCode.Insert), "left footer");
         ViewOnly("Space on a file", () => t.Press(KeyCode.Space), "left footer");
         ViewOnly("Space again", () => t.Press(KeyCode.Space), "left footer");
         ViewOnly("Shift+Down", () => t.Press(KeyCode.Down, KeyModifiers.Shift), "left footer");
         ViewOnly("Shift+Down again", () => t.Press(KeyCode.Down, KeyModifiers.Shift), "left footer");
-        ViewOnly("Up after a sweep", () => t.Press(KeyCode.Up));
+        NoBuild("Up after a sweep", () => t.Press(KeyCode.Up));
         ViewOnly("Ctrl+A", () => t.Press(KeyCode.A, KeyModifiers.Ctrl), "left footer");
         ViewOnly("Ctrl+A again", () => t.Press(KeyCode.A, KeyModifiers.Ctrl), "left footer");
         ViewOnly("a row clicked", () => ClickRow(t, 'L', Name(9)));
         ViewOnly("Tab", () => t.Press(KeyCode.Tab), "left trail", "right trail");
+        // From ".." onto a file: F3 pairs it with the left pane's cursor, which takes the partner's
+        // ring; the next file pairs with it too.
         ViewOnly("Down in the right pane", () => t.Press(KeyCode.Down));
+        NoBuild("Down again in the right pane", () => t.Press(KeyCode.Down));
         ViewOnly("a row clicked in the other pane", () => ClickRow(t, 'L', Name(2)), "left trail", "right trail");
         ViewOnly("a filter typed", () => t.Press(KeyCode.Digit1), "left footer", "command line");
         ViewOnly("the filter extended", () => t.Press(KeyCode.Digit2), "left footer", "command line");
-        ViewOnly("Down in the filter", () => t.Press(KeyCode.Down));
+        NoBuild("Down in the filter", () => t.Press(KeyCode.Down));
         ViewOnly("Backspace in the filter", () => t.Press(KeyCode.Backspace), "left footer", "command line");
         ViewOnly("Escape clears the filter", () => t.Press(KeyCode.Escape), "left footer", "command line");
         ViewOnly("Tab with a filter", () => { t.Press(KeyCode.Digit3); t.Press(KeyCode.Tab); },
@@ -126,7 +133,7 @@ public class PartTests
         t.Press(KeyCode.Tab);
         t.Press(KeyCode.F2, KeyModifiers.Ctrl);
         s.PumpFrames(2);
-        ViewOnly("Brief Right", () => t.Press(KeyCode.Right));
+        NoBuild("Brief Right", () => t.Press(KeyCode.Right));
         ViewOnly("Brief scrolled", () =>
         {
             var scroll = t.Field<Ref<ScrollViewElement>>("_briefScrollL").Current!;
@@ -135,7 +142,7 @@ public class PartTests
         });
         t.Press(KeyCode.F3, KeyModifiers.Ctrl);
         s.PumpFrames(2);
-        ViewOnly("Thumbnails Down", () => t.Press(KeyCode.Down));
+        NoBuild("Thumbnails Down", () => t.Press(KeyCode.Down));
         ViewOnly("Thumbnails Insert", () => t.Press(KeyCode.Insert), "left footer");
     }
 
@@ -279,18 +286,18 @@ public class PartTests
             s.PumpUntil(() => t.Rows('L').Count > Files);
         });
 
-        // The footers: files cut for a move (set and taken back by hand, then a key: Ctrl+X and
-        // Esc go through the system clipboard), a folder measured, a file added and the pane
-        // refreshed.
+        // The footers: files cut for a move (set and taken back by hand, then a view-only build:
+        // Ctrl+X and Esc go through the system clipboard; a cursor key builds nothing now), a
+        // folder measured, a file added and the pane refreshed.
         After("a file cut", () =>
         {
             t.Field<HashSet<string>>("_cutPending").Add(Path.Combine(t.Left, Name(3)));
-            t.Press(KeyCode.Down);
+            t.Invoke("MarkViewDirty");
         });
         After("the cut taken back", () =>
         {
             t.Field<HashSet<string>>("_cutPending").Clear();
-            t.Press(KeyCode.Up);
+            t.Invoke("MarkViewDirty");
         });
         t.PutCursorOn('L', "docs");
         After("a folder measured", () =>
@@ -336,14 +343,15 @@ public class PartTests
         AssertPartsAreAFullBuild(t, "decoded");
         Assert.Null(Text(Part(t, "left footer"), "decoding", required: false, within: true));
 
-        // A decode still running when a key rebuilds the view shows in the footer, and its landing
-        // takes it off. The grid realizes its tiles (and starts their decodes) after the build that
-        // made the footer, and the decodes race the frames, so one is put in flight by hand.
+        // A decode still running when the view builds shows in the footer, and its landing takes it
+        // off. The grid realizes its tiles (and starts their decodes) after the build that made the
+        // footer, and the decodes race the frames, so one is put in flight by hand. (A cursor key,
+        // which this used, builds nothing now.)
         var inFlight = (HashSet<string>)typeof(ThumbnailCache)
             .GetField("_inFlight", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cache())!;
-        Step(t, "a decode in flight", () => { inFlight.Add("held"); t.Press(KeyCode.Right); }, window: true, "left footer");
+        Step(t, "a decode in flight", () => { inFlight.Add("held"); t.Invoke("MarkViewDirty"); }, window: true, "left footer");
         Assert.NotNull(Text(Part(t, "left footer"), "decoding 1", within: true));
-        Step(t, "and landed", () => { inFlight.Remove("held"); t.Press(KeyCode.Left); }, window: true, "left footer");
+        Step(t, "and landed", () => { inFlight.Remove("held"); t.Invoke("MarkViewDirty"); }, window: true, "left footer");
         Assert.Null(Text(Part(t, "left footer"), "decoding", required: false, within: true));
     }
 

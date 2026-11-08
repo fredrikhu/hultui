@@ -118,6 +118,44 @@ public class ContextMenuAccessibilityTests
         Assert.False(ran);
     }
 
+    /// <summary>A disabled entry's node is not enabled, as the entry is drawn dimmed and runs nothing
+    /// (plan 17 round 8, step 2: every item node was made enabled); separators still are no item.</summary>
+    [Fact]
+    public void ADisabledItem_IsNotEnabled()
+    {
+        var tree = BuildLaidOut(Menu(
+            new ContextMenuItem { Label = "Cut", IsDisabled = true },
+            ContextMenuItem.Separator(),
+            new ContextMenuItem { Label = "Paste" }));
+
+        Assert.Equal([("Cut", false), ("Paste", true)], tree.Children.Select(c => (c.Name, c.IsEnabled)));
+    }
+
+    /// <summary>An entry enabled while the menu is open is patched by the in-place walk, its node made
+    /// again and its enabled state told, as a build's diff would tell it: no tree is built for it.</summary>
+    [Fact]
+    public void AnItemEnabledLater_IsPatchedInPlace_AsABuildsDiffTellsIt()
+    {
+        List<ContextMenuItem> items = [new() { Label = "Copy" }, new() { Label = "Paste", IsDisabled = true }];
+        var menu = new ContextMenuElement(items, new ContextMenuTheme(), closeMenu: () => { });
+        var tree = BuildLaidOut(menu);
+        Assert.False(tree.Children[1].IsEnabled);
+
+        items[1] = new() { Label = "Paste" };
+        var diff = AccessibilityTreeDiffer.Diff(tree, AccessibilityTreeBuilder.Build(menu));
+        var refresh = new AccessibilityTreeBuilder.LayoutRefresh();
+        Assert.True(AccessibilityTreeBuilder.TryRefreshInPlace(tree, menu, [], null, refresh), refresh.Mismatch);
+        refresh.Apply();
+
+        var told = Assert.Single(diff.PropertyChanged);
+        Assert.Equal(AccessibilityProperties.IsEnabled, told.PropertyName);
+        var change = Assert.Single(refresh.Changes);
+        Assert.Equal((AccessibilityProperties.IsEnabled, told.Node.ElementId), (change.PropertyName, change.Node.ElementId));
+        Assert.False(refresh.Structural);
+        Assert.Equal(1, Assert.Single(refresh.Remade).Index);
+        Assert.True(tree.Children[1].IsEnabled);
+    }
+
     // ── Plan 17, round 5: what a reader is told while the menu is open ──
 
     /// <summary>What the menu told, property by property.</summary>

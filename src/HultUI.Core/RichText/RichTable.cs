@@ -94,8 +94,12 @@ public static class RichTable
             while (end < blocks.Count && blocks[end].IsTableCell && !StartsTable(blocks, end)) end++;
 
             var rows = SplitRows(blocks, start, end);
-            int columns = rows.Max(r => r.Count);
-            bool normal = rows.All(r => r.Count == columns);
+            // Loops, not rows.All(r => r.Count == columns): that lambda captures `columns`, and
+            // the compiler made its closure on entry to this loop's body, once for every block.
+            int columns = 0;
+            foreach (var row in rows) columns = Math.Max(columns, row.Count);
+            bool normal = true;
+            foreach (var row in rows) normal &= row.Count == columns;
             for (int r = 0; normal && r < rows.Count; r++)
                 for (int c = 0; normal && c < columns; c++)
                     normal = rows[r][c].Row == r && rows[r][c].Column == c;

@@ -524,7 +524,8 @@ public static partial class AccessibilityTreeBuilder
             var (localTop, height) = source.ItemBounds(i) ?? (i * itemHeight, itemHeight);
             var box = new Rect(content.X, content.Y + localTop, content.Width, height);
             items[i] = MakeItemNode(slot, i, role, source.GetItemLabel(i), place.Unscrolled(box), source.ItemIsToggled(i),
-                source.ItemIsExpanded(i), source.IsItemSelected(i), !RectsIntersect(clip, place.OnScreen(box)));
+                source.ItemIsExpanded(i), source.IsItemSelected(i), source.ItemIsEnabled(i),
+                !RectsIntersect(clip, place.OnScreen(box)));
         }
         if (open.Element is { } row)
         {
@@ -547,7 +548,7 @@ public static partial class AccessibilityTreeBuilder
 
     /// <summary>The node of item <paramref name="index"/> of the list holding <paramref name="slot"/>.</summary>
     private static AccessibilityNode MakeItemNode(uint slot, int index, AccessibilityRole role, string? label, Rect unscrolled,
-        bool? toggled, bool? expanded, bool selected, bool offscreen) =>
+        bool? toggled, bool? expanded, bool selected, bool enabled, bool offscreen) =>
         new(VirtualItemId.ForSlot(slot, index),
             role,
             label,
@@ -555,7 +556,9 @@ public static partial class AccessibilityTreeBuilder
             unscrolled,
             isFocusable: false,
             isFocused: false,
-            isEnabled: true,
+            // A menu's disabled entry (IAccessibleItemSource.ItemIsEnabled): every item was published
+            // as enabled until plan 17 round 8, step 2, and a reader offered it as one to run.
+            isEnabled: enabled,
             isToggled: toggled,
             value: null,
             expanded: expanded,
@@ -804,6 +807,57 @@ public static partial class AccessibilityTreeBuilder
             return content;
 
         return element.Name;
+    }
+
+    /// <summary>
+    /// Whether <see cref="ResolveName"/> would name <paramref name="element"/> <paramref name="name"/>,
+    /// by the same rules, building nothing: a name from content is matched text by text. The in-place
+    /// walk asks it of every node on every refresh, and joining the texts of a button named by two or
+    /// more of them made a string per button and walk on an unchanged tree (plan 17 round 8, step 2).
+    /// </summary>
+    internal static bool NameIs(Element element, string? name)
+    {
+        if (element.AccessibleName is not null) return element.AccessibleName == name;
+        if (element is TextElement text && !string.IsNullOrEmpty(text.Content)) return text.Content == name;
+        if (element is CheckboxElement checkbox && !string.IsNullOrEmpty(checkbox.Label)) return checkbox.Label == name;
+        if (element is RadioButtonElement radio && !string.IsNullOrEmpty(radio.Label)) return radio.Label == name;
+        if (element is ToggleSwitchElement toggle && !string.IsNullOrEmpty(toggle.Label)) return toggle.Label == name;
+        if (IsNameFromContentRole(ResolveRole(element)))
+        {
+            int at = 0;
+            bool any = false;
+            if (!ContentTextMatches(element, name, ref at, ref any)) return false;
+            // A text matched, so there is a name, and all of it must be the texts.
+            if (any) return at == name!.Length;
+        }
+        return element.Name == name;
+    }
+
+    /// <summary>Matches the texts <see cref="AppendContentText"/> joins, one space between two, against
+    /// <paramref name="name"/> from <paramref name="at"/>; false at the first that differs.</summary>
+    private static bool ContentTextMatches(Element element, string? name, ref int at, ref bool any)
+    {
+        var children = element.Children;   // by index, as AppendContentText
+        for (int i = 0; i < children.Count; i++)
+        {
+            var child = children[i];
+            if (child is TextElement text && !string.IsNullOrEmpty(text.Content))
+            {
+                if (name is null) return false;
+                var rest = name.AsSpan(at);
+                if (any)
+                {
+                    if (rest.Length == 0 || rest[0] != ' ') return false;
+                    rest = rest[1..];
+                    at++;
+                }
+                if (!rest.StartsWith(text.Content.AsSpan(), StringComparison.Ordinal)) return false;
+                at += text.Content.Length;
+                any = true;
+            }
+            if (!ContentTextMatches(child, name, ref at, ref any)) return false;
+        }
+        return true;
     }
 
     /// <summary>

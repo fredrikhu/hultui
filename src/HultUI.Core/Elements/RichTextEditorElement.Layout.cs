@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
@@ -98,20 +99,22 @@ public partial class RichTextEditorElement
     }
 
     /// <summary>A block's marks as the spans its paragraph is shaped and drawn with: what each
-    /// mark looks like is decided here, from the theme.</summary>
-    private List<TextSpan>? SpansOf(RichBlock block, ResolvedInheritedStyle style)
+    /// mark looks like is decided here, from the theme. An exact array: a list of them was a
+    /// list and its array for every block laid out.</summary>
+    private TextSpan[]? SpansOf(RichBlock block, ResolvedInheritedStyle style)
     {
         if (block.IsPreformatted || block.Spans.Length == 0) return null;
-        var spans = new List<TextSpan>(block.Spans.Length);
-        foreach (var span in block.Spans)
+        var spans = new TextSpan[block.Spans.Length];
+        for (int i = 0; i < spans.Length; i++)
         {
+            var span = block.Spans[i];
             var m = span.Marks;
             bool code = m.Has(InlineStyle.Code);
             var decoration = TextDecoration.None;
             if (m.Has(InlineStyle.Underline) || m.Link is not null) decoration |= TextDecoration.Underline;
             if (m.Has(InlineStyle.Strike)) decoration |= TextDecoration.LineThrough;
 
-            spans.Add(new TextSpan(
+            spans[i] = new TextSpan(
                 span.Start, span.Length,
                 m.Link is not null ? _linkColor : m.Color ?? (m.Highlight is { } marker ? TextOn(marker) : default),
                 m.Highlight ?? (code ? _codeBackground : default),
@@ -119,7 +122,7 @@ public partial class RichTextEditorElement
                 m.Has(InlineStyle.Bold) ? FontWeight.Bold : null,
                 m.Has(InlineStyle.Italic) ? FontSlant.Italic : null,
                 m.Size ?? (code ? style.FontSize * _rt.CodeScale : null),
-                m.Family ?? (code ? _rt.CodeFamily : null)));
+                m.Family ?? (code ? _rt.CodeFamily : null));
         }
         return spans;
     }
@@ -136,13 +139,29 @@ public partial class RichTextEditorElement
 
     // ── Block layout ──
 
-    /// <summary>One block as laid out: where it sits and where its text starts.</summary>
+    /// <summary>One block as laid out: where it sits and where its text starts. What only a cell
+    /// or a picture has is kept apart, in an object made for those alone: most blocks are text,
+    /// and a layout holding it all was ~150 B a block (plan 17, round 8).</summary>
     private sealed class BlockLayout
     {
         public required RichBlock Block;
-        /// <summary>Null for a rule or a picture, which have no text.</summary>
+        /// <summary>Null for a rule or a picture, which have no text. Set again only on a cell,
+        /// which keeps its own <see cref="Style"/>.</summary>
         public required TextParagraph? Paragraph;
-        public required ResolvedInheritedStyle Style;
+
+        /// <summary>The style its text is laid out in: a text block's paragraph's, not kept a
+        /// second time. A rule, a picture and a cell (whose paragraph is set after its style)
+        /// keep their own.</summary>
+        public required ResolvedInheritedStyle Style
+        {
+            get => _extra is null ? Paragraph!.Style : _extra.Style;
+            init
+            {
+                if (Paragraph is { } p && p.Style == value) return;
+                Extra.Style = value;
+            }
+        }
+
         /// <summary>Top of the block, from the top of the document. A cell's is its row's, inside
         /// the grid line above it.</summary>
         public float Top;
@@ -158,21 +177,39 @@ public partial class RichTextEditorElement
         public int Number;
 
         /// <summary>The table a cell is in; null for any other block.</summary>
-        public TableLayout? Table;
-        public int CellRow, CellColumn;
+        public TableLayout? Table { get => _extra?.Table; set => Extra.Table = value; }
+        public int CellRow { get => _extra?.CellRow ?? 0; set => Extra.CellRow = value; }
+        public int CellColumn { get => _extra?.CellColumn ?? 0; set => Extra.CellColumn = value; }
         /// <summary>A cell's text on one line, unwrapped: its column's claim on the width.</summary>
-        public float NaturalWidth = -1;
+        public float NaturalWidth { get => _extra?.NaturalWidth ?? -1; set => Extra.NaturalWidth = value; }
 
         /// <summary>A picture's source as it was resolved, and where it is drawn: x from the
         /// content box's left edge, y from the block's top.</summary>
-        public IImageSource? Picture;
-        public bool PictureLoaded;
-        public Size PictureIntrinsic;
-        public Rect PictureRect;
+        public IImageSource? Picture { get => _extra?.Picture; init => Extra.Picture = value; }
+        public bool PictureLoaded { get => _extra?.PictureLoaded ?? false; init => Extra.PictureLoaded = value; }
+        public Size PictureIntrinsic { get => _extra?.PictureIntrinsic ?? default; init => Extra.PictureIntrinsic = value; }
+        public Rect PictureRect { get => _extra?.PictureRect ?? default; init => Extra.PictureRect = value; }
         /// <summary>The resolver answers differently now: lay the block out again.</summary>
         public bool Stale;
 
         public float Bottom => Top + Height;
+
+        private BlockExtra? _extra;
+        private BlockExtra Extra => _extra ??= new BlockExtra();
+
+        /// <summary>A cell's or a picture's own, and the style of a block with no paragraph to
+        /// take it from.</summary>
+        private sealed class BlockExtra
+        {
+            public ResolvedInheritedStyle Style;
+            public TableLayout? Table;
+            public int CellRow, CellColumn;
+            public float NaturalWidth = -1;
+            public IImageSource? Picture;
+            public bool PictureLoaded;
+            public Size PictureIntrinsic;
+            public Rect PictureRect;
+        }
     }
 
     /// <summary>A table's grid: the x of each vertical line and the y of each horizontal one,
@@ -189,7 +226,10 @@ public partial class RichTextEditorElement
         public required float Border;
     }
 
-    private BlockLayout[] _blocks = [];
+    // Every block's layout, in document order. One list, its blocks shifted in place when an edit
+    // adds or takes out blocks: a new array of them for each such edit was 8 B a block (40 KB for
+    // an Enter in 5,000 blocks).
+    private readonly List<BlockLayout> _blocks = [];
     private readonly List<BlockLayout> _pictures = [];
     private RichDocument? _laidOutDocument;
     private float _laidOutWidth = -1;
@@ -214,7 +254,7 @@ public partial class RichTextEditorElement
         if (sameFrame && ReferenceEquals(doc, _laidOutDocument)) return;
 
         _renderCtx = ctx;
-        if (sameFrame && _laidOutDocument is { } old && old.BlockCount == _blocks.Length)
+        if (sameFrame && _laidOutDocument is { } old && old.BlockCount == _blocks.Count)
             Relayout(ctx, old, doc, width, body);
         else
             LayoutAll(ctx, doc, width, body, keep: sameFrame);
@@ -230,15 +270,15 @@ public partial class RichTextEditorElement
     private void LayoutAll(IRenderContext ctx, RichDocument doc, float width, ResolvedInheritedStyle body, bool keep)
     {
         Dictionary<RichBlock, BlockLayout>? reuse = null;
-        if (keep && _blocks.Length > 0)
+        if (keep && _blocks.Count > 0)
         {
-            reuse = new Dictionary<RichBlock, BlockLayout>(_blocks.Length, ReferenceEqualityComparer.Instance);
+            reuse = new Dictionary<RichBlock, BlockLayout>(_blocks.Count, ReferenceEqualityComparer.Instance);
             foreach (var bl in _blocks)
                 if (!bl.Stale) reuse.TryAdd(bl.Block, bl);
         }
-        var blocks = new BlockLayout[doc.BlockCount];
-        LayOut(ctx, doc, blocks, 0, blocks.Length, width, body, reuse);
-        _blocks = blocks;
+        _blocks.Clear();
+        CollectionsMarshal.SetCount(_blocks, doc.BlockCount);
+        LayOut(ctx, doc, CollectionsMarshal.AsSpan(_blocks), 0, doc.BlockCount, width, body, reuse);
         Place(doc, 0);
     }
 
@@ -280,19 +320,22 @@ public partial class RichTextEditorElement
                 if (!_blocks[i].Stale) reuse.TryAdd(_blocks[i].Block, _blocks[i]);
         }
 
-        var blocks = b.Length == _blocks.Length ? _blocks : new BlockLayout[b.Length];
-        if (!ReferenceEquals(blocks, _blocks))
+        // The blocks after the run move to their new places (a span copy is safe where the two
+        // overlap); those before it stay where they are, and the run is laid out in between.
+        int oldCount = _blocks.Count;
+        if (b.Length != oldCount)
         {
-            Array.Copy(_blocks, 0, blocks, 0, start);
-            Array.Copy(_blocks, oldEnd, blocks, end, suffix);
+            if (b.Length > oldCount) CollectionsMarshal.SetCount(_blocks, b.Length);
+            var all = CollectionsMarshal.AsSpan(_blocks);
+            all.Slice(oldEnd, suffix).CopyTo(all.Slice(end, suffix));
+            if (b.Length < oldCount) CollectionsMarshal.SetCount(_blocks, b.Length);
         }
-        LayOut(ctx, doc, blocks, start, end, width, body, reuse);
-        _blocks = blocks;
+        LayOut(ctx, doc, CollectionsMarshal.AsSpan(_blocks), start, end, width, body, reuse);
         Place(doc, start);
     }
 
     // Lays out blocks [from, to) into `into`, whole tables at a time.
-    private void LayOut(IRenderContext ctx, RichDocument doc, BlockLayout[] into, int from, int to, float width,
+    private void LayOut(IRenderContext ctx, RichDocument doc, Span<BlockLayout> into, int from, int to, float width,
         ResolvedInheritedStyle body, Dictionary<RichBlock, BlockLayout>? reuse)
     {
         for (int i = from; i < to; i++)
@@ -312,7 +355,7 @@ public partial class RichTextEditorElement
     // numbered item's number, which counts from the start of its list.
     private void Place(RichDocument doc, int from)
     {
-        var blocks = _blocks;
+        var blocks = CollectionsMarshal.AsSpan(_blocks);
         Span<int> counters = stackalloc int[RichLists.Depths];
         for (int i = 0; i < blocks.Length; i++)
             blocks[i].Number = RichLists.Next(doc[i], counters);
@@ -469,7 +512,7 @@ public partial class RichTextEditorElement
     /// Junction's Markdown view shares it — and each row is as tall as its tallest cell.
     /// </summary>
     private TableLayout BuildTable(IRenderContext ctx, RichDocument doc, RichTableRange range, float width,
-        ResolvedInheritedStyle body, Dictionary<RichBlock, BlockLayout>? reuse, BlockLayout[] into)
+        ResolvedInheritedStyle body, Dictionary<RichBlock, BlockLayout>? reuse, Span<BlockLayout> into)
     {
         float border = _rt.TableBorderWidth;
         var pad = _rt.TableCellPadding;
@@ -580,9 +623,9 @@ public partial class RichTextEditorElement
     /// selected.</summary>
     private Rect CaretRect(RichPosition p, bool upstream)
     {
-        if (_blocks.Length == 0) return default;
+        if (_blocks.Count == 0) return default;
         p = _state.Document.Clamp(p);
-        var bl = _blocks[Math.Min(p.Block, _blocks.Length - 1)];
+        var bl = _blocks[Math.Min(p.Block, _blocks.Count - 1)];
         if (bl.Paragraph is not { } para)
         {
             if (bl.Block.Kind == BlockKind.Image)
@@ -598,7 +641,7 @@ public partial class RichTextEditorElement
     /// In a table, the last cell of the row there.</summary>
     private int BlockAt(float y)
     {
-        int lo = 0, hi = _blocks.Length - 1;
+        int lo = 0, hi = _blocks.Count - 1;
         while (lo < hi)
         {
             int mid = (lo + hi + 1) >> 1;
@@ -625,7 +668,7 @@ public partial class RichTextEditorElement
     /// </summary>
     private (RichPosition Position, bool Upstream) PositionAt(float x, float y)
     {
-        if (_blocks.Length == 0) return (default, false);
+        if (_blocks.Count == 0) return (default, false);
         int b = BlockAt(x, y);
         var bl = _blocks[b];
         if (bl.Paragraph is not { } para) return (new RichPosition(b, 0), false);
@@ -668,7 +711,7 @@ public partial class RichTextEditorElement
                 ? table.Range.IndexOf(row, bl.CellColumn)
                 : direction < 0 ? table.Range.Start - 1 : table.Range.End;
         }
-        if (next < 0 || next >= _blocks.Length) return null;
+        if (next < 0 || next >= _blocks.Count) return null;
         if (_blocks[next].Table is { } entered && !ReferenceEquals(entered, bl.Table))
             next = entered.Range.IndexOf(direction < 0 ? entered.Range.Rows - 1 : 0, ColumnAt(entered, x));
 

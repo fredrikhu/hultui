@@ -10,8 +10,9 @@ namespace HultUI.Platform.Accessibility.Linux;
 /// <see cref="AccessibilityNode.IsVirtualItemContainer"/>), which the tree has no node for. The list's
 /// object answers ChildCount with their number, and an item's object is made when a client first asks
 /// for it (the list's GetChildAtIndex, or the item's path) and kept while the list is served, so the
-/// same item answers from the same object. What an item answers is read when it is asked: its name
-/// and whether it is checked from the list (as UI Automation's on-demand items read them), whether it
+/// same item answers from the same object. What an item answers is read when it is asked: its name,
+/// whether it is checked and whether it is enabled from the list (as UI Automation's on-demand items
+/// read them), whether it
 /// is selected, how many items there are and where one is from the list's node
 /// (<see cref="AccessibilityNode.Served"/>), as their events told them. Until plan 17's round 5 the
 /// list's object said it had no children, and no item could be reached.
@@ -147,6 +148,14 @@ internal sealed class AtSpiServedItems
     {
         try { return List.Node?.ItemSource?.ItemIsToggled(index); }
         catch { return null; }
+    }
+
+    /// <summary>Whether the item can be used (the enabled and sensitive states), from the list, read
+    /// now: a menu's disabled entry is not.</summary>
+    public bool EnabledOf(int index)
+    {
+        try { return List.Node?.ItemSource?.ItemIsEnabled(index) ?? true; }
+        catch { return true; }
     }
 
     /// <summary>Selected, as the list's node carries it: what the selection's events told.</summary>
