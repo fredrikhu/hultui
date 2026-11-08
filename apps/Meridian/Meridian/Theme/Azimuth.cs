@@ -91,6 +91,12 @@ public static class Azimuth
     /// <summary>The sheet's standard chip/selection tint: the colour at 16%.</summary>
     public static Color Tint(Color c) => Alpha(c, 0.16);
 
+    /// <summary><paramref name="c"/> with its own alpha scaled by <paramref name="opacity"/> (0..1):
+    /// the colour as an element drawn at that opacity shows it. Unlike <see cref="Alpha"/>, a
+    /// colour that is already translucent (a <see cref="Tint"/>) stays relative to itself.</summary>
+    public static Color Fade(Color c, double opacity) =>
+        new(c.R, c.G, c.B, (byte)Math.Clamp(Math.Round(c.A * opacity), 0, 255));
+
     /// <summary>Hover tint where a surface change won't do: 12% accent.</summary>
     public static readonly Color HoverAccent = Alpha(Hex("#38C5D8"), 0.12);
 

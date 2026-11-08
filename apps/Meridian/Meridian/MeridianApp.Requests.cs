@@ -194,16 +194,23 @@ public partial class MeridianApp
 
     /// <summary>The method chip: mono caps on a 16% tint of the method colour,
     /// text always present. 8px at tree scale, 10 elsewhere; DELETE abbreviates
-    /// to DEL at tree scale (the sheet's rule).</summary>
-    internal static Element MethodChip(string? method, bool treeScale = false)
+    /// to DEL at tree scale (the sheet's rule). Below 1, <paramref name="opacity"/> fades the
+    /// chip's colours, tint and label both, so a faded row draws it without a layer.</summary>
+    internal static Element MethodChip(string? method, bool treeScale = false, float opacity = 1f)
     {
         string label = method ?? "?";
         if (treeScale && label == "DELETE") label = "DEL";
         var color = method != null ? Azimuth.MethodColor(method) : Azimuth.TextMuted;
+        var tint = Azimuth.Tint(color);
+        if (opacity < 1f)
+        {
+            tint = Azimuth.Fade(tint, opacity);
+            color = Azimuth.Fade(color, opacity);
+        }
         return Box.New()
             .Padding(new Thickness(2, 5, 2, 5))
             .CornerRadius(Azimuth.Radius1)
-            .Background(Azimuth.Tint(color))
+            .Background(tint)
             .FlexShrink(0)
             .Children(Ui.ChipLabel(label, treeScale ? 8f : 10f, color).FontWeight(FontWeight.SemiBold));
     }

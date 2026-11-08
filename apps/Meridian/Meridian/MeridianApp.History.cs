@@ -309,8 +309,8 @@ public partial class MeridianApp
         // VirtualList: history is the one surface that really does grow to
         // thousands of rows, and it is capped at ten thousand. Item rows: the list keeps a row
         // while its entry and its place are what they were, and draws the selection itself, under
-        // rows made unselected, so a key makes no row. A row older than today is drawn at 60 %
-        // opacity, its fill with it: the highlight under such a row is the fill at 60 %.
+        // rows made unselected, so a key makes no row. A row older than today draws its colours at
+        // 60 %, its fill with them: the highlight under such a row is the fill at 60 %.
         _historyListRows = rows;
         var list = VirtualListElement<HistoryRowItem>.New()
             .ItemHeight((int)Azimuth.RowRun)
@@ -384,7 +384,10 @@ public partial class MeridianApp
         return row;
     }
 
-    /// <summary>How opaque a row older than today is drawn — the mock's 60%.</summary>
+    /// <summary>How opaque a row older than today is drawn — the mock's 60%. The row fades each
+    /// colour it draws, not itself: <c>Opacity</c> on an element with children draws it offscreen,
+    /// as a layer of its own, so every visible row was a layer on every History frame (29 at
+    /// 1440×900, 20–32 % of a real frame on GL and Vulkan; plan 17 round 8 step 9).</summary>
     private const float OlderRowOpacity = 0.6f;
 
     /// <summary><paramref name="index"/> only names the row for automation —
@@ -404,26 +407,29 @@ public partial class MeridianApp
             .AccessibleRole(AccessibilityRole.Button)
             .AccessibleName(HistoryRowName(entry, now))
             .AutomationId($"hist-row-{Math.Max(index, 0)}");
-        // Older than today reads dimmer.
-        if (!today) row.Opacity(OlderRowOpacity);
+        // Older than today reads dimmer: every colour the row draws at 60 % (see OlderRowOpacity).
+        float opacity = today ? 1f : OlderRowOpacity;
 
-        row.AddChild(Ui.Mono(HistoryLog.TimeLabel(entry, now), 10.5f, Azimuth.TextMuted).Width(96).FlexShrink(0));
-        row.AddChild(MethodChip(entry.Method, treeScale: true));
-        row.AddChild(Ui.Mono(entry.Url, 11.5f, Azimuth.TextDim)
+        row.AddChild(Ui.Mono(HistoryLog.TimeLabel(entry, now), 10.5f, Faded(Azimuth.TextMuted, opacity)).Width(96).FlexShrink(0));
+        row.AddChild(MethodChip(entry.Method, treeScale: true, opacity));
+        row.AddChild(Ui.Mono(entry.Url, 11.5f, Faded(Azimuth.TextDim, opacity))
             .FlexGrow(1).TextOverflow(TextOverflow.Ellipsis).MaxLines(1));
-        row.AddChild(Ui.Mono(entry.Reached ? $"{glyph} {entry.StatusCode}" : $"! {entry.Detail}", 11f, color)
+        row.AddChild(Ui.Mono(entry.Reached ? $"{glyph} {entry.StatusCode}" : $"! {entry.Detail}", 11f, Faded(color, opacity))
             .FlexShrink(0));
-        row.AddChild(Ui.Mono($"{entry.DurationMs:0} ms", 10.5f, Azimuth.TextMuted).Width(60).FlexShrink(0));
-        row.AddChild(Ui.Mono(entry.EnvName ?? "—", 10f, Azimuth.TextFaint).Width(64).FlexShrink(0));
+        row.AddChild(Ui.Mono($"{entry.DurationMs:0} ms", 10.5f, Faded(Azimuth.TextMuted, opacity)).Width(60).FlexShrink(0));
+        row.AddChild(Ui.Mono(entry.EnvName ?? "—", 10f, Faded(Azimuth.TextFaint, opacity)).Width(64).FlexShrink(0));
 
         var captured = entry;
         row.OnClick(_ => { _historySelection = captured; MarkViewDirty(); });
         // The row's own hover tint, so a hovered row older than today stays at its 60 %: the list's
         // HoverHighlight would draw it whole. Over the highlight it is the highlight's colour again
         // (a row older than today hovered while selected reads a little lighter).
-        row.HoverBg(Azimuth.Raised, Color.Transparent);
+        row.HoverBg(Faded(Azimuth.Raised, opacity), Color.Transparent);
         return row;
     }
+
+    /// <summary>A History row's colour at the row's <paramref name="opacity"/>.</summary>
+    private static Color Faded(Color c, float opacity) => opacity < 1f ? Azimuth.Fade(c, opacity) : c;
 
     // ── The archived send: a part of its own ─────────────────────────────
     //

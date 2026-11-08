@@ -1,5 +1,6 @@
 using HultUI.Core.Accessibility;
 using HultUI.Core.Events;
+using HultUI.Core.Primitives;
 using HultUI.Headless;
 using Meridian.Core;
 using Meridian.Tests.Fixtures;
@@ -125,9 +126,9 @@ public class HistoryTests : IClassFixture<TestHttpServer>, IDisposable
     // ── The view ─────────────────────────────────────────────────────────
 
 
-    private void Hosted(Action<HeadlessSession, MeridianApp> body)
+    private void Hosted(Action<HeadlessSession, MeridianApp> body, HeadlessOptions? options = null)
     {
-        using var session = HeadlessSession.Create(1600, 900);
+        using var session = HeadlessSession.Create(1600, 900, options: options);
         MeridianApp? app = null;
         try
         {
@@ -396,6 +397,62 @@ public class HistoryTests : IClassFixture<TestHttpServer>, IDisposable
             Assert.Equal(11, app.FilteredHistory().Count);   // items/3 and items/30 … 39
             Assert.True(Contains(session, "11 of 42"), "the count should reflect the filter");
         });
+    }
+
+    /// <summary>A send older than today reads dimmer through its colours, not through its row: the
+    /// row has no <c>Opacity</c> (one on an element with children draws it offscreen, so every
+    /// visible row was a layer on every History frame: 29 at 1440×900, 20–32 % of a real frame,
+    /// plan 17 round 8 step 9), and everything it draws (its texts, the method chip's tint and
+    /// label, its hover tint) is today's row's colour at 60 % of its alpha.</summary>
+    [Fact]
+    public void AnOlderSendFadesItsColours_NotItsRow()
+    {
+        // The same send twice: two days old, then from today (newest first: today's is row 0).
+        var now = DateTimeOffset.Now;
+        HistoryLog.Append(_root, new HistoryEntry(now.AddDays(-2), "POST", "https://api.x/v1/same", 201, 12, "ci", null));
+        HistoryLog.Append(_root, new HistoryEntry(now.AddMinutes(-1), "POST", "https://api.x/v1/same", 201, 12, "ci", null));
+        static Color Fade(Color c) => new(c.R, c.G, c.B, (byte)Math.Round(c.A * 0.6));
+        Hosted((session, app) =>
+        {
+            GoTo(session, KeyCode.Digit4);
+            var list = session.Window.FindByAutomationId("history-rows")!.Element;
+            var todays = list.Children.Single(r => r.AutomationId == "hist-row-0");
+            var older = list.Children.Single(r => r.AutomationId == "hist-row-1");
+            Assert.True(HistoryLog.IsToday(app.FilteredHistory()[0], now));
+            Assert.False(HistoryLog.IsToday(app.FilteredHistory()[1], now));
+
+            var a = Descendants(todays).ToList();
+            var b = Descendants(older).ToList();
+            Assert.Equal(a.Count, b.Count);
+            Assert.All(b, e => Assert.Equal(1f, e.Opacity));
+            int texts = 0, fills = 0;
+            for (int i = 0; i < a.Count; i++)
+            {
+                Assert.Equal(a[i].GetType(), b[i].GetType());
+                if (a[i] is HultUI.Core.Elements.TextElement)
+                {
+                    Assert.NotNull(a[i].Inherited.TextColor);
+                    Assert.Equal(Fade(a[i].Inherited.TextColor!.Value), b[i].Inherited.TextColor);
+                    texts++;
+                }
+                else if (a[i] is HultUI.Core.Elements.BoxElement { BackgroundColor: { A: > 0 } fill })
+                {
+                    Assert.Equal(Fade(fill), ((HultUI.Core.Elements.BoxElement)b[i]).BackgroundColor);
+                    fills++;
+                }
+            }
+            Assert.Equal((6, 1), (texts, fills));   // five texts and the chip's label; the chip's tint
+
+            // Hovered, the older row's tint is at its 60 % too, and the frame draws no layer.
+            var log = session.Window.RenderLog;
+            log.Clear();
+            var box = older.WindowBorderBox;
+            session.Window.MoveMouse(box.X + box.Width / 2, box.Y + box.Height / 2);
+            session.PumpFrames(2);
+            Assert.Equal(Fade(Meridian.Theme.Azimuth.Raised), ((HultUI.Core.Elements.BoxElement)older).BackgroundColor);
+            Assert.Contains(log.Named("DrawText"), op => op.ToString().Contains("api.x/v1/same", StringComparison.Ordinal));
+            Assert.Empty(log.Named("PushOpacity"));
+        }, new HeadlessOptions { RecordDrawCalls = true });
     }
 
     /// <summary>A key in History builds the archived send beside the list and nothing else: the list
