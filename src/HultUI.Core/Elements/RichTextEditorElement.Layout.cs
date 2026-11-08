@@ -138,13 +138,29 @@ public partial class RichTextEditorElement
 
     // ── Block layout ──
 
-    /// <summary>One block as laid out: where it sits and where its text starts.</summary>
+    /// <summary>One block as laid out: where it sits and where its text starts. What only a cell
+    /// or a picture has is kept apart, in an object made for those alone: most blocks are text,
+    /// and a layout holding it all was ~150 B a block (plan 17, round 8).</summary>
     private sealed class BlockLayout
     {
         public required RichBlock Block;
-        /// <summary>Null for a rule or a picture, which have no text.</summary>
+        /// <summary>Null for a rule or a picture, which have no text. Set again only on a cell,
+        /// which keeps its own <see cref="Style"/>.</summary>
         public required TextParagraph? Paragraph;
-        public required ResolvedInheritedStyle Style;
+
+        /// <summary>The style its text is laid out in: a text block's paragraph's, not kept a
+        /// second time. A rule, a picture and a cell (whose paragraph is set after its style)
+        /// keep their own.</summary>
+        public required ResolvedInheritedStyle Style
+        {
+            get => _extra is null ? Paragraph!.Style : _extra.Style;
+            init
+            {
+                if (Paragraph is { } p && p.Style == value) return;
+                Extra.Style = value;
+            }
+        }
+
         /// <summary>Top of the block, from the top of the document. A cell's is its row's, inside
         /// the grid line above it.</summary>
         public float Top;
@@ -160,21 +176,39 @@ public partial class RichTextEditorElement
         public int Number;
 
         /// <summary>The table a cell is in; null for any other block.</summary>
-        public TableLayout? Table;
-        public int CellRow, CellColumn;
+        public TableLayout? Table { get => _extra?.Table; set => Extra.Table = value; }
+        public int CellRow { get => _extra?.CellRow ?? 0; set => Extra.CellRow = value; }
+        public int CellColumn { get => _extra?.CellColumn ?? 0; set => Extra.CellColumn = value; }
         /// <summary>A cell's text on one line, unwrapped: its column's claim on the width.</summary>
-        public float NaturalWidth = -1;
+        public float NaturalWidth { get => _extra?.NaturalWidth ?? -1; set => Extra.NaturalWidth = value; }
 
         /// <summary>A picture's source as it was resolved, and where it is drawn: x from the
         /// content box's left edge, y from the block's top.</summary>
-        public IImageSource? Picture;
-        public bool PictureLoaded;
-        public Size PictureIntrinsic;
-        public Rect PictureRect;
+        public IImageSource? Picture { get => _extra?.Picture; init => Extra.Picture = value; }
+        public bool PictureLoaded { get => _extra?.PictureLoaded ?? false; init => Extra.PictureLoaded = value; }
+        public Size PictureIntrinsic { get => _extra?.PictureIntrinsic ?? default; init => Extra.PictureIntrinsic = value; }
+        public Rect PictureRect { get => _extra?.PictureRect ?? default; init => Extra.PictureRect = value; }
         /// <summary>The resolver answers differently now: lay the block out again.</summary>
         public bool Stale;
 
         public float Bottom => Top + Height;
+
+        private BlockExtra? _extra;
+        private BlockExtra Extra => _extra ??= new BlockExtra();
+
+        /// <summary>A cell's or a picture's own, and the style of a block with no paragraph to
+        /// take it from.</summary>
+        private sealed class BlockExtra
+        {
+            public ResolvedInheritedStyle Style;
+            public TableLayout? Table;
+            public int CellRow, CellColumn;
+            public float NaturalWidth = -1;
+            public IImageSource? Picture;
+            public bool PictureLoaded;
+            public Size PictureIntrinsic;
+            public Rect PictureRect;
+        }
     }
 
     /// <summary>A table's grid: the x of each vertical line and the y of each horizontal one,
