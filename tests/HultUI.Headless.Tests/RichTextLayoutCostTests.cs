@@ -1,5 +1,6 @@
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
 using HultUI.Core.RichText;
 using HultUI.Testing;
 using Xunit;
@@ -41,7 +42,30 @@ public class RichTextLayoutCostTests
         // Each block: its paragraph (144 B) and the array of its one line (32 B: a one-line
         // layout's lines are not an array the paragraph can share); its layout, 72 B now that a
         // cell's and a picture's fields and a second copy of its style are not in it (152 B with
-        // them); its place in a new array of layouts (8 B).
-        Assert.Equal(144 + 32 + 72 + 8, perBlock);
+        // them). The list of the layouts is the one the editor keeps: a new array of them was
+        // 8 B a block more.
+        Assert.Equal(144 + 32 + 72, perBlock);
+    }
+
+    [Fact]
+    public void Enter_InALongDocument_CopiesTheDocumentsBlocksAndNoLayouts()
+    {
+        static long Bytes(int blocks)
+        {
+            using var session = Open(blocks, out var editor);
+            session.Window.Click(editor);
+            editor.State.Select(RichSelection.Caret(new RichPosition(blocks / 2, 2)));
+            session.PumpFrame();
+            return Allocations.Least(() =>
+            {
+                session.Window.PressKey(KeyCode.Enter);
+                session.PumpFrame();
+            });
+        }
+        long perBlock = (Bytes(2_000) - Bytes(1_000)) / 1_000;
+        // The new document's own array of its blocks (8 B a block: RichDocument.Blocks is
+        // immutable). The editor shifts its layouts in place: a new array of them for every edit
+        // that changed the number of blocks was 8 B a block more.
+        Assert.Equal(8, perBlock);
     }
 }

@@ -35,7 +35,7 @@ public partial class RichTextEditorElement
         if (_renderCtx is null) return false;
         if (!ReferenceEquals(_laidOutDocument, _state.Document))
             EnsureLayout(_renderCtx, _laidOutWidth >= 0 ? _laidOutWidth : Layout.AbsoluteContentBox.Width);
-        return _blocks.Length > 0;
+        return _blocks.Count > 0;
     }
 
     private Point ToDocument(Point screen)
