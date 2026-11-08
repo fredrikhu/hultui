@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 8
-- **Phase:** build — round 8, step 9 next (9 steps; steps 1–8 landed; question 12 open, not blocking). Step 2 resumed 2026-11-08 after the weekly
+- **Phase:** build — round 8, steps 1–9 done (step 9 measured only); **questions 12 and 13 asked** — step 9b (the faded-rows change) if 13 is yes, then the full suite. Step 2 resumed 2026-11-08 after the weekly
   reset (next reset 2026-11-15 03:00 UTC) on top of main's merge 3a15b5b1 (32 commits, mostly Meridian). Briefs and
   probes stay in session 64e7e0e2's old scratchpad (see Probe code). The survey's eight reports are
   `17-reports/r8-*.md` (common brief `brief-r8-survey.md`). The 90 % weekly pause applies to build steps (user,
@@ -458,6 +458,14 @@ Round 8 question (asked 2026-11-03). Recommendations in brackets.
     Vesper needs it from another assembly; `KeptElements.Live` users will too. Keep it public? [Yes: it is the fix for a
     real trap, and REACTIVITY.md now tells authors to use it. The other way is an internal method plus friend access
     for the app.]
+13. **paint-meridian-history-faded-row-layers** (step 9 measured, no commit): Meridian History fades older sends with
+    `row.Opacity(0.6)`, so every visible row is its own offscreen layer (29 a frame). Real window, 1440×900 at 150 %,
+    AOT, idle-gated, ABAB + BABA, medians with → without layers: GL wheel 0.923 → 0.627 ms a frame (−32 %; GPU 0.953 →
+    0.261, −73 %), Down −27 %; Vulkan 8-bit wheel 0.906 → 0.685 (−24 %; GPU −86 %), Down −25 %; F16 wheel 1.059 → 0.774
+    (−27 %; GPU 2.240 → 0.483, −78 %), Down −20 %. Fading the colours instead (60 % alpha on each text and the chip)
+    changes pixels: 8-bit 18–20k pixels by exactly 1/255 (glyph edges) and 2,478 inside the 32 method chips, max 8/255
+    (chip text over its tint); F16 49.7k at 1/255 and 19.7k in the chips, max 6/255. May History's faded rows change
+    those pixels? [Yes: invisible at 1–8/255, and a fifth to a third of every History frame.]
 
 Round 7 questions 1–4, round 6 questions 1–9 and round 5's question 5, all answered, are in the archive
 ([round 7](17-performance-team-ledger-archive.md#needs-the-user-round-7), [round 6](17-performance-team-ledger-archive.md#needs-the-user-round-6)).
@@ -710,3 +718,10 @@ From 2026-11-02 (round 7's survey); earlier entries are in the archive ([to 2026
   it too, make the panel a `Part` rebuilt when the view places it and what it shows changed, and move the list by ref;
   before skipping a build on a key, check the rows on screen are the rows the key walked; clamp a kept cursor at both
   ends after a filter shortens the rows.
+- 2026-11-08: round 8 step 9 measured (no commit): Meridian History's faded rows are 29 offscreen layers a frame and
+  cost 20–32 % of a real frame on GL, Vulkan 8-bit and F16 (GPU 70–86 %; ~8–10 µs CPU and 18–61 µs GPU a layer).
+  Fading the colours changes pixels by 1–8/255, so it is question 13 for the user. 8 guarded launches: guard 0,
+  foreground 0, no device-lost, no new `nvlddmkm` event. Guideline notes: `Opacity` on an element with children costs
+  one offscreen layer per element — for list rows fade the colours, not the row; a GL timestamp query issued after
+  SwapBuffers needs a `glFlush` (else it waits for the next frame's submit: ~49 ms read for ~0.9 ms). The headless
+  suite cannot pin GPU or flush costs, so no suite row.
