@@ -704,6 +704,18 @@ Brief and Thumbnails since step 7):
   view may have done that to all of them. `TryKeep` checks the window as well (`Element.IsHosted`).
 - `TryKeep(…, place: key)` is the row-place check for cards a virtual list makes in a frame: those
   skip `Begin` and are handed back only into a parent keyed so.
+- **A grid whose columns change passes no place.** A change of columns moves every place but the first
+  row's to another row, so the row-place check makes every card on screen again. Aperture's library
+  did that from round 8 (step 5) to round 9 (step 1): 249 elements and 110 text measures a change of
+  columns. Its rows now check what a card needs themselves (`CanTakeCard`): the card's row is still a
+  child of the list (after a change of columns, one the list is about to let go of), and a card under
+  the pointer or pressed goes only back into its own row, where a full build leaves it too; moved, it
+  would take its hover to where the pointer is not. Every card then moves to its new row untouched, the
+  pixels, rings and reader tree what a grid made from nothing shows. Headless, 600 films, 1440×900,
+  JIT: a change of columns each step 235.6 → 62.5 KB, 249 → 58 elements made (the view's build and
+  the rows), text measures 110 → 14.5; a drag over 40 widths 13.6 → 4.9 KB a step. The suite pins it:
+  `virtual/image grid across a change of columns, 600 cards, cards kept in their own row` against `…,
+  cards kept`.
 
 Aperture's Home is its first user (one helper per shelf, as one film can stand on two shelves). The
 perf suite pins it: `component/shelf walk Right, 5 shelves of 7 cards, every card made` against `…,

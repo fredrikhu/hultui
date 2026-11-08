@@ -369,13 +369,12 @@ public sealed partial class ApertureApp
 
     /// <summary>
     /// A row of posters. A row made again — a picture landed, a page filled it, the cursor moved
-    /// onto it with a build — hands back each card whose item, cursor and picture are what it was
-    /// made with (REACTIVITY.md, "Hand back the elements a key does not change"): the row is keyed by
-    /// its first item's place, so the list patches the row it replaces from it, and the cards by
-    /// their items, so the patch puts the live ones back untouched, with the pictures they show. A
-    /// card is handed back only into the row that replaces its own: a change of columns, which moves
-    /// places to other rows, makes them. A cursor key mostly makes no row at all
-    /// (MoveRingWithoutBuild).
+    /// onto it with a build, the columns changed — hands back each card whose item, cursor and
+    /// picture are what it was made with (REACTIVITY.md, "Hand back the elements a key does not
+    /// change"): the row is keyed by its first item's place, so the list patches the row it replaces
+    /// from it, and the cards by their items, so the patch puts the live ones back untouched, with the
+    /// pictures they show. A change of columns moves places to other rows, and the cards go with them
+    /// (<see cref="CanTakeCard"/>). A cursor key mostly makes no row at all (MoveRingWithoutBuild).
     /// </summary>
     private Element GridRow(IReadOnlyList<MediaItem> items, int start, int perRow)
     {
@@ -393,7 +392,7 @@ public sealed partial class ApertureApp
             // screen recent in the cache, and what shows the one that landed.
             var picture = ShownPicture(item, ImageKind.Primary, Halide.PosterWidth, Halide.PosterHeight);
             var state = new GridCardState(item, i, IsCursor(i), picture);
-            if (_gridCards.TryKeep(item.Id, state, out var kept, place: key))
+            if (_gridCards.TryKeep(item.Id, state, out var kept) && CanTakeCard(kept, key))
             {
                 row.AddChild(kept);
                 continue;
@@ -402,6 +401,19 @@ public sealed partial class ApertureApp
         }
         return row;
     }
+
+    /// <summary>
+    /// Whether the row keyed <paramref name="row"/> can take a card handed back: the card's own row
+    /// is still a child of the list — the row this one replaces, or, after a change of columns, one
+    /// the list is about to let go of; a row that scrolled away is out of the tree. A row on screen is
+    /// never asked for another's card: a row is made for the places it holds, and only a change of
+    /// columns, which makes every row again, moves a place to another row. A card under the pointer
+    /// or pressed goes only back into its own row, as a full build leaves it: moved, it would take its
+    /// hover and its press to where the pointer is not, as a row the list moves would.
+    /// </summary>
+    private bool CanTakeCard(Element card, string row) =>
+        card.Parent is { } own && ReferenceEquals(own.Parent, _gridList.Current)
+        && (string.Equals(own.Key, row, StringComparison.Ordinal) || !(card.IsHovered || card.IsPressed));
 
     /// <summary>
     /// Whether the place <paramref name="index"/> in the grid (or -1, nowhere) can take or lose the
@@ -442,9 +454,9 @@ public sealed partial class ApertureApp
     /// <summary>
     /// The cards the grid's rows were made with, by item, and the live element each is now. The rows
     /// are made in the frame, outside the app's builds, so there is no <c>Begin</c>: a card is handed
-    /// back while it is in the window and its row is the one being made again (the place). A card in
-    /// a row that scrolled away is out of the tree. All are let go when what every card shows changes
-    /// (<see cref="GridCardShape"/>); those out of the tree as more are made.
+    /// back while it is in the window and its row is still in the list (<see cref="CanTakeCard"/>).
+    /// A card in a row that scrolled away is out of the tree. All are let go when what every card
+    /// shows changes (<see cref="GridCardShape"/>); those out of the tree as more are made.
     /// </summary>
     private readonly KeptElements<GridCardState> _gridCards = new();
 
