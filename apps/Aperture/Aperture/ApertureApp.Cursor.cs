@@ -166,6 +166,8 @@ public sealed partial class ApertureApp
     /// (a watchlist title card is built). A card on another page of its shelf is not on screen: as
     /// after a build, it takes no ring and no keyboard. A key used to build all of Home, every
     /// shelf's cards with it.</item>
+    /// <item>Discover the same, while it is on screen as its latest build left it: a key used to build
+    /// every shelf, the LINQ that finds them and the walk's key with them.</item>
     /// <item>The library grid, while its latest build drew it. The grid is scrolled to the cursor as a
     /// build does it, and the rows that brings in are made in the frame, the ring on the cursor's. A
     /// key used to build the view and make the two rows it moved between, and never handed over the
@@ -184,6 +186,9 @@ public sealed partial class ApertureApp
         {
             case ApertureView.Home:
                 if (_homeBuild != Builds || !HomeCardAt(from, out left) || !HomeCardAt(_cursorIndex, out reached)) return false;
+                break;
+            case ApertureView.Discover:
+                if (_discoverBuild != Builds || !DiscoverCardAt(from, out left) || !DiscoverCardAt(_cursorIndex, out reached)) return false;
                 break;
             case ApertureView.Library:
                 if (!GridCardAt(from, out left) || !GridCardAt(_cursorIndex, out reached)) return false;

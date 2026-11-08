@@ -3,6 +3,7 @@ using Aperture.Core.Requests;
 using Aperture.Theme;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
+using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
@@ -26,6 +27,7 @@ public sealed partial class ApertureApp
     {
         EnsureDiscoverRows();
         EnsureMyRecentRequests();
+        _discoverShelves.Clear();
 
         var scroll = ScrollView.Vertical().FlexGrow(1).AutomationId("discover");
         var page = Flex.Column(gap: Halide.S6).Padding(new Thickness(Halide.S5));
@@ -77,19 +79,22 @@ public sealed partial class ApertureApp
         SetCursorList($"discover:{string.Join(',', rows.Select(r => r.Key))}:{walk.Count}", walk,
             VisibleCards(Halide.PosterWidth));
 
+        _discoverBuild = Builds;
         int cursorBase = 0;
         foreach (var row in rows)
         {
             int start = cursorBase;
+            var cards = DiscoverCardsOf(row.Key);
             if (row.Genres.Count > 0)
             {
                 var genres = row.Genres;
                 var kind = row.Kind == SliderKind.MovieGenres ? DiscoverKind.Movie : DiscoverKind.Tv;
                 var title = row.Title;
+                _discoverShelves.Add(new DiscoverShelf(start, genres, cards));
                 // The row holds every genre already, a few at a time; "See all" is all of
                 // them at once — only worth offering when they do not fit on one page.
                 page.AddChild(CardRow(row.Title, genres.Count,
-                    i => GenreCard(genres[i], cursorIndex: start + i), GenreCardWidth, "discover-row-" + row.Key,
+                    i => DiscoverShelfCard(cards, genres[i], start + i), GenreCardWidth, "discover-row-" + row.Key,
                     headingExtra: genres.Count > VisibleCards(GenreCardWidth)
                         ? SeeAllButton(title, $"discover-row-{row.Key}-see-all", () => Navigate(new Route(
                             ApertureView.DiscoverGenres, kind == DiscoverKind.Movie ? "movie" : "tv", title)))
@@ -102,9 +107,10 @@ public sealed partial class ApertureApp
                 var companies = row.Companies;
                 var studios = row.Kind == SliderKind.Studios;
                 var heading = row.Title;
+                _discoverShelves.Add(new DiscoverShelf(start, companies, cards));
                 // As with genres: the row has them all, a few at a time; "See all" is all at once.
                 page.AddChild(CardRow(row.Title, companies.Count,
-                    i => CompanyCard(companies[i], cursorIndex: start + i), CompanyCardWidth, "discover-row-" + row.Key,
+                    i => DiscoverShelfCard(cards, companies[i], start + i), CompanyCardWidth, "discover-row-" + row.Key,
                     headingExtra: companies.Count > VisibleCards(CompanyCardWidth)
                         ? SeeAllButton(heading, $"discover-row-{row.Key}-see-all", () => Navigate(new Route(
                             ApertureView.DiscoverCompanies, studios ? "movie" : "tv", heading)))
@@ -113,8 +119,9 @@ public sealed partial class ApertureApp
                 continue;
             }
             var items = row.Items;
+            _discoverShelves.Add(new DiscoverShelf(start, items, cards));
             page.AddChild(CardRow(row.Title, items.Count,
-                i => DiscoverCard(items[i], Halide.PosterWidth, cursorIndex: start + i),
+                i => DiscoverShelfCard(cards, items[i], start + i),
                 Halide.PosterWidth, "discover-row-" + row.Key,
                 headingExtra: row.Kind == SliderKind.RecentRequests ? SeeAllRequestsLink(row)
                     : row.CanSeeAll ? SeeAllLink(row) : null));
@@ -125,6 +132,94 @@ public sealed partial class ApertureApp
         return scroll;
     }
 
+    /// <summary>
+    /// A Discover shelf's card, handed back as it is when what it shows is what it was made with in the
+    /// build before, as Home's are (ApertureApp.Home.cs): its title, genre or studio, its place in the
+    /// walk, the cursor on it, the picture it draws, the caption setting and the scale its glyphs are
+    /// cut at. The picture is asked for either way, which keeps one on screen recent in the cache and is
+    /// how a card finds the one that landed.
+    /// </summary>
+    private Element DiscoverShelfCard(KeptElements<DiscoverCardState> cards, object entry, int index)
+    {
+        var picture = entry switch
+        {
+            DiscoverGenre genre => ShownRequestArtwork(RequestImages.Backdrop, genre.BackdropPath, GenreCardWidth),
+            DiscoverCompany company => ShownRequestArtwork(RequestImages.Logo, company.LogoPath, CompanyCardWidth),
+            DiscoverItem item => ShownRequestArtwork(RequestImages.Poster, item.PosterPath, Halide.PosterWidth),
+            _ => null,
+        };
+        var state = new DiscoverCardState(entry, index, IsCursor(index), picture, _settings.Data.ShowCardTitles, Ui.DisplayScale);
+        string key = DiscoverCardKey(entry);
+        if (cards.TryKeep(key, state, out var kept)) return kept;
+        return cards.Made(key, state, entry switch
+        {
+            DiscoverGenre genre => GenreCard(genre, index, picture),
+            DiscoverCompany company => CompanyCard(company, index, picture),
+            _ => DiscoverCard((DiscoverItem)entry, Halide.PosterWidth, index, picture),
+        });
+    }
+
+    /// <summary>What a card on a Discover shelf shows; see <see cref="DiscoverShelfCard"/>. The entry is a
+    /// record, compared by value.</summary>
+    private readonly record struct DiscoverCardState(object Entry, int Index, bool Cursor,
+        HultUI.Core.Rendering.IImageSource? Picture, bool Titles, float Scale);
+
+    /// <summary>A card's key on its shelf, which holds one kind of card.</summary>
+    private static string DiscoverCardKey(object entry) => entry switch
+    {
+        DiscoverItem item => item.Key,
+        DiscoverGenre genre => genre.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        DiscoverCompany company => company.Key,
+        _ => "",
+    };
+
+    /// <summary>Each shelf's cards, by the shelf's key: a title can be on two shelves.</summary>
+    private readonly Dictionary<string, KeptElements<DiscoverCardState>> _discoverCards = new(StringComparer.Ordinal);
+
+    private KeptElements<DiscoverCardState> DiscoverCardsOf(string rowKey)
+    {
+        if (!_discoverCards.TryGetValue(rowKey, out var cards)) _discoverCards[rowKey] = cards = new();
+        cards.Begin(Builds);
+        return cards;
+    }
+
+    /// <summary>A shelf as Discover's latest build drew it: where it starts in the walk, its titles,
+    /// genres or studios, and its cards.</summary>
+    private readonly record struct DiscoverShelf(int Start, IReadOnlyList<object> Entries,
+        KeptElements<DiscoverCardState> Cards);
+
+    private readonly List<DiscoverShelf> _discoverShelves = [];
+
+    /// <summary>The app build that last built Discover's shelves, or -1.</summary>
+    private int _discoverBuild = -1;
+
+    /// <summary>
+    /// Whether the place <paramref name="index"/> in Discover's walk (or -1, nowhere) is a card on a
+    /// shelf that Discover's latest build drew, and its live element: null when it is on another page
+    /// of its shelf, so not on screen.
+    /// </summary>
+    private bool DiscoverCardAt(int index, out Element? card)
+    {
+        card = null;
+        if (index < 0) return true;
+        foreach (var shelf in _discoverShelves)
+        {
+            if (index < shelf.Start || index >= shelf.Start + shelf.Entries.Count) continue;
+            card = shelf.Cards.Live(DiscoverCardKey(shelf.Entries[index - shelf.Start]));
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>A request server's picture as a card draws it: the image once it is in, or null for the
+    /// placeholder.</summary>
+    private HultUI.Core.Rendering.IImageSource? ShownRequestArtwork(
+        Func<string?, int, string?, Uri?> sized, string? path, float layoutWidth)
+    {
+        var (image, status) = RequestArtwork(sized, path, layoutWidth);
+        return status == PosterCache.Status.Ready && image is { IsLoaded: true } ? image : null;
+    }
+
     private const float GenreCardWidth = 240f;
 
     /// <summary>
@@ -132,7 +227,11 @@ public sealed partial class ApertureApp
     /// server's own web page draws them the same way, and a row of backdrops reads as
     /// "places to go" rather than as more titles.
     /// </summary>
-    private Element GenreCard(DiscoverGenre genre, int cursorIndex = -1)
+    private Element GenreCard(DiscoverGenre genre, int cursorIndex = -1) =>
+        GenreCard(genre, cursorIndex, ShownRequestArtwork(RequestImages.Backdrop, genre.BackdropPath, GenreCardWidth));
+
+    /// <summary>A genre card drawing <paramref name="picture"/>; see <see cref="ShownRequestArtwork"/>.</summary>
+    private BoxElement GenreCard(DiscoverGenre genre, int cursorIndex, HultUI.Core.Rendering.IImageSource? picture)
     {
         float height = MathF.Round(GenreCardWidth * 9 / 16);
         var card = Box.New().Width(GenreCardWidth).Height(height).FlexShrink(0)
@@ -148,18 +247,17 @@ public sealed partial class ApertureApp
         if (cursorIndex >= 0)
         {
             TrackCursor(card, cursorIndex);
-            if (IsCursor(cursorIndex)) card.Outline(2f, Halide.Accent, offset: 3f);
+            if (IsCursor(cursorIndex)) card.Outline = CursorRing;
         }
 
-        var (image, status) = RequestArtwork(RequestImages.Backdrop, genre.BackdropPath, GenreCardWidth);
-        if (status == PosterCache.Status.Ready && image is { IsLoaded: true })
+        if (picture is not null)
         {
-            var picture = Image.New(image);
-            picture.Fit = ImageFit.Cover;
-            picture.Position.Type = PositionType.Absolute;
-            picture.Position.Left = Dimension.Px(0);
-            picture.Position.Top = Dimension.Px(0);
-            card.AddChild(picture.Size(Dimension.Percent(100), Dimension.Percent(100)));
+            var image = Image.New(picture);
+            image.Fit = ImageFit.Cover;
+            image.Position.Type = PositionType.Absolute;
+            image.Position.Left = Dimension.Px(0);
+            image.Position.Top = Dimension.Px(0);
+            card.AddChild(image.Size(Dimension.Percent(100), Dimension.Percent(100)));
         }
         var scrim = Box.New().Size(Dimension.Percent(100), Dimension.Percent(100)).Background(Halide.Alpha(Halide.Bg, 0.55));
         scrim.IsHitTestVisible = false;
@@ -171,7 +269,8 @@ public sealed partial class ApertureApp
             .MaxLines(2).TextOverflow(TextOverflow.Ellipsis));
 
         card.OnClick(_ => OpenGenre(genre));
-        return card.HoverBg(Halide.Raised);
+        card.HoverBg(Halide.Raised);
+        return card;
     }
 
     /// <summary>"See all", at the end of a row's heading: the row's first page is all a row
@@ -255,7 +354,11 @@ public sealed partial class ApertureApp
     /// draws them, and a row of logos reads as "places to go" as the genre backdrops do. The
     /// name stands in for a logo that has not loaded, or will not.
     /// </summary>
-    private Element CompanyCard(DiscoverCompany company, int cursorIndex = -1)
+    private Element CompanyCard(DiscoverCompany company, int cursorIndex = -1) =>
+        CompanyCard(company, cursorIndex, ShownRequestArtwork(RequestImages.Logo, company.LogoPath, CompanyCardWidth));
+
+    /// <summary>A studio or network card drawing <paramref name="picture"/>; see <see cref="ShownRequestArtwork"/>.</summary>
+    private BoxElement CompanyCard(DiscoverCompany company, int cursorIndex, HultUI.Core.Rendering.IImageSource? picture)
     {
         var kind = company.Kind == DiscoverKind.Movie ? "films" : "series";
         var card = Box.New().Width(CompanyCardWidth).Height(128).FlexShrink(0)
@@ -271,13 +374,12 @@ public sealed partial class ApertureApp
         if (cursorIndex >= 0)
         {
             TrackCursor(card, cursorIndex);
-            if (IsCursor(cursorIndex)) card.Outline(2f, Halide.Accent, offset: 3f);
+            if (IsCursor(cursorIndex)) card.Outline = CursorRing;
         }
 
-        var (image, status) = RequestArtwork(RequestImages.Logo, company.LogoPath, CompanyCardWidth);
-        if (status == PosterCache.Status.Ready && image is { IsLoaded: true })
+        if (picture is not null)
         {
-            var logo = Image.New(image);
+            var logo = Image.New(picture);
             logo.Fit = ImageFit.Contain;
             card.AddChild(logo.Size(Dimension.Percent(100), Dimension.Percent(100)));
         }
@@ -288,7 +390,8 @@ public sealed partial class ApertureApp
         }
 
         card.OnClick(_ => OpenCompany(company));
-        return card.HoverBg(Halide.Raised);
+        card.HoverBg(Halide.Raised);
+        return card;
     }
 
     /// <summary>Every studio or network at once, as the row's logo cards. The lists are
@@ -512,7 +615,11 @@ public sealed partial class ApertureApp
     /// Deliberately the library card's twin — same size, same caption — so a shelf of
     /// things you could have reads like a shelf of things you do.
     /// </summary>
-    internal Element DiscoverCard(DiscoverItem item, float width = Halide.PosterWidth, int cursorIndex = -1)
+    internal Element DiscoverCard(DiscoverItem item, float width = Halide.PosterWidth, int cursorIndex = -1) =>
+        DiscoverCard(item, width, cursorIndex, ShownRequestArtwork(RequestImages.Poster, item.PosterPath, width));
+
+    /// <summary>A discovery poster drawing <paramref name="picture"/>; see <see cref="ShownRequestArtwork"/>.</summary>
+    private BoxElement DiscoverCard(DiscoverItem item, float width, int cursorIndex, HultUI.Core.Rendering.IImageSource? picture)
     {
         float height = MathF.Round(width * 1.5f);
         var card = Flex.Column(gap: Halide.S2)
@@ -528,7 +635,7 @@ public sealed partial class ApertureApp
         if (cursorIndex >= 0)
         {
             TrackCursor(card, cursorIndex);
-            if (IsCursor(cursorIndex)) card.Outline(2f, Halide.Accent, offset: 3f);
+            if (IsCursor(cursorIndex)) card.Outline = CursorRing;
         }
 
         var art = Box.New()
@@ -538,12 +645,11 @@ public sealed partial class ApertureApp
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center);
         art.Box.OverflowX = Overflow.Hidden;
         art.Box.OverflowY = Overflow.Hidden;
-        var (image, status) = RequestArtwork(RequestImages.Poster, item.PosterPath, width);
-        if (status == PosterCache.Status.Ready && image is { IsLoaded: true })
+        if (picture is not null)
         {
-            var picture = Image.New(image);
-            picture.Fit = ImageFit.Cover;
-            art.AddChild(picture.Size(Dimension.Percent(100), Dimension.Percent(100)));
+            var image = Image.New(picture);
+            image.Fit = ImageFit.Cover;
+            art.AddChild(image.Size(Dimension.Percent(100), Dimension.Percent(100)));
         }
         else
         {
