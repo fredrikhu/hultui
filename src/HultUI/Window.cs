@@ -2276,8 +2276,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 // extending the selection on a plain hover after the button is released.
                 if (!button.IsDown && _groupDragToken is not null)
                 {
-                    foreach (var label in CollectGroupLabels(_groupDragToken))
-                        label.EndDrag();
+                    ForEachGroupLabel(_root, _groupDragToken, static label => label.EndDrag());
                     _groupDragToken = null;
                 }
 
@@ -2846,28 +2845,24 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// from the group, so this is all that is needed after the selection moves — and the
     /// labels that are not realized need nothing, which is the point.
     /// </summary>
-    private void RepaintGroup(TextSelectionGroup group)
-    {
-        foreach (var label in CollectGroupLabels(group))
-            label.MarkPaintDirty();
-    }
+    private void RepaintGroup(TextSelectionGroup group) =>
+        ForEachGroupLabel(_root, group, static label => label.MarkPaintDirty());
 
-    /// <summary>Every realized label of <paramref name="token"/>. Order does not matter: each
-    /// label knows its own model index, so the highlight no longer depends on tree order.</summary>
-    private List<TextElement> CollectGroupLabels(TextSelectionGroup token)
+    /// <summary>
+    /// Calls <paramref name="visit"/> on every realized label of <paramref name="token"/> under
+    /// <paramref name="el"/>. Order does not matter: each label knows its own model index, so the
+    /// highlight no longer depends on tree order. Visited in place rather than collected: a drag
+    /// walks the group on every move and, held past its view's edge, every frame, and a list of
+    /// the labels was 1.1 KB a move over Vesper's viewer (plan 17, round 9). The callers pass
+    /// static lambdas, which are made once.
+    /// </summary>
+    private static void ForEachGroupLabel(Element? el, TextSelectionGroup token, Action<TextElement> visit)
     {
-        var result = new List<TextElement>();
-        Collect(_root);
-        return result;
-
-        void Collect(Element? el)
-        {
-            if (el is null) return;
-            if (el is TextElement te && te.Selectable && ReferenceEquals(te.SelectionGroup, token))
-                result.Add(te);
-            var children = el.Children;   // by index: foreach over the interface boxes an enumerator
-            for (int i = 0; i < children.Count; i++) Collect(children[i]);
-        }
+        if (el is null) return;
+        if (el is TextElement te && te.Selectable && ReferenceEquals(te.SelectionGroup, token))
+            visit(te);
+        var children = el.Children;   // by index: foreach over the interface boxes an enumerator
+        for (int i = 0; i < children.Count; i++) ForEachGroupLabel(children[i], token, visit);
     }
 
     /// <summary>The group label at <paramref name="pos"/>. Uses <see cref="HitTester"/> so it

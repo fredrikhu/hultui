@@ -315,6 +315,77 @@ public class GroupSelectionDragTests
         Assert.EndsWith("number 2", group.SelectedText);
     }
 
+    // ── What a drag selects, to the character ─────────────────────────────
+    // The window visits the group's labels on every move of a drag, and every frame of one held
+    // past the view's edge (plan 17, round 9 changed how). These pin what the drag ends up with.
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ADragAcrossLabels_SelectsAndCopiesExactlyTheSpan(bool upward)
+    {
+        using var session = HeadlessSession.Create(width: 200, height: 200);
+        var (scroll, rows, group) = Build(session);
+        float x0 = rows[0].Layout.AbsoluteContentBox.X;
+        var top = (x: x0 + CharX(rows[1], "line "), y: ScreenMidY(scroll, rows[1]));      // row 1, offset 5
+        var bottom = (x: x0 + CharX(rows[4], "line num"), y: ScreenMidY(scroll, rows[4])); // row 4, offset 8
+        var (from, to) = upward ? (bottom, top) : (top, bottom);
+
+        // Over every row between, back over one, then to the far end.
+        session.Window.MouseDown(from.x, from.y);
+        session.Window.MoveMouse(40f, ScreenMidY(scroll, rows[2]));
+        session.Window.MoveMouse(40f, ScreenMidY(scroll, rows[3]));
+        session.PumpFrame();
+        session.Window.MoveMouse(40f, ScreenMidY(scroll, rows[2]));
+        session.Window.MoveMouse(to.x, to.y);
+        session.PumpFrame();
+        session.Window.MouseUp(to.x, to.y);
+
+        const string span = "number 1\nline number 2\nline number 3\nline num";
+        Assert.Equal(span, group.SelectedText);
+        Assert.Equal(upward ? 1 : 4, group.FocusIndex);
+        Assert.Equal((1, 5), group.Start);
+        for (int i = 0; i < rows.Length; i++)
+            Assert.Equal(i is >= 1 and <= 4, rows[i].HasSelection);
+        session.Window.KeyDown(KeyCode.C, KeyModifiers.Ctrl);
+        Assert.Equal(span, session.Window.Clipboard.GetText());
+    }
+
+    // Held below the view, the drag scrolls it at a speed set by how far past the edge the
+    // pointer is, until the view's end, and selects to the line at its bottom edge each frame.
+    [Fact]
+    public void ADragHeldBelowTheView_ScrollsToItsEnd_AndSelectsToTheLastLine()
+    {
+        using var session = HeadlessSession.Create(width: 200, height: 200);
+        var (scroll, rows, group) = Build(session);
+        float x0 = rows[0].Layout.AbsoluteContentBox.X;
+
+        session.Window.MouseDown(x0 + CharX(rows[1], "line "), ScreenMidY(scroll, rows[1]));
+        session.PumpFrame();
+        session.Window.MoveMouse(x0 + CharX(rows[9], "line num"), 150f);   // 50 px below the 100-tall view
+        var offsets = new List<float>();
+        while (offsets.Count < 60 && session.PumpFrame())
+        {
+            offsets.Add(scroll.ScrollOffsetY);
+            // Each frame the selection reaches the line now at the view's bottom edge.
+            Assert.Equal((int)((scroll.ScrollOffsetY + 99f) / RowH), group.FocusIndex);
+        }
+
+        // 450 px/s (50 px past the edge at the gain of 9) over frames of 16 or 17 whole ms: 7.2
+        // or 7.65 px a frame, and the 100 px to the end in 14 frames. Stalled there, the drag
+        // asks for no more.
+        Assert.Equal([7.2f, 14.85f, 22.5f], offsets.Take(3).Select(o => MathF.Round(o, 2)));
+        Assert.Equal(13, offsets.IndexOf(100f));
+        Assert.Equal(100f, scroll.ScrollOffsetY);
+        Assert.False(session.PumpFrame(), "a drag stalled at the view's end asks for no frames");
+        Assert.Equal("number 1\nline number 2\nline number 3\nline number 4\nline number 5\n"
+            + "line number 6\nline number 7\nline number 8\nline num", group.SelectedText);
+        Assert.Equal(9, group.FocusIndex);
+        session.Window.MouseUp(40f, 150f);
+        Assert.True(rows[9].HasSelection);
+        Assert.False(rows[0].HasSelection);
+    }
+
     // Width of a prefix in the label's own font, so a test can aim at a character offset.
     private static float CharX(TextElement row, string prefix) =>
         HultUI.Core.Rendering.TextMeasure.MeasureWidth(prefix, row.ResolvedInherited);
