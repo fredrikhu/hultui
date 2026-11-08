@@ -482,6 +482,34 @@ public class HistoryTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    /// <summary>Up after a search that left fewer rows than the cursor had walked selects the last
+    /// row; it threw (the cursor, one above where it stood, was still past the rows).</summary>
+    [Fact]
+    public void UpAfterASearchThatShortenedTheRows_SelectsTheLastRow()
+    {
+        var start = DateTimeOffset.Now.AddMinutes(-90);
+        for (int i = 0; i < 40; i++)
+            HistoryLog.Append(_root, new HistoryEntry(start.AddMinutes(i), "GET",
+                $"https://api.x/v1/items/{i}", 200, 10 + i, null, null));
+        Hosted((session, app) =>
+        {
+            GoTo(session, KeyCode.Digit4);
+            for (int i = 0; i < 30; i++) GoTo(session, KeyCode.Down);
+            session.Window.FindByAutomationId("history-search")!.Click();
+            session.Window.TypeText("items/1");   // items/1 and items/10 … 19: eleven rows
+            session.PumpFrames(2);
+            session.Window.Window.ClearFocus();
+            session.PumpFrames(2);
+            Assert.Equal(11, app.FilteredHistory().Count);
+
+            GoTo(session, KeyCode.Up);
+            Assert.EndsWith("/items/1 200", Walk(session.Window.AccessibilityTree).Single(n => n.IsSelected == true).Name);
+            Assert.Contains("https://api.x/v1/items/1", ArchiveTexts(session));
+            GoTo(session, KeyCode.Up);
+            Assert.EndsWith("/items/10 200", Walk(session.Window.AccessibilityTree).Single(n => n.IsSelected == true).Name);
+        });
+    }
+
     private static List<string> ArchiveTexts(HeadlessSession session) =>
         Descendants(session.Window.FindByAutomationId("history-archive")!.Element)
             .OfType<HultUI.Core.Elements.TextElement>().Select(t => t.Content).ToList();

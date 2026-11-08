@@ -104,7 +104,8 @@ public partial class MeridianApp
                 RevealHistoryCursor();
                 return true;
             case KeyCode.Up when rows.Count > 0:
-                SelectHistoryCursor(rows, Math.Max(_historyCursor - 1, 0));
+                // Clamped at the end too: a search or a filter can leave the cursor past the rows.
+                SelectHistoryCursor(rows, Math.Clamp(_historyCursor - 1, 0, rows.Count - 1));
                 RevealHistoryCursor();
                 return true;
             case KeyCode.Enter when _historyCursor >= 0 && _historyCursor < rows.Count:
