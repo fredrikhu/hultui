@@ -237,6 +237,26 @@ public class RichTextEditorTests
         Assert.True(rig.Editor.ScrollOffsetY > 100, $"scrolled to {rig.Editor.ScrollOffsetY}");
     }
 
+    [Fact]
+    public void ACaretTallerThanTheView_ShowsItsTop_KeyAfterKey()
+    {
+        // A view shorter than a line. Brought in by its bottom, the caret had its top above the
+        // view on the next key, which brought it in by its top, and so on: the text jumped a
+        // line's height up and down with every key.
+        var doc = new RichDocument(Enumerable.Range(0, 20).Select(i => P($"line {i}")));
+        using var rig = Build(doc, height: 12, configure: e => e.Padding(0));
+        rig.State.Select(RichSelection.Caret(new RichPosition(8, 1)));
+        rig.Session.PumpFrame();
+        for (int i = 0; i < 4; i++)
+        {
+            rig.Window.PressKey(KeyCode.Right);
+            rig.Session.PumpFrame();
+            var caret = rig.Editor.CaretBounds(rig.State.Selection.Focus);
+            Assert.True(caret.Height > rig.Content.Height, $"a caret {caret.Height} tall in a view {rig.Content.Height} tall");
+            Assert.Equal(rig.Content.Y, caret.Y, 0.01f);
+        }
+    }
+
     // ── Tab ──
 
     [Fact]

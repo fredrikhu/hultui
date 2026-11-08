@@ -362,7 +362,9 @@ public partial class RichTextEditorElement
     private void ScrollCaretIntoView(float viewport)
     {
         var caret = CaretRect(_state.Selection.Focus, _upstream);
-        if (caret.Y < _scrollY) _scrollY = caret.Y;
+        // A caret taller than the view shows its top. Brought in by its bottom, it had its top
+        // above the view on the next pass, which brought it in by its top: it jumped every pass.
+        if (caret.Y < _scrollY || caret.Height >= viewport) _scrollY = caret.Y;
         else if (caret.Bottom > _scrollY + viewport) _scrollY = caret.Bottom - viewport;
     }
 
