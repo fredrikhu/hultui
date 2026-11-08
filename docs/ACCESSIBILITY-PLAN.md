@@ -326,7 +326,18 @@ then Orca on Linux:
 If a reader says nothing on a move (it follows focus only), note which one, and whether it speaks
 when the item under the pointer changes: the fix would be to give the selected item the focus
 (UIA's focus event, AT-SPI `focused`), a change of what a reader is told that needs the user's
-approval. A disabled item is read as enabled today (its node's state is not set), a gap of its own.
+approval.
+
+A disabled item is read as disabled (plan 17 round 8, step 2; the user approved it on 2026-11-03,
+question 11). Until then every item node was made enabled, so a reader offered a dimmed "Paste" as
+one to run. `IAccessibleItemSource.ItemIsEnabled(index)` (a default member: true, so no source has
+to change) says whether an item can be used, and `ContextMenuElement` answers it from
+`ContextMenuItem.IsDisabled`: a context menu's, a menu bar's menu's and a dropdown's popup's entry
+alike, though a dropdown's values are never disabled today. The item node carries it, so UIA's
+IsEnabled is false and AT-SPI leaves out the enabled and sensitive states; an item served on demand
+reads it from its list, as its label is read. A change of it is patched by the in-place walk, as a
+change of an item's label, toggle or selection is, and told as UIA's IsEnabled property change and
+AT-SPI's `state-changed:enabled` and `state-changed:sensitive`.
 
 A dialog with nothing focusable in it takes the focus itself (round 6, step 5): the panel, not a
 Tab stop, so a reader is told the focus is on the dialog, named by its title. It was on the scrim,

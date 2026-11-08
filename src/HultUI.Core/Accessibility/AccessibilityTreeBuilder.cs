@@ -524,7 +524,8 @@ public static partial class AccessibilityTreeBuilder
             var (localTop, height) = source.ItemBounds(i) ?? (i * itemHeight, itemHeight);
             var box = new Rect(content.X, content.Y + localTop, content.Width, height);
             items[i] = MakeItemNode(slot, i, role, source.GetItemLabel(i), place.Unscrolled(box), source.ItemIsToggled(i),
-                source.ItemIsExpanded(i), source.IsItemSelected(i), !RectsIntersect(clip, place.OnScreen(box)));
+                source.ItemIsExpanded(i), source.IsItemSelected(i), source.ItemIsEnabled(i),
+                !RectsIntersect(clip, place.OnScreen(box)));
         }
         if (open.Element is { } row)
         {
@@ -547,7 +548,7 @@ public static partial class AccessibilityTreeBuilder
 
     /// <summary>The node of item <paramref name="index"/> of the list holding <paramref name="slot"/>.</summary>
     private static AccessibilityNode MakeItemNode(uint slot, int index, AccessibilityRole role, string? label, Rect unscrolled,
-        bool? toggled, bool? expanded, bool selected, bool offscreen) =>
+        bool? toggled, bool? expanded, bool selected, bool enabled, bool offscreen) =>
         new(VirtualItemId.ForSlot(slot, index),
             role,
             label,
@@ -555,7 +556,9 @@ public static partial class AccessibilityTreeBuilder
             unscrolled,
             isFocusable: false,
             isFocused: false,
-            isEnabled: true,
+            // A menu's disabled entry (IAccessibleItemSource.ItemIsEnabled): every item was published
+            // as enabled until plan 17 round 8, step 2, and a reader offered it as one to run.
+            isEnabled: enabled,
             isToggled: toggled,
             value: null,
             expanded: expanded,

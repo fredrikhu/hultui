@@ -81,6 +81,14 @@ public interface IAccessibleItemSource
     bool? ItemIsToggled(int index) => null;
 
     /// <summary>
+    /// Whether the item at <paramref name="index"/> can be used now: false for one shown dimmed
+    /// that does nothing when activated, as a menu's entry with nothing to act on. True (the
+    /// default) for a source whose items have no such state. What UIA's IsEnabled and AT-SPI's
+    /// enabled and sensitive states report for the item, so a reader says "unavailable" or "dimmed".
+    /// </summary>
+    bool ItemIsEnabled(int index) => true;
+
+    /// <summary>
     /// Whether the item at <paramref name="index"/> opens something that is open now (a menu
     /// item's submenu), or <c>null</c> (the default) when the item opens nothing. What UIA's
     /// ExpandCollapse pattern reports for the item.

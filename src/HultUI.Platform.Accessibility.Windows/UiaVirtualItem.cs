@@ -78,7 +78,7 @@ internal sealed class UiaVirtualItem(WindowsAccessibilityBridge bridge, ElementI
             UiaInterop.UIA_NamePropertyId when bridge.GetVirtualItemLabel(listId, index) is { } name
                 => UiaVariant.FromBStr(name),
             UiaInterop.UIA_ControlTypePropertyId => UiaVariant.FromInt(bridge.ServedItemControlType(listId)),
-            UiaInterop.UIA_IsEnabledPropertyId => UiaVariant.FromBool(true),
+            UiaInterop.UIA_IsEnabledPropertyId => UiaVariant.FromBool(bridge.GetVirtualItemEnabled(listId, index)),
             UiaInterop.UIA_IsOffscreenPropertyId => UiaVariant.FromBool(bridge.GetVirtualItemOffscreen(listId, index)),
             // As an item node's wrapper answers it, from the state its events told.
             UiaInterop.UIA_SelectionItemIsSelectedPropertyId => UiaVariant.FromBool(bridge.GetServedItemSelected(listId, index)),

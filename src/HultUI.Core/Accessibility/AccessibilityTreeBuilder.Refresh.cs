@@ -569,12 +569,14 @@ public static partial class AccessibilityTreeBuilder
             bool? toggled = source.ItemIsToggled(i);
             bool? expanded = source.ItemIsExpanded(i);
             bool selected = source.IsItemSelected(i);
+            bool enabled = source.ItemIsEnabled(i);
             // Only an item with nothing under it, in either tree, is one node to make again.
             bool holdsRow = i == open.Item || node.Children.Count != 0;
-            if (node.Name != label || node.IsToggled != toggled || node.Expanded != expanded || node.IsSelected != selected)
+            if (node.Name != label || node.IsToggled != toggled || node.Expanded != expanded || node.IsSelected != selected
+                || node.IsEnabled != enabled)
             {
                 if (holdsRow) return refresh.Fail("a node with children changed");
-                var made = MakeItemNode(slot, i, role, label, unscrolled, toggled, expanded, selected, offscreen);
+                var made = MakeItemNode(slot, i, role, label, unscrolled, toggled, expanded, selected, enabled, offscreen);
                 AccessibilityTreeDiffer.CompareNodes(refresh.Changes, node, made, prevAbove, currAbove);
                 refresh.Remade.Add((listNode, i, made));
                 continue;
@@ -598,7 +600,8 @@ public static partial class AccessibilityTreeBuilder
             var (localTop, height) = source.ItemBounds(i) ?? (i * itemHeight, itemHeight);
             var box = new Rect(content.X, content.Y + localTop, content.Width, height);
             var item = MakeItemNode(slot, i, role, source.GetItemLabel(i), place.Unscrolled(box), source.ItemIsToggled(i),
-                source.ItemIsExpanded(i), source.IsItemSelected(i), !RectsIntersect(clip, place.OnScreen(box)));
+                source.ItemIsExpanded(i), source.IsItemSelected(i), source.ItemIsEnabled(i),
+                !RectsIntersect(clip, place.OnScreen(box)));
             if (i == open.Item)
             {
                 int row = pending.Count;

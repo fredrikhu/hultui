@@ -138,9 +138,10 @@ internal sealed class AtSpiAccessible
     }
     private bool _focused;
 
+    /// <summary>An item served on demand reads it from its list (<see cref="AtSpiServedItems.EnabledOf"/>).</summary>
     public bool Enabled
     {
-        get => Volatile.Read(ref _enabled);
+        get => ItemOf is { } items ? items.EnabledOf(ItemIndex) : Volatile.Read(ref _enabled);
         set => Volatile.Write(ref _enabled, value);
     }
     private bool _enabled = true;

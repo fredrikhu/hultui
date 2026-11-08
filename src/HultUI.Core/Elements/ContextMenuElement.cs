@@ -135,6 +135,14 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
         return item < 0 ? null : _items[item].IsChecked;
     }
 
+    // A disabled entry is dimmed and runs nothing (ActivateItem below): a reader is told so. Every
+    // entry was published as enabled until plan 17 round 8, step 2.
+    bool Accessibility.IAccessibleItemSource.ItemIsEnabled(int index)
+    {
+        int item = ItemIndex(index);
+        return item < 0 || !_items[item].IsDisabled;
+    }
+
     bool? Accessibility.IAccessibleItemSource.ItemIsExpanded(int index)
     {
         int item = ItemIndex(index);
