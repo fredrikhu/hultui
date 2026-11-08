@@ -732,3 +732,5 @@ From 2026-11-02 (round 7's survey); earlier entries are in the archive ([to 2026
   layers → 0 a frame, a frame −21…−33 % on GL, Vulkan 8-bit and F16 (GPU −74…−86 %). Pixels change by 1–8/255 as
   approved, except the hovered older row's chip label, up to 13/255 in 55 pixels (told to the user). Every build step
   is done; Phase → full suite. Usage ~11 % weekly.
+- 2026-11-08: the user saw before/after crops of the hovered older row (the GET chip's label 47,93,138 → 51,101,150 at
+  worst; 68 pixels over 8/255) and kept step 9b as it is.
