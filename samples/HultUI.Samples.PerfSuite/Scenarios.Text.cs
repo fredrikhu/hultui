@@ -350,9 +350,34 @@ static partial class Scenarios
                     Check = step => scrolled(step) ?? viewer.Drawn(),
                 };
             });
+
+        yield return new Scenario("text/wheel over a 2,000-line plain label in a ScrollView",
+            $"Wheel 3 notches in the middle of a {PlainLabelLines:N0}-line JSON body shown as one plain label in a scroll view, as Meridian's Request tab shows the body it sent: a screenful of its lines is on screen",
+            ctx =>
+            {
+                var body = Text.New(Ui.JsonResponse(ctx.Rng, PlainLabelLines)).FontFamily(FontFamilies.Monospace)
+                    .FontSize(11.5f).TextColor(Ui.Muted).FlexShrink(0);
+                var view = ScrollView.New().FlexGrow(1).Children(Flex.Column().FlexShrink(0).Padding(8).Children(body));
+                ctx.Mount(view);
+                view.ScrollOffsetY = float.MaxValue;
+                view.ScrollOffsetY /= 2;
+                ctx.Pump();
+                var box = view.WindowBorderBox;
+                var scrolled = ScrolledTo(() => view.ScrollOffsetY);
+                return new Op
+                {
+                    Run = step => ctx.Window.Wheel(box.X + box.Width / 2, box.Y + box.Height / 2, 0, WheelDirection(step) * 3),
+                    // A plain label keeps no paragraph: it is drawn through DrawText.
+                    Check = step => scrolled(step)
+                        ?? (HultUI.Headless.LayoutProbe.DrawnLines(body).Count != 0 ? "the label drew as selectable text"
+                            : body.Layout.AbsoluteBorderBox.Height < 20 * box.Height ? $"the label is only {body.Layout.AbsoluteBorderBox.Height:0} px tall"
+                            : null),
+                };
+            });
     }
 
     private const int ViewerLines = 400;
+    private const int PlainLabelLines = 2_000;
 
     // Emoji of the Basic Multilingual Plane that ask for emoji presentation on their own:
     // ⭐ ✅ ☕ ⚡ ❌ ⌛ ⛔ ⚽. Nothing in them sends a label to the BiDi path.
