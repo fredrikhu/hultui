@@ -1479,7 +1479,9 @@ at all: set `SelectedIndex` on the mounted list through its ref, and scroll the 
 index. A Down in Junction's palette made 32 elements and allocated 32 KB a key with its rows drawing
 the choice, each in a box of its own; 14 elements and 15 KB with the list drawing it and the card
 built again; and 3.9 elements (the rows scrolled in) and 3.7 KB with neither (plan 17, round 7,
-step 5).
+step 5). When one panel beside the list shows the selection too, make that panel a part with a
+signal of its own and write the signal with the move: only the panel builds (REACTIVITY.md, "Keep
+what a key does not change in a child component"; Meridian's History, 52.1 → 21.6 KB a key).
 
 **Rows held at the top.** `.StickyRows((item, index) => item.IsHeader)` says which rows are a
 section's header in one list of rows. The list keeps the last sticky row at or above the first row

@@ -538,6 +538,20 @@ counts: a URL character compares the two with what the last build showed, and bu
 neither moved and the request was already unsaved (round 7, step 10: 66.6 → 4.0 KB a character
 and −17 % time on NativeAOT, −27 % on JIT; a query typed out −83 %).
 
+**A selection a list and one panel show needs neither the window nor the view.** History's list
+draws its own selection, and the only other thing that shows it is the archived send beside the
+list; still a key built the whole window for that panel. The panel is now a part with a signal of
+its own (round 8, step 8): a key sets the mounted list's `SelectedIndex` and highlight through its
+ref (ELEMENTS.md, "the list is then the only thing that shows the selection") and writes the part's
+signal, so the panel builds alone. The view's build places it as Junction's composer is placed,
+comparing the send it shows, the day its time reads against and the full-rebuild revision, so a
+search character or a filter that leaves the selection where it was builds no panel. The key falls
+back to a build of the view when there is no panel yet, or when the list on screen was made from
+other rows than the key walked (a send logged with no build since). Headless, 300 sends, 1440×900,
+a key and three frames, JIT: Down 52.1 → 21.6 KB (−58 %; NativeAOT 51.4 → 21.6), no window build; a
+search character with a send selected 56.6 → 40.9 KB (−28 %; NativeAOT 61.1 → 45.5, −26 %). The
+key's time does not move: its frames are most of it.
+
 Vesper keeps its title bar, rail and command line, and each pane's tab strip, path trail, column
 header and footer, this way (round 5, step 12), and adds four lessons:
 
