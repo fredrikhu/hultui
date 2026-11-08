@@ -265,16 +265,33 @@ public sealed partial class ApertureApp
     /// <summary>The display scale artwork is fetched for; see <see cref="ArtworkScaleFor"/>.</summary>
     private float _artworkScale = 1f;
 
-    /// <summary>Pictures that have landed in the cache, counted on the UI thread: a card made
-    /// before its picture landed shows a placeholder (or an old size's stand-in) until it is
-    /// made again, so the grid's kept rows go with this. (A kept card does not ask the cache
+    /// <summary>Builds for pictures that landed in the cache, counted on the UI thread: a card
+    /// made before its picture landed shows a placeholder (or an old size's stand-in) until it
+    /// is made again, so the grid's kept rows go with this. (A kept card does not ask the cache
     /// again, so it does not refresh its picture's place in the LRU; the cache only drops a
-    /// picture when one lands, every landing makes the rows on screen again, and the cap is
-    /// many screenfuls, so a picture on screen is never the oldest.)</summary>
+    /// picture when one lands, every landing is followed by a build that makes the rows on
+    /// screen again, and the cap is many screenfuls, so a picture on screen is never the
+    /// oldest.)</summary>
     private int _artworkLanded;
+
+    /// <summary>1 while a build for landed pictures is posted to the UI thread and has not run.
+    /// The cache calls back once per picture, on the thread pool, and a whole screenful lands
+    /// within a few frames: a build posted for each made Home's 36 posters 41 builds, up to 10 of
+    /// them in one frame. Posted one at a time, the pictures that land before the build runs
+    /// share it. The build clears the flag before it reads the cache, so a picture that lands
+    /// while it runs posts the next one.</summary>
+    private int _artworkPosted;
+
+    /// <summary>The cache's callback, on the thread pool.</summary>
+    private void PostArtworkLanded()
+    {
+        if (Interlocked.Exchange(ref _artworkPosted, 1) == 0)
+            HultUI.Application.InvokeOnMainThread(OnArtworkLanded);
+    }
 
     private void OnArtworkLanded()
     {
+        Interlocked.Exchange(ref _artworkPosted, 0);
         _artworkLanded++;
         RerenderView();
         // A trickplay sheet is artwork too, and the card over the scrubber is the player's, which

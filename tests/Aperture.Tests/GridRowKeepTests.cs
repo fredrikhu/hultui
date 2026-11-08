@@ -296,6 +296,36 @@ public class GridRowKeepTests
         }, artwork: artwork);
     }
 
+    /// <summary>Pictures that land together build the view once: the cache calls back once per
+    /// picture, and the app posts one build at a time, which shows every picture landed before
+    /// it ran. A build posted per picture made a screenful of posters a screenful of builds in
+    /// one frame (46 builds for the grid's 42 posters, up to 13 in a frame).</summary>
+    [Fact]
+    public void PicturesThatLandTogether_BuildTheViewOnce()
+    {
+        var artwork = new GatedArtwork(open: false);
+        Host((session, app, _, _) =>
+        {
+            var cards = Rows(session).SelectMany(Cards).ToList();
+            Assert.True(cards.Count > 20, $"only {cards.Count} cards on screen");
+            Assert.DoesNotContain(cards, HasPicture);
+
+            // Every picture lands while the UI thread is not pumping, so their callbacks wait
+            // for the same drain. The pause after the last one leaves its callback time to post.
+            artwork.Open();
+            var sw = Stopwatch.StartNew();
+            while (app.Posters.PendingCount > 0 && sw.Elapsed < TimeSpan.FromSeconds(10)) Thread.Sleep(5);
+            Assert.Equal(0, app.Posters.PendingCount);
+            Thread.Sleep(200);
+
+            int builds = app.Builds;
+            session.PumpFrame();
+
+            Assert.Equal(1, app.Builds - builds);
+            Assert.All(Rows(session).SelectMany(Cards), card => Assert.True(HasPicture(card), $"{card.AutomationId} has no picture"));
+        }, artwork: artwork);
+    }
+
     /// <summary>A toggle changes the copy of one film: only its card is made.</summary>
     [Fact]
     public void MarkingACardWatched_MakesItsCardAlone()
