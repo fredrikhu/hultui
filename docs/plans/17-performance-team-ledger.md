@@ -5,10 +5,10 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 9
-- **Phase:** build — round 9, step 1 next (the survey merged 2026-11-08; 14 steps in "Round 9 build order"). Build
+- **Phase:** build — round 9, step 2 next (step 1 landed 2026-11-08; 16 steps in "Round 9 build order"). Build
   agents run one at a time in this worktree; their briefs go in session c484f5ac's scratchpad as `brief-r9b<N>.md`.
-  Open for the user: questions 17 (step 12 waits for it), 18 and 19, and question 10 (`TokenizeDiff` public), the live
-  screen-reader check of menus and disabled menu items (ACCESSIBILITY-PLAN.md). Weekly usage 17 % after the survey
+  Questions 14–19 answered. Open for the user: question 10 (`TokenizeDiff` public), the live screen-reader check of
+  menus and disabled menu items (ACCESSIBILITY-PLAN.md), and the hand checks step 16 needs. Weekly usage 17 % after the survey
   (reset 2026-11-15 03:00 UTC; extra usage off); the 90 % pause applies to build steps (user, 2026-10-27). Older rounds are in [the archive](17-performance-team-ledger-archive.md)
   (search it, don't read it whole). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a
   pre-push hook refuses pushes built on the old history). To resume in a fresh context, run in this worktree: `/loop
@@ -153,8 +153,8 @@ lines its brief quotes (`r9-k` = `17-reports/r9-k-<area>.md`).
 12. **webview-hidden-keeps-interop** (3; r9-3 Candidate 3) — a hidden web view releases its D3D11 interop texture, its
     `WGL_NV_DX_interop2` registration (VisualCapture.cs:343-398) and the sink's GL texture in a frame with the context
     current, and restarts the capture when shown: hidden 90.7 → 68.4 MB GPU (−25 %; Vulkan 146.5 → 124.2), ~−29 MB with
-    the sink's texture. Medium. **(user: question 17)** — if Meridian disposes the preview after ~60 s hidden, this
-    covers only that minute; the step does the app's dispose as its own commit.
+    the sink's texture. Medium. Question 17 answered: Meridian also disposes a preview hidden for about 60 s (all 45.4
+    MB and the 6 `msedgewebview2` processes), as its own commit; the release covers that minute.
 13. **Faded images and rows in Vesper** (2; r9-2 Candidates 2 and 3) — measure first, as round 8 step 9: Vesper's cut
     icons (`icon.Opacity = 0.45f`, CommanderApp.Pane.cs:991, Views.cs:666) are 26.6 (Detail) / 61 (Brief) / 29.5
     (Thumbnails, whole tiles, Views.cs:419) layers a frame, Sync's Equal rows (Sync.cs:313, `row.Opacity = 0.55f`)
@@ -165,6 +165,23 @@ lines its brief quotes (`r9-k` = `17-reports/r9-k-<area>.md`).
     ~5 KB a line (JSON 1,993 lines 9,863 KB a call, XML 5.05 KB a line) and 14.6 KB a line for HTML (3,641 lines 53,182
     KB; one line 2,680 KB); a pretty toggle on that HTML is 56,145 KB all threads, 34 gen-0 and 4 gen-1 GCs over 20
     toggles. Keep a change only if the bytes are in HultUI.Syntax (not TextMateSharp) and fall ≥ 10 %; else record it.
+15. **Reader focus in Vesper and Meridian** (7; r9-7 Needs the user; **question 19: in the app**) — not perf. (a)
+    vesper-reader-focus: Vesper's focused pane is a Box with no role or name, so `IsSemantic` drops it
+    (AccessibilityTreeBuilder.cs:717; CommanderApp.Pane.cs:177) and every focus move tells a reader "focus on nothing";
+    give the pane a role and name, and the cursor's Brief cell or thumbnail tile `AccessibleSelected` set with the
+    `Restyle` call (a patch, 0 trees a key). (b) meridian-focus-lost (from Waiting): the new-request prompt's Escape
+    puts focus back on "New request"; the Request tab's "reveal" keeps focus where a keyboard user expects it; History
+    walks with an element focused. Check 0 trees a key and the audit. Small, app.
+16. **frame-snap-flyout-bottom-entry-high-dpi** (3, correctness; found by the user's Snap Layouts hover, 2026-11-08) —
+    Meridian on the 4K at 150 %: the flyout doesn't open when the pointer enters the maximize button from below until
+    about a third of the way in (restored and maximized); every other direction works, and the 1440p at 100 % works
+    in every direction. Vesper on the 4K does not have it. Meridian's `WM_NCHITTEST` reports `HTMAXBUTTON` over the
+    whole 69×60 px button (rows 548–608, probe `r9-snap\hitcol.ps1`), and its window has no `WS_SYSMENU`; a dead
+    bottom third fits a DWM caption region of 41 px (the 100 % value of `UpdateCaptionHeight`, Window.cs:4328) on a
+    61 px button. Find why Meridian's region (or what the shell trusts) is short where Vesper's isn't, and fix it in the
+    framework if it is the framework's. Synthetic cursor moves (`SetCursorPos`, `SendInput`) did not open the flyout on
+    a window that isn't active (probes `r9-snap\flyout.ps1`, `diff3.ps1`): the user allows moving the mouse; ask the
+    user to activate the window or to hover by hand. Small–medium.
 
 ### Waiting
 
@@ -187,9 +204,11 @@ Re-ranked by the next survey.
   parts), Meridian at 25 requests 654.5 KB; view-only on the hide −36…−37 %. A one-off event.
 - **apps-meridian-response-drag-build** (6/8, low; r9-8 Candidate 4) — each pointer move on the response pane's edge
   (8f7f8fa5) rebuilds the response Part: 39.5 KB a move, 86 % build; −86 % with the width set through a ref. A drag.
-- **meridian-focus-lost** (7, reader and keyboard bug, not perf; r9-7 Needs the user) — the new-request prompt's Escape
-  leaves focus nowhere (not back on "New request"); the Request tab's "reveal" click moves focus to a button that then
-  goes; History walks with nothing focused (`FocusedElement` null). App fixes.
+- **uitests-workareas-before-dpi-aware** (tests, small; found running f9bceb6d's checks) — the placement UiTests read
+  `WorkAreas()` before SDL makes the process per-monitor aware, so the first Borderless pass sees the 4K at 96 dpi
+  (2560×1392 at 0,0); and every UiTests window is made on the 96 dpi monitor first (`scale=1` at creation), so the
+  high-dpi cases are brief moves. Set the test thread per-monitor aware first (`SetThreadDpiAwarenessContext(-4)`, as
+  the scratch check `r9-4k\ZzR9FourKVisibleTests.cs` did).
 - **findbar-countonscreen-foreach** (4, nit) — `CountOnScreen` loops `foreach` over `bar.Children` (32 B on AOT, 0.4 %
   of an 8 KB Enter); fix when FindBar is next touched.
 - **terminal-noop-scrollback-wheel** + **terminal-row-strings-by-content** (2/Terminal, low) — a no-op notch draws a
@@ -220,7 +239,7 @@ Down walking a shelf's pages is a UX note), junction-leads' old-side state conve
 
 ## Landed
 
-Round 8 (the round round 9's survey reviews; it moves to the archive at round 10's survey). Rounds 1–7 are in
+Rounds 8 and 9 (round 8 is the round round 9's survey reviewed; it moves to the archive at round 10's survey). Rounds 1–7 are in
 [the archive](17-performance-team-ledger-archive.md#landed-rounds-14) ([round 5](17-performance-team-ledger-archive.md#landed-round-5),
 [round 6](17-performance-team-ledger-archive.md#landed-round-6), [round 7](17-performance-team-ledger-archive.md#landed-round-7)).
 
@@ -245,6 +264,7 @@ Round 8 (the round round 9's survey reviews; it moves to the archive at round 10
 | 8 | 62a67257 | apps-meridian-history-archive-part | The archived-send panel is its own `Part` (own group and signal); Down/Up/Enter set the live list's `SelectedIndex` and highlight through its ref and write the part's signal; the view rebuilds the panel only when the send, the day or `_partRevision.Peek()` changed; falls back to a view build when no panel is on screen or the list was built from other rows or another day. Headless, 300 sends, idle-gated, base 43f7e106, JIT ×2 / AOT pair: History Down/Up 52.05 → 21.64 KB (−58 %; AOT 51.44 → 21.55), with the reader 53.12 → 22.71 (−57 %); search keeping the selection 56.55 → 40.88 (−28 %; AOT −26 %), dropping it 63.66 → 47.98 (−25 %); nothing selected 47.97 flat. A key: window builds 1 → 0, plus 1 panel build; time flat (render dominates). Send, find, method pick flat. 31 scenes with the reader identical to the base and a full build (pixels, tree, focus, texts, list index/scroll/highlight); restore by `r` and the button act on the selected send. No public API. |
 | 8 | 66e31aa7 | meridian-history-up-after-search (bug) | Pre-existing crash on 43f7e106: walk 30 rows down, search down to 20 rows, press Up → `ArgumentOutOfRangeException`. Up clamps the cursor to the rows. HistoryTests `UpAfterASearchThatShortenedTheRows_SelectsTheLastRow`, `AKeyBuildsTheArchiveAlone_AndASearchCharacterBuildsNoArchive`; PartTests check History keys as panel-only builds; 9 reverse edits fail; Meridian 586 + 4 skipped, Headless 1,459 pass. REACTIVITY.md, ELEMENTS.md. |
 | 8 | 307ee07c | paint-meridian-history-faded-row-layers | Approved (question 13; pixels). An older send's row has no `Opacity`: its 5 texts, the method chip's tint and label and its hover tint draw at 60 % of their alpha (`Azimuth.Fade`, `MethodChip` `opacity`); app code only. Real window 1440×900 at 150 %, AOT, idle-gated, one ABAB launch a renderer, medians: layers 29.0–29.4 → 0 a frame; GL wheel 0.912 → 0.614 ms (GPU 0.954 → 0.261), Down 0.971 → 0.702 (GPU 0.902 → 0.269); Vulkan 8-bit wheel 0.898 → 0.681 (GPU 0.607 → 0.084), Down 1.063 → 0.829 (GPU 0.573 → 0.091); F16 wheel 1.063 → 0.816 (GPU 2.208 → 0.494), Down 1.105 → 0.893 (GPU 2.19 → 0.498, one segment; another process on the GPU in the second). Pixels: at rest 18–50k at 1/255, chips ≤ 8/255 (8-bit) / 6 (F16); hovered older row ≤ 5/255 outside its chip, **its chip label up to 13/255 in 55 pixels** (label over tint and faded hover fill); selected ≤ 1/255, selected and hovered ≤ 3, chips ≤ 10; hover and selection fills unchanged. Headless bytes flat JIT + AOT, CPU per step −57…−73 %; 25 History scenes' tree, focus, texts identical. `AnOlderSendFadesItsColours_NotItsRow` (3 reverse edits fail); Meridian 587 + 4 skipped, Headless 1,459 (goldens) pass. 4 guarded launches, 0 foreground takes, no `nvlddmkm` events. |
+| 9 | 4142ee85, 0a9a9c64, 71f95ff1, 96dbc917 | apps-aperture-grid-columns-keep-cards | The objection to d366505b. A card goes back while its own row is still a child of the list (`CanTakeCard`, `place: null`, as round 7's `GridCards.TakeBack`); a hovered or pressed card only into its own row. d366505b's `place: key` remade every card on a change of columns, though a place moves to another row only then, and that invalidates every row first. Follow-up: across a change of columns the keyboard goes back to the cursor's card after the frame (that card and the first row's last card on a narrowing are still made again). Headless, 600 films, JIT idle-gated ×2: a column change each step 235.6 → 62.5 KB, elements 249 → 58, leaf/text measures 369 → 60 / 110 → 14.5; resize over 40 widths 13.6 → 4.9 KB (round 8 base 6.1); cursor keys unchanged (Right 0.3, Down 21.5, no build); AOT walk `library-resize-4px` 6.4 → 3.2 KB (below round 8's 3.6), CPU within noise. New suite rows (kept image grid across a change of columns: own-row 194 KB / 32.4 cards, kept 32 KB / 3.0); shared rows 0/0 ×2 (captures 96dbc917). d366505b's 7 scenes + a last-column scene, 96 checkpoints: pixels and tree as HEAD, 32 column changes as a forget-all grid, one ring on the cursor's card, the keyboard on it at all 48 (HEAD 4 of 16). Aperture 356, Headless 1,459 pass; GridRowKeepTests +4, GridCursorTests +3. REACTIVITY.md "A grid whose columns change passes no place". |
 
 ## Examined, not worth it
 
@@ -485,17 +505,20 @@ Recommendations in brackets. Asked only if step 13 clears 5 %: faded images (≤
     life (`_preview ??=`). Disposing it when it leaves the screen frees all 45.4 MB of the process's GPU memory (90.7 →
     45.3) and the 6 `msedgewebview2` processes (283–315 MB working set, 140–198 MB private); the next "web" toggle then
     starts the browser again (first page frame 395–673 ms after `NavigateToString`, 5 runs). Dispose after a while
-    hidden? [Yes, after about 60 s hidden, so a quick toggle back stays instant; step 12 covers that minute.]
+    hidden? [Yes, after about 60 s hidden, so a quick toggle back stays instant; step 12 covers that minute.] →
+    **yes, after 60 s** (2026-11-08).
 18. **f9bceb6d's window checks** (Open; r9-3): the 4K monitor at 150 % is now attached and primary. `WindowPlacementTests`
     and the Borderless `WindowStateActivationTests` (`HULTUI_UITESTS=1`) show maximized and full-screen windows over the
     desktop, so they need the desk to themselves. Run them now, or at a time you name (while you are away)? The Snap
-    Layouts hover stays by hand. [While you are away.]
+    Layouts hover stays by hand. [While you are away.] → "later", then **"run the window tests now"** (2026-11-08):
+    see Open and the log.
 19. **vesper-reader-focus** (r9-7; reader behaviour, not perf, not new in round 8): Vesper's focused pane is a Box with
     no role or name, so `IsSemantic` drops it (AccessibilityTreeBuilder.cs:717; CommanderApp.Pane.cs:177) and every
     focus move tells a reader "focus on nothing"; in Brief and Thumbnails a reader hears nothing as the cursor moves.
     Fix in the app (a role and name on the pane, `AccessibleSelected` on the cursor's cell or tile set with the `Restyle`
     call: a patch, 0 trees), or in the framework (a focusable element is always semantic: trees change in every app)?
-    [In the app, as a step after the perf steps, with meridian-focus-lost (Waiting).]
+    [In the app, as a step after the perf steps, with meridian-focus-lost (Waiting).] → **in the app** (2026-11-08):
+    step 15.
 
 Round 8 questions 11–13, round 7 questions 1–4, round 6 questions 1–9 and round 5's question 5, all answered, are in
 the archive ([round 8](17-performance-team-ledger-archive.md#needs-the-user-round-8),
@@ -523,8 +546,13 @@ Standing notes (from earlier rounds):
 - **f9bceb6d's window checks** (round 6 step 4; expert 3 again in round 7): maximize on both monitors, the DPI
   hop and the Snap Layouts flyout on the lower-DPI monitor need the 4K monitor at 150 % attached and primary at
   sign-in; only the 1440p at 100 % has been attached. Then the UiTests `WindowPlacementTests` and the Borderless
-  `WindowStateActivationTests` (`HULTUI_UITESTS=1`), plus a Snap Layouts hover by hand. Round 9: the 4K monitor is
-  attached and primary now (system DPI 144, the 1440p on its left); when to run them is question 18.
+  `WindowStateActivationTests` (`HULTUI_UITESTS=1`), plus a Snap Layouts hover by hand. **Round 9 (2026-11-08): done
+  but the 4K's Snap hover.** The 4K at 150 % is primary (system DPI 144), the 1440p at 100 % on its left. The UiTests
+  pass 11 of 11 (placements land at dpi 96 and 144), and a held scratch check, watched by the user on the 4K, passed:
+  each style placed and maximized at dpi 144, the Borderless maximized client 0,0 3840×2088 = the work area to the
+  pixel. The user's Snap hover: the 1440p works in every direction; on the 4K, Meridian misses a bottom entry
+  (step 16), Vesper works; the flyout's first frame at the monitor's top-left (often in Vesper, once in Meridian) is
+  the Windows shell's (memory `snap-layouts-caption-band`: Electron apps flash the same).
 - **8a38ef4 on Linux/KWin and on AMD/Intel Windows:** not measured. Linux keeps the chained
   path. If AMD/Intel do not stall, destroy-first may cost them 21–24 ms per resize, as it
   cost NVIDIA's IMMEDIATE and FIFO. A real Aperture resize run is also still to do.
@@ -661,3 +689,18 @@ From 2026-11-03 (round 8's survey); earlier entries are in the archive ([to 2026
   14 build steps; questions 14–16 answered during the survey, 17–19 asked (web preview dispose, window checks on the 4K
   monitor, Vesper reader focus). The 4K monitor at 150 % is now attached and primary. Survey agents 267–373k tokens
   each; weekly usage 12 → 17 %. Phase → build.
+- 2026-11-08: the user answered questions 17–19: Meridian disposes a preview hidden for about 60 s (step 12); Vesper's
+  reader focus is fixed in the app (new step 15, with meridian-focus-lost from Waiting); the window checks "later",
+  then "run the window tests now": 11 of 11 UiTests pass on the 4K at 150 % (primary) and the 1440p at 100 %, run
+  in a scratch worktree so step 1's build was untouched. The user saw the windows only on the 1440p (every UiTests
+  window is made there first; the 4K cases are brief moves), so a held check (each window 3 s on top, no activation)
+  ran while the user watched the 4K: seen there, dpi 144, the Borderless maximized client the work area to the pixel.
+  The user's Snap hover found a bug: Meridian on the 4K misses a bottom entry into the maximize button (step 16);
+  Vesper works. Probing: Meridian's hit test covers the whole button; synthetic cursor glides (`SetCursorPos`,
+  `SendInput`) opened no flyout on an inactive window. Test trap → Waiting uitests-workareas-before-dpi-aware.
+- 2026-11-08: round 9 step 1 landed (4142ee85, 0a9a9c64, 71f95ff1; captures 96dbc917): Aperture's grid hands its
+  cards to their new rows across a change of columns (−73 % a step, elements 249 → 58; resize −64 %, AOT −50 %) and
+  keeps the keyboard on the cursor's card (HEAD lost it at 12 of 16 column changes); the objection to d366505b is
+  closed. Guideline notes: the row-place check is for rows that keep their place — a grid that reflows checks the
+  card's own row is still in the list; leave a hovered or pressed card in its own row (as VirtualList's moved rows);
+  a card whose ring moved with no build is made again, so if it held the keyboard ask for it back after the frame.
