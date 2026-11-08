@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 8
-- **Phase:** build — round 8, every build step done (1–9b); **the full test suite next**. Step 2 resumed 2026-11-08 after the weekly
+- **Phase:** release — round 8: every build step done and the full suite passed on 1b75f86e; merge into main, push, wait for CI. Step 2 resumed 2026-11-08 after the weekly
   reset (next reset 2026-11-15 03:00 UTC) on top of main's merge 3a15b5b1 (32 commits, mostly Meridian). Briefs and
   probes stay in session 64e7e0e2's old scratchpad (see Probe code). The survey's eight reports are
   `17-reports/r8-*.md` (common brief `brief-r8-survey.md`). The 90 % weekly pause applies to build steps (user,
@@ -734,3 +734,7 @@ From 2026-11-02 (round 7's survey); earlier entries are in the archive ([to 2026
   is done; Phase → full suite. Usage ~11 % weekly.
 - 2026-11-08: the user saw before/after crops of the hovered older row (the GET chip's label 47,93,138 → 51,101,150 at
   worst; 68 pixels over 8/255) and kept step 9b as it is.
+- 2026-11-08: round 8 full suite on 1b75f86e (src as eec55e8d): Windows `dotnet test HultUI.slnx -c Release` 30 projects
+  0 failures (Core 5,064, Headless 1,459, Junction 1,082 in 7 m 40 s, Vesper 896, Meridian 587, Aperture 349), Fedora
+  `wsl-test.sh` 22 projects 0 failures, docfx `--warningsAsErrors` 0 warnings. origin/main 12d0392e is in the branch.
+  Phase → release.
