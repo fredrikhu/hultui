@@ -283,7 +283,7 @@ public partial class CommanderApp : Component, IDisposable
         foreach (char side in "LR")
             _paneScroll[Si(side)] = ViewOf(side) switch
             {
-                ViewMode.Brief => BriefScroll(side).Current?.ScrollOffsetX ?? 0f,
+                ViewMode.Brief => BriefScroll(side).Current?.ScrollOffsetX ?? _briefScrollX[Si(side)],
                 ViewMode.Thumbnails => ThumbVList(side).Current?.ScrollOffsetY ?? 0f,
                 _ => VList(side).Current?.ScrollOffsetY ?? 0f,
             };
@@ -888,6 +888,8 @@ public partial class CommanderApp : Component, IDisposable
         // views unable to see their own Esc.
         else if (!AnyOverlayOpen && !FullShellOpen && _window.FocusedElement is null)
             PaneRef(_active).Current?.Focus();
+
+        LetGoOfLeftViews();
     }
 
     private void RequestScroll(char side)

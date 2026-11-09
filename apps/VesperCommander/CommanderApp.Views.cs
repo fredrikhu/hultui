@@ -44,6 +44,10 @@ public partial class CommanderApp
     private readonly float[] _briefColW = { 186f, 186f };
     private readonly Ref<ScrollViewElement> _briefScrollL = new(), _briefScrollR = new();
     private Ref<ScrollViewElement> BriefScroll(char side) => side == 'L' ? _briefScrollL : _briefScrollR;
+    /// <summary>Brief's scroll offset as its scroll view left it, kept once the view left the window
+    /// (<see cref="LetGoOfLeftViews"/>): the next Brief build makes its columns for it, as it did from
+    /// the old scroll view.</summary>
+    private readonly float[] _briefScrollX = new float[2];
     private readonly Ref<VirtualListElement<ThumbRowItem>> _thumbVListL = new(), _thumbVListR = new();
     private Ref<VirtualListElement<ThumbRowItem>> ThumbVList(char side) => side == 'L' ? _thumbVListL : _thumbVListR;
 
@@ -601,7 +605,7 @@ public partial class CommanderApp
         float paneW = PaneContentWidthEstimate();
         var (rows, totalCols, colW, overflow) = BriefGrid(n, paneW, availH, rowH);
         int visCols = overflow ? Math.Max(1, (int)(paneW / colW)) : totalCols;
-        float scrollX = overflow ? Math.Max(0, BriefScroll(side).Current?.ScrollOffsetX ?? 0) : 0;
+        float scrollX = overflow ? Math.Max(0, BriefScroll(side).Current?.ScrollOffsetX ?? _briefScrollX[Si(side)]) : 0;
         int firstCol = overflow ? Math.Clamp((int)(scrollX / colW), 0, Math.Max(0, totalCols - 1)) : 0;
         int lastCol = Math.Min(totalCols - 1, firstCol + visCols + 1);   // +1 buffer column
         return new BriefGeom(paneW, availH, new BriefFit(rows, totalCols, overflow, visCols, firstCol, lastCol));
@@ -726,6 +730,31 @@ public partial class CommanderApp
         else if (moved[i].MadeRinged == on) moved.RemoveAt(i);
         el.Restyle(on ? CursorOn : CursorOff);
         _ringMovedSinceBuild[Si(side)] = true;
+    }
+
+    /// <summary>
+    /// After a build: a ref whose element left the window held the whole view that element was in,
+    /// through its parents (REACTIVITY.md, "A ref into a view keeps the whole view"): Brief's cells
+    /// and columns behind Detail or Thumbnails. The cursor's row (a cell, a tile or a row, whichever
+    /// view drew the cursor) is let go, as nothing reads one out of the window (CursorRowBox wants a
+    /// row on screen). Brief's scroll view too, keeping the one thing a later build reads from it, its
+    /// offset (<see cref="BriefGeometry"/>, <see cref="RememberPaneScroll"/>). Both are set again by the
+    /// build or the key that next draws them.
+    /// </summary>
+    private void LetGoOfLeftViews()
+    {
+        for (int si = 0; si < 2; si++)
+        {
+            char side = si == 0 ? 'L' : 'R';
+            var cursor = CursorRowRef(side);
+            if (cursor.Current is { IsHosted: false }) cursor.Current = null;
+            var brief = BriefScroll(side);
+            if (brief.Current is { IsHosted: false } scroll)
+            {
+                _briefScrollX[si] = scroll.ScrollOffsetX;
+                brief.Current = null;
+            }
+        }
     }
 
     /// <summary>At the start of a pane's build: the cells and tiles a key moved the ring on or off

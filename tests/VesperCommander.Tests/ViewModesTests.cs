@@ -421,6 +421,60 @@ public class ViewModesTests
         finally { File.Delete(tmp); }
     }
 
+    /// <summary>Detail lets Brief go (plan 17 round 10). The cursor's ref and Brief's scroll view's held
+    /// the cell and the scroll view they last pointed at, and through their parents all of Brief behind
+    /// Detail (its cells are held weakly, KeptElements). A build now lets go of a ref whose element left
+    /// the window, keeping Brief's scroll offset, which the next Brief build makes its columns for: back
+    /// in Brief from its end, the build makes the columns it left, as it did from the old scroll view.
+    /// (The new scroll view then shows its start, as before the change: Brief comes back blank until a
+    /// key scrolls it.)</summary>
+    [Fact]
+    public void Detail_LetsBriefGo_AndBriefComesBackWhereItWas()
+    {
+        using var t = new DiffViewTests.Fixture();
+        for (int i = 0; i < 400; i++) t.WriteLeft($"f{i:000}.txt", "x");
+        t.Open();
+        t.Press(KeyCode.F2, KeyModifiers.Ctrl);   // view: Brief
+        t.Session.PumpFrames(2);
+        t.Press(KeyCode.End);
+        t.Session.PumpFrames(3);
+        var made = BriefCellNames(t);
+        Assert.Contains("f399.txt", made);
+        Assert.DoesNotContain("f000.txt", made);
+        var (cell, scrolled) = WeakBriefCell(t);
+        Assert.True(scrolled > 0);
+
+        t.Press(KeyCode.F1, KeyModifiers.Ctrl);   // view: Detail
+        t.Session.PumpFrames(3);
+        System.GC.Collect();
+        System.GC.WaitForPendingFinalizers();
+        System.GC.Collect();
+
+        Assert.False(cell.IsAlive, "Brief outlived its view behind Detail");
+        Assert.Null(t.Field<Ref<ScrollViewElement>>("_briefScrollL").Current);
+        Assert.Null(t.Field<Ref<BoxElement>>("_cursorRowL").Current);
+
+        t.Press(KeyCode.F2, KeyModifiers.Ctrl);   // back to Brief
+        t.Session.PumpFrames(3);
+        Assert.Equal(made, BriefCellNames(t));
+        Assert.True(t.Field<Ref<BoxElement>>("_cursorRowL").Current is { IsHosted: true });
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static (System.WeakReference Cell, float Scrolled) WeakBriefCell(DiffViewTests.Fixture t)
+    {
+        var scroll = t.Field<Ref<ScrollViewElement>>("_briefScrollL").Current!;
+        var cell = scroll.Children[0].Children.Last(c => c.Children.Count > 0).Children[0];
+        return (new System.WeakReference(cell), scroll.ScrollOffsetX);
+    }
+
+    /// <summary>The names on the Brief cells made, all columns.</summary>
+    private static List<string> BriefCellNames(DiffViewTests.Fixture t) =>
+        t.Field<Ref<ScrollViewElement>>("_briefScrollL").Current!.Children[0].Children
+            .SelectMany(column => column.Children)
+            .Select(cell => cell.Children.OfType<TextElement>().Single().Content)
+            .ToList();
+
     private static void WritePng(string path, int w, int h)
     {
         using var bmp = new SkiaSharp.SKBitmap(w, h);
