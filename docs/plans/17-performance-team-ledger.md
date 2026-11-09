@@ -5,8 +5,9 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 9
-- **Phase:** build — round 9: every step done (1–12, 13b, 14, 14c, 15, 15b, 16; 14b images only; question 22
-  declined, 26 for later). Next: the full suite again (Windows, Fedora, docfx), then Phase release. Build
+- **Phase:** release — round 9: the full suite passed on 2370eea5 (Windows 30 projects, Fedora 22, docfx 0); merge into
+  main (detached origin/main merge in this worktree, gated), push, CI incl. the meridian-keyring jobs (step 8 touched
+  the Linux/macOS keyring stores). Question 26 for later. Build
   agents run one at a time in this worktree; their briefs go in session c484f5ac's scratchpad as `brief-r9b<N>.md`.
   Questions 14–19 answered. Open for the user: question 10 (`TokenizeDiff` public), the live screen-reader check of
   menus and disabled menu items (ACCESSIBILITY-PLAN.md). Weekly usage 17 % after the survey
@@ -937,3 +938,7 @@ From 2026-11-03 (round 8's survey); earlier entries are in the archive ([to 2026
   keep VS Code's colour too; exactly the expected lines changed. Guideline notes: TextMateSharp's encoded tokens are the
   cheap path; its parent-scope theme rules never apply in 2.0.4 (worked around per grammar); bold/italic from a theme
   would change text measurement, so the highlighter leaves them out. Every build step is done; Phase → full suite.
+- 2026-11-09: round 9 full suite on 2370eea5: Windows `dotnet test HultUI.slnx -c Release` 30 projects 0 failures (Core
+  5,067, Headless 1,501, Junction 1,082 in 8 m 24 s, Vesper 903, Meridian 653, Aperture 356, Syntax 94), Fedora
+  `wsl-test.sh` 22 projects 0 failures, docfx `--warningsAsErrors` 0 warnings. origin/main 10acc8c0 is in the branch.
+  Phase → release.
