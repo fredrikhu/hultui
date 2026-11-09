@@ -1,4 +1,6 @@
+using System.Text;
 using System.Text.Json;
+using System.Text.Unicode;
 
 namespace Meridian.Core;
 
@@ -63,6 +65,40 @@ public static class OpenApi
         return body.Text;
     }
 
+    /// <summary>
+    /// <see cref="FullText"/> as UTF-8, for <see cref="Parse(ReadOnlyMemory{byte}, string, string, out ParseFailure?)"/>:
+    /// the file a body past the viewer cap was spilled to, read as bytes (not as a string of 2 bytes
+    /// a character), or the text in memory.
+    /// </summary>
+    internal static ReadOnlyMemory<byte> FullUtf8(ResponseBody body)
+    {
+        if (body.Truncated && body.SpillPath is { } spill)
+        {
+            try { return ReadUtf8(spill); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
+        return Encoding.UTF8.GetBytes(body.Text);
+    }
+
+    /// <summary>
+    /// A file's text as UTF-8, the text <see cref="File.ReadAllText(string)"/> reads: without a
+    /// UTF-8 byte order mark, and decoded as that does when the file is not plain UTF-8 (another
+    /// byte order mark, bytes that are not UTF-8). A plain UTF-8 file, as specs are, is its own
+    /// bytes, with no string in between.
+    /// </summary>
+    internal static ReadOnlyMemory<byte> ReadUtf8(string path)
+    {
+        byte[] bytes = File.ReadAllBytes(path);
+        ReadOnlySpan<byte> span = bytes;
+        int start = span.StartsWith((ReadOnlySpan<byte>)[0xEF, 0xBB, 0xBF]) ? 3 : 0;
+        bool otherBom = span.StartsWith((ReadOnlySpan<byte>)[0xFE, 0xFF]) || span.StartsWith((ReadOnlySpan<byte>)[0xFF, 0xFE])
+            || span.StartsWith((ReadOnlySpan<byte>)[0x00, 0x00, 0xFE, 0xFF]);
+        if (!otherBom && Utf8.IsValid(span[start..]))
+            return bytes.AsMemory(start);
+        using var reader = new StreamReader(new MemoryStream(bytes), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        return Encoding.UTF8.GetBytes(reader.ReadToEnd());
+    }
+
     private static readonly string[] Methods =
         ["get", "put", "post", "delete", "options", "head", "patch", "trace"];
 
@@ -76,52 +112,142 @@ public static class OpenApi
         }
         catch (JsonException e)
         {
-            failure = new ParseFailure(
-                e.Message.Split(" LineNumber:")[0].TrimEnd('.'),
-                (int)(e.LineNumber ?? 0) + 1,
-                (int)(e.BytePositionInLine ?? 0) + 1);
+            failure = FailureOf(e);
+            return null;
+        }
+        using (doc) return Read(doc, baseUrl, source, out failure);
+    }
+
+    /// <summary>
+    /// <see cref="Parse(string, string, string, out ParseFailure?)"/> of UTF-8 text, a path at a time.
+    /// A document of the whole spec rents a UTF-8 copy of the text and a table of its tokens that
+    /// grows by doubling, and every array it rents stays in the shared pool once it is disposed: 9 MB
+    /// after a spec of 2,000 operations. This reads the bytes where they are and makes a document of
+    /// <c>info</c> and of one path item at a time, a few KB each, whose arrays the next one takes
+    /// again. The map is the one the whole document gives (the last <c>paths</c> and <c>info</c>, as
+    /// <c>TryGetProperty</c> finds them), and a failure is at the same line and column: the same
+    /// reader reads the same text to its end.
+    /// </summary>
+    internal static ApiMap? Parse(ReadOnlyMemory<byte> utf8Json, string baseUrl, string source, out ParseFailure? failure)
+    {
+        failure = null;
+        List<Endpoint>? endpoints = null;
+        string? version = null;
+        try
+        {
+            var reader = new Utf8JsonReader(utf8Json.Span);
+            reader.Read();
+            if (reader.TokenType != JsonTokenType.StartObject) reader.Skip();
+            else
+                while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+                {
+                    if (reader.ValueTextEquals("paths"u8))
+                    {
+                        reader.Read();
+                        endpoints = reader.TokenType == JsonTokenType.StartObject ? ReadPaths(ref reader) : null;
+                        if (endpoints is null) reader.Skip();
+                    }
+                    else if (reader.ValueTextEquals("info"u8))
+                    {
+                        reader.Read();
+                        using var info = JsonDocument.ParseValue(ref reader);
+                        version = info.RootElement.ValueKind == JsonValueKind.Object ? VersionOf(info.RootElement) : null;
+                    }
+                    else
+                    {
+                        reader.Read();
+                        reader.Skip();
+                    }
+                }
+            // To the end, as a document reads it: anything after the root fails here.
+            while (reader.Read()) { }
+        }
+        catch (JsonException e)
+        {
+            failure = FailureOf(e);
+            return null;
+        }
+        if (endpoints is null)
+        {
+            failure = NotASpec();
+            return null;
+        }
+        return new ApiMap(baseUrl, endpoints, source, version);
+    }
+
+    /// <summary>The path items of a <c>paths</c> object, the reader on its start: each a document of
+    /// its own while its endpoints are read.</summary>
+    private static List<Endpoint> ReadPaths(ref Utf8JsonReader reader)
+    {
+        var endpoints = new List<Endpoint>();
+        while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+        {
+            string path = reader.GetString()!;
+            reader.Read();
+            if (reader.TokenType != JsonTokenType.StartObject)
+            {
+                reader.Skip();
+                continue;
+            }
+            using var item = JsonDocument.ParseValue(ref reader);
+            AddPathItem(path, item.RootElement, endpoints);
+        }
+        return endpoints;
+    }
+
+    private static ParseFailure FailureOf(JsonException e) => new(
+        e.Message.Split(" LineNumber:")[0].TrimEnd('.'),
+        (int)(e.LineNumber ?? 0) + 1,
+        (int)(e.BytePositionInLine ?? 0) + 1);
+
+    private static ApiMap? Read(JsonDocument doc, string baseUrl, string source, out ParseFailure? failure)
+    {
+        failure = null;
+        var root = doc.RootElement;
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("paths", out var paths))
+        {
+            failure = NotASpec();
             return null;
         }
 
-        using (doc)
+        string? version = root.TryGetProperty("info", out var info) ? VersionOf(info) : null;
+
+        var endpoints = new List<Endpoint>();
+        foreach (var pathEntry in paths.EnumerateObject())
         {
-            var root = doc.RootElement;
-            if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("paths", out var paths))
-            {
-                failure = new ParseFailure("not an OpenAPI document — no \"paths\" object", 1, 1);
-                return null;
-            }
+            if (pathEntry.Value.ValueKind != JsonValueKind.Object) continue;
+            AddPathItem(pathEntry.Name, pathEntry.Value, endpoints);
+        }
+        return new ApiMap(baseUrl, endpoints, source, version);
+    }
 
-            string? version = root.TryGetProperty("info", out var info)
-                && info.TryGetProperty("version", out var v) && v.ValueKind == JsonValueKind.String
-                ? v.GetString() : null;
+    private static ParseFailure NotASpec() => new("not an OpenAPI document — no \"paths\" object", 1, 1);
 
-            var endpoints = new List<Endpoint>();
-            foreach (var pathEntry in paths.EnumerateObject())
-            {
-                if (pathEntry.Value.ValueKind != JsonValueKind.Object) continue;
-                // Parameters declared once for the whole path apply to each method.
-                var shared = ReadParams(pathEntry.Value);
+    private static string? VersionOf(JsonElement info) =>
+        info.TryGetProperty("version", out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 
-                foreach (var opEntry in pathEntry.Value.EnumerateObject())
-                {
-                    if (!Methods.Contains(opEntry.Name, StringComparer.OrdinalIgnoreCase)) continue;
-                    if (opEntry.Value.ValueKind != JsonValueKind.Object) continue;
-                    var op = opEntry.Value;
+    /// <summary>The endpoints of one path item, an object: one a method it declares.</summary>
+    private static void AddPathItem(string path, JsonElement item, List<Endpoint> endpoints)
+    {
+        // Parameters declared once for the whole path apply to each method.
+        var shared = ReadParams(item);
 
-                    var parameters = shared.Concat(ReadParams(op)).ToList();
-                    endpoints.Add(new Endpoint(
-                        opEntry.Name.ToUpperInvariant(),
-                        pathEntry.Name,
-                        Confidence.Declared,
-                        Group: TagOf(op) ?? ApiMap.GroupOf(pathEntry.Name),
-                        Summary: StringOr(op, "summary", ""),
-                        Deprecated: op.TryGetProperty("deprecated", out var dep) && dep.ValueKind == JsonValueKind.True,
-                        Parameters: parameters,
-                        ExampleResponse: ExampleOf(op)));
-                }
-            }
-            return new ApiMap(baseUrl, endpoints, source, version);
+        foreach (var opEntry in item.EnumerateObject())
+        {
+            if (!Methods.Contains(opEntry.Name, StringComparer.OrdinalIgnoreCase)) continue;
+            if (opEntry.Value.ValueKind != JsonValueKind.Object) continue;
+            var op = opEntry.Value;
+
+            var parameters = shared.Concat(ReadParams(op)).ToList();
+            endpoints.Add(new Endpoint(
+                opEntry.Name.ToUpperInvariant(),
+                path,
+                Confidence.Declared,
+                Group: TagOf(op) ?? ApiMap.GroupOf(path),
+                Summary: StringOr(op, "summary", ""),
+                Deprecated: op.TryGetProperty("deprecated", out var dep) && dep.ValueKind == JsonValueKind.True,
+                Parameters: parameters,
+                ExampleResponse: ExampleOf(op)));
         }
     }
 

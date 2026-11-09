@@ -92,7 +92,8 @@ public partial class MeridianApp
                 // The path under the base, as the toast and the map's source say it.
                 var candidate = url.Length > baseUrl.Length && url.StartsWith(baseUrl, StringComparison.OrdinalIgnoreCase)
                     ? url[baseUrl.Length..] : url;
-                var imported = OpenApi.Parse(OpenApi.FullText(response.Body), baseUrl, candidate, out var failure);
+                // Parsed from its UTF-8 bytes: as text it cost a string and a UTF-8 copy left in the pool.
+                var imported = OpenApi.Parse(OpenApi.FullUtf8(response.Body), baseUrl, candidate, out var failure);
                 if (imported == null)
                 {
                     // A 200 that isn't a spec is not an error — keep probing.
@@ -116,15 +117,17 @@ public partial class MeridianApp
     /// <summary>Imports a spec file from disk (the front door's Ctrl+I).</summary>
     internal void ImportSpecFile(string path)
     {
-        string text;
-        try { text = File.ReadAllText(path); }
+        // The file's bytes, parsed where they are (OpenApi.ReadUtf8): read as text, a spec of 2,000
+        // operations left 8 MB in the shared pool besides the string.
+        ReadOnlyMemory<byte> utf8;
+        try { utf8 = OpenApi.ReadUtf8(path); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             Flash($"Could not read {Path.GetFileName(path)}: {e.Message}");
             return;
         }
 
-        var imported = OpenApi.Parse(text, _mapBaseUrl ?? "", Path.GetFileName(path), out var failure);
+        var imported = OpenApi.Parse(utf8, _mapBaseUrl ?? "", Path.GetFileName(path), out var failure);
         if (imported == null)
         {
             SetSpecError(path, failure!);
