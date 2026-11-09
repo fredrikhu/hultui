@@ -5,9 +5,9 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 9
-- **Phase:** build — round 9: step 14b next (images of question 23's colour changes); question 22 asked again with
-  the tile variant's images. Then the full suite again (Windows, Fedora, docfx) and Phase release. Steps 1–12, 13b,
-  14–16 and 15b landed 2026-11-08/09. Build
+- **Phase:** build — round 9: waiting for the user on questions 22 (tile variant, images sent) and 23 (encoded-token
+  colours, images sent); 26 is for later. Then a step for whichever is approved, the full suite again (Windows,
+  Fedora, docfx) and Phase release. Steps 1–12, 13b, 14–16 and 15b landed 2026-11-08/09; 14b made images only. Build
   agents run one at a time in this worktree; their briefs go in session c484f5ac's scratchpad as `brief-r9b<N>.md`.
   Questions 14–19 answered. Open for the user: question 10 (`TokenizeDiff` public), the live screen-reader check of
   menus and disabled menu items (ACCESSIBILITY-PLAN.md). Weekly usage 17 % after the survey
@@ -575,12 +575,26 @@ Recommendations in brackets. Asked only if step 13 clears 5 %: faded images (≤
     names max 3; Vulkan only 17–30 px at 13/255 at the letterbox bars' rounded ends. It does not stay within ~2/255
     apart from the badge. Asked again with these images: commit this variant? [The user's eye: the zooms; my lean is
     yes for the pictures, the kind icons and cursor tile changes are small and only on cut tiles.]
+26. **syntax-merged-theme** (from step 14b; not perf, not blocking): today and the encoded path both differ from VS Code
+    on ~974k corpus lines because TextMateSharp keeps an included theme in a second lookup and the main theme's broader
+    rule wins: JSON keys are teal where VS Code shows #9CDCFE (every key in Meridian's JSON bodies), `this` is #9CDCFE
+    where VS Code shows #569CD6. Giving it one merged theme would match VS Code. Wanted? [Later, its own step with
+    images: it recolours every JSON key.]
 23. **syntax-encoded-tokens-colours** (step 14, 2026-11-09): colouring from TextMateSharp's encoded tokens
     (`TokenizeLine2`) would save a further 28 % of the tokenizer's bytes on JSON, 18 % on XML, 4 % on HTML. It matches
     theme rules by parent scope, as VS Code does, so it changes colours on 2,388 of 1,752,346 corpus lines (mostly
     TypeScript/JavaScript, then PowerShell, shell, C++ and Markdown; nothing in Meridian's JSON/XML/HTML response bodies).
     May colours change to VS Code's parent-scope matching? [Show before/after examples of the changed lines first.] →
     **as recommended** (2026-11-09): step 14b makes before/after images; then ask again.
+    Step 14b (no commit; switch kept in `r9b14b\switch.patch`; images `artifacts/r9-syntax-compare/01–10`, sent
+    2026-11-09): only Dark+ and Light+ change (the themes that include a second theme file); Solarized, Kimbie, One Dark,
+    Dracula, Tomorrow Night Blue change 0 lines. Dark+ groups: TS/JS quoted object key 950 lines #9CDCFE → #CE9178
+    (the most noticeable: whole key tables), `new` 863 #C586C0 → #569CD6, TSX JSX braces 310 (light blue → each token's
+    colour), TS/JS numeric key 103, PowerShell `$x.Member` 54 #DCDCAA → #9CDCFE (away from VS Code: TextMateSharp never
+    counts the root scope as a parent), C/C++ `.`/`->` member 52, shell `${…}` 33, smaller JSDoc/Markdown groups. 2,334 of
+    2,388 move to VS Code's colour. No JSON/XML/HTML line changes (an HTML body's inline `<script>` changes like TS/JS).
+    The agent recommends adopting at least for JSON, XML and HTML (where the bytes are: −28 / −18 / −4 % of the
+    tokenizer's bytes) or for every language (cost: the 54 PowerShell lines). Asked again with the images.
 24. **vesper-pane-name-folder** (step 15): Vesper's pane is now read as "Left pane, <folder>". Because the walk can't
     patch a name on a node with children, a folder change with a reader on costs one tree (~+20 KB, UIA 209 → 229 KB a
     navigation). A fixed "Left pane" name costs nothing. Keep the folder in the name? [Yes: a reader learns where it
@@ -910,3 +924,6 @@ From 2026-11-03 (round 8's survey); earlier entries are in the archive ([to 2026
   Guideline notes: a view that walks its own items with no build gives each item the `ListItem` role and a name and sets
   `AccessibleSelected` with the cursor's restyle; keep what changes often (a mark, a count) out of the name of an
   element with children — a new name there builds the tree.
+- 2026-11-09: round 9 step 14b (no commit): images of question 23's colour changes, sent to the user — only Dark+/Light+
+  change, 2,334 of 2,388 lines toward VS Code's colour (54 PowerShell lines away), no JSON/XML/HTML line. Found: both
+  paths differ from VS Code on ~974k lines (an included theme looked up second) — question 26, for later.
