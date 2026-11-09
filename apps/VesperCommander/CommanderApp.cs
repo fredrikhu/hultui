@@ -3194,8 +3194,11 @@ public partial class CommanderApp : Component, IDisposable
         {
             // The active pane shows in the trails, and a filter in the footer and the command
             // line, which MarkViewDirty compares: the rest of the parts stay.
+            // The keyboard focus goes with it: it stayed on the pane Tab left, so a reader was told
+            // nothing of the move (the keys follow _active, not the focus, so they are the same).
             case KeyCode.Tab:
                 ExitSearch(_active); _active = _active == 'L' ? 'R' : 'L';
+                if (PaneRef(_active).Current is { } pane && _window.IsInTree(pane)) pane.Focus();
                 MarkViewDirty(); e.StopPropagation = true; return;
             case KeyCode.Escape:
                 if (_search.Length > 0) { ExitSearch(side); MarkViewDirty(); e.StopPropagation = true; }

@@ -352,7 +352,19 @@ click told nothing. It is a group (UIA Group, AT-SPI panel) named after its side
 navigation with a reader builds the tree where it was walked in place (a node with children whose own
 name changed, which the walk does not take): 60 files, Enter and Backspace, 0 → 1 tree and +20 KB a
 navigation with UIA (209 → 230 KB), the same on AT-SPI; nothing without a reader, and no cursor key
-builds one (0 trees a key in Detail, Brief and Thumbnails, as before).
+builds one (0 trees a key in Detail, Brief and Thumbnails, as before). Tab, which Vesper takes to
+switch panes, moved the active pane but left the focus on the one it left, so a reader was told
+nothing; the focus goes with it now, and a reader is told the pane it reached, then (in Detail) its
+cursor's item, selected, with no tree built: a Tab without a reader 71.60 → 71.68 KB.
+
+In Brief and Thumbnails a cursor key still tells a reader nothing, and the app cannot tell it without
+a tree. A Brief cell's selected state (`AccessibleSelected`, set with the ring's `Restyle`) is patched
+only on a menu's entry or a row directly in a composite list (the window's property observer), and
+built for on any other element: 60 files, 0 → 1 tree and 2.2 → 36 KB a key with UIA, tried and taken
+out. A thumbnail tile is in a row of a list that publishes its rows as items, which has no node at
+all. A prototype that patches any element's selected state (one condition in the observer) with the
+thumbnail list's rows composite told the cursor's item, named and selected, with 0 trees and the
+same KB a key in both views; that is a framework change, left to the user.
 
 The coalesced layout refresh builds no tree either where a build would make the same nodes
 (2026-10-26, plan 17 round 5). A node keeps its box where it sits in the content of the scroll
