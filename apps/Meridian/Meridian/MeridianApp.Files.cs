@@ -247,11 +247,25 @@ public partial class MeridianApp
 
     // ── Folders ──────────────────────────────────────────────────────────
 
-    private IReadOnlyList<(string, Action)> FolderActions(CollectionFolder folder) =>
+    // By the folder's path, as the request's are: a tree row can be older than the latest scan
+    // (MeridianApp.Requests.cs keeps it), so what it asks about is looked up when it asks.
+    private IReadOnlyList<(string, Action)> FolderActions(string path) =>
     [
-        ("Rename…", () => OpenRenameFolderDialog(folder.Path)),
-        ("Delete…", () => ConfirmDeleteFolder(folder)),
+        ("Rename…", () => OpenRenameFolderDialog(path)),
+        ("Delete…", () => { if (FolderAt(path) is { } folder) ConfirmDeleteFolder(folder); }),
     ];
+
+    private CollectionFolder? FolderAt(string path)
+    {
+        static CollectionFolder? Find(CollectionFolder folder, string path)
+        {
+            if (SamePath(folder.Path, path)) return folder;
+            foreach (var sub in folder.Folders)
+                if (Find(sub, path) is { } found) return found;
+            return null;
+        }
+        return _tree is { } tree ? Find(tree.Root, path) : null;
+    }
 
     private void OpenRenameFolderDialog(string path)
     {
@@ -426,6 +440,7 @@ public partial class MeridianApp
     private void OpenConfirm(string title, string message, string confirm, Action onConfirm,
         (string Label, Action Run)? alternative = null)
     {
+        NoteModalOpener();
         _confirm = (title, message, confirm, onConfirm, alternative);
         _pendingConfirmFocus = true;
         MarkDirty();
@@ -439,6 +454,7 @@ public partial class MeridianApp
         if (_confirm is not { } confirm) return;
         if (alternative && confirm.Alternative is null) return;
         _confirm = null;
+        ReturnFocusToModalOpener();
         int builds = Builds;
         if (alternative) confirm.Alternative!.Value.Run();
         else confirm.OnConfirm();
@@ -448,6 +464,7 @@ public partial class MeridianApp
     private void CancelConfirm()
     {
         _confirm = null;
+        ReturnFocusToModalOpener();
         MarkDirty();
     }
 

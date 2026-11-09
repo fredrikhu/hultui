@@ -133,6 +133,7 @@ window is moved or resized on Windows, inside the modal loop where posts wait: t
 keeps its own frame rate there. A GPU source of your own that signals only by posting is drawn
 there at SDL's live-resize timer rate (about 64 frames a second), not at its own, and no longer
 freezes: posted work goes undrawn only while some source asked for a frame in the last 100 ms.
+With no such source on screen, other posted work draws once rather than on every timer tick.
 
 **The converse: the UI thread must never wait for a decoder that is waiting for it.** In GPU
 mode the UI thread is the render thread, and mpv's core waits up to 200 ms after every load and

@@ -536,7 +536,13 @@ A field holds the text typed into it, so a key needs a build only for what else 
 that text. On the Headers, Body and Auth sub-tabs the URL is read only by the Params and Chain
 counts: a URL character compares the two with what the last build showed, and builds nothing when
 neither moved and the request was already unsaved (round 7, step 10: 66.6 → 4.0 KB a character
-and −17 % time on NativeAOT, −27 % on JIT; a query typed out −83 %).
+and −17 % time on NativeAOT, −27 % on JIT; a query typed out −83 %). A header value and the body
+make the same comparison, the body also with its type (the first character into a request with no
+body block makes one, and the sub-tab says "Body json"); a value cell of the Environments table
+builds only when it makes its environment unsaved, the one thing the view shows of it besides the
+cell. That table had cost one `TextInput` per cell and a keyring read per secret on every
+character: 312 KB at 3 environments × 12 keys, 1.2 MB at 5 × 40, then 2.3–5.4 KB (round 9,
+step 8).
 
 **A selection a list and one panel show needs neither the window nor the view.** History's list
 draws its own selection, and the only other thing that shows it is the archived send beside the
@@ -704,6 +710,18 @@ Brief and Thumbnails since step 7):
   view may have done that to all of them. `TryKeep` checks the window as well (`Element.IsHosted`).
 - `TryKeep(…, place: key)` is the row-place check for cards a virtual list makes in a frame: those
   skip `Begin` and are handed back only into a parent keyed so.
+- **A grid whose columns change passes no place.** A change of columns moves every place but the first
+  row's to another row, so the row-place check makes every card on screen again. Aperture's library
+  did that from round 8 (step 5) to round 9 (step 1): 249 elements and 110 text measures a change of
+  columns. Its rows now check what a card needs themselves (`CanTakeCard`): the card's row is still a
+  child of the list (after a change of columns, one the list is about to let go of), and a card under
+  the pointer or pressed goes only back into its own row, where a full build leaves it too; moved, it
+  would take its hover to where the pointer is not. Every card then moves to its new row untouched, the
+  pixels, rings and reader tree what a grid made from nothing shows. Headless, 600 films, 1440×900,
+  JIT: a change of columns each step 235.6 → 62.5 KB, 249 → 58 elements made (the view's build and
+  the rows), text measures 110 → 14.5; a drag over 40 widths 13.6 → 4.9 KB a step. The suite pins it:
+  `virtual/image grid across a change of columns, 600 cards, cards kept in their own row` against `…,
+  cards kept`.
 
 Aperture's Home is its first user (one helper per shelf, as one film can stand on two shelves). The
 perf suite pins it: `component/shelf walk Right, 5 shelves of 7 cards, every card made` against `…,
@@ -761,7 +779,10 @@ cursor is within a page of the loaded end, where the build asks for the next pag
 off the live card it leaves and puts it on the one it reaches, if that one is live, and then builds.
 A card the list makes in the frame after the build takes the keyboard once that frame is drawn
 (`Window.RequestPostFrameCallback`); asked straight after the build, it does not exist yet, which is
-why the grid's cursor never had the keyboard. Aperture's grid, 600 films, 1440×900, a key and three
+why the grid's cursor never had the keyboard. A change of columns asks the same when the keyboard is on
+the cursor's card: handed back, the card keeps it, but one made again in its new row (its ring moved
+with no build since it was made, or it was the first row's last card, which the patched first row lets
+go of) would leave nothing focused. Aperture's grid, 600 films, 1440×900, a key and three
 frames, JIT: Right 49.2 → 0.3 KB a key, Down 81.9 → 29.1 (what is left is the rows scrolling in), no
 build a key; with a reader the same, and no tree built. Home's shelves do the same when a move builds:
 onto a watchlist title card, which every build makes (the card left kept its ring, two rings on
@@ -802,6 +823,47 @@ after them. The differences: a tooltip, which the headless pump draws only while
 after End in Thumbnails a list's height in the reader tree 0.0005 px from a later build's; and, as
 before the change, Brief's columns after a key that scrolls them, made for the scroll before it until
 the next key.
+
+**A part that every full build makes keeps its rows too** (Meridian's request tree, round 9 step 9).
+The tree builds with each `MarkDirty` — a request opened, a send's start and its end, a save, each toast
+— and made every row again, with the ⋯ button and the menu each row gained in 41f48bd3. Each request
+and folder row now comes back by its path. Its state is what it shows: the method, the title, lit,
+unsaved, the first variable it feeds forward, how many it uses, its depth and the scale; a workspace
+opened lets them all go. **Capture the key, and look the rest up when the handler runs.** A folder's
+menu captured the folder's record from the scan its row was made from, so a kept row's Delete… would
+have counted the requests of that scan, not the one on screen; it now finds the folder by its path when
+it is picked. Headless, 1440×900, JIT, UI-thread bytes: a full build at 25 requests 327.6 → 127.6 KB
+(elements made 294 → 117), at 200 requests 1,587.5 → 132.8 KB (1,407 → 117; the tree part 1,389.2 → 15.8),
+now flat in the collection's size; a toast at 200 requests 3,180.7 → 272.1 KB, a send 3,270.4 → 361.0;
+NativeAOT within 1 %. In 29 scenes (opens, a send in flight and ended, an edit, a save, a rename, a
+delete, new requests and folders, a folder renamed with what is in it, an environment, a toast, hover
+and keyboard on a row and its ⋯ across a build, History and back, changes on disk, the scale), the
+pixels, the reader tree, focus and every row's menu, each item run, matched a build that keeps nothing.
+
+**A selection only the view shows builds the view, and hands back the rows it does not move**
+(Meridian's Discovery map, round 9 step 11). A click on an endpoint built the whole window, the title
+bar and the rail too, and made every row of the map again: with a large spec imported, about 4.5 KB an
+endpoint a click. The click now builds the view alone (`MarkViewDirty`: no part shows the selection),
+and each row and group heading comes back by its key unless what it shows moved. The state is the
+endpoint itself, a record that is equal when every fact the row shows and the detail its click selects
+is equal, and whether it is selected; the click captures that endpoint, so a kept row selects what a
+row made now would. The order, the headings, the keys and the counts are worked out once a map, since a
+map is never changed (a send makes a new one). Two lessons:
+
+- **Let the kept elements go when the view is not built.** `KeptElements` holds the live elements, so a
+  map of 2,000 rows left for another view would stay alive behind it, which a test already guarded
+  against (a still pointer had done the same). The app's build forgets the rows when it made none.
+- **What is left is the list itself.** The build still walks every line, asks for each row and hands
+  the list its children: about 35 B an endpoint a click, against 4.5 KB.
+
+Headless, 1440×900, a click and three frames, idle-gated, JIT: 60 endpoints 365.3 → 54.7 KB a click
+(−85 %), 600 2,846.6 → 77.2 KB (−97 %), 2,000 9,073.0 → 124.4 KB (−99 %); elements made 333 / 2,493 /
+8,129 → 55 / 55 / 63, no part built; a click's time 1.5 → 1.1 ms, 4.3 → 1.5 ms, 6.4 → 2.4 ms (min;
+NativeAOT the same bytes, 0.78 → 0.71 ms, 1.47 → 0.87, 3.82 → 1.60). The
+pixels over a click walk match the old build's, and in a walk of clicks (the same row twice, the pointer
+over another row, a scrolled map, sends folded in, an observed row, the observed toggle, another view
+and back) the pixels, the reader tree and focus match a build that keeps nothing. Each row now tells a
+reader whether it is the selected one (`AccessibleSelected`).
 
 A column whose cells are all kept is left with no children by the time the reconciler reaches
 it, since the build moved every one into its new tree. Until round 5 those came back one by one,

@@ -343,6 +343,61 @@ A dialog with nothing focusable in it takes the focus itself (round 6, step 5): 
 Tab stop, so a reader is told the focus is on the dialog, named by its title. It was on the scrim,
 which since the scrim stopped being a button is a pane with no name.
 
+What holds the keyboard focus has to be a node, or a reader is told the focus is on nothing (plan 17
+round 9, step 15, fixed in the apps). A focusable box with no role or name is no node
+(`AccessibilityTreeBuilder.IsSemantic`), and the bridges are told a focus move only between nodes.
+Vesper's pane, the Tab stop that holds the focus while the cursor walks, was such a box: every Tab and
+click told nothing. It is a group (UIA Group, AT-SPI panel) named after its side and its folder,
+"Left pane, Downloads", with the pane's content under it. Its name changes with the folder, so a
+navigation with a reader builds the tree where it was walked in place (a node with children whose own
+name changed, which the walk does not take): 60 files, Enter and Backspace, 0 → 1 tree and +20 KB a
+navigation with UIA (209 → 230 KB), the same on AT-SPI; nothing without a reader, and no cursor key
+builds one (0 trees a key in Detail, Brief and Thumbnails, as before). Tab, which Vesper takes to
+switch panes, moved the active pane but left the focus on the one it left, so a reader was told
+nothing; the focus goes with it now, and a reader is told the pane it reached, then (in Detail) its
+cursor's item, selected, with no tree built: a Tab without a reader 71.60 → 71.68 KB.
+
+In Brief and Thumbnails a cursor key told a reader nothing (step 15): a Brief cell was a box with no
+role or name, so no node, and a thumbnail tile was in a row of a list that publishes its rows as
+items, one item named by all the files on it. Since step 15b each cell and tile is an item
+(`ListItem`) named after its entry ("f003.txt", "docs, folder", "Parent folder"), and the cursor's is
+selected, set with the ring (`ShowCursor`, which the ring's `Restyle` runs when a key moves it with
+no build); the thumbnail list's rows are composite (`RowsAreComposite`), so its tiles are read as
+they are; and the window marks an item's selected state on its node with no tree (below). A reader
+is told on every cursor key the item left, not selected, and the item reached, selected, and on Tab
+the pane, then its cursor's item, as in Detail. 60 files, 40 keys: 0 trees a key in Detail, Brief and
+Thumbnails with the tree, UIA and AT-SPI readers, as before; KB a key the same (Brief 2.21 / 2.33 /
+2.21 / 2.33 → 2.49 off / tree / UIA / AT-SPI, Thumbnails 1.97 / 2.06 / 1.85 / 1.81 → 1.96). The
+name is what these views show, the entry's name and a folder said to be one: not the size and date,
+which they do not show, nor a mark, which the colour shows. A mark in the name renames the item, a
+node with children, and the tree is built for that with a reader: tried, 0 → 1 tree and +26–34 KB a
+mark (Space), where a mark is walked in place with no tree now, as before (in Thumbnails 6 KB less
+than before, with no row labels to make). Detail's row says the mark. The cost is a navigation's,
+with a reader only: each cell is a node over its icon and name, and the tiles and their parts are
+nodes where a row was one (+34 and +95 nodes a navigation): Brief 237 → 250 KB with UIA (254 → 270
+AT-SPI), Thumbnails 262 → 294 (265 → 313); without a reader a navigation is within 0.5 KB. Thumbnail
+rows off screen are not in the tree, as in any composite list; they come in as they realize.
+
+Focus that goes nowhere is the other half: an element holding the focus goes, and nothing takes it.
+Meridian's prompt and question (cards in its own tree, not `Dialog.Show`, which gives the focus back
+itself) took it into their field or button and let it go with the card: Escape out of "New request"
+left no focused element, and a reader was told the focus on nothing. They give it back as they close
+(`ReturnFocusToModalOpener`): to what held it when the card opened, while the card's field still has
+it, so a reader is told one move, the field to the "New request" button; a submit gives it back
+before its action runs, so an action that focuses something of its own wins. 0 trees, as before;
+66.07 → 66.10 KB an open or Escape without a reader. The Request tab's "reveal (5 s)" button goes
+as the values show, with the focus its press gave it; the response's tabs are focusable now (no Tab
+stop, no ring, `TabIndex` −1), so a click focuses them as it does a button, and the reveal hands the
+focus to the Request tab: a reader is told the button, then the tab, where it was told the button,
+then nothing. 0 trees; 75.6 → 76.1 KB the click without a reader, one probe step (the focus moves
+to the button and back to the tab, where the button's removal only dropped it). Meridian's History
+walks its rows from the app's key handler, whatever holds the focus, and opened with nothing
+focused: a reader heard the rows' selection move in a list it was not in. The list (named "History")
+takes the focus when the view opens and is a Tab stop; it takes no key itself, so the keys are as
+they were, and draws no ring. A reader is told the list on opening, then each key's two rows as
+before, with the focus on their list: 0 trees a key (300 sends, 16.08 → 16.10 KB a key without a
+reader, 16.55 → 16.57 with UIA), the opening 645.7 → 646.1 KB.
+
 The coalesced layout refresh builds no tree either where a build would make the same nodes
 (2026-10-26, plan 17 round 5). A node keeps its box where it sits in the content of the scroll
 views above it (`UnscrolledRect`: the element's box less a sticky shift or an overlay's origin),
@@ -391,6 +446,20 @@ changes (the suite's composite walk, 1.0 tree a key). Since round 7 step 8b the 
 (the list's node has no selected state: its rows tell it, made again or told), and the second is
 marked on the applied tree and told as a menu entry's is (`TryPatchA11y`); Junction's Changes caret
 walk builds no tree for either.
+
+Which selected states are marked on the applied tree with no build (the window's property observer,
+`Window.AccessibilityObserverAdapter`; plan 17 round 9 step 15b): a menu's entry (`IsMenuEntry`); a row directly in
+a composite list (its parent says `RowsAreComposite`); and an item, an element whose `Role` is
+`ListItem`, wherever it is: a cell of a grid a view lays out with boxes (Vesper's Brief: columns of
+cells in a scroll view), a tile in a composite list's row (its Thumbnails). Each must say selected or
+not before and after (`AccessibleSelected` set both times), and its node must be in the applied tree
+where its ancestors say (else the tree is built, as for any patch). The layout cannot tell a grid from
+any other boxes, so the item's role is what says it is one of a set. Its selected state goes on its
+own node and nothing else a build makes reads it, so the mark is what the build's diff would report.
+Any other element's selected state — a tab, a radio button, a button that is one of a set (Meridian's
+endpoints, which a detail pane follows) — still builds the tree, which also tells what came with it.
+Vesper's Brief, 60 files, with UIA: a cursor key 36 KB and a tree with that change alone, 2.2 KB and
+none with the rule.
 
 Threading: UIA may call provider methods from worker threads. Either marshal
 to the UI thread, or snapshot values onto the wrapper at construction/diff

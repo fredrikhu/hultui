@@ -9,7 +9,8 @@ namespace VesperCommander.Tests;
 /// None set a label, so the framework's fallback, the item's <c>ToString()</c>, was read out:
 /// "DiffRow { Line = Line { Op = Change, LeftNo = 2, … } }" for a line of the comparison, and
 /// "0", "1", "2" for the viewer's lines and the grid's rows of tiles. The labels are also made
-/// once and kept, because the tree asks for every item's label each time it is built.
+/// once and kept, because the tree asks for every item's label each time it is built. The grid's
+/// tiles are items of their own now, each named after its file.
 /// </summary>
 public class ItemLabelTests
 {
@@ -54,8 +55,10 @@ public class ItemLabelTests
             again.First(n => n.StartsWith("line 1:", System.StringComparison.Ordinal)));
     }
 
+    /// <summary>Each tile is an item of its own, named after its file (plan 17 round 9, step 15b: a
+    /// row of tiles was one item named by all the files on it, and the cursor was in none).</summary>
     [Fact]
-    public void AThumbnailRowIsNamedByTheFilesOnIt()
+    public void AThumbnailTileIsAnItemNamedAfterItsFile()
     {
         using var t = new DiffViewTests.Fixture();
         System.IO.Directory.CreateDirectory(System.IO.Path.Combine(t.Left, "docs"));
@@ -65,7 +68,10 @@ public class ItemLabelTests
         t.Session.PumpFrames(2);
 
         var names = ItemNames(t.Session.Window.AccessibilityTree);
-        Assert.Contains(names, n => n.StartsWith("Parent folder; docs, folder; f00.txt; f01.txt", System.StringComparison.Ordinal));
+        Assert.Contains("Parent folder", names);
+        Assert.Contains("docs, folder", names);
+        Assert.Contains("f00.txt", names);
+        Assert.DoesNotContain(names, n => n.Contains(';'));
         Assert.DoesNotContain("0", names);
         Assert.DoesNotContain("1", names);
     }

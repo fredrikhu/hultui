@@ -1,3 +1,4 @@
+using System.Text;
 using Meridian.Core;
 using Xunit;
 
@@ -79,6 +80,49 @@ public class ApiMapTests
         var endpoint = Assert.Single(map.Endpoints);
         Assert.Equal(Confidence.Declared, endpoint.Confidence);
         Assert.Equal(1, endpoint.SeenCount);
+    }
+
+    /// <summary>A send into a map of 2,000 endpoints matches its path in place and templatizes a new
+    /// one without splitting every known path: 396 KB a send to a known endpoint, 934 KB to a new path,
+    /// before. What is left is the new map's list.</summary>
+    [Fact]
+    public void ASendIntoALargeMap_SplitsNoKnownPath()
+    {
+        var map = OpenApi.Parse(BigSpec(400), "https://api.x", "spec", out _)!;
+        Assert.Equal(2000, map.Endpoints.Count);
+        for (int i = 0; i < 5; i++)
+        {
+            map.Record("GET", $"https://api.x/v1/res399/items/it_{i}", 200, null);
+            map.Record("GET", $"https://api.x/v2/other{i}/abc_{i}9", 200, null);
+        }
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        var known = map.Record("GET", "https://api.x/v1/res399/items/it_7", 200, null);
+        long knownBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+        before = GC.GetAllocatedBytesForCurrentThread();
+        var unknown = map.Record("GET", "https://api.x/v2/other7/abc_79", 200, null);
+        long unknownBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(1, known.Endpoints.Single(e => e.Method == "GET" && e.Path == "/v1/res399/items/{id}").SeenCount);
+        Assert.Equal(Confidence.Observed, unknown.Endpoints[^1].Confidence);
+        Assert.Equal("/v2/other7/{id}", unknown.Endpoints[^1].Path);
+        Assert.True(knownBytes < 48 * 1024, $"a send to a known endpoint allocated {knownBytes / 1024} KB");
+        Assert.True(unknownBytes < 160 * 1024, $"a send to a new path allocated {unknownBytes / 1024} KB");
+    }
+
+    [Theory]
+    [InlineData("/v1/charges/{id}", "/v1/charges/ch_1", true)]
+    [InlineData("/v1/charges/{id}", "/v1/charges", false)]
+    [InlineData("/v1/charges/{id}", "/v1/charges/ch_1/refunds", false)]
+    [InlineData("/v1/charges", "/v1/refunds", false)]
+    [InlineData("//v1//charges/", "/v1/charges", true)]
+    [InlineData("/v1/{a}/x/{b}", "/v1/1/x/2", true)]
+    [InlineData("/v1/{a}/x/{b}", "/v1/1/y/2", false)]
+    [InlineData("/", "/", true)]
+    [InlineData("/{", "/a", false)]
+    public void APathMatchesATemplateSegmentBySegment(string template, string concrete, bool matches)
+    {
+        Assert.Equal(matches, ApiMap.PathMatches(template, concrete));
     }
 
     [Fact]
@@ -224,6 +268,126 @@ public class ApiMapTests
             Assert.NotNull(OpenApi.Parse(OpenApi.FullText(body), "https://h", "x.json", out _));
         }
         finally { File.Delete(spill); }
+    }
+
+    // ── Parsed from bytes ────────────────────────────────────────────────
+    //
+    // A spec file, and a body spilled past the viewer cap, are parsed from their UTF-8 bytes: read
+    // as text they cost a string and a rented UTF-8 copy that stayed in the shared pool (8 MB after
+    // a spec of 2,000 operations). The oracle is the text path they replaced.
+
+    private static readonly Dictionary<string, Func<string>> Specs = new()
+    {
+        ["the spec above"] = () => Spec,
+        ["60 endpoints, as the walks' spec60.json"] = () => DiscoveryViewTests.WalkSpec(30),
+        ["600 endpoints, as the walks' spec600.json"] = () => DiscoveryViewTests.WalkSpec(300),
+        ["500 operations with examples and parameters"] = () => BigSpec(100),
+        ["text past ASCII"] = () => """{"info":{"version":"1.0 ü"},"paths":{"/café/{id}":{"get":{"tags":["Café ☕"],"summary":"Hämta 東 😀"}}}}""",
+        ["a broken spec"] = () => "{\n  \"paths\": {\n    \"/a\": { \"get\": { \"summary\": \"x\" } },\n    oops\n  }\n}",
+        ["not a spec"] = () => """{"hello":"world"}""",
+        // The bytes are read a path item at a time: what a document of the whole text decides.
+        ["broken inside a path item"] = () => "{\"paths\":{\"/a\":{\"get\":{}},\n \"/b\":{\"get\":{\"summary\":\"x\",}}}}",
+        ["cut short"] = () => """{"paths":{"/a":{"get":{"summary":"x"}}""",
+        ["text after the root"] = () => """{"paths":{"/a":{"get":{}}}} x""",
+        ["broken in info"] = () => """{"info":{"version":1.2.3},"paths":{"/a":{"get":{}}}}""",
+        ["broken in a value nobody reads"] = () => """{"servers":[{"url":}],"paths":{"/a":{"get":{}}}}""",
+        ["paths and info twice"] = () => """{"info":{"version":"1"},"paths":{"/a":{"get":{}}},"info":{"version":"2"},"paths":{"/b":{"post":{}},"/b":{"put":{}}}}""",
+        ["escaped names"] = () => """{"paths":{"/a/{id}":{"get":{"summary":"sé","tags":["T"]}}},"info":{"version":"1"}}""",
+        ["path items that are not objects"] = () => """{"paths":{"/a":[1,{"get":{}}],"/b":"x","/c":null,"/d":{"get":{}}}}""",
+        ["a root that is an array"] = () => """[{"paths":{"/a":{"get":{}}}}]""",
+        ["nothing at all"] = () => "  \n ",
+        ["nested too deep"] = () => "{\"x\":" + new string('[', 70) + new string(']', 70) + ",\"paths\":{}}",
+    };
+
+    public static TheoryData<string> SpecFiles()
+    {
+        var data = new TheoryData<string>();
+        foreach (var what in Specs.Keys) data.Add(what);
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(SpecFiles))]
+    public void ASpecFileParsedFromBytes_IsTheMapItsTextGives(string what)
+    {
+        string spec = Specs[what]();
+        var path = Path.GetTempFileName();
+        try
+        {
+            // As saved: plain UTF-8, with a byte order mark, as UTF-16; and with a byte that is not UTF-8.
+            foreach (var (form, bytes) in new (string, byte[])[]
+            {
+                ("UTF-8", new UTF8Encoding(false).GetBytes(spec)),
+                ("UTF-8 with a BOM", new UTF8Encoding(true).GetPreamble().Concat(Encoding.UTF8.GetBytes(spec)).ToArray()),
+                ("UTF-16 with a BOM", Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes(spec)).ToArray()),
+                ("Latin-1 in a string", Encoding.Latin1.GetBytes(spec.Replace("\"paths\"", "\"x\":\"résumé\",\"paths\"", StringComparison.Ordinal))),
+            })
+            {
+                File.WriteAllBytes(path, bytes);
+                var text = OpenApi.Parse(File.ReadAllText(path), "https://api.x", "openapi.json", out var textFailure);
+                var utf8 = OpenApi.Parse(OpenApi.ReadUtf8(path), "https://api.x", "openapi.json", out var utf8Failure);
+                Assert.True(Dump(text) == Dump(utf8), $"{what}, {form}: the map from bytes differs:\n{Dump(text)}\n---\n{Dump(utf8)}");
+                Assert.Equal(textFailure, utf8Failure);
+            }
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Theory]
+    [MemberData(nameof(SpecFiles))]
+    public void AResponseBodyParsedFromBytes_IsTheMapItsTextGives(string what)
+    {
+        string spec = Specs[what]();
+        var spill = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(spill, spec);
+            foreach (var body in new[]
+            {
+                new ResponseBody(BodyKind.Text, spec, [], spec.Length, Truncated: false, null),
+                new ResponseBody(BodyKind.Text, spec[..Math.Min(spec.Length, 12)], [], spec.Length, Truncated: true, spill),
+            })
+            {
+                var text = OpenApi.Parse(OpenApi.FullText(body), "https://api.x", "spec", out var textFailure);
+                var utf8 = OpenApi.Parse(OpenApi.FullUtf8(body), "https://api.x", "spec", out var utf8Failure);
+                Assert.True(Dump(text) == Dump(utf8), $"{what}, truncated {body.Truncated}: the map from bytes differs");
+                Assert.Equal(textFailure, utf8Failure);
+            }
+        }
+        finally { File.Delete(spill); }
+    }
+
+    /// <summary>Everything a parsed map holds, in order.</summary>
+    private static string Dump(ApiMap? map)
+    {
+        if (map is null) return "<none>";
+        var sb = new StringBuilder($"{map.BaseUrl}|{map.SpecSource}|{map.SpecVersion}|{map.DeclaredCount}|{map.ObservedCount}\n");
+        foreach (var e in map.Endpoints)
+        {
+            sb.Append($"{e.Method} {e.Path} {e.Confidence} [{e.Group}] [{e.Summary}] {e.Deprecated} {e.SeenCount} [{e.InferredShape}]");
+            foreach (var p in e.Params) sb.Append($" ({p.Name},{p.In},{p.Required},{p.Type})");
+            sb.Append('\n').Append(e.ExampleResponse).Append('\n');
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>Expert 4's synthetic spec (plan 17 round 9): five operations a resource, each with a
+    /// 300-character description, query parameters, an item id and a 200 example; tags res0..res39.</summary>
+    internal static string BigSpec(int resources)
+    {
+        var sb = new StringBuilder("{\"openapi\":\"3.0.1\",\"info\":{\"title\":\"Big\",\"version\":\"2.4.0\"},\"paths\":{");
+        const string example = "{\"id\":\"it_123\",\"name\":\"An item\",\"tags\":[\"a\",\"b\"],\"owner\":{\"id\":\"u_1\"},\"amount\":1200}";
+        const string idParam = ",{\"name\":\"id\",\"in\":\"path\",\"required\":true,\"schema\":{\"type\":\"string\"}}";
+        for (int i = 0; i < resources; i++)
+        {
+            string tag = $"res{i % 40}";
+            string op(string summary, string extra) =>
+                $"{{\"tags\":[\"{tag}\"],\"summary\":\"{summary}\",\"description\":\"{new string('d', 300)}\",\"parameters\":[{{\"name\":\"limit\",\"in\":\"query\",\"schema\":{{\"type\":\"integer\"}}}}{extra}],\"responses\":{{\"200\":{{\"description\":\"ok\",\"content\":{{\"application/json\":{{\"example\":{example}}}}}}},\"404\":{{\"description\":\"not found\"}}}}}}";
+            if (i > 0) sb.Append(',');
+            sb.Append($"\"/v1/res{i}/items\":{{\"get\":{op("List items " + i, "")},\"post\":{op("Create an item " + i, "")}}},");
+            sb.Append($"\"/v1/res{i}/items/{{id}}\":{{\"get\":{op("Get an item " + i, idParam)},\"put\":{op("Replace an item " + i, idParam)},\"delete\":{op("Delete an item " + i, idParam)}}}");
+        }
+        return sb.Append("}}").ToString();
     }
 
     // ── Promotion ────────────────────────────────────────────────────────

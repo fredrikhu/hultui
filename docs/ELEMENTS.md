@@ -114,6 +114,27 @@ hover allocates nothing beyond the platform's own input record. A `PointerMoveEv
 handler makes an event on every move over its element or anything inside it — on a root,
 every move in the window — so attach a move handler to the element that needs it.
 
+**Hover follows a build under a still pointer.** Enter and leave work as the DOM's
+`mouseenter` and `mouseleave` do: moving between an element and one inside it tells the outer
+one nothing. When a build removes the element under the pointer (a key switches the view, a
+list makes its rows again, an overlay closes), the window hit-tests hover again at the end of
+that frame, where the pointer rests, as a browser does. Each element that went gets one
+`PointerLeave`; each element now under the pointer that was not before gets one `PointerEnter`
+and its `.OnHover` look in the next frame; the part of the chain that survived hears nothing,
+and what it is no longer over gets its leave. A tooltip owned by what went closes, and the new
+element's opens after the usual delay. Nothing happens while a press holds the pointer (a
+capture, a drag, a text selection, a slider, an autoscroll): hover stays where it is until the
+release, as it does on a move, and the frame after the release settles it. Nothing happens
+when the pointer is outside the window or has never been in it, or when the build kept the
+hovered element. Until plan 17's round 9, hover stayed on the removed element until the
+pointer moved, and through its parents that element kept the whole old view alive: in
+Meridian with a 2,000-endpoint spec, 7.8 MB of a 28 MB heap after a key switched the view.
+
+So an enter or leave handler must not rebuild the element the pointer is over into a new one:
+the next frame's hit-test enters the new one, the handler builds another, and the window
+rebuilds every frame while the pointer rests. Keep the element (the same kind at the same
+place, or the same key) and change what it shows, as Vesper Commander's column headers do.
+
 **Which inputs draw a frame.** An input draws a frame when it changes something: an element
 marked itself dirty (a control's own state, a scroll, a hover or pressed style, an overlay),
 the hover moved to another element, a drag is under way or has just ended, or the focus ring
@@ -187,6 +208,14 @@ it is selectable and whether it is the one selected, and selecting it from assis
 clicks it, so the element has to select itself on click. `TabsElement` sets it on its headers
 (role `Tab`, in a strip of role `TabList`, beside a panel of role `TabPanel`).
 
+A view that lays out its own items and moves a cursor through them with no build (a grid of
+cells made of boxes, the tiles in a composite list's rows: Vesper's Brief and Thumbnails) gives
+each item the role `ListItem`, a name, and `AccessibleSelected` (true on the cursor's, false on
+the rest) as it is made, and sets it where it moves the cursor (with the ring's `Restyle`). The window marks an
+item's selected state on its node and tells it with no tree; a selected state on any other
+element (a tab, a button that is one of a set) builds the tree. Keep what changes often out of
+such an item's name: a new name on an element with children builds the tree.
+
 `AccessibleName` is what a screen reader announces. `Name` is only its last-resort fallback — reach for `AccessibleName` on anything user-facing, and leave `Name` for debugging.
 
 **A `BoxElement` with a click handler is announced as a button.** When no role is set, the
@@ -246,7 +275,17 @@ moved and hears neither.
 blends the group once, so overlapping children do not show through each other. The group
 is sized to what the subtree paints — each element's `PaintBounds`, unioned down the tree
 until a clip (`Overflow.Hidden`, a scroll view) cuts the children off. A plain `Box` with
-no children and one fill skips the group and fills in a fainter colour.
+no children and one fill skips the group and fills in a fainter colour, and a plain `Image`
+with no children draws its picture once at that alpha (within 2/255 of the group; a crop
+(`SourceRect`), a video or another GPU or frame-stream source keeps the group).
+
+A group is a layer on every frame it is drawn, about 0.01 ms of CPU and 0.013–0.02 ms of GPU
+each in a real window, and a list that fades a row with children makes one for each row on
+screen (Vesper's Brief view with 61 cut files: 43 % of a GL frame, 84 % of its GPU time; plan 17
+round 9). To dim a row, a card or a tile, fade its colours instead (each text and fill at the
+same share of its alpha, as an element at that opacity shows it) and give `Opacity` only to lone
+boxes and images. What overlaps then blends part by part: text over a faded fill is a level or
+two off at glyph edges, and a faded part shows what is under it, which the group hid.
 
 `PaintBounds` is the border box unless the element says otherwise. `BoxElement` adds its
 shadows and outline, `TextElement` the ink of text longer than its box. **A custom element
@@ -680,6 +719,13 @@ layout pass), it holds the request and applies it when the extent is next comput
 so a reveal asked for on the same frame the content appeared is not lost.
 `ScrollIntoView(child)` and `ScrollRangeIntoViewHorizontal(left, width)` are the
 element and sideways forms.
+
+**A scroll from code raises no event.** `ScrollEvent` is the wheel's; setting
+`ScrollOffsetX`/`ScrollOffsetY` or a reveal moves the view and tells no handler. A view that
+makes only what is in view, picked from the offset (Vesper's Brief columns), sets a scroll it
+is about to make *before* its build and picks from that: a build that makes what the old
+offset shows and then scrolls (from `OnAfterBuild`) leaves what it scrolled to unmade, with
+nothing to build it until the next key.
 
 **`ScrollSidewaysWith(ISidewaysScroller)`.** Set when the horizontal offset is owned by
 something other than the view's own `ScrollOffsetX` (a `HorizontalPan`). The wheel's

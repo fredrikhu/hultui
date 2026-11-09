@@ -640,7 +640,7 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
             // that does not is cut into clusters and searched, unless it was wrapped before.
             if (!FitsWhole(line, pos, hardEnd, wrapWidth, style, asciiAdvance, ref charWidth)
                 && _replaced?.TryMove(_text, pos, hardEnd, into) != true)
-                WrapLine(into, pos, hardEnd, wrapWidth, style, ref charWidth);
+                WrapLine(into, pos, hardEnd, wrapWidth, style, asciiAdvance, ref charWidth);
             pos = hardEnd + 1;
         }
         if (_clusterEnds is { Capacity: > 4096 }) _clusterEnds = null;
@@ -810,16 +810,19 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     }
 
     // Where [start..hardEnd), too long to fit whole, breaks into lines: each wrapped line's
-    // start after the first, appended to `into`.
+    // start after the first, appended to `into`. In a face proven monospace for printable ASCII
+    // (`asciiAdvance` above 0) a row of it breaks by its count; any other row is searched.
     private void WrapLine(List<int> into, int start, int hardEnd, float wrapWidth, ResolvedInheritedStyle style,
-        ref float charWidth)
+        float asciiAdvance, ref float charWidth)
     {
         var ends = ClusterEnds(start, hardEnd);
         int segStart = start;
         while (segStart < hardEnd)
         {
             // How many chars fit on this wrapped line?
-            int lineEnd = FindLineBreak(segStart, hardEnd, wrapWidth, style, ends, ref charWidth);
+            int lineEnd = asciiAdvance > 0f ? BreakByCount(segStart, hardEnd, wrapWidth, asciiAdvance) : -1;
+            if (lineEnd < 0)
+                lineEnd = FindLineBreak(segStart, hardEnd, wrapWidth, style, ends, ref charWidth);
             if (lineEnd >= hardEnd)
                 break;
             into.Add(lineEnd);
@@ -835,8 +838,10 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     /// A 19,000-line JSON response measured every line it opened with (18,887 widths) to find
     /// that they fit, and kept a 4 MB cache of them. A line with anything else in it — a tab, a
     /// carriage return, a character outside printable ASCII — or one that fits by less than a
-    /// character is measured as before, and the rows are the ones measuring gives. False is the
-    /// reference path, every line measured, for the tests that hold the two to the same rows.
+    /// character is measured as before, and the rows are the ones measuring gives. A line too
+    /// long to fit breaks the same way, row by row (<see cref="BreakByCount"/>). False is the
+    /// reference path, every line measured and every row searched, for the tests that hold the
+    /// two to the same rows.
     /// </summary>
     internal bool FitsByCount { get; set; } = true;
 
@@ -1136,6 +1141,37 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
 
         // No word boundary found — break between characters
         return fitEnd;
+    }
+
+    /// <summary>
+    /// Where the row from <paramref name="start"/> breaks by its count, in a face proven
+    /// monospace for printable ASCII (<paramref name="advance"/>); -1 for the search
+    /// (<see cref="FindLineBreak"/>). n of those characters measure n advances to within the
+    /// proof's 1/4096 of one a character, so the longest run that fits is floor(width / advance)
+    /// characters, and the break is where the search would put it: walked back to the last
+    /// space. Only when the n + 1 characters that settle it are all printable ASCII, and the
+    /// width is not within that rounding of a multiple of the advance — (n + 1) × advance / 4096
+    /// and a thousandth of a pixel for float noise, either side — nor under one advance (the
+    /// search's one-character floor) nor NaN. A 1 MB minified script wrapped at 703 px built a
+    /// prefix table and shaped the words its probes cut for every one of its 12,525 rows:
+    /// 63.6 MB to open.
+    /// </summary>
+    private int BreakByCount(int start, int hardEnd, float wrapWidth, float advance)
+    {
+        float room = wrapWidth / advance;
+        if (!(room >= 1f)) return -1;
+        int length = hardEnd - start;
+        int n = room < length ? (int)room : length;
+        float slack = (n + 1) * advance * (1f / 4096) + 1e-3f;
+        if (n == length)   // the rest of the line fits, by its count, or is measured
+            return length * advance <= wrapWidth - slack && IsPrintableAscii(_text.AsSpan(start, length)) ? hardEnd : -1;
+        if (n * advance > wrapWidth - slack || (n + 1) * advance <= wrapWidth + slack
+            || !IsPrintableAscii(_text.AsSpan(start, n + 1)))
+            return -1;
+        int fitEnd = start + n, breakAt = fitEnd;
+        while (breakAt > start && !char.IsWhiteSpace(_text[breakAt - 1]))
+            breakAt--;
+        return breakAt > start ? breakAt : fitEnd;
     }
 
     private int LineCount(float wrapWidth, ResolvedInheritedStyle style) =>

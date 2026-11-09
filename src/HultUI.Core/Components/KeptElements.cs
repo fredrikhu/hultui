@@ -123,12 +123,17 @@ public sealed class KeptElements<TState> where TState : IEquatable<TState>
     public void Clear() => _entries.Clear();
 
     // Let go each time the count doubles, so a list scrolled through a thousand items holds about what
-    // is on screen: whatever left the window or is older than the build before.
+    // is on screen: whatever left the window or is older than the build before. Never what the build
+    // in progress made or handed back: an element it made is not in the window until the build is
+    // reconciled, and one let go here had no Live after it and was made again by the next build.
     private void Prune()
     {
         foreach (var (key, entry) in _entries)
+        {
+            if (_build != Unbuilt && entry.Build == _build) continue;
             if ((_build != Unbuilt && entry.Build < _build - 1) || entry.Live.Current is not { IsHosted: true })
                 _gone.Add(key);
+        }
         foreach (var key in _gone) _entries.Remove(key);
         _gone.Clear();
         _pruneAt = Math.Max(64, _entries.Count * 2);

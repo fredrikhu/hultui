@@ -248,6 +248,131 @@ public class GridRowKeepTests
         });
     }
 
+    /// <summary>
+    /// A narrower window fits a card fewer across: every place but the first row's moves to another
+    /// row, and its card goes with it, untouched. Only the first row's last card is made: the first
+    /// row is the one row whose key both widths share, so the list patches it and lets go of the card
+    /// that no longer fits in it before the second row asks for it. Each card was made again before,
+    /// in every row whose key is new.
+    /// </summary>
+    [Fact]
+    public void AChangeOfColumns_HandsTheCardsBack()
+    {
+        Host((session, app, _, _) =>
+        {
+            var cards = Rows(session).SelectMany(Cards).ToList();
+            int across = Cards(Rows(session)[0]).Count;
+            Stamp(cards);
+
+            ulong before = ElementId.New().Value;
+            session.Window.SetClientSize(1300, 900);
+            session.PumpFrames(3);
+            ulong elements = ElementId.New().Value - before - 1;
+
+            Assert.Equal(across - 1, Cards(Rows(session)[0]).Count);
+            var now = Rows(session).SelectMany(Cards).ToList();
+            Assert.Equal([$"card-m{across - 1:000}"], now.Where(c => c.AccessibleDescription is null).Select(c => c.AutomationId));
+            Assert.All(now.Where(c => c.AccessibleDescription is not null), c => Assert.Contains(c, cards));
+            // The view's build, the rows, and the one card: 249 elements before.
+            Assert.True(elements < 80, $"{elements} elements made");
+        });
+    }
+
+    /// <summary>The cursor's card, made with its ring by the build before, keeps the ring and the
+    /// keyboard as it moves to another row with a change of columns.</summary>
+    [Fact]
+    public void AChangeOfColumns_KeepsTheRingAndTheKeyboardOnTheCursorsCard()
+    {
+        Host((session, app, _, _) =>
+        {
+            Keys(session, KeyCode.Right);
+            Keys(session, KeyCode.Down);
+            Rebuild(session, app);
+            var card = Card(session, "m007");
+            var row = card.Parent;
+            Assert.Same(card, session.Window.Window.FocusedElement);
+
+            session.Window.SetClientSize(1300, 900);
+            Settle(session);
+
+            Assert.Same(card, Card(session, "m007"));
+            Assert.NotSame(row, card.Parent);   // the second row starts at m006 now: another row
+            Assert.Same(card, session.Window.Window.FocusedElement);
+            Assert.Equal(["card-m007"], Rows(session).SelectMany(Cards).Where(c => c.Outline.Width > 0).Select(c => c.AutomationId));
+        });
+    }
+
+    /// <summary>A card under the pointer stays where a full build leaves it: moved, it would take its
+    /// hover to where the pointer is not.</summary>
+    [Fact]
+    public void ACardUnderThePointer_IsNotMovedByAChangeOfColumns()
+    {
+        Host((session, app, _, _) =>
+        {
+            var hovered = Card(session, "m009");
+            var box = hovered.Layout.AbsoluteBorderBox;
+            float px = box.X + box.Width / 2, py = box.Y + 40;
+            session.Window.MoveMouse(px, py);
+            session.PumpFrames(2);
+            Assert.True(hovered.IsHovered);
+            var other = Card(session, "m010");
+
+            session.Window.SetClientSize(1300, 900);
+            Settle(session);
+
+            Assert.NotSame(hovered, Card(session, "m009"));
+            Assert.Same(other, Card(session, "m010"));
+            // The old card is let go, and hover is hit-tested again where the pointer rests (ff6125a6): only a card
+            // under the still pointer may show it, never one moved there.
+            Assert.False(hovered.IsHovered);
+            foreach (var card in Rows(session).SelectMany(Cards).Where(c => c.IsHovered))
+            {
+                var b = card.Layout.AbsoluteBorderBox;
+                Assert.True(px >= b.X && px < b.X + b.Width && py >= b.Y && py < b.Y + b.Height,
+                    "only the card under the still pointer is hovered");
+            }
+        });
+    }
+
+    /// <summary>The oracle across changes of columns: the grid, its rings and what a reader is told
+    /// are what a grid made from nothing at the same width shows.</summary>
+    [Fact]
+    public void ChangesOfColumns_EndWhereAGridMadeFromNothingWould()
+    {
+        Host((session, app, _, _) =>
+        {
+            session.Window.InstallAccessibilityBridge();
+            session.PumpFrames(3);
+            (KeyCode? Key, int Width)[] steps =
+            [
+                (KeyCode.Right, 0), (null, 1300), (KeyCode.Down, 0), (null, 1440), (KeyCode.Right, 0), (null, 1140),
+                (KeyCode.PageDown, 0), (null, 1440), (KeyCode.Up, 0), (null, 1300),
+            ];
+            int step = 0;
+            foreach (var (key, width) in steps)
+            {
+                if (key is { } k) Keys(session, k);
+                else session.Window.SetClientSize(width, 900);
+                for (int i = 0; i < 3; i++) session.PumpFrame(TimeSpan.FromMilliseconds(200));
+                step++;
+                string shown = RowsSig(session) + Rings(session), told = Told(session.Window.AccessibilityTree);
+
+                ForgetCards(app);
+                ((VirtualListElement<ApertureApp.GridRowItem>)Grid(session)!).InvalidateRows();
+                session.PumpFrames(2);
+                for (int i = 0; i < 3; i++) session.PumpFrame(TimeSpan.FromMilliseconds(200));
+
+                string fresh = RowsSig(session) + Rings(session);
+                Assert.True(fresh == shown, $"after step {step}: the grid is not what one made from nothing shows\n{First(shown, fresh)}");
+                string freshTold = Told(session.Window.AccessibilityTree);
+                Assert.True(freshTold == told, $"after step {step}: a reader is told otherwise\n{First(told, freshTold)}");
+            }
+        }, films: 200);
+    }
+
+    private static string Rings(HeadlessSession session) =>
+        "rings: " + string.Join(",", Rows(session).SelectMany(Cards).Where(c => c.Outline.Width > 0).Select(c => c.AutomationId));
+
     /// <summary>A kept card keeps its image element, and a card made again draws its picture in
     /// the first frame after the key: nothing shows a placeholder on the way.</summary>
     [Fact]

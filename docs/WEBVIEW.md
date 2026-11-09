@@ -165,6 +165,15 @@ the page moves on to the next element. Its accessible name is the page's title u
 app sets one. Unmounting the element hides the page without reloading it: a tab switch
 keeps the page as it was.
 
+**A hidden page keeps its browser, and gives back its frames' GPU memory.** On Windows, in the
+first frame after the element goes, the page gives back what its frames go through: the
+capture's interop texture and its GL registration, and on Vulkan the image the renderer lent it.
+Shown again, WebView2 sends the page's frame and it is drawn through them made anew, 11–28 ms
+after the element is added (What it costs has the memory). The browser's processes stay until the controller is disposed —
+six `msedgewebview2` of about 300 MB together, for one page — so an app that keeps a page the
+user may not come back to can dispose its controller after a while and make a new one when it is
+wanted, at about a third of a second to the new page's first frame. Meridian does after a minute.
+
 **One element per controller.** The element tells the engine where the page is; two
 elements showing one controller would fight over it.
 
@@ -263,6 +272,11 @@ the window. Several pages, and videos beside them, can share a window on either 
 on Vulkan each is lent a shared image of its own. Where the driver lacks the
 interop the frame is read back and uploaded instead, at about 220 ms/s;
 `HULTUI_WEBVIEW2_INTEROP=0` forces that, for a driver that mishandles the interop.
+
+A page's GPU memory, a still page of 2160×779 px on an RTX 4080 (this process, DXGI): with the
+page shown 87 MB on GL and 134–141 on Vulkan; hidden 72 and 97; with its controller disposed 42
+and 66, against 27 and 46 with no page at all. Shown again, the page's frame arrives 11–28 ms
+after the element is added; a new page's first frame, 0.25–0.35 s after its document goes in.
 
 ## Limits, for now
 

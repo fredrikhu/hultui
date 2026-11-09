@@ -1,5 +1,6 @@
 using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
+using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
@@ -66,6 +67,41 @@ public partial class MeridianApp
 
     // ── Tree ─────────────────────────────────────────────────────────────
 
+    // A row comes back from the build before when nothing it shows or does moved (KeptElements;
+    // REACTIVITY.md, "Hand back the elements a key does not change"). The tree builds with every
+    // MarkDirty — opening a request, a send's start and its end, a save, each toast — and made each
+    // row again with its ⋯ and its menu: at 200 requests 1,389 KB of a 1,588 KB build, 133 KB a
+    // build with the rows kept (REACTIVITY.md has the numbers). A row is keyed
+    // by its path, and its state is all it shows; its handlers capture the path alone, and its menu
+    // reads the tabs and the tree as they are when it opens. The scale is there for the icons cut at
+    // it, and a workspace opened lets them all go (a folder row names its path in the collection).
+    private readonly record struct RequestRowState(string? Method, string DisplayName, bool Active, bool Dirty,
+        string? Produces, int UsesCount, int Depth, float Scale);
+    private readonly record struct FolderRowState(string Name, int Depth, float Scale);
+    private readonly KeptElements<RequestRowState> _requestRows = new();
+    private readonly KeptElements<FolderRowState> _folderRows = new();
+    private int _treeBuilds;
+
+    /// <summary>Request rows the tree has made so far, for tests: a build that changes no row makes none.</summary>
+    internal int RequestRowsMade { get; private set; }
+
+    /// <summary>At the start of every build of the tree part, one that shows no tree too, so that
+    /// rows a build left out are never handed back (<see cref="KeptElements{TState}.Begin"/>).</summary>
+    private void BeginTreeRows()
+    {
+        _treeBuilds++;
+        _requestRows.Begin(_treeBuilds);
+        _folderRows.Begin(_treeBuilds);
+    }
+
+    /// <summary>Lets every kept row go, so the next build makes them all: for a workspace opened,
+    /// and for tests, whose oracle is a build that keeps nothing.</summary>
+    internal void ForgetTreeRows()
+    {
+        _requestRows.Clear();
+        _folderRows.Clear();
+    }
+
     private Element BuildTree()
     {
         var ws = _workspace!;
@@ -87,8 +123,10 @@ public partial class MeridianApp
         var list = Flex.Column(gap: 0);
         if (_tree is { } tree)
         {
+            // Every child of the list is keyed, the rows by their paths (KeptElements keys them).
             if (tree.Root.Folders.Count == 0 && tree.Root.Requests.Count == 0)
-                list.AddChild(Flex.Column(gap: Azimuth.S1)
+            {
+                var none = Flex.Column(gap: Azimuth.S1)
                     .Padding(new Thickness(Azimuth.S3))
                     .AlignItems(AlignItems.FlexStart)
                     .Children(
@@ -96,7 +134,10 @@ public partial class MeridianApp
                         Text.New("A request is a .req file in this folder.").FontSize(11f).TextColor(Azimuth.TextFaint),
                         Box.New().Height(Azimuth.S1),
                         Ui.Button(ButtonVariant.Secondary, "New request…", () => OpenNewRequestDialog(ws.Root),
-                            "tree-first-request", style: Ui.Small)));
+                            "tree-first-request", style: Ui.Small));
+                none.Key = "no-requests";
+                list.AddChild(none);
+            }
             AddFolderRows(list, tree.Root, depth: 0, isRoot: true);
         }
         scroll.AddChild(list);
@@ -119,33 +160,21 @@ public partial class MeridianApp
         int childDepth = isRoot ? 0 : depth + 1;
         if (!isRoot)
         {
-            // Folders in mono — they are real directories. ＋ request and ＋ folder make them in
-            // this folder; rename and delete are the ⋯ at the row's end, or a right-click on the row.
-            string relative = Relative(folder.Path);
-            string id = relative.Replace('/', '-');
-            var path = folder.Path;
-            var row = Flex.Row(gap: 2).Height(Azimuth.RowList).FlexShrink(0)
-                .AlignItems(AlignItems.Center)
-                .Padding(new Thickness(0, Azimuth.S2, 0, Azimuth.S3 + depth * Azimuth.S3))
-                .AccessibleRole(AccessibilityRole.Group).AccessibleName($"folder {folder.Name}")
-                .AutomationId("folder-" + id)
-                .Children(
-                    Ui.Mono(folder.Name + "/", 12f, Azimuth.TextMuted).MaxLines(1).TextOverflow(TextOverflow.Ellipsis),
-                    Box.New().FlexGrow(1),
-                    TreeAction(Icons.NewRequest, $"New request in {relative}", "tree-new-request-" + relative,
-                        () => OpenNewRequestDialog(path)),
-                    TreeAction(Icons.NewFolder, $"New folder in {relative}", "tree-new-folder-" + relative,
-                        () => OpenNewFolderDialog(path)),
-                    RowActionsButton($"actions for folder {folder.Name}", "folder-actions-" + id, () => FolderActions(folder)));
-            RowContextMenu(row, () => FolderActions(folder));
-            list.AddChild(row);
+            var state = new FolderRowState(folder.Name, depth, Ui.DisplayScale);
+            list.AddChild(_folderRows.TryKeep(folder.Path, state, out var kept)
+                ? kept
+                : _folderRows.Made(folder.Path, state, FolderRow(folder.Path, state)));
             // A folder made in the app shows before its first request (its _folder.req keeps it).
             if (folder.Folders.Count == 0 && folder.Requests.Count == 0)
-                list.AddChild(Flex.Row(gap: 0).Height(Azimuth.RowList).FlexShrink(0)
+            {
+                var empty = Flex.Row(gap: 0).Height(Azimuth.RowList).FlexShrink(0)
                     .AlignItems(AlignItems.Center)
                     .Padding(new Thickness(0, Azimuth.S2, 0, Azimuth.S3 + childDepth * Azimuth.S3))
                     .Children(Text.New("empty").FontSize(11f).TextColor(Azimuth.TextFaint)
-                        .AutomationId("tree-empty-" + relative)));
+                        .AutomationId("tree-empty-" + Relative(folder.Path)));
+                empty.Key = "empty " + folder.Path;
+                list.AddChild(empty);
+            }
         }
         foreach (var sub in folder.Folders)
             AddFolderRows(list, sub, childDepth, isRoot: false);
@@ -153,42 +182,74 @@ public partial class MeridianApp
             list.AddChild(RequestRow(request, childDepth));
     }
 
+    /// <summary>Folders in mono — they are real directories. ＋ request and ＋ folder make them in
+    /// this folder; rename and delete are the ⋯ at the row's end, or a right-click on the row.</summary>
+    private Element FolderRow(string path, FolderRowState state)
+    {
+        string relative = Relative(path);
+        string id = relative.Replace('/', '-');
+        var row = Flex.Row(gap: 2).Height(Azimuth.RowList).FlexShrink(0)
+            .AlignItems(AlignItems.Center)
+            .Padding(new Thickness(0, Azimuth.S2, 0, Azimuth.S3 + state.Depth * Azimuth.S3))
+            .AccessibleRole(AccessibilityRole.Group).AccessibleName($"folder {state.Name}")
+            .AutomationId("folder-" + id)
+            .Children(
+                Ui.Mono(state.Name + "/", 12f, Azimuth.TextMuted).MaxLines(1).TextOverflow(TextOverflow.Ellipsis),
+                Box.New().FlexGrow(1),
+                TreeAction(Icons.NewRequest, $"New request in {relative}", "tree-new-request-" + relative,
+                    () => OpenNewRequestDialog(path)),
+                TreeAction(Icons.NewFolder, $"New folder in {relative}", "tree-new-folder-" + relative,
+                    () => OpenNewFolderDialog(path)),
+                RowActionsButton($"actions for folder {state.Name}", "folder-actions-" + id, () => FolderActions(path)));
+        RowContextMenu(row, () => FolderActions(path));
+        return row;
+    }
+
     private Element RequestRow(RequestRef request, int depth)
     {
-        bool active = ActiveTab?.Path.Equals(request.Path, StringComparison.OrdinalIgnoreCase) == true;
-        var openTab = _tabs.FirstOrDefault(t => t.Path.Equals(request.Path, StringComparison.OrdinalIgnoreCase));
+        bool active = ActiveTab is { } activeTab && SamePath(activeTab.Path, request.Path);
+        bool dirty = false;
+        foreach (var tab in _tabs)
+            if (SamePath(tab.Path, request.Path)) { dirty = tab.Dirty; break; }
+        var state = new RequestRowState(request.Method, request.DisplayName, active, dirty,
+            request.Produces.Count > 0 ? request.Produces[0] : null, request.UsesCount, depth, Ui.DisplayScale);
+        if (_requestRows.TryKeep(request.Path, state, out var kept)) return kept;
+        RequestRowsMade++;
+        return _requestRows.Made(request.Path, state, RequestRow(request.Path, state));
+    }
 
+    private Element RequestRow(string path, RequestRowState state)
+    {
         var row = Flex.Row(gap: Azimuth.S2).Height(Azimuth.RowList).FlexShrink(0)
             .AlignItems(AlignItems.Center)
-            .Padding(new Thickness(0, Azimuth.S2, 0, Azimuth.S3 + depth * Azimuth.S3))
+            .Padding(new Thickness(0, Azimuth.S2, 0, Azimuth.S3 + state.Depth * Azimuth.S3))
             .CornerRadius(Azimuth.Radius1)
-            .BorderColor(active ? Azimuth.Accent : Color.Transparent)
+            .BorderColor(state.Active ? Azimuth.Accent : Color.Transparent)
             .BorderWidth(new Thickness(2, 0, 0, 0))
             .Cursor(CursorType.Pointer)
             .AccessibleRole(AccessibilityRole.Button)
-            .AccessibleName($"{request.Method ?? "?"} {request.DisplayName}")
-            .AutomationId("req-" + System.IO.Path.GetFileNameWithoutExtension(request.Path));
-        if (active) row.Background(Azimuth.Raised);
+            .AccessibleName($"{state.Method ?? "?"} {state.DisplayName}")
+            .AutomationId("req-" + System.IO.Path.GetFileNameWithoutExtension(path));
+        if (state.Active) row.Background(Azimuth.Raised);
 
-        row.AddChild(MethodChip(request.Method, treeScale: true));
-        row.AddChild(Text.New(request.DisplayName).FontSize(12f)
-            .TextColor(active ? Azimuth.Text : Azimuth.TextDim)
+        row.AddChild(MethodChip(state.Method, treeScale: true));
+        row.AddChild(Text.New(state.DisplayName).FontSize(12f)
+            .TextColor(state.Active ? Azimuth.Text : Azimuth.TextDim)
             .TextOverflow(TextOverflow.Ellipsis).MaxLines(1).FlexGrow(1));
         // The cheap chain badges: what this request feeds forward, and how
         // many variables it consumes. The Chain tab has the full story.
-        if (request.Produces.Count > 0)
-            row.AddChild(Ui.Mono("→" + request.Produces[0], 8f, Azimuth.Accent300).FlexShrink(0));
-        if (request.UsesCount > 0)
-            row.AddChild(Ui.Mono("⛓" + request.UsesCount, 8f, Azimuth.TextFaint).FlexShrink(0));
-        if (openTab is { Dirty: true })
+        if (state.Produces is { } produces)
+            row.AddChild(Ui.Mono("→" + produces, 8f, Azimuth.Accent300).FlexShrink(0));
+        if (state.UsesCount > 0)
+            row.AddChild(Ui.Mono("⛓" + state.UsesCount, 8f, Azimuth.TextFaint).FlexShrink(0));
+        if (state.Dirty)
             row.AddChild(Dot(Azimuth.Accent));
-        var path = request.Path;
-        row.AddChild(RowActionsButton($"actions for {request.DisplayName}",
+        row.AddChild(RowActionsButton($"actions for {state.DisplayName}",
             "req-actions-" + System.IO.Path.GetFileNameWithoutExtension(path), () => RequestActions(path)));
 
-        row.OnClick(_ => OpenRequest(request.Path));
+        row.OnClick(_ => OpenRequest(path));
         RowContextMenu(row, () => RequestActions(path));
-        if (!active) row.HoverBg(Azimuth.Raised, Color.Transparent);
+        if (!state.Active) row.HoverBg(Azimuth.Raised, Color.Transparent);
         return row;
     }
 
@@ -509,11 +570,12 @@ public partial class MeridianApp
     }
 
     /// <summary>What the sub-tab strip shows of a tab's URL: the pairs Params counts, and the
-    /// variables used and produced that Chain counts.</summary>
+    /// variables used and produced that Chain counts (the URL's, the header values' and the
+    /// body's).</summary>
     private readonly record struct UrlCounts(RequestTab Tab, int Params, int Chain);
 
-    /// <summary>The counts the last build of the strip showed, which a URL character that moves
-    /// neither leaves as they are.</summary>
+    /// <summary>The counts the last build of the strip showed, which a character in the URL, a
+    /// header value or the body that moves neither leaves as they are.</summary>
     private UrlCounts _urlCountsShown;
 
     private static UrlCounts UrlCountsOf(RequestTab tab)
@@ -574,6 +636,10 @@ public partial class MeridianApp
             {
                 bool wasDirty = tab.Dirty;
                 tab.Doc.SetHeader(index, CurrentHeader(tab, index).Name, v);
+                // The box holds what was typed; the rest of the editor reads a header's value only
+                // for the Chain count, so a character that moves no count shown and leaves the
+                // request as unsaved as it was builds nothing, as in the URL box (65 KB a character).
+                if (tab.Dirty == wasDirty && UrlCountsOf(tab) == _urlCountsShown) return;
                 DocEdited(tab, wasDirty);
             }, 0, $"header-value-{i}"));
             row.AddChild(RemoveButton($"Remove header {header.Name}", () =>
@@ -678,7 +744,12 @@ public partial class MeridianApp
             .OnTextChanged(text =>
             {
                 bool wasDirty = tab.Dirty;
-                tab.Doc.SetBody(tab.Doc.Body?.Type ?? "json", text);
+                var type = tab.Doc.Body?.Type;
+                tab.Doc.SetBody(type ?? "json", text);
+                // As a header value: the area holds the text, and the editor reads the body only for
+                // the Chain count and the sub-tab's type ("Body json", which the first character into
+                // a request with no body block makes). 59 KB a character when it built.
+                if (tab.Dirty == wasDirty && tab.Doc.Body?.Type == type && UrlCountsOf(tab) == _urlCountsShown) return;
                 DocEdited(tab, wasDirty);
             })
             .FontFamily(Fonts.Mono).FontSize(12f)

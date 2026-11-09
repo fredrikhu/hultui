@@ -78,9 +78,10 @@ environment; nothing needs moving.
 | Linux | the Secret Service (GNOME Keyring, KWallet, KeePassXC) through libsecret: an item of the default collection with the schema `io.github.fredrikhu.Meridian` and the attributes `collection`, `environment` (`*` for the shared value) and `key` | Seahorse ("Passwords and Keys") or KWallet Manager, labelled `Meridian: client_secret (staging) in <collection>` |
 
 macOS ties a keychain item to the program that stored it, so a newer build of
-Meridian may ask once to read an item an older one stored. Meridian reads each
-entry once per run and remembers the answer, so a change made in one of the
-tools above shows after a restart.
+Meridian may ask once to read an item an older one stored. On every OS Meridian
+reads each entry once per run and remembers the answer, so a change made in one
+of the tools above shows after a restart. A value set, changed or forgotten in
+the app shows at once.
 
 The variables are what a machine without a keyring has: CI, or a Linux machine
 without libsecret or a running Secret Service (a server, a container, an SSH

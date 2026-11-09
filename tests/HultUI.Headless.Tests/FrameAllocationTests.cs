@@ -173,6 +173,99 @@ public class FrameAllocationTests
         Assert.True(perFrame < 1, $"repainting 43 selectable and linked labels allocated {perFrame:0.#} B per frame");
     }
 
+    /// <summary>80 selectable lines in one selection group, in a scroll view, with the primary
+    /// button pressed on line 2.</summary>
+    private static (HeadlessSession Session, ScrollViewElement View, TextElement[] Lines, TextSelectionGroup Group) GroupDrag()
+    {
+        var lines = new string[80];
+        var labels = new TextElement[lines.Length];
+        var group = new TextSelectionGroup();
+        for (int i = 0; i < lines.Length; i++)
+        {
+            lines[i] = $"var line{i,-3} = \"text\"; // the line's comment, number {i}";
+            labels[i] = TextElement.New(lines[i]).Selectable().SelectionGroup(group, i);
+        }
+        group.Bind(lines, lines.Length, i => lines[i]);
+        var view = ScrollView.New().FlexGrow(1).Children(Flex.Column().FlexShrink(0).Children(labels));
+        var session = Session(view);
+        // Every line drawn once, a screen at a time: a frame that scrolls a line into view draws
+        // it for the first time otherwise, and lays its paragraph out.
+        for (float y = 0; y < 80 * 40; y += 200) { view.ScrollOffsetY = y; session.Application.RunFrame(Frame); }
+        view.ScrollOffsetY = 0;
+        session.Application.RunFrame(Frame);
+        session.Window.MouseDown(40, Middle(labels[2]));
+        session.Application.RunFrame(Frame);
+        return (session, view, labels, group);
+    }
+
+    private static float Middle(Element e) => e.WindowBorderBox.Y + e.WindowBorderBox.Height / 2;
+
+    /// <summary>A selection dragged over a group of selectable labels: every move repaints the
+    /// group's labels, which a walk of the window's tree finds. The walk put them in a new list
+    /// each time, 1.1 KB a move over Vesper's viewer of a log (plan 17, round 9); it visits them
+    /// in place now, so a move allocates the platform's input and nothing else.</summary>
+    [Fact]
+    public void ADragOverAGroupOfLabels_AllocatesOnlyThePlatformsInput()
+    {
+        var (session, _, labels, group) = GroupDrag();
+        using var owned = session;
+        var window = session.Window;
+        var app = session.Application;
+        float y4 = Middle(labels[4]), y6 = Middle(labels[6]);
+        for (int i = 0; i < 10; i++) { window.MoveMouse(40 + i % 2, i % 2 == 0 ? y4 : y6); app.RunFrame(Frame); }
+
+        long events = Allocations.Least(() =>
+        {
+            for (int i = 0; i < 100; i++)
+                _sink = new InputEvent.MouseMoveInput(40, y4, 1, 0, KeyModifiers.None);
+        });
+        int rendered = 0;
+        long moves = Allocations.Least(() =>
+        {
+            for (int i = 0; i < 100; i++)
+            {
+                window.MoveMouse(40 + i % 2, i % 2 == 0 ? y4 : y6);   // the selection's end changes line
+                if (app.RunFrame(Frame)) rendered++;
+            }
+        }, goal: events);
+
+        Assert.True(rendered >= 100, $"only {rendered} of the moves drew a frame");
+        Assert.Equal(6, group.FocusIndex);
+        Assert.True(labels[5].HasSelection);
+        Assert.True(moves <= events, $"100 drag moves allocated {moves} B; the platform's input alone is {events} B");
+    }
+
+    /// <summary>The same drag held below its view: each frame scrolls the view, takes the
+    /// selection to the line at its bottom edge and repaints the group's labels, with no input at
+    /// all. A frame that brings no new line into the selection allocates nothing. (One that does
+    /// draws that line's highlight for the first time, which is not the walk's.)</summary>
+    [Fact]
+    public void AFrameOfADragHeldBelowItsView_AllocatesNothing()
+    {
+        var (session, view, labels, group) = GroupDrag();
+        using var owned = session;
+        // 1 px below the view: 9 px/s, 0.15 px a frame, so most rounds of 20 frames reach no new
+        // line. The scroll's speed comes from the clock, so these frames move virtual time on, as
+        // the real loop's do.
+        var box = view.WindowBorderBox;
+        session.Window.MoveMouse(40, box.Bottom + 1);
+        for (int i = 0; i < 10; i++) session.PumpFrame(Frame);
+        float before = view.ScrollOffsetY;
+
+        int ran = 0, rendered = 0;
+        double perFrame = Allocations.PerCall(20, () =>
+        {
+            ran++;
+            if (session.PumpFrame(Frame)) rendered++;
+        });
+
+        Assert.Equal(ran, rendered);
+        Assert.True(view.ScrollOffsetY > before, "the view should have scrolled on");
+        int edge = Array.FindIndex(labels, l => l.WindowBorderBox.Y <= box.Bottom - 1 && l.WindowBorderBox.Bottom > box.Bottom - 1);
+        Assert.Equal(edge, group.FocusIndex);
+        Assert.True(perFrame < 1, $"a frame of a held drag allocated {perFrame:0.#} B");
+    }
+
     /// <summary>Selectable, span-coloured lines as above, two of whose shaping merged clusters —
     /// emoji, combining marks — under a selection. Such a line maps offsets to x through a prefix
     /// measurer, and a new closure for each pass over it was ~1 KB a frame over two such lines

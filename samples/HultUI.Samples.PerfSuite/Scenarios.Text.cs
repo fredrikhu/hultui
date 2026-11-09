@@ -268,6 +268,35 @@ static partial class Scenarios
                 };
             });
 
+        yield return new Scenario("text/open a minified file in a monospace TextArea",
+            $"Junction's file view handed a minified script, {MinifiedChars / 1024:N0} K characters on one line: a read-only monospace 13 px TextArea wraps it into rows, then draws the first screen",
+            ctx =>
+            {
+                // Three scripts in turn, so no prefix or word of the one opened is still cached
+                // from the step before.
+                var scripts = new string[3];
+                for (int d = 0; d < scripts.Length; d++) scripts[d] = Ui.MinifiedScript(ctx.Rng, MinifiedChars);
+                var area = TextArea.New("").FontFamily(FontFamilies.Monospace).FontSize(13f).FlexGrow(1);
+                area.ReadOnly = true;
+                ctx.Mount(Flex.Column().FlexGrow(1).Padding(8).Children(area));
+                return new Op
+                {
+                    Run = step => area.Text = scripts[step % scripts.Length],
+                    Check = step =>
+                    {
+                        var text = scripts[step % scripts.Length];
+                        if (!ReferenceEquals(area.Text, text)) return "the script did not reach the TextArea";
+                        // Wrapped: at least the rows of characters half the font size wide.
+                        float viewport = area.Layout.AbsoluteContentBox.Height;
+                        area.ScrollOffsetY = float.MaxValue;
+                        float height = area.ScrollOffsetY + viewport;
+                        area.ScrollOffsetY = 0;
+                        float rows = text.Length / (area.Layout.AbsoluteContentBox.Width / 6.5f);
+                        return height >= rows * 13f ? null : $"the TextArea is {height:0} px tall for {rows:N0} rows or more";
+                    },
+                };
+            });
+
         yield return new Scenario("text/wheel highlighted JSON in a TextArea",
             $"Wheel 3 notches in the middle of the {JsonLines:N0}-line JSON response: each line drawn takes its colour spans out of the whole response's",
             ctx =>
@@ -350,9 +379,72 @@ static partial class Scenarios
                     Check = step => scrolled(step) ?? viewer.Drawn(),
                 };
             });
+
+        yield return new Scenario("text/selectable viewer drag select",
+            $"Drag a selection over the file viewer of {ViewerLines} selectable lines, pressed in the middle of the screen: each move takes the selection to another line, up or down, and every line on screen is drawn again",
+            ctx =>
+            {
+                var viewer = new SelectableViewer(ctx);
+                int anchor = viewer.Press(120, 380);
+                // ~18 px lines: a 63 px step lands on another line each time.
+                static float PointerY(int step) => 30 + step * 63 % 660;
+                return new Op
+                {
+                    Run = step => ctx.Window.MoveMouse(300, PointerY(step)),
+                    Check = step => viewer.Selected(anchor, viewer.LineAt(PointerY(step))) ?? viewer.Drawn(),
+                };
+            });
+
+        yield return new Scenario("text/selectable viewer drag held below the view",
+            $"Hold a selection's drag below the file viewer of {ViewerLines} selectable lines: with no input, each frame scrolls the view on and takes the selection to the line now at its bottom edge",
+            ctx =>
+            {
+                var viewer = new SelectableViewer(ctx);
+                int anchor = viewer.Press(120, 380);
+                var box = viewer.View.WindowBorderBox;
+                ctx.Window.MoveMouse(300, box.Bottom + 30);
+                ctx.Pump();
+                float offset = viewer.View.ScrollOffsetY;
+                return new Op
+                {
+                    Run = _ => { },
+                    Check = _ =>
+                    {
+                        float was = offset;
+                        offset = viewer.View.ScrollOffsetY;
+                        return offset <= was ? $"the view stayed at {offset:0}"
+                            : viewer.Selected(anchor, viewer.LineAt(box.Bottom - 1)) ?? viewer.Drawn();
+                    },
+                };
+            });
+
+        yield return new Scenario("text/wheel over a 2,000-line plain label in a ScrollView",
+            $"Wheel 3 notches in the middle of a {PlainLabelLines:N0}-line JSON body shown as one plain label in a scroll view, as Meridian's Request tab shows the body it sent: a screenful of its lines is on screen",
+            ctx =>
+            {
+                var body = Text.New(Ui.JsonResponse(ctx.Rng, PlainLabelLines)).FontFamily(FontFamilies.Monospace)
+                    .FontSize(11.5f).TextColor(Ui.Muted).FlexShrink(0);
+                var view = ScrollView.New().FlexGrow(1).Children(Flex.Column().FlexShrink(0).Padding(8).Children(body));
+                ctx.Mount(view);
+                view.ScrollOffsetY = float.MaxValue;
+                view.ScrollOffsetY /= 2;
+                ctx.Pump();
+                var box = view.WindowBorderBox;
+                var scrolled = ScrolledTo(() => view.ScrollOffsetY);
+                return new Op
+                {
+                    Run = step => ctx.Window.Wheel(box.X + box.Width / 2, box.Y + box.Height / 2, 0, WheelDirection(step) * 3),
+                    // A plain label keeps no paragraph: it is drawn through DrawText.
+                    Check = step => scrolled(step)
+                        ?? (HultUI.Headless.LayoutProbe.DrawnLines(body).Count != 0 ? "the label drew as selectable text"
+                            : body.Layout.AbsoluteBorderBox.Height < 20 * box.Height ? $"the label is only {body.Layout.AbsoluteBorderBox.Height:0} px tall"
+                            : null),
+                };
+            });
     }
 
     private const int ViewerLines = 400;
+    private const int PlainLabelLines = 2_000;
 
     // Emoji of the Basic Multilingual Plane that ask for emoji presentation on their own:
     // ⭐ ✅ ☕ ⚡ ❌ ⌛ ⛔ ⚽. Nothing in them sends a label to the BiDi path.
@@ -385,12 +477,17 @@ static partial class Scenarios
         private readonly Element[] _rows = new Element[ViewerLines];
         private readonly TextElement[] _code = new TextElement[ViewerLines];
 
+        private readonly Ctx _ctx;
+
         public ScrollViewElement View { get; }
+
+        public TextSelectionGroup Group { get; } = new();
 
         public SelectableViewer(Ctx ctx)
         {
+            _ctx = ctx;
             var lines = new string[ViewerLines];
-            var group = new TextSelectionGroup();
+            var group = Group;
             for (int i = 0; i < lines.Length; i++)
             {
                 var (text, spans) = CodeLine(ctx.Rng, i);
@@ -407,6 +504,54 @@ static partial class Scenarios
             group.Bind(lines, lines.Length, i => lines[i]);
             View = ScrollView.New().FlexGrow(1).Background(Field).Children(Flex.Column().FlexShrink(0).Children(_rows));
             ctx.Mount(View);
+        }
+
+        /// <summary>Presses the primary button at a point of the viewer and keeps it down, as a
+        /// selection drag starts; returns the line pressed.</summary>
+        public int Press(float x, float y)
+        {
+            _ctx.Window.MouseDown(x, y);
+            _ctx.Pump();
+            return LineAt(y);
+        }
+
+        /// <summary>The line whose row is at window Y <paramref name="y"/>, or -1.</summary>
+        public int LineAt(float y)
+        {
+            for (int i = 0; i < _rows.Length; i++)
+            {
+                var box = _rows[i].WindowBorderBox;
+                if (y >= box.Y && y < box.Bottom) return i;
+            }
+            return -1;
+        }
+
+        /// <summary>Null when the selection runs from line <paramref name="anchor"/> to line
+        /// <paramref name="focus"/>: the group's ends, the text it copies, and which lines on
+        /// screen draw a highlight.</summary>
+        public string? Selected(int anchor, int focus)
+        {
+            if (anchor < 0 || focus < 0) return $"no line under the press ({anchor}) or the pointer ({focus})";
+            if (!Group.HasSelection) return "nothing is selected";
+            if (Group.FocusIndex != focus)
+                return $"the selection ends on line {Group.FocusIndex + 1}, not on line {focus + 1} under the pointer";
+            int low = Math.Min(anchor, focus), high = Math.Max(anchor, focus);
+            if (Group.Start.Index != low) return $"the selection starts on line {Group.Start.Index + 1}, not on line {low + 1}";
+            int copied = Group.SelectedText.Count(c => c == '\n') + 1;
+            if (copied != high - low + 1) return $"the copy holds {copied} lines, not {high - low + 1}";
+            var viewport = View.WindowBorderBox;
+            for (int i = 0; i < _code.Length; i++)
+            {
+                var box = _code[i].WindowBorderBox;
+                if (box.Bottom <= viewport.Y || box.Y >= viewport.Bottom) continue;
+                // An end line may hold none of its text (pressed past its end), so only the
+                // lines between the ends must draw a highlight.
+                if (i > low && i < high && !_code[i].HasSelection)
+                    return $"line {i + 1} is in the selection but draws no highlight";
+                if ((i < low || i > high) && _code[i].HasSelection)
+                    return $"line {i + 1} draws a highlight outside the selection";
+            }
+            return null;
         }
 
         /// <summary>Null when the row under the pointer, and only it, is hovered.</summary>
@@ -533,6 +678,9 @@ static partial class Scenarios
     /// <see cref="Ui.JsonResponse"/>).
     /// </summary>
     private const int JsonLines = 19_000;
+
+    // A minified script's length: about 2,000 rows at the suite's width.
+    private const int MinifiedChars = 256 * 1024;
 
     /// <summary>Meridian's response body: read-only, monospace 12 px, Dark+ colours on a dark field.</summary>
     private static TextAreaElement JsonViewer()

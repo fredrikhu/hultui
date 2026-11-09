@@ -145,6 +145,18 @@ public class ImageElement : Element
         else ctx.DrawImage(Source, Layout.AbsoluteContentBox, Fit);
     }
 
+    /// <summary>A plain image paints one picture, so it fades by drawing it with that much less
+    /// alpha, as a plain box fills in a fainter colour: a cut file's icon in a list was an
+    /// offscreen group of its own on every frame. A crop (<see cref="SourceRect"/>), and a GPU or
+    /// frame-stream source, keep the group. Not a subclass: its <see cref="Render"/> may add more.</summary>
+    internal override bool RenderWithOpacity(IRenderContext ctx, float opacity)
+    {
+        if (GetType() != typeof(ImageElement) || _sourceRect is not null || ctx is not IFadingImageContext fading)
+            return false;
+        if (Source is null || !Source.IsLoaded) return true;
+        return fading.TryDrawImage(Source, Layout.AbsoluteContentBox, Fit, opacity);
+    }
+
     // Every setter below that can change the size marks the layout when it does.
     private protected override bool PatchMarksOwnLayout => GetType() == typeof(ImageElement);
 

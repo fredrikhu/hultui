@@ -24,9 +24,14 @@ namespace HultUI.Platform.Accessibility.Windows;
 /// window-procedure subclass installed here — not SDL's message-pump hook,
 /// which only runs for queued messages and so never delivered the provider.
 /// </para>
+/// <para>
+/// A diff is read during <see cref="ApplyChanges"/> or <see cref="ApplyPatchedProperties"/> and
+/// nothing of it is kept (<see cref="ITreeDiffBorrower"/>): the window lends the bridge one diff
+/// for its patches, emptied after each call.
+/// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]
-public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IDisposable
+public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ITreeDiffBorrower, IDisposable
 {
     private readonly IntPtr _hwnd;
     private readonly IUiaHostBridge _host;

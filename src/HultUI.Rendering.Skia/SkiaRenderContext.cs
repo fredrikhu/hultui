@@ -9,7 +9,7 @@ using System.Runtime.InteropServices;
 
 namespace HultUI.Rendering.Skia;
 
-public sealed class SkiaRenderContext : IRenderContext, IDisposable
+public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDisposable
 {
     private SKCanvas? _canvas;
     private readonly Stack<int> _saveStack = new();
@@ -828,9 +828,15 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         // Indexed, here and in every text draw below: Lines and Runs are interfaces, and a
         // foreach over one boxes its enumerator — 72 B per label per frame, on every frame.
         var lines = layout.Lines;
+        // Lines wholly above or below the clip draw nothing, as in DrawParagraph: a plain label in
+        // a scroll view can run far past its viewport. A label of one line reads no clip.
+        bool cull = lines.Count > 1 && CullsTextLines;
+        var clip = cull ? Canvas.LocalClipBounds : default;
         for (int li = 0; li < lines.Count; li++)
         {
             var line = lines[li];
+            // The clip first: reading a line's runs makes them, and these lines draw nothing.
+            if (cull && LineOutsideClip(bounds.Y + line.OffsetY, line.Height, clip)) continue;
             // Shift the line horizontally for center/right alignment. The layout
             // itself is width-independent (and shared from cache), so alignment is
             // applied here at draw time against the actual box width.
@@ -879,9 +885,12 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         float alignFactor = TextAlignment.Factor(style.TextAlign, layout.IsRtlParagraph);
 
         var lines = layout.Lines;
+        bool cull = lines.Count > 1 && CullsTextLines;
+        var clip = cull ? Canvas.LocalClipBounds : default;
         for (int li = 0; li < lines.Count; li++)
         {
             var line = lines[li];
+            if (cull && LineOutsideClip(bounds.Y + line.OffsetY, line.Height, clip)) continue;
             float alignOffset = alignFactor > 0f && bounds.Width > line.Width
                 ? (bounds.Width - line.Width) * alignFactor
                 : 0f;
@@ -922,7 +931,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         _pooledPaint.IsAntialias = true;
 
         // Lines wholly above or below the clip draw nothing: a paragraph in an editor can run
-        // far past its viewport. A line's height of slack covers what hangs out of its box.
+        // far past its viewport.
         var clip = Canvas.LocalClipBounds;
         var lines = p.TextLines;
         for (int i = 0; i < lines.Count; i++)
@@ -930,7 +939,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             var line = lines[i];
             // The clip first: reading a line's runs makes them, and these lines draw nothing.
             float lineTop = origin.Y + line.OffsetY;
-            if (lineTop > clip.Bottom + line.Height || lineTop + 2 * line.Height < clip.Top) continue;
+            if (LineOutsideClip(lineTop, line.Height, clip)) continue;
             if (line.Runs.Count == 0) continue;
             float baseX = origin.X + p.LineLeft(i);
             float lineY = lineTop + line.Ascent;
@@ -950,6 +959,18 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             }
         }
     }
+
+    /// <summary>Whether DrawText skips the lines of a label of several lines that are wholly
+    /// outside the clip, as DrawParagraph always has. Off, it draws every line, as before: the
+    /// reference the pixel tests hold it to.</summary>
+    internal bool CullsTextLines { get; set; } = true;
+
+    // Whether a line whose box starts at lineTop is wholly above or below the clip, in the
+    // canvas's own space (LocalClipBounds: any transform and layer are in it). A line's height of
+    // slack each way covers what hangs out of its box: ascenders, descenders and stacked marks
+    // past a tight line height, an underline. Nothing is skipped sideways.
+    private static bool LineOutsideClip(float lineTop, float lineHeight, SKRect clip) =>
+        lineTop > clip.Bottom + lineHeight || lineTop + 2 * lineHeight < clip.Top;
 
     public Rect? TextPaintBounds(string text, Rect bounds, ResolvedInheritedStyle style, TextOverflow overflow,
         int? maxLines, IReadOnlyList<TextSpan>? spans)
@@ -1512,6 +1533,26 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         // aliased, and geometry thinner than a destination pixel (Phosphor's `minus`
         // bar is 6% of its box) could land between samples and vanish outright.
         Canvas.DrawImage(image, srcRect, ToSkRect(drawRect), DownscaleSampling, _pooledPaint);
+    }
+
+    /// <summary>
+    /// A still image at an opacity in one draw: what <see cref="DrawImage(IImageSource, Rect, ImageFit)"/>
+    /// draws, its alpha scaled by the alpha <see cref="PushOpacity(float, Rect)"/> would composite
+    /// its group with. A GPU or frame-stream source keeps its group: false, nothing drawn.
+    /// </summary>
+    bool IFadingImageContext.TryDrawImage(IImageSource source, Rect destRect, ImageFit fit, float opacity)
+    {
+        if (source is IGpuImageSource || source is IPixelImageSource) return false;
+        if (source is not SkiaImageSource skiaSource || skiaSource.Bitmap is not { } bitmap
+            || skiaSource.Image is not { } image)
+            return true;   // nothing to draw, as DrawImage draws nothing
+
+        var (drawRect, srcRect) = ComputeImageFit(fit, bitmap.Width, bitmap.Height, destRect.Width, destRect.Height, destRect);
+        _pooledPaint.Reset();
+        _pooledPaint.IsAntialias = true;
+        _pooledPaint.Color = new SKColor(255, 255, 255, (byte)(opacity * 255));
+        Canvas.DrawImage(image, srcRect, ToSkRect(drawRect), DownscaleSampling, _pooledPaint);
+        return true;
     }
 
     /// <summary>

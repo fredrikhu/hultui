@@ -61,6 +61,33 @@ static partial class Scenarios
         };
     }
 
+    /// <summary>The <see cref="ImageGridPane"/> across a change of columns, each step: the window
+    /// 1440 wide (seven cards across) or 1300 (six), and the columns with it, the cursor on the second
+    /// card. Rows are keyed by their first card's place, so only the first row keeps its key; with
+    /// <paramref name="anyRow"/> a card goes into whatever row holds its place now, as Aperture's
+    /// library does, and otherwise only into its own row's. The row reports the cards made a step.</summary>
+    internal static Op ImageGridColumns(Ctx ctx, bool anyRow)
+    {
+        var pane = new ImageGridPane(ImageGridFilms(600), keepCards: true, reflow: true, anyRow: anyRow);
+        ctx.Mount(pane.Mount());
+        pane.Press(KeyCode.Right);
+        ctx.Pump(2);
+        int cursor = pane.Cursor, madeBefore = 0;
+        return new Op
+        {
+            Run = i =>
+            {
+                madeBefore = pane.CardsMade;
+                bool narrow = i % 2 == 0;
+                ctx.Window.SetClientSize(narrow ? 1300 : 1440, 900);
+                pane.Columns = narrow ? ImageGridPane.PerRow - 1 : ImageGridPane.PerRow;
+            },
+            Figure = () => pane.CardsMade - madeBefore,
+            FigureUnit = "cards made",
+            Check = _ => pane.Verify(cursor),
+        };
+    }
+
     private static readonly string[] ImageGridGenres = ["Drama", "Comedy", "Thriller", "Science fiction", "Western"];
 
     private static List<ImageGridFilm> ImageGridFilms(int count)
@@ -100,9 +127,12 @@ sealed record ImageGridFilm(string Id, string Title, string Line, bool Watched, 
 /// with every card on it, each with its picture, its caption and its badges. With
 /// <paramref name="keepCards"/> the row is keyed by its place and the cards by their films, and a
 /// row made again hands back each card whose cursor did not change (REACTIVITY.md, "Hand back the
-/// elements a key does not change"), as the app's grid does.
+/// elements a key does not change"), as the app's grid does. With <paramref name="reflow"/> the
+/// columns can change (<see cref="Columns"/>): the rows are keyed by their first card's place, and a
+/// change makes them all again; with <paramref name="anyRow"/> a card is handed back into whatever
+/// row holds its place while its own row is still in the list, not only into its own row's place.
 /// </summary>
-sealed class ImageGridPane(List<ImageGridFilm> films, bool keepCards = false) : Component
+sealed class ImageGridPane(List<ImageGridFilm> films, bool keepCards = false, bool reflow = false, bool anyRow = false) : Component
 {
     private const float CardWidth = 168f, CardHeight = 252f, Caption = 46f, Gap = 16f, Pad = 24f;
     private const float Stride = CardHeight + Caption + Gap;
@@ -135,6 +165,13 @@ sealed class ImageGridPane(List<ImageGridFilm> films, bool keepCards = false) : 
     /// <summary>How many cards fit across at the scenario's window, 1440 wide.</summary>
     public const int PerRow = 7;
 
+    private readonly Signal<int> _columns = new(PerRow);
+    private int _builtColumns = PerRow;
+
+    /// <summary>How many cards go across, as the window's width would decide; <see cref="PerRow"/>
+    /// to start with.</summary>
+    public int Columns { set => _columns.Value = value; }
+
     /// <summary>The cards made so far by place, with the cursor on them, and the live element each is.</summary>
     private readonly Dictionary<int, (bool Cursor, Ref<BoxElement> Live)> _kept = [];
 
@@ -152,8 +189,8 @@ sealed class ImageGridPane(List<ImageGridFilm> films, bool keepCards = false) : 
         {
             KeyCode.Right => 1,
             KeyCode.Left => -1,
-            KeyCode.Down => PerRow,
-            KeyCode.Up => -PerRow,
+            KeyCode.Down => _columns.Peek(),
+            KeyCode.Up => -_columns.Peek(),
             _ => 0,
         };
         if (move != 0) _cursor.Value = Math.Clamp(_cursor.Peek() + move, 0, films.Count - 1);
@@ -172,9 +209,13 @@ sealed class ImageGridPane(List<ImageGridFilm> films, bool keepCards = false) : 
 
     public override Element Build()
     {
-        int cursor = _cursor.Value;
-        int rows = (films.Count + PerRow - 1) / PerRow;
-        if (_list.Current is { } mounted) mounted.ScrollRangeIntoView(cursor / PerRow * Stride, Stride);
+        int cursor = _cursor.Value, perRow = _columns.Value;
+        int rows = (films.Count + perRow - 1) / perRow;
+        if (_list.Current is { } mounted) mounted.ScrollRangeIntoView(cursor / perRow * Stride, Stride);
+        // A row's item is its place and its cursor column, the same across a change of columns: the
+        // rows on screen all hold other cards then.
+        if (perRow != _builtColumns) _list.Current?.InvalidateRows();
+        _builtColumns = perRow;
 
         var bar = Flex.Row(gap: 12).FlexShrink(0).Height(56).AlignItems(AlignItems.Center)
             .Padding(new Thickness(0, Pad, 0, Pad))
@@ -187,28 +228,28 @@ sealed class ImageGridPane(List<ImageGridFilm> films, bool keepCards = false) : 
         list.RowsAreComposite = true;
         return Flex.Column(gap: 0).FlexGrow(1).Background(Ground).Children(bar,
             list.ItemHeight((int)Stride)
-                .Items(new CardRows(rows, PerRow, cursor))
-                .RenderWith((r, _) => MakeRow(r))
+                .Items(new CardRows(rows, perRow, cursor))
+                .RenderWith((r, _) => MakeRow(r, perRow))
                 .WithRef(_list)
                 .Padding(new Thickness(0, Pad, Pad, Pad))
                 .AutomationId("grid")
                 .FlexGrow(1));
     }
 
-    private Element MakeRow(CardRow r)
+    private Element MakeRow(CardRow r, int perRow)
     {
         RowsMade++;
         var row = Flex.Row(gap: Gap).AlignItems(AlignItems.FlexStart).Height(CardHeight + Caption)
             .Padding(new Thickness(0, 0, Gap, 0));
-        if (keepCards) row.Key = "row" + r.Row;
-        for (int k = 0; k < PerRow; k++)
+        if (keepCards) row.Key = "row" + (reflow ? r.Row * perRow : r.Row);
+        for (int k = 0; k < perRow; k++)
         {
-            int i = r.Row * PerRow + k;
+            int i = r.Row * perRow + k;
             if (i >= films.Count) break;
             bool cursor = k == r.CursorColumn;
             if (keepCards && _kept.TryGetValue(i, out var kept) && kept.Cursor == cursor
-                && kept.Live.Current is { Parent: { } parent } live && parent.Key == row.Key
-                && ReferenceEquals(parent.Parent, _list.Current))
+                && kept.Live.Current is { Parent: { } parent } live && ReferenceEquals(parent.Parent, _list.Current)
+                && (parent.Key == row.Key || anyRow && !(live.IsHovered || live.IsPressed)))
             {
                 row.AddChild(live);
                 continue;

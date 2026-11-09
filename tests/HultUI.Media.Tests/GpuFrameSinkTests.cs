@@ -296,6 +296,95 @@ public class GpuFrameSinkTests
         Assert.Equal(0, sizeless);
     }
 
+    /// <summary>
+    /// A picture that left the screen gives its GPU objects back in the next frame of the window it
+    /// was drawn in, and in no other window's: the renderer's (ReleaseGL, with that window's context
+    /// current) and the target the surface lent. Shown again, the target is a new one holding
+    /// nothing, so the sink draws nothing until the renderer has a frame for it (plan 17 round 9,
+    /// webview-hidden-keeps-interop: a WebView2 page kept 90.7 MB of this process's GPU memory hidden).
+    /// </summary>
+    [Fact]
+    public void AHiddenSink_GivesItsGpuObjectsBack_InItsWindowsNextFrame_AndShowsNothingUntilANewFrame()
+    {
+        var renderer = new CountingRenderer();
+        var sink = new GpuFrameSink(new PixelFrameSink(), renderer);
+        var surface = new LendingSurface(framebuffer: 7, texture: 9, internalFormat: 0x881A);
+        var otherWindow = new LendingSurface(framebuffer: 3, texture: 4, internalFormat: 0x8058);
+        Assert.True(sink.TryRenderFrame(surface, out _));
+
+        sink.ReleaseWhileHidden();
+        Assert.True(GpuFrameSink.AnyToRelease);
+        GpuFrameSink.ReleaseHidden(otherWindow);
+        Assert.Equal(0, renderer.Releases);
+        int entered = surface.GLEntries;
+        GpuFrameSink.ReleaseHidden(surface);
+        Assert.Equal(1, renderer.Releases);
+        Assert.Equal(entered + 1, surface.GLEntries);   // inside the surface's GL, as a draw is
+        Assert.Equal([sink], surface.Released);
+        Assert.True(sink.IsReleased);
+        Assert.False(sink.IsReleaseWanted);
+
+        // Shown: the renderer is asked, and until it draws, nothing is shown.
+        renderer.HasNewFrame = false;
+        Assert.False(sink.TryRenderFrame(surface, out _));
+        Assert.True(sink.IsReleased);
+        renderer.HasNewFrame = true;
+        Assert.True(sink.TryRenderFrame(surface, out var frame));
+        Assert.True(frame.RendererOwned);
+        Assert.False(sink.IsReleased);
+        // And with the frame drawn, the target keeps it as before.
+        renderer.HasNewFrame = false;
+        Assert.True(sink.TryRenderFrame(surface, out _));
+        sink.Dispose();
+    }
+
+    /// <summary>A sink drawn before its window's next frame is on screen after all — a page moved
+    /// between two places in one rebuild — and keeps everything.</summary>
+    [Fact]
+    public void AHiddenSinkDrawnBeforeTheNextFrame_KeepsItsGpuObjects()
+    {
+        var renderer = new CountingRenderer();
+        var sink = new GpuFrameSink(new PixelFrameSink(), renderer);
+        var surface = new LendingSurface(framebuffer: 7, texture: 9, internalFormat: 0x881A);
+        Assert.True(sink.TryRenderFrame(surface, out _));
+
+        sink.ReleaseWhileHidden();
+        Assert.True(sink.IsReleaseWanted);
+        Assert.True(sink.TryRenderFrame(surface, out _));
+        Assert.False(sink.IsReleaseWanted);
+        GpuFrameSink.ReleaseHidden(surface);
+        Assert.Equal(0, renderer.Releases);
+        Assert.Empty(surface.Released);
+        sink.Dispose();
+    }
+
+    /// <summary>Nothing to give back from a sink never drawn on the GPU, or drawn as pixels; and one
+    /// disposed while it waits is not released afterwards by a frame.</summary>
+    [Fact]
+    public void ASinkWithNothingOnTheGpu_OrDisposedWhileItWaits_IsNotReleasedByAFrame()
+    {
+        var surface = new LendingSurface(framebuffer: 7, texture: 9, internalFormat: 0x881A);
+        var undecided = new GpuFrameSink(new PixelFrameSink(), new CountingRenderer());
+        undecided.ReleaseWhileHidden();
+        Assert.False(undecided.IsReleaseWanted);
+
+        var pixels = new GpuFrameSink(new PixelFrameSink(), new CountingRenderer());
+        pixels.TryAcquire(out _);
+        pixels.ReleaseWhileHidden();
+        Assert.False(pixels.IsReleaseWanted);
+
+        var renderer = new CountingRenderer();
+        var disposed = new GpuFrameSink(new PixelFrameSink(), renderer);
+        Assert.True(disposed.TryRenderFrame(surface, out _));
+        disposed.ReleaseWhileHidden();
+        disposed.Dispose();   // its own ReleaseGL, as ever
+        int released = renderer.Releases;
+        GpuFrameSink.ReleaseHidden(surface);
+        Assert.Equal(released, renderer.Releases);
+        undecided.Dispose();
+        pixels.Dispose();
+    }
+
     /// <summary>A surface that hands out a target of its own, resolving no GL at all.</summary>
     private sealed class LendingSurface : IExternalGLSurface
     {
@@ -376,6 +465,8 @@ public class GpuFrameSinkTests
         public bool LastWantedLinear { get; private set; }
         public float LastPeakNits { get; private set; }
         public float ReferenceWhiteNits => LastWantedLinear ? 203f : 0f;
+        /// <summary>What <see cref="Render"/> answers: whether it had a new frame to draw.</summary>
+        public bool HasNewFrame { get; set; } = true;
         public bool Render(Func<string, nint> getProcAddress, in GpuFrameTarget target, int width, int height)
         {
             GLRenders++;
@@ -383,8 +474,9 @@ public class GpuFrameSinkTests
             LastInternalFormat = target.InternalFormat;
             LastWantedLinear = target.WantsLinearLight;
             LastPeakNits = target.PeakNits;
-            return true;
+            return HasNewFrame;
         }
-        public void ReleaseGL() { }
+        public int Releases { get; private set; }
+        public void ReleaseGL() => Releases++;
     }
 }

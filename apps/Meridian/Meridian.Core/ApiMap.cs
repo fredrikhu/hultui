@@ -93,16 +93,49 @@ public sealed record ApiMap(
     }
 
     /// <summary>A concrete path against a template: segment counts must match,
-    /// and a <c>{param}</c> segment matches anything.</summary>
+    /// and a <c>{param}</c> segment matches anything. Compared in place: a send
+    /// asks this of every endpoint with its method, and splitting both paths for
+    /// each cost 396 KB a send into a map of 2,000.</summary>
     internal static bool PathMatches(string template, string concrete)
     {
-        var t = template.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        var c = concrete.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        if (t.Length != c.Length) return false;
-        for (int i = 0; i < t.Length; i++)
-            if (!(t[i].StartsWith('{') && t[i].EndsWith('}')) && t[i] != c[i])
+        var t = new Segments(template);
+        var c = new Segments(concrete);
+        while (true)
+        {
+            bool more = t.MoveNext();
+            if (more != c.MoveNext()) return false;   // the counts differ
+            if (!more) return true;
+            var segment = t.Current;
+            if (!(segment[0] == '{' && segment[^1] == '}') && !segment.SequenceEqual(c.Current))
                 return false;
-        return true;
+        }
+    }
+
+    /// <summary>A path's segments as <c>Split('/', RemoveEmptyEntries)</c> gives
+    /// them, without the array or the strings.</summary>
+    private ref struct Segments(string path)
+    {
+        private readonly ReadOnlySpan<char> _path = path;
+        private int _next;
+
+        public ReadOnlySpan<char> Current { get; private set; }
+
+        public bool MoveNext()
+        {
+            while (_next < _path.Length)
+            {
+                int start = _next;
+                int slash = _path[start..].IndexOf('/');
+                int end = slash < 0 ? _path.Length : start + slash;
+                _next = end + 1;
+                if (end > start)
+                {
+                    Current = _path[start..end];
+                    return true;
+                }
+            }
+            return false;
+        }
     }
 
     /// <summary>
@@ -113,10 +146,13 @@ public sealed record ApiMap(
     /// </summary>
     internal static string Templatize(string path, IEnumerable<string> knownPaths)
     {
-        var literal = new HashSet<string>(
-            knownPaths.SelectMany(p => p.Split('/', StringSplitOptions.RemoveEmptyEntries))
-                      .Where(s => !s.StartsWith('{')),
-            StringComparer.OrdinalIgnoreCase);
+        // Each literal segment of the known paths once: a string is made only for one not seen yet
+        // (splitting every path made them all, 934 KB a send to a new path in a map of 2,000).
+        var literal = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var literals = literal.GetAlternateLookup<ReadOnlySpan<char>>();
+        foreach (var known in knownPaths)
+            for (var parts = new Segments(known); parts.MoveNext();)
+                if (parts.Current[0] != '{') literals.Add(parts.Current);
 
         var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
         for (int i = 0; i < segments.Length; i++)

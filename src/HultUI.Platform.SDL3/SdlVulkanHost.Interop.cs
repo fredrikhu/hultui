@@ -140,9 +140,14 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
     private static readonly bool InteropAllowed =
         Environment.GetEnvironmentVariable("HULTUI_VULKAN_INTEROP") != "0";
 
-    public bool TryEnableInterop()
+    // Asked on every draw of a GPU source (the surface's SupportsExternalGL), so the answer from
+    // cache is a method of its own: the check's uuid lambda captures a local, and its closure was
+    // made on the way into the method, cached answer or not — 24 bytes a frame with a web view or
+    // a video on screen.
+    public bool TryEnableInterop() => _interopReady ?? EnableInterop();
+
+    private bool EnableInterop()
     {
-        if (_interopReady is { } known) return known;
         _interopReady = false;
 
         if (_disposed || _device.IsNull) return false;

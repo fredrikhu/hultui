@@ -164,11 +164,11 @@ public class GridCursorNoBuildTests
         Assert.Same(target, CursorRef(t));
     }
 
-    /// <summary>A key whose cell is out of view, or not made at all, builds, and scrolls to it. The
-    /// columns are made for the scroll a build reads, before the key scrolls, so the next key builds
-    /// too, as every key used to, and the one after that no more.</summary>
+    /// <summary>A key whose cell is out of view, or not made at all, builds, and scrolls to it before
+    /// it builds: the columns made are the ones in view after the scroll, so the next key builds
+    /// nothing.</summary>
     [Fact]
-    public void InBrief_AKeyToACellOutOfView_Builds()
+    public void InBrief_AKeyToACellOutOfView_Builds_AndTheNextKeyNothing()
     {
         using var t = Open(files: 400);
         t.Press(KeyCode.F2, KeyModifiers.Ctrl);
@@ -177,32 +177,102 @@ public class GridCursorNoBuildTests
         int builds = Builds(t);
         Press(t, KeyCode.End);
         Assert.Equal(1, Builds(t) - builds);
-        Assert.True(t.Field<Ref<ScrollViewElement>>("_briefScrollL").Current!.ScrollOffsetX > 0, "End did not scroll");
+        Assert.True(BriefScroll(t).ScrollOffsetX > 0, "End did not scroll");
         Press(t, KeyCode.Up);
-        Assert.Equal(2, Builds(t) - builds);
+        Assert.Equal(1, Builds(t) - builds);
         Assert.Equal([Name(398)], Ringed(BriefCells(t)));
         Press(t, KeyCode.Up);
-        Assert.Equal(2, Builds(t) - builds);
+        Assert.Equal(1, Builds(t) - builds);
         Assert.Equal([Name(397)], Ringed(BriefCells(t)));
         CursorNoBuildTests.AssertIsAFullBuild(t, "after End, Up, Up");
     }
 
-    /// <summary>A page jump scrolls past the columns made (they are made for the scroll before the
-    /// key): the next key builds even onto a cell made and in view, so the columns it scrolled to
-    /// are made, as every key used to.</summary>
+    /// <summary>A page jump scrolls past the columns made before it: its build makes the columns it
+    /// scrolls to, so the window after its own frame is what a full build makes, and a key back onto
+    /// a cell in view builds nothing.</summary>
     [Fact]
-    public void InBrief_AKeyAfterAPageJump_BuildsTheColumnsScrolledTo()
+    public void InBrief_APageJump_MakesTheColumnsItScrollsTo()
     {
         using var t = Open(files: 400);
         t.Press(KeyCode.F2, KeyModifiers.Ctrl);
         t.Session.PumpFrames(2);
         Press(t, KeyCode.Home, KeyCode.Right, KeyCode.Right);   // the last column in full view
         int builds = Builds(t);
-        Press(t, KeyCode.PageDown);
+        t.Press(KeyCode.PageDown);
         Assert.Equal(1, Builds(t) - builds);
+        Assert.Empty(BlankColumns(t));
+        CursorNoBuildTests.AssertIsAFullBuild(t, "after PageDown");
+        builds = Builds(t);
         Press(t, KeyCode.Left);
-        Assert.Equal(2, Builds(t) - builds);
+        Assert.Equal(0, Builds(t) - builds);
         CursorNoBuildTests.AssertIsAFullBuild(t, "after PageDown, Left");
+    }
+
+    /// <summary>Every key that scrolls the grid — to the end and back, a page each way, a column
+    /// left, a filter typed and cleared — shows no blank column (in view and not made) after its own
+    /// frame. The columns used to be made for the scroll before the key, and a scroll set from code
+    /// fires no ScrollEvent to make them, so they stayed blank until the next key.</summary>
+    [Fact]
+    public void InBrief_AKeyThatScrolls_LeavesNoBlankColumn()
+    {
+        using var t = Open(files: 400);
+        t.Press(KeyCode.F2, KeyModifiers.Ctrl);
+        t.Session.PumpFrames(2);
+        Press(t, KeyCode.Home);
+        var keys = new[] { KeyCode.End, KeyCode.Home, KeyCode.PageDown, KeyCode.PageDown, KeyCode.PageUp, KeyCode.End,
+            KeyCode.Left, KeyCode.Left, KeyCode.Left, KeyCode.Left, KeyCode.Digit9, KeyCode.Escape };
+        int scrolled = 0;
+        foreach (var key in keys)
+        {
+            float before = BriefScroll(t).ScrollOffsetX;
+            t.Press(key);
+            if (BriefScroll(t).ScrollOffsetX != before) scrolled++;
+            Assert.True(BlankColumns(t) is [], $"after {key}: columns {string.Join(", ", BlankColumns(t))} in view and not made");
+        }
+        Assert.True(scrolled >= 9, $"only {scrolled} of the keys scrolled");
+        CursorNoBuildTests.AssertIsAFullBuild(t, "after the keys");
+    }
+
+    /// <summary>A Down walk from the first row to the last and back builds once for each key that
+    /// scrolls, and never for a key that does not.</summary>
+    [Fact]
+    public void InBrief_ADownWalk_BuildsOncePerScroll()
+    {
+        using var t = Open(files: 400);
+        t.Press(KeyCode.F2, KeyModifiers.Ctrl);
+        t.Session.PumpFrames(2);
+        Press(t, KeyCode.Home);
+        int n = t.Rows('L').Count;
+        foreach (var key in new[] { KeyCode.Down, KeyCode.Up })
+        {
+            int builds = 0, scrolls = 0;
+            for (int i = 0; i < n - 1; i++)
+            {
+                float before = BriefScroll(t).ScrollOffsetX;
+                int b = Builds(t);
+                t.Press(key);
+                if (BriefScroll(t).ScrollOffsetX != before) scrolls++;
+                builds += Builds(t) - b;
+            }
+            Assert.True(scrolls >= 10, $"{key}: the walk scrolled {scrolls} times");
+            Assert.Equal(scrolls, builds);
+        }
+        CursorNoBuildTests.AssertIsAFullBuild(t, "after the walk");
+    }
+
+    private static ScrollViewElement BriefScroll(DiffViewTests.Fixture t) => t.Field<Ref<ScrollViewElement>>("_briefScrollL").Current!;
+
+    /// <summary>The left pane's Brief columns at least partly in view that the latest build did not make.</summary>
+    private static int[] BlankColumns(DiffViewTests.Fixture t)
+    {
+        var scroll = BriefScroll(t);
+        int rows = t.Field<int[]>("_briefRows")[0];
+        int total = (t.Rows('L').Count + rows - 1) / rows;
+        var made = scroll.Children[0].Children.Select(c => c.Key).ToHashSet();
+        const float colW = CommanderApp.BriefColWidth;
+        int first = (int)(scroll.ScrollOffsetX / colW);
+        int last = Math.Min(total - 1, (int)Math.Ceiling((scroll.ScrollOffsetX + scroll.Layout.AbsoluteContentBox.Width) / colW - 0.001) - 1);
+        return [.. Enumerable.Range(first, Math.Max(0, last - first + 1)).Where(c => !made.Contains("col" + c))];
     }
 
     // ── Thumbnails ───────────────────────────────────────────────────────

@@ -109,6 +109,14 @@ static partial class Scenarios
             "The same walk Down: the two rows the cursor moved between keep all but the card it left and the card it reached; a row scrolled in is made whole",
             ctx => ImageGridWalk(ctx, KeyCode.Down, KeyCode.Up, turn: 6, keepCards: true)) { Width = 1440, Height = 900 };
 
+        yield return new Scenario("virtual/image grid across a change of columns, 600 cards, cards kept in their own row",
+            "Each step the window is 1440 wide (seven cards across) or 1300 (six) and the grid's columns follow, with its cards kept but handed back only into the row with their own row's key: rows are keyed by their first card's place, so only the first row's cards come back, and every other card on screen is made",
+            ctx => ImageGridColumns(ctx, anyRow: false)) { Width = 1440, Height = 900 };
+
+        yield return new Scenario("virtual/image grid across a change of columns, 600 cards, cards kept",
+            "The same, with a card handed back into whatever row holds its place now while its own row is still in the list, as Aperture's library does: each card moves to its new row untouched",
+            ctx => ImageGridColumns(ctx, anyRow: true)) { Width = 1440, Height = 900 };
+
         yield return new Scenario("table/TableView 10k sort",
             "Re-sort a 10,000-row TableView (4 columns) by its text column, flipping direction each step",
             ctx =>
@@ -540,7 +548,7 @@ sealed class WalkPane(List<WalkItem> items, bool itemRows = false, bool details 
                 ScrollView.New().FlexGrow(1).Children(Flex.Column().FlexShrink(0).Children(files)));
     }
 
-    protected override void OnAfterBuild()
+    protected internal override void OnAfterBuild()
     {
         if (!_reveal) return;
         _reveal = false;
@@ -670,7 +678,7 @@ sealed class PartnerPane(List<WalkItem> items, bool oneRow) : Component
         return Flex.Row(gap: 0).FlexGrow(1).Children(left.WithRef(_left), right.WithRef(_right));
     }
 
-    protected override void OnAfterBuild()
+    protected internal override void OnAfterBuild()
     {
         if (!_reveal) return;
         _reveal = false;

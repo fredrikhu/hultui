@@ -70,6 +70,26 @@ public sealed class PointerState(TimeProvider? timeProvider = null)
         }
     }
 
+    /// <summary>
+    /// The hovered element has left the window (a build removed it, or its overlay closed): its
+    /// part of the hover chain, from it up to the top of what went, gets PointerLeave, and hover
+    /// rests on <paramref name="survivor"/>, the deepest element of the old chain still shown,
+    /// which never lost the pointer and keeps its hover. The next <see cref="UpdateHover"/> goes
+    /// on from there. Going on from the removed element instead finds no ancestor in common with
+    /// anything shown: the surviving part of the chain was entered a second time and never left.
+    /// </summary>
+    internal void LeaveRemoved(Element? survivor, Point position, KeyModifiers modifiers)
+    {
+        PointerLeaveEvent? leaveEvt = null;
+        for (var el = _hoveredElement; el is not null && !ReferenceEquals(el, survivor); el = el.Parent)
+        {
+            el.SetInteractionHovered(false);
+            if (el.HasEventHandler<PointerLeaveEvent>())
+                EventDispatcher.DispatchDirect(leaveEvt ??= new PointerLeaveEvent { Position = position, Modifiers = modifiers }, el);
+        }
+        _hoveredElement = survivor;
+    }
+
     private static Element? FindCommonAncestor(Element? a, Element? b)
     {
         if (a is null || b is null) return null;

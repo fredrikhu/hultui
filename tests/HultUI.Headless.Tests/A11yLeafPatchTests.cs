@@ -23,7 +23,9 @@ namespace HultUI.Headless.Tests;
 /// is made again, compared with the applied one and put in its place, and the bridges are handed the
 /// changes, with no tree built (plan 17, round 4). Each rebuilt and diffed the whole tree for one
 /// node: a keystroke beside 200 rows 53 KB with UIA, a check box's click among 500 rows 87 KB, a
-/// playing video's scrubber two or three trees a second. Each case runs twice: once as it is, and
+/// playing video's scrubber two or three trees a second. An item's selected state is marked on its
+/// node the same way (round 9, step 15b): a cell of a grid a view lays out itself, a tile in a
+/// composite list's row; a selected state on anything else still builds the tree. Each case runs twice: once as it is, and
 /// once with a change in the same frame that cannot be patched (an automation id, which no bridge
 /// tells), so the tree is rebuilt; what each bridge tells, and the trees, must be the same.
 /// </summary>
@@ -105,14 +107,14 @@ public class A11yLeafPatchTests
         "typing", "password", "checkbox click", "checkbox by code, offscreen", "switch", "app toggle", "slider",
         "progress, toggle while pending", "number field", "leaf name", "leaf description", "leaf expanded",
         "canvas name", "label", "label in an explicitly named button", "two leaves, reverse order",
-        "selection and leaves", "in an open overlay",
+        "selection and leaves", "in an open overlay", "cursor in a grid of items", "cursor in a composite list's tiles",
     };
 
     /// <summary>Cases the tree is rebuilt for, as before.</summary>
     public static TheoryData<string> Rebuilt => new()
     {
         "label in a button named from its content", "box that gains a name", "box whose name goes",
-        "text a button takes for its name", "radio", "box with a child, named", "masked",
+        "text a button takes for its name", "radio", "box with a child, named", "masked", "selected, not an item",
     };
 
     private static BoxElement Rows(int n)
@@ -426,6 +428,92 @@ public class A11yLeafPatchTests
                 {
                     s.Settled("mask", () => input.Masked = true);
                     s.Settled("reveal", () => input.Masked = false);
+                });
+            }
+            case "cursor in a grid of items":
+            {
+                // A grid a view lays out itself, columns of boxes (Vesper's Brief): each cell an item
+                // named after its file, with an icon and its text, and the cursor's cell selected, moved
+                // with no build as a key moves the ring (plan 17, round 9, step 15b).
+                var cells = new BoxElement[12];
+                var grid = Flex.Row();
+                for (int c = 0; c < 3; c++)
+                {
+                    var column = Flex.Column().Width(Dimension.Px(140)).FlexShrink(0);
+                    for (int r = 0; r < 4; r++)
+                    {
+                        int i = c * 4 + r;
+                        cells[i] = Flex.Row(gap: 4).Height(Dimension.Px(22)).BorderWidth(1f)
+                            .AccessibleRole(AccessibilityRole.ListItem).AccessibleName($"file {i}.txt").AccessibleSelected(i == 0)
+                            .Children(Image.New().Width(Dimension.Px(12)).Height(Dimension.Px(12)), TextB.New($"file {i}.txt").FontSize(12f));
+                        column.AddChild(cells[i]);
+                    }
+                    grid.AddChild(column);
+                }
+                int cursor = 0;
+                void Move(int to)
+                {
+                    cells[cursor].Restyle(static e => { e.AccessibleSelected = false; ((BoxElement)e).BorderColor = Color.Transparent; });
+                    cells[to].Restyle(static e => { e.AccessibleSelected = true; ((BoxElement)e).BorderColor = new Color(40, 90, 200); });
+                    cursor = to;
+                }
+                return With(grid, s =>
+                {
+                    s.Step("down", () => Move(1));
+                    s.Step("right", () => Move(5));
+                    s.Step("right again", () => Move(9));
+                    s.Step("back to the top", () => Move(0));
+                });
+            }
+            case "cursor in a composite list's tiles":
+            {
+                // A grid driven through a list whose rows a reader reads as they are (Vesper's
+                // Thumbnails): each row a strip of tiles, each tile an item, the cursor's selected.
+                int cursor = 0;
+                var tiles = new Dictionary<int, BoxElement>();
+                var list = VirtualListElement<int>.New().ItemHeight(40).Items(Enumerable.Range(0, 30).ToList())
+                    .RenderWith(row =>
+                    {
+                        var strip = Flex.Row(gap: 4).Height(Dimension.Px(36));
+                        for (int k = 0; k < 4; k++)
+                        {
+                            int i = row * 4 + k;
+                            var tile = Flex.Column().Width(Dimension.Px(70)).Height(Dimension.Px(34))
+                                .AccessibleRole(AccessibilityRole.ListItem).AccessibleName($"tile {i}").AccessibleSelected(i == cursor)
+                                .Children(TextB.New($"tile {i}").FontSize(10f));
+                            tiles[i] = tile;
+                            strip.AddChild(tile);
+                        }
+                        return strip;
+                    })
+                    .Height(Dimension.Px(200));
+                list.RowsAreComposite = true;
+                void Move(int to)
+                {
+                    tiles[cursor].AccessibleSelected = false;
+                    tiles[to].AccessibleSelected = true;
+                    cursor = to;
+                }
+                return With(list, s =>
+                {
+                    s.Step("right", () => Move(1));
+                    s.Step("down", () => Move(5));
+                    s.Step("left", () => Move(4));
+                    s.Step("up", () => Move(0));
+                });
+            }
+            case "selected, not an item":
+            {
+                // One of a set that is no item: a row, a button, that a pane beside it follows
+                // (Meridian's endpoints). A tree is built for it, as before.
+                var a = Flex.Row().AccessibleRole(AccessibilityRole.Button).AccessibleName("GET /a").AccessibleSelected(true)
+                    .Children(TextB.New("GET /a").FontSize(12f));
+                var b = Flex.Row().AccessibleRole(AccessibilityRole.Button).AccessibleName("GET /b").AccessibleSelected(false)
+                    .Children(TextB.New("GET /b").FontSize(12f));
+                return With(Flex.Column().Children(a, b), s =>
+                {
+                    s.Step("b", () => { a.AccessibleSelected = false; b.AccessibleSelected = true; });
+                    s.Step("a", () => { b.AccessibleSelected = false; a.AccessibleSelected = true; });
                 });
             }
             default:

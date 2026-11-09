@@ -1173,9 +1173,9 @@ public class DiffViewTests
         public void WriteLeft(string name, string text) => File.WriteAllText(Path.Combine(Left, name), text);
         public void WriteRight(string name, string text) => File.WriteAllText(Path.Combine(Right, name), text);
 
-        public void Open(bool wrap = false)
+        public void Open(bool wrap = false, HeadlessOptions? options = null)
         {
-            _session = HeadlessSession.Create(1240, 820);
+            _session = HeadlessSession.Create(1240, 820, options: options);
             _app = new CommanderApp(_session.Application, _session.Window.Window, Left, Right);
             // The app loads the developer's own settings and session, so pin the two things
             // that would otherwise steer these tests: which folder each pane shows, and the

@@ -106,6 +106,9 @@ internal sealed unsafe class VisualCapture : IDisposable
     /// <summary>Whether GL reads the frames in place (false: read back and uploaded, or not GPU yet).</summary>
     public bool ZeroCopy => _dxDevice != 0 && !_uploadInstead;
 
+    /// <summary>Whether the interop texture GL reads in place is held, with its registration.</summary>
+    public bool HoldsInterop => _interopObject != 0 || _interopTexture != 0;
+
     /// <summary>
     /// How frames are delivered. Set when the first draw decides it; UI thread. Switching to
     /// pixels delivers the frame already waiting, since a still page sends no other.
@@ -142,6 +145,13 @@ internal sealed unsafe class VisualCapture : IDisposable
         Com.Check(((delegate* unmanaged[Stdcall]<nint, nint, int, int, Native.SizeInt32, int>)(*(nint**)_pool)[IDirect3D11CaptureFramePool.Recreate])(
             _pool, _winrtDevice, Native.DirectXPixelFormat_B8G8R8A8UIntNormalized, 2, size), "FramePool.Recreate");
     }
+
+    /// <summary>
+    /// The GL side was given back while the page was not drawn (<see cref="ReleaseGL"/>): the
+    /// next frame drawn has to come from the capture. Cleared when one is drawn.
+    /// </summary>
+    public bool AwaitsFrame => _awaitsFrame;
+    private volatile bool _awaitsFrame;
 
     private void Start(Native.SizeInt32 size)
     {
@@ -288,6 +298,7 @@ internal sealed unsafe class VisualCapture : IDisposable
                     BlitInPlace(texture, target, w, h);
                 else
                     Upload(texture, target, w, h);
+                _awaitsFrame = false;
                 return true;
             }
             finally
@@ -397,15 +408,32 @@ internal sealed unsafe class VisualCapture : IDisposable
         _interopWidth = _interopHeight = 0;
     }
 
-    /// <summary>Frees the GL side. UI thread, with the context the objects were made in current.</summary>
+    /// <summary>
+    /// Frees what GL reads the frames through: the interop texture, its GL registration, the
+    /// framebuffer over it. UI thread, with the context they were made in current. The next
+    /// <see cref="Render"/> makes them again: the frame sink asks for this while the page is
+    /// hidden as well as when it goes (GpuFrameSink.ReleaseWhileHidden). The capture keeps
+    /// running, so the frame WebView2 sends when the page is shown again is there to draw.
+    /// </summary>
+    /// <remarks>
+    /// Measured on NVIDIA 610 (plan 17 round 9, a page of 2160×779 px): the interop device stays
+    /// open until <see cref="Dispose"/>, because closed here and opened again on show it left
+    /// 7.4 MB more of this process's GPU memory behind after a show or two; and the D3D11 context
+    /// is flushed, because D3D11 destroys a released texture only then — without it a show added
+    /// a new texture's 7.4 MB while the old one's stayed.
+    /// </remarks>
     public void ReleaseGL()
     {
         lock (_gate)
         {
             ReleaseInterop();
-            if (_gl is { } gl && _dxDevice != 0) gl.DXCloseDevice(_dxDevice);
-            _dxDevice = 0;
-            _gl = null;
+            if (_mode == GpuSinkMode.Gpu)
+            {
+                // The upload fallback's read-back texture: in GPU mode only Render uses it.
+                Com.Release(ref _staging);
+                _awaitsFrame = true;
+            }
+            ((delegate* unmanaged[Stdcall]<nint, void>)(*(nint**)_context)[ID3D11DeviceContext.Flush])(_context);
         }
     }
 
@@ -482,7 +510,12 @@ internal sealed unsafe class VisualCapture : IDisposable
         Com.RemoveHandler(_pool, IDirect3D11CaptureFramePool.remove_FrameArrived, _frameToken);
         _frameHandler?.Release();
         // The GL names are ReleaseGL's, which needs their context; if it has not run by now
-        // they go with that context, and the interop texture goes here with the device.
+        // they go with that context, and the interop texture goes here with the device. The
+        // interop device, which ReleaseGL keeps, is closed here: on the UI thread right after the
+        // frame sink's ReleaseGL (WebViewController.Dispose), with the same context current.
+        if (_gl is { } gl && _dxDevice != 0) gl.DXCloseDevice(_dxDevice);
+        _dxDevice = 0;
+        _gl = null;
         Com.Release(ref _interopTexture);
         CloseAndRelease(ref _session);
         CloseAndRelease(ref _pool);

@@ -27,6 +27,7 @@ public class KeptElementsTests
         public Func<int, bool> Shown = _ => true;
         public int Made;
         public bool Placed, KeyBySuffix;
+        public int PerShelf = 4;
         /// <summary>Another view in the same shape, made without the helper: its cards, keyed as the
         /// shelves' are, are patched onto the shelves' live ones.</summary>
         public bool Other;
@@ -45,9 +46,9 @@ public class KeptElementsTests
             {
                 var row = Flex.Row(gap: 4);
                 row.Key = "shelf" + s;
-                for (int k = 0; k < 4; k++)
+                for (int k = 0; k < PerShelf; k++)
                 {
-                    int i = s * 4 + k;
+                    int i = s * PerShelf + k;
                     if (!Shown(i)) continue;
                     if (Other)
                     {
@@ -228,6 +229,25 @@ public class KeptElementsTests
         Step(session, shelves, shelves.Cards.Clear);
 
         Assert.Equal(made + 8, shelves.Made);
+    }
+
+    /// <summary>A build that makes more cards than the helper lets go at keeps every one. The cards a
+    /// build makes are not in the window until it is reconciled, and those let go then had no live
+    /// element after it, and were made again by the next build, which had changed nothing.</summary>
+    [Fact]
+    public void ABuildThatMakesManyCards_KeepsEveryOne()
+    {
+        var session = HeadlessSession.Create(600, 400);
+        using var held = session;
+        var shelves = new Shelves { PerShelf = 50 };
+        session.Application.SetRoot(shelves.Mount());
+        session.PumpFrames(2);
+        Assert.Equal(100, shelves.Made);
+        Assert.All(Enumerable.Range(0, 100), i => Assert.Same(Card(shelves, i), shelves.Cards.Live("c" + i)));
+
+        Step(session, shelves, () => { });
+
+        Assert.Equal(100, shelves.Made);
     }
 
     /// <summary>Cards that left the window are let go as more are made: a walk through many keeps

@@ -175,6 +175,11 @@ public partial class CommanderApp
         // focus can change during reconciliation (element removal), and a synchronous
         // rebuild there re-enters the differ.
         pane.IsFocusable = true;
+        // What holds the focus has to be a node for a reader to be told of it: a box with no role
+        // or name is none, so every Tab and click told a reader "focus on nothing". A group named
+        // after its side and its folder, as the tab and the window title name the folder.
+        pane.Role = HultUI.Core.Accessibility.AccessibilityRole.Group;
+        pane.AccessibleName = PaneName(side);
         pane.WithRef(PaneRef(side));
         pane.On<FocusEvent>(_ =>
         {
@@ -251,6 +256,23 @@ public partial class CommanderApp
         pane.AddChild(FootPart(side).Place().FlexShrink(0));
         return pane;
     }
+
+    /// <summary>The pane as a screen reader names it: its side and what its tab shows. Made again
+    /// only when that changes, not on every build of the pane (a Tab, a mark).</summary>
+    private string PaneName(char side)
+    {
+        var tab = ActiveTab(side);
+        // A result set's tab says so, as its chip does; its folder is only where the search ran.
+        var where = tab.Results != null ? null : tab.Dir;
+        int si = Si(side);
+        if (_paneName[si] is not { } name || _paneNameDir[si] != where)
+        {
+            _paneNameDir[si] = where;
+            _paneName[si] = name = $"{(side == 'L' ? "Left" : "Right")} pane, {(where is null ? "Results" : TabLabel(where))}";
+        }
+        return name;
+    }
+    private readonly string?[] _paneName = new string?[2], _paneNameDir = new string?[2];
 
     // ── Tab strip ────────────────────────────────────────────────────────
     private Element BuildTabStrip(char side)

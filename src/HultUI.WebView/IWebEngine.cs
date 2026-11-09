@@ -178,6 +178,16 @@ public interface IWebViewHost
     void Post(Action action);
 }
 
+/// <summary>
+/// A view whose GPU renderer can give its GL objects back while the page is off screen and make
+/// them again when it is next asked to render, and that sends the page's frame when the page is
+/// shown again — a still page's included. Its controller then has the frame sink give back the
+/// renderer's objects and its own target in the first frame after
+/// <see cref="IWebEngineView.SetVisible"/> hid the page (GpuFrameSink.ReleaseWhileHidden).
+/// WebView2's view is one. Internal, so an engine outside this repository keeps what it has.
+/// </summary>
+internal interface IReleasesGpuWhileHidden { }
+
 /// <summary>What a view does itself rather than through the element.</summary>
 [Flags]
 public enum WebEngineCapabilities

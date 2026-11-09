@@ -241,6 +241,7 @@ public partial class MeridianApp : Component, IDisposable
         // The title bar is a part of its own (see Part), keyed by its host.
         var titleBar = TitleBarPart.Mount().FlexShrink(0);
         var body = BuildBody(); body.Key = "body";
+        EndMapBuild();   // a build that shows no map lets its kept rows go
         // The response panel keeps the readout of a send in flight (TickWhileSending) while it is
         // kept; with no panel on screen there is none.
         if (!_responsePlaced) _sendElapsed.Current = null;
@@ -313,6 +314,12 @@ public partial class MeridianApp : Component, IDisposable
             _pendingConfirmFocus = false;
             if (_confirmRef.Current is { } ok && _window.IsInTree(ok)) ok.Focus();
         }
+        if (_pendingHistoryFocus)
+        {
+            _pendingHistoryFocus = false;
+            if (View == MeridianView.History && _historyListRef.Current is { } history && _window.IsInTree(history))
+                history.Focus();
+        }
         _responseFind.Service();
     }
 
@@ -340,8 +347,12 @@ public partial class MeridianApp : Component, IDisposable
     private void SetView(MeridianView v)
     {
         if (View == v) return;
+        // History's list takes the focus once it is built, so a reader follows the walk.
+        _pendingHistoryFocus = v == MeridianView.History;
         View = v;   // reactive → rebuild
     }
+
+    private bool _pendingHistoryFocus;
 
     private async void OpenFolder()
     {
@@ -368,6 +379,7 @@ public partial class MeridianApp : Component, IDisposable
             return;
         }
         _workspace = ws;
+        ForgetTreeRows();
         StopResponseWork();
         _tabs.Clear();
         _activeTab = -1;
@@ -793,5 +805,6 @@ public partial class MeridianApp : Component, IDisposable
         _watcher?.Dispose();
         DisposePreview();
         Engine.Dispose();
+        FlushMapCache();   // a map saved just before is on disk when the app is gone
     }
 }

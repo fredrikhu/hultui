@@ -2,6 +2,8 @@ using System.Diagnostics;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using TextMateSharp.Grammars;
+using TextMateSharp.Internal.Grammars;
+using TextMateSharp.Internal.Types;
 using TextMateSharp.Registry;
 using TextMateSharp.Themes;
 using TmTheme = TextMateSharp.Themes.Theme;   // "Theme" alone collides with HultUI.Core.Styling.Theme
@@ -37,10 +39,8 @@ public static class SyntaxHighlighter
     private static readonly object Gate = new();
     private static RegistryOptions? _options;
     private static Registry? _registry;
-    private static TmTheme? _theme;
-    private static Color? _defaultFg;
-    private static readonly Dictionary<string, IGrammar?> GrammarByExt = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly Dictionary<int, Color?> ColorById = new();
+    private static Palette? _palette;
+    private static readonly Dictionary<string, Language?> LanguageByExt = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>How many times this thread has needed the registry, loaded or not. A test
     /// reads it to show that a question answered from a table never touched it.</summary>
@@ -181,9 +181,8 @@ public static class SyntaxHighlighter
         cancellationToken.ThrowIfCancellationRequested();
         lock (Gate)
         {
-            var grammar = GrammarFor(path);
-            if (grammar == null) return null;
-            return Tokenize(wrap is null ? grammar : wrap(grammar), text, maxLines,
+            if (LanguageFor(path) is not { } language) return null;
+            return Tokenize(wrap is null ? language.Grammar : wrap(language.Grammar), language.Colours, text, maxLines,
                 clock ?? TimeProvider.System, cancellationToken);
         }
     }
@@ -193,8 +192,8 @@ public static class SyntaxHighlighter
     /// needs every line above it, for the state they leave (a block comment opened 900 lines
     /// up), but a diff needs nothing below its last line, and of the lines above it only that
     /// state. So each side stops at its last shown line; a line nobody shows is walked for its
-    /// state, which saves about a fifth of its bytes and leaves no spans to keep (a diff's lines
-    /// are a few in a hundred); and the lines both versions start with are walked once. On the
+    /// state and leaves no spans to keep (a diff's lines are a few in a hundred); and the lines
+    /// both versions start with are walked once. On the
     /// spans of a line shown this is <see cref="TokenizeLines(string, string, int, CancellationToken, TimeProvider?)"/>,
     /// and it holds a side to the same limits: a text too long for that gets none here.
     ///
@@ -214,8 +213,7 @@ public static class SyntaxHighlighter
         lock (Gate)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var grammar = GrammarFor(path);
-            if (grammar == null) return default;
+            if (LanguageFor(path) is not { } language) return default;
 
             var oldLines = oldText is null ? [] : SplitLines(oldText, oldShown[^1].Last);
             var newLines = newText is null ? [] : SplitLines(newText, newShown[^1].Last);
@@ -224,7 +222,7 @@ public static class SyntaxHighlighter
             var longer = newLines.Count >= oldLines.Count ? newLines : oldLines;
             int shared = oldText is null || newText is null ? 0 : Math.Min(SharedLines(oldText, newText), longer.Count);
 
-            var walk = new LineWalk(grammar, clock, cancellationToken);
+            var walk = new LineWalk(language.Grammar, language.Colours, clock, cancellationToken);
             IStateStack? state = null;
             walk.Run(longer, 0, shared, ref state, ref oldSide, ref newSide);
             var elapsed = clock.GetElapsedTime(walk.Started);
@@ -336,14 +334,14 @@ public static class SyntaxHighlighter
             if (parsed == _themeName && _registry != null) return true;
             _themeName = parsed;
             // Drop the registry rather than re-theming it in place: the colour ids a rule
-            // carries are indices into the theme's own colour table, so ColorById and every
+            // carries are indices into the theme's own colour table, so a palette and every
             // grammar's cached tokenization belong to the theme that produced them.
             _registry = null;
             _options = null;
-            _theme = null;
-            _defaultFg = null;
-            GrammarByExt.Clear();
-            ColorById.Clear();
+            _palette = null;
+            _rootParents = null;
+            LanguageByExt.Clear();
+            LanguageByRoot.Clear();
         }
         // Which extensions are highlightable does not depend on the theme: CanHighlight answers
         // from a fixed table.
@@ -356,10 +354,8 @@ public static class SyntaxHighlighter
         if (_registry != null) return;
         _options = new RegistryOptions(_themeName);
         _registry = new Registry(_options);
-        _theme = _registry.GetTheme();
-        _defaultFg = _theme.GetGuiColorDictionary().TryGetValue("editor.foreground", out var fg)
-            ? ParseHex(fg)
-            : null;
+        _palette = new Palette(_registry.GetTheme());
+        _rootParents = RootedOptions.ParentsNamed(_options);
     }
 
     /// <summary>
@@ -376,26 +372,140 @@ public static class SyntaxHighlighter
         return ExtensionAliases.TryGetValue(ext, out var alias) ? alias : ext;
     }
 
+    /// <summary>A grammar and the palette its tokens' colour ids index.</summary>
+    private sealed record Language(IGrammar Grammar, Palette Colours);
+
     /// <summary>
     /// The grammar for <paramref name="path"/>, resolved from its extension, then
     /// from an alias, then — for extension-less files — from its name. Null when
     /// nothing bundled parses it.
     /// </summary>
-    private static IGrammar? GrammarFor(string path)
+    private static Language? LanguageFor(string path)
     {
         if (ResolveExtension(path) is not { } ext) return null;
         EnsureRegistry();
         // Keyed by the resolved extension, so every alias shares one cached grammar.
-        if (GrammarByExt.TryGetValue(ext, out var grammar)) return grammar;
+        if (LanguageByExt.TryGetValue(ext, out var language)) return language;
         var scope = _options!.GetScopeByExtension(ext);
-        grammar = scope == null ? null : _registry!.LoadGrammar(scope);
-        GrammarByExt[ext] = grammar;
-        return grammar;
+        language = scope == null ? null : LanguageForRoot(scope);
+        LanguageByExt[ext] = language;
+        return language;
+    }
+
+    // ── A theme rule that names the root scope ───────────────────────────
+    //
+    // TextMateSharp never colours an encoded token by a theme rule that names parent scopes: it
+    // looks for the rule's own scope among the token's parents as well. VS Code applies such a rule
+    // inside its parents. In Dark+ and Light+ the one that matters is "source.powershell
+    // variable.other.member", a member's yellow in a PowerShell file, where source.powershell is
+    // the root of every token: without it, `$x.Count` would draw Count light blue as a variable. So
+    // a grammar whose root scope a rule's one parent names gets a registry of its own, whose theme
+    // has that rule without the parent (RootedOptions): inside such a file it always applies, as in
+    // VS Code. Everywhere else the rule still applies nowhere, also as in VS Code (a C member is not
+    // a PowerShell one, and a PowerShell fence in Markdown has no source.powershell scope). Of the
+    // bundled grammars that is PowerShell, and Less for dark_vs's and light_vs's
+    // "source.css.less entity.other.attribute-name.id".
+    private static HashSet<string>? _rootParents;
+    private static readonly Dictionary<string, Language> LanguageByRoot = new(StringComparer.Ordinal);
+
+    private static Language? LanguageForRoot(string scope)
+    {
+        if (!_rootParents!.Any(parent => RootedOptions.Names(scope, parent)))
+            return _registry!.LoadGrammar(scope) is { } grammar ? new Language(grammar, _palette!) : null;
+        if (LanguageByRoot.TryGetValue(scope, out var known)) return known;
+        var registry = new Registry(new RootedOptions(_options!, scope));
+        if (registry.LoadGrammar(scope) is not { } rooted) return null;
+        return LanguageByRoot[scope] = new Language(rooted, new Palette(registry.GetTheme()));
+    }
+
+    /// <summary>
+    /// The registry's options with the theme as TextMateSharp should see it for a grammar whose
+    /// root scope is <paramref name="root"/>: a rule whose one parent names the root, "source.powershell
+    /// variable.other.member" for <c>source.powershell</c>, without its parent, and last in its theme
+    /// file, as VS Code prefers a rule with parents to one without for the same scope.
+    /// </summary>
+    private sealed class RootedOptions(RegistryOptions inner, string root) : IRegistryOptions
+    {
+        public IRawTheme GetDefaultTheme() => new RootedTheme(inner.GetDefaultTheme(), root);
+        public IRawTheme GetTheme(string scopeName) => inner.GetTheme(scopeName) is { } theme ? new RootedTheme(theme, root) : null!;
+        public IRawGrammar GetGrammar(string scopeName) => inner.GetGrammar(scopeName);
+        public ICollection<string> GetInjections(string scopeName) => inner.GetInjections(scopeName);
+
+        /// <summary>Whether <paramref name="selector"/> is <paramref name="scope"/> or a prefix of it at
+        /// a dot, as a theme matches scopes.</summary>
+        public static bool Names(string scope, string selector) =>
+            scope.StartsWith(selector, StringComparison.Ordinal)
+            && (scope.Length == selector.Length || scope[selector.Length] == '.');
+
+        /// <summary>The parent scope of every rule of the theme (and of the one it includes) that names
+        /// one: the roots a grammar may need its own registry for.</summary>
+        public static HashSet<string> ParentsNamed(RegistryOptions options)
+        {
+            var parents = new HashSet<string>(StringComparer.Ordinal);
+            for (var theme = options.GetDefaultTheme(); theme is not null;
+                 theme = theme.GetInclude() is { Length: > 0 } include ? options.GetTheme(include) : null)
+                foreach (var settings in new[] { theme.GetSettings(), theme.GetTokenColors() })
+                    foreach (var setting in settings ?? [])
+                        foreach (var selector in Selectors(setting.GetScope()))
+                            if (ParentOf(selector) is { } parent) parents.Add(parent);
+            return parents;
+        }
+
+        /// <summary>The parent a selector of two scopes names ("source.powershell" of
+        /// "source.powershell variable.other.member"); null for any other.</summary>
+        private static string? ParentOf(string selector)
+        {
+            var parts = selector.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return parts.Length == 2 ? parts[0] : null;
+        }
+
+        private static List<string> Selectors(object? scope) => scope switch
+        {
+            string list => [.. list.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)],
+            IList<object> items => [.. items.OfType<string>().Select(s => s.Trim())],
+            _ => [],
+        };
+
+        private sealed class RootedTheme(IRawTheme inner, string root) : IRawTheme
+        {
+            public string GetName() => inner.GetName();
+            public string GetInclude() => inner.GetInclude();
+            public ICollection<IRawThemeSetting> GetSettings() => Rooted(inner.GetSettings())!;
+            public ICollection<IRawThemeSetting> GetTokenColors() => Rooted(inner.GetTokenColors())!;
+            public ICollection<KeyValuePair<string, object>> GetGuiColors() => inner.GetGuiColors();
+
+            private ICollection<IRawThemeSetting>? Rooted(ICollection<IRawThemeSetting>? settings)
+            {
+                if (settings is null) return null;
+                var kept = new List<IRawThemeSetting>(settings.Count);
+                var moved = new List<IRawThemeSetting>();
+                foreach (var setting in settings)
+                {
+                    var selectors = Selectors(setting.GetScope());
+                    if (!selectors.Exists(IsRooted)) { kept.Add(setting); continue; }
+                    if (selectors.Where(s => !IsRooted(s)).ToList() is { Count: > 0 } stay)
+                        kept.Add(new Setting(setting, string.Join(',', stay)));
+                    moved.Add(new Setting(setting, string.Join(',', selectors.Where(IsRooted)
+                        .Select(s => s.Split(' ', StringSplitOptions.RemoveEmptyEntries)[1]))));
+                }
+                kept.AddRange(moved);
+                return kept;
+            }
+
+            private bool IsRooted(string selector) => ParentOf(selector) is { } parent && Names(root, parent);
+        }
+
+        private sealed class Setting(IRawThemeSetting inner, string scope) : IRawThemeSetting
+        {
+            public string GetName() => inner.GetName();
+            public object GetScope() => scope;
+            public IThemeSetting GetSetting() => inner.GetSetting();
+        }
     }
 
     // ── Tokenization ─────────────────────────────────────────────────────
 
-    private static IReadOnlyList<TextSpan>[]? Tokenize(IGrammar grammar, string text, int maxLines,
+    private static IReadOnlyList<TextSpan>[]? Tokenize(IGrammar grammar, Palette colours, string text, int maxLines,
         TimeProvider clock, CancellationToken cancellationToken)
     {
         var lines = SplitLines(text);
@@ -403,7 +513,7 @@ public static class SyntaxHighlighter
 
         var side = new Side(Uncoloured(lines.Count), EveryLine);
         IStateStack? state = null;
-        new LineWalk(grammar, clock, cancellationToken).Run(lines, 0, lines.Count, ref state, ref side, ref Side.None);
+        new LineWalk(grammar, colours, clock, cancellationToken).Run(lines, 0, lines.Count, ref state, ref side, ref Side.None);
         return side.Result;
     }
 
@@ -434,7 +544,8 @@ public static class SyntaxHighlighter
     }
 
     /// <summary>A walk down lines, each from the state the one above left.</summary>
-    private sealed class LineWalk(IGrammar grammar, TimeProvider clock, CancellationToken cancellationToken)
+    private sealed class LineWalk(IGrammar grammar, Palette colours, TimeProvider clock,
+        CancellationToken cancellationToken)
     {
         /// <summary>What the budget of three seconds runs from.</summary>
         public long Started = clock.GetTimestamp();
@@ -471,28 +582,24 @@ public static class SyntaxHighlighter
                     line = line[..(char.IsHighSurrogate(line.Span[_longLine - 1]) ? _longLine - 1 : _longLine)];
                 }
                 long lineStarted = Stopwatch.GetTimestamp();
-                if (!inFirst && !inSecond)
-                {
-                    IStateStack next;
-                    try { next = grammar.TokenizeLine2(new LineText(line), state, _lineBudget).RuleStack; }
-                    catch { continue; }   // a broken grammar rule shouldn't kill the whole file
-                    if (Finished(lineStarted)) state = next;
-                    continue;
-                }
-
-                ITokenizeLineResult tokenized;
-                try { tokenized = grammar.TokenizeLine(new LineText(line), state, _lineBudget); }
+                ITokenizeLineResult2 tokenized;
+                try { tokenized = grammar.TokenizeLine2(new LineText(line), state, _lineBudget); }
                 catch { continue; }   // a broken grammar rule shouldn't kill the whole file
                 if (whole && Finished(lineStarted)) state = tokenized.RuleStack;
+                if (!inFirst && !inSecond) continue;   // walked for its state alone
 
-                int lineLength = line.Length;
+                // Two numbers a token: where it starts, and its attributes, which carry the colour
+                // the theme gives it (see Palette). A token ends where the next one starts, the
+                // last at the end of the line.
+                var tokens = tokenized.Tokens;
+                int count = tokens.Length / 2, lineLength = line.Length;
                 _spans.Clear();
-                foreach (var token in tokenized.Tokens)
+                for (int k = 0; k < count; k++)
                 {
-                    int s = Math.Clamp(token.StartIndex, 0, lineLength);
-                    int e = Math.Clamp(token.EndIndex, s, lineLength);
+                    int s = Math.Clamp(tokens[2 * k], 0, lineLength);
+                    int e = Math.Clamp(k + 1 < count ? tokens[2 * k + 2] : lineLength, s, lineLength);
                     if (e <= s) continue;
-                    if (ColorFor(token.Scopes) is not { } color) continue;
+                    if (colours.For(EncodedTokenAttributes.GetForeground(tokens[2 * k + 1])) is not { } color) continue;
 
                     // Merge contiguous same-color tokens so the renderer draws fewer segments.
                     if (_spans.Count > 0 && _spans[^1].End == s && _spans[^1].Color == color)
@@ -522,22 +629,37 @@ public static class SyntaxHighlighter
             grammar.GetScopeName() is "source.json" or "source.json.comments" or "text.xml" ? LongDataLine : LongLine;
     }
 
-    private static Color? ColorFor(List<string> scopes)
+    // TextMateSharp encodes in each token the colour the theme gives it, matched as the scopes were
+    // pushed, so a line comes back as numbers: no token objects and no lists of scope names, 28 % of
+    // a JSON body's tokenize bytes and 18 % of an XML body's. Each scope takes its own most specific
+    // rule and the innermost scope with a colour wins, as in VS Code; a rule naming parent scopes
+    // ("source.cpp keyword.operator.new") no longer colours a token outside them. In Dark+ and
+    // Light+, the two bundled themes that include another file, that differs from taking the first
+    // rule with a colour from any scope of the token, the theme's own file before the included one:
+    // a quoted object key in TypeScript is a string now, `new` a keyword, a C member a variable.
+    // Only the colour is taken, as before; a theme's bold and italic stay unused, since they would
+    // change how wide a line is.
+    /// <summary>A theme's colours by the ids one registry's tokens carry.</summary>
+    private sealed class Palette(TmTheme theme)
     {
-        foreach (var rule in _theme!.Match(scopes))
+        private readonly Color? _editorForeground =
+            theme.GetGuiColorDictionary().TryGetValue("editor.foreground", out var fg) ? ParseHex(fg) : null;
+        private readonly Dictionary<int, Color?> _byId = new();
+
+        /// <summary>The colour of a token's foreground id. Id 1 is the theme's default foreground,
+        /// which a token no rule colours carries; it draws in the element's own text colour, and
+        /// so does a rule's colour that is the editor's foreground.</summary>
+        public Color? For(int id)
         {
-            if (rule.foreground <= 0) continue;
-            if (!ColorById.TryGetValue(rule.foreground, out var color))
+            if (id <= 1) return null;
+            if (!_byId.TryGetValue(id, out var color))
             {
-                color = ParseHex(_theme.GetColor(rule.foreground));
-                ColorById[rule.foreground] = color;
+                color = ParseHex(theme.GetColor(id));
+                if (color == _editorForeground) color = null;
+                _byId[id] = color;
             }
-            if (color is not { } c) continue;
-            // The default editor foreground carries no information — let the
-            // element's own text color show through instead.
-            return c == _defaultFg ? null : c;
+            return color;
         }
-        return null;
     }
 
     // Lines as slices of the source (no per-line string allocs); trailing '\r' is

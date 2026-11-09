@@ -102,8 +102,7 @@ public sealed unsafe class SecretServiceKeyring : IKeyring
 
     public string? Get(string workspaceRoot, string? environment, string key)
     {
-        string entry = WindowsCredentialKeyring.Target(workspaceRoot, environment, key);
-        if (_memo.TryRecall(entry, out var known)) return known;
+        if (_memo.TryRecall(workspaceRoot, environment, key, out var known)) return known;
         if (Unavailable != null) return null;
         lock (_native)
         {
@@ -113,7 +112,7 @@ public sealed unsafe class SecretServiceKeyring : IKeyring
             if (Failed(error)) return null;
             string? value = found == 0 ? null : Marshal.PtrToStringUTF8(found);
             if (found != 0) _passwordFree(found);   // zeroes it as it frees
-            _memo.Remember(entry, value);
+            _memo.Remember(workspaceRoot, environment, key, value);
             return value;
         }
     }
@@ -121,7 +120,6 @@ public sealed unsafe class SecretServiceKeyring : IKeyring
     public bool Set(string workspaceRoot, string? environment, string key, string value)
     {
         if (Unavailable != null) return false;
-        string entry = WindowsCredentialKeyring.Target(workspaceRoot, environment, key);
         lock (_native)
         {
             using var attributes = new Attributes(this, workspaceRoot, environment, key);
@@ -135,7 +133,7 @@ public sealed unsafe class SecretServiceKeyring : IKeyring
                 // A null collection is the default one; an item with the same attributes is replaced.
                 bool stored = _store(_schema, attributes.Table, 0, label, password, 0, &error) != 0;
                 if (Failed(error) || !stored) return false;
-                _memo.Remember(entry, value);
+                _memo.Remember(workspaceRoot, environment, key, value);
                 return true;
             }
             finally
@@ -150,7 +148,6 @@ public sealed unsafe class SecretServiceKeyring : IKeyring
     public bool Delete(string workspaceRoot, string? environment, string key)
     {
         if (Unavailable != null) return false;
-        string entry = WindowsCredentialKeyring.Target(workspaceRoot, environment, key);
         lock (_native)
         {
             using var attributes = new Attributes(this, workspaceRoot, environment, key);
@@ -158,10 +155,10 @@ public sealed unsafe class SecretServiceKeyring : IKeyring
             bool removed = _clear(_schema, attributes.Table, 0, &error) != 0;
             if (Failed(error))
             {
-                _memo.Forget(entry);   // unknown now: ask again next time
+                _memo.Forget(workspaceRoot, environment, key);   // unknown now: ask again next time
                 return false;
             }
-            _memo.Remember(entry, null);
+            _memo.Remember(workspaceRoot, environment, key, null);
             return removed;
         }
     }
@@ -225,24 +222,40 @@ public sealed unsafe class SecretServiceKeyring : IKeyring
 
 /// <summary>A store's answers for the life of the process — the value, or that there is none — so a
 /// table that asks at every build costs the platform's keyring one call per entry. Only answers
-/// are kept: a call that failed is asked again.</summary>
-internal sealed class KeyringMemo
+/// are kept: a call that failed is asked again. An entry is its three parts, not the name the store
+/// knows it by, so an answer recalled allocates nothing (the Request tab asks for every secret of
+/// every environment at each build of the response pane, 59 times a frame of a drag with 12 secrets
+/// × 3 environments). <paramref name="ignoreCase"/> is for a store that matches names in any letter
+/// case (Windows): the memo then answers for the same entries the store would.</summary>
+internal sealed class KeyringMemo(bool ignoreCase = false)
 {
-    private readonly Dictionary<string, string?> _known = new(StringComparer.Ordinal);
+    private readonly Dictionary<(string Root, string? Environment, string Key), string?> _known =
+        new(new EntryComparer(ignoreCase ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal));
     private readonly Lock _lock = new();
 
-    public bool TryRecall(string entry, out string? value)
+    public bool TryRecall(string workspaceRoot, string? environment, string key, out string? value)
     {
-        lock (_lock) return _known.TryGetValue(entry, out value);
+        lock (_lock) return _known.TryGetValue((workspaceRoot, environment, key), out value);
     }
 
-    public void Remember(string entry, string? value)
+    public void Remember(string workspaceRoot, string? environment, string key, string? value)
     {
-        lock (_lock) _known[entry] = value;
+        lock (_lock) _known[(workspaceRoot, environment, key)] = value;
     }
 
-    public void Forget(string entry)
+    public void Forget(string workspaceRoot, string? environment, string key)
     {
-        lock (_lock) _known.Remove(entry);
+        lock (_lock) _known.Remove((workspaceRoot, environment, key));
+    }
+
+    private sealed class EntryComparer(StringComparer names) : IEqualityComparer<(string Root, string? Environment, string Key)>
+    {
+        public bool Equals((string Root, string? Environment, string Key) x, (string Root, string? Environment, string Key) y) =>
+            names.Equals(x.Key, y.Key) && names.Equals(x.Environment, y.Environment) && names.Equals(x.Root, y.Root);
+
+        public int GetHashCode((string Root, string? Environment, string Key) entry) =>
+            HashCode.Combine(names.GetHashCode(entry.Root),
+                entry.Environment is null ? 0 : names.GetHashCode(entry.Environment),
+                names.GetHashCode(entry.Key));
     }
 }

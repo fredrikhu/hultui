@@ -299,8 +299,12 @@ public sealed partial class ApertureApp
         else if (_fitGridStride > 0f) _window.RequestPostFrameCallback(FocusCursorCardMadeInTheFrame);
     }
 
+    /// <summary>The card the cursor is on, once the frame that made it is drawn: still on screen, as
+    /// a card that left keeps the focus manager it had.</summary>
     private void FocusCursorCardMadeInTheFrame()
     {
-        if (Current.View == ApertureView.Library && _cursorCardIndex == _cursorIndex) _cursorCard.Current?.Focus();
+        if (Current.View == ApertureView.Library && _cursorCardIndex == _cursorIndex
+            && _cursorCard.Current is { IsHosted: true } card)
+            card.Focus();
     }
 }

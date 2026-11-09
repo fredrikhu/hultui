@@ -197,6 +197,63 @@ public class RequestsShellTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    /// <summary>A header value and the body are the URL box's case: the field holds the text, and the
+    /// rest of the editor reads it only for the Chain count, so a character builds the window only
+    /// when it moves that count or makes the request unsaved, and in the body when its first
+    /// character makes the body block the sub-tab names ("Body json"). Each character built the
+    /// whole editor, 65 KB (plan 17 round 9).</summary>
+    [Fact]
+    public void AHeaderValueOrBodyCharacterBuildsOnlyWhenItMovesWhatTheEditorShows()
+    {
+        Hosted((session, app) =>
+        {
+            Click(session, "req-login");
+            int Typed(string text)
+            {
+                int builds = app.Builds;
+                foreach (var ch in text)
+                {
+                    session.Window.TypeText(ch.ToString());
+                    session.PumpFrames(2);
+                }
+                return app.Builds - builds;
+            }
+            string? Focused() => session.Window.Window.FocusedElement?.AutomationId;
+
+            Click(session, "subtab-headers");
+            Click(session, "header-value-0");
+            session.Window.PressKey(KeyCode.End);
+            session.PumpFrames(1);
+            Assert.Equal(1, Typed(";"));                     // the request turns unsaved
+            Assert.True(Contains(session, "Login tab, unsaved"), "the tab's unsaved mark");
+            Assert.Equal(0, Typed(" q=0.9 "));
+            Assert.True(Contains(session, "Chain 1"), "the URL's base_url");
+            Assert.Equal(1, Typed("{{token}}"));             // Chain 2, at the closing braces
+            Assert.True(Contains(session, "Chain 2"), "the Chain count");
+            Assert.Equal(0, Typed("x"));
+            Assert.Equal("header-value-0", Focused());
+            Assert.Equal("application/json; q=0.9 {{token}}x", app.ActiveTab!.Doc.Headers[0].Value);
+
+            Click(session, "subtab-body");
+            Assert.False(Contains(session, "Body json"), "no body block yet");
+            Click(session, "body-editor");
+            Assert.Equal(1, Typed("{"));                     // the block, and its type on the sub-tab
+            Assert.True(Contains(session, "Body json"), "the body's type");
+            Assert.Equal(0, Typed("\"a\": 1, "));
+            Assert.Equal(1, Typed("{{user}}"));              // Chain 3
+            Assert.True(Contains(session, "Chain 3"), "the Chain count");
+            Assert.Equal(0, Typed(" "));
+            Assert.Equal("body-editor", Focused());
+            Assert.Equal("{\"a\": 1, {{user}} ", app.ActiveTab.Doc.Body!.Content);
+
+            session.Window.PressKey(KeyCode.S, KeyModifiers.Ctrl);
+            session.PumpFrames(2);
+            Assert.False(app.ActiveTab.Dirty);
+            Assert.Equal(1, Typed("2"));                     // unsaved again
+            Assert.True(Contains(session, "Login tab, unsaved"), "the tab's unsaved mark");
+        });
+    }
+
     [Fact]
     public void AddingAHeaderRowEditsTheDocument()
     {

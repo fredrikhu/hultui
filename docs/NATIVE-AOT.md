@@ -149,6 +149,19 @@ bytes in light windows, but every value added collections, and 6 MB made Junctio
 and longer frames. None of the apps sets it; the numbers are in
 [DECISIONS.md](DECISIONS.md#a-smaller-gen-0-budget-for-the-apps-measured-and-declined).
 
+### A large JSON document stays in the shared pool
+
+`JsonDocument` rents its arrays from `ArrayPool<byte>.Shared` and gives them back when it is
+disposed, and the pool keeps them: a document of a large text leaves its arrays on the heap for good.
+The UTF-8 copy that `JsonDocument.Parse(string)` makes is the smaller part (the exact byte count,
+rounded up to a power of two); the larger is the table of tokens, which starts at 1 MB for a text
+over 1 MB and doubles as it fills, every size it passed through kept. Meridian's spec of 2,000
+operations (1.7 million characters) left 9.2 MB in the pool, 7.2 MB of it with the text parsed from
+bytes. Read a large text with a `Utf8JsonReader` over its bytes, and make a document only of the
+pieces the code reads (`JsonDocument.ParseValue(ref reader)`, disposed before the next): the pool then
+holds what one piece needs, and the next piece takes the same arrays again. Meridian's spec parsed a
+path at a time left 51 KB (round 9 of plan 17, `OpenApi.Parse` of bytes).
+
 ## Measured results (HultUI.Samples.HelloWorld, win-x64)
 
 | | NativeAOT | Framework-dependent | Self-contained (no AOT) |

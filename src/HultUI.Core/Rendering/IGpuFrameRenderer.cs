@@ -82,6 +82,8 @@ public interface IGpuFrameRenderer
     /// </summary>
     void SkipFrame(Func<string, nint> getProcAddress) { }
 
-    /// <summary>Frees GL resources. Render thread, context current, before the sink deletes its own.</summary>
+    /// <summary>Frees GL resources. Render thread, context current, before the sink deletes its own.
+    /// Normally the last call; the web view's sink also makes it while a WebView2 page is hidden,
+    /// and asks that renderer to <see cref="Render"/> again when the page is back.</summary>
     void ReleaseGL();
 }

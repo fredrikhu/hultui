@@ -347,7 +347,8 @@ public sealed class MediaPlayer : IDisposable
             var owner = Owner ?? throw new InvalidOperationException("The sink has no player.");
             if (owner._gpuSink is not null)
                 throw new InvalidOperationException("A GPU renderer is already registered.");
-            owner._gpuSink = new GpuFrameSink(pixels, renderer);
+            // The player asks for its frames inside Win32's size/move loop (OnRepaintRequested).
+            owner._gpuSink = new GpuFrameSink(pixels, renderer, asksForLiveFrames: true);
         }
 
         public void RequestRepaint() => Owner?.OnRepaintRequested();

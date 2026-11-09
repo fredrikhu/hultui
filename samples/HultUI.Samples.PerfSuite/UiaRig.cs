@@ -13,10 +13,11 @@ namespace PerfSuite;
 /// the rows that time what a Windows screen reader adds on top of the tree build and diff:
 /// the bridge's wrapper upkeep and the UIA events it raises. The window disposes it with the
 /// session. It reports itself active whether or not a UIA client listens, so the rows time
-/// the same work on any desk.
+/// the same work on any desk. It keeps nothing of a diff past the call, as the bridge does, so
+/// the window lends it its diff for patches as it lends the bridge (<see cref="ITreeDiffBorrower"/>).
 /// </summary>
 [SupportedOSPlatform("windows")]
-sealed class UiaRig : IBridgeRig, IAccessibilityBridge, IDisposable
+sealed class UiaRig : IBridgeRig, IAccessibilityBridge, ITreeDiffBorrower, IDisposable
 {
     private IntPtr _hwnd;
     private readonly WindowsAccessibilityBridge _bridge;

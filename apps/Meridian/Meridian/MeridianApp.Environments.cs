@@ -338,7 +338,16 @@ public partial class MeridianApp
 
         var input = TextInput.New(doc.Values.GetValueOrDefault(key, "")).Style(Ui.Field);
         // A value shows in this table alone; the title bar names the environment, not its values.
-        input.OnTextChanged(v => { doc.SetValue(key, v); MarkViewDirty(); })
+        // The box holds what was typed, and nothing else in the view reads a value, so a character
+        // builds the view only when it makes the environment unsaved: the dot in the list and the
+        // footer's count. A build of the table was 312 KB a character at 3 × 12 keys and 1.2 MB at
+        // 5 × 40, each secret cell a keyring read (plan 17 round 9).
+        input.OnTextChanged(v =>
+            {
+                bool wasEdited = doc.Edited;
+                doc.SetValue(key, v);
+                if (doc.Edited != wasEdited) MarkViewDirty();
+            })
             .Height(Dimension.Px(26)).FlexGrow(1)
             .FontFamily(Fonts.Mono).FontSize(11.5f)
             .TextColor(Azimuth.Text);
@@ -614,6 +623,7 @@ public partial class MeridianApp
     private void OpenDialog(string title, string placeholder, Action<string> onSubmit,
         Func<string, string?>? validate = null, string initial = "")
     {
+        NoteModalOpener();
         _dialog = (title, placeholder, onSubmit, validate);
         _dialogValue = initial;
         _dialogError = null;
@@ -635,6 +645,7 @@ public partial class MeridianApp
             return;
         }
         _dialog = null;
+        ReturnFocusToModalOpener();
         int builds = Builds;
         dialog.OnSubmit(_dialogValue);
         if (Builds == builds) MarkDirty();
@@ -643,7 +654,35 @@ public partial class MeridianApp
     private void CancelDialog()
     {
         _dialog = null;
+        ReturnFocusToModalOpener();
         MarkDirty();
+    }
+
+    // ── The focus back to what opened a prompt or a question ─────────────
+    // The prompt's field and the question's button take the focus when they open, and went with
+    // the card when it closed: the focus was left nowhere, and a reader was told so (Escape out of
+    // "New request" left no focused element). It goes back to what held it when the card opened —
+    // the "New request" button, a row's rename — as the card closes, while the card's field still
+    // has it: the opener is in the window's own tree, which the close does not take away, so it
+    // moves in one step, as a reader hears it. A submit gives it back before its action runs, so
+    // an action that focuses something of its own (after its build) wins, and a card the action
+    // opens takes the opener as its own.
+
+    /// <summary>What held the keyboard focus when the open prompt or question opened.</summary>
+    private Element? _modalOpener;
+
+    private void NoteModalOpener()
+    {
+        if (_dialog is null && _confirm is null) _modalOpener = _window.FocusedElement;
+    }
+
+    /// <summary>The prompt or the question is closing: the focus back to its opener, if it is still
+    /// in the window.</summary>
+    private void ReturnFocusToModalOpener()
+    {
+        var opener = _modalOpener;
+        _modalOpener = null;
+        if (opener is not null && _window.IsInTree(opener)) opener.Focus();
     }
 
     private Element BuildDialog((string Title, string Placeholder, Action<string> OnSubmit, Func<string, string?>? Validate) dialog)

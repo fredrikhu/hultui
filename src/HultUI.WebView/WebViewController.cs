@@ -303,7 +303,15 @@ public sealed class WebViewController : IDisposable
         if (_disposed || _visible == visible) return;
         _visible = visible;
         _view.SetVisible(visible);
+        // Off screen, the page's GPU memory goes back in the window's next frame: the engine's
+        // interop texture and its GL registration, and on Vulkan the image the surface lent the
+        // sink. Shown again, the frame the engine sends is drawn through them made again.
+        if (!visible && _view is IReleasesGpuWhileHidden) _gpuSink?.ReleaseWhileHidden();
     }
+
+    /// <summary>Whether a drawn element has to say the page is on screen: something else said it
+    /// is not (another element showing this controller stopped), and the page is still here.</summary>
+    internal bool NeedsShowing => !_disposed && _visible != true;
 
     internal void SendPointer(in WebPointerInput input) { if (!_disposed) _view.SendPointer(input); }
     internal void SendKey(in WebKeyInput input) { if (!_disposed) _view.SendKey(input); }
@@ -539,7 +547,8 @@ public sealed class WebViewController : IDisposable
         public void UseGpuRenderer(IGpuFrameRenderer renderer)
         {
             if (owner._gpuSink is not null) throw new InvalidOperationException("A GPU renderer is already registered.");
-            owner._gpuSink = new GpuFrameSink(owner._sink, renderer);
+            // The controller asks for its frames inside Win32's size/move loop (OnRepaintRequested).
+            owner._gpuSink = new GpuFrameSink(owner._sink, renderer, asksForLiveFrames: true);
         }
 
         public void RequestRepaint() => owner.OnRepaintRequested();
