@@ -877,3 +877,7 @@ From 2026-11-03 (round 8's survey); earlier entries are in the archive ([to 2026
   the folder in the pane's name costs a tree a navigation with a reader (question 24). Guideline notes: a focusable
   element needs a role or a name; an app key handler that takes Tab must move the focus too; a card the app draws in its
   own tree (not `Dialog.Show`) hands focus back as it closes; a list walked by app-level arrows should hold the focus.
+- 2026-11-09: an early full Windows suite on 73fad609 while the user decides questions 20–25: `dotnet test HultUI.slnx -c
+  Release` 30 projects, 0 failures (Core 5,067, Headless 1,491, Junction 1,082 in 8 m 19 s, Vesper 900, Meridian 653,
+  Aperture 356, Skia 387, Text 293, WebView 76, Media 86, Platform.SDL3 54). Still to run before the release: Fedora
+  (`scripts/wsl-test.sh`), docfx `--warningsAsErrors`, and the suite again if steps 13b/15b land.
