@@ -380,6 +380,47 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    /// <summary>Another view lets the Requests view go (plan 17 round 10). The tree's kept rows hold
+    /// their elements weakly (KeptElements), and a build that shows no response panel or URL field
+    /// empties the refs into them: the open response tab, the body, the URL field. Each of them held
+    /// the whole view through its parents (the tree, the editor, the response and its body) behind
+    /// History. Back on Requests the view is what a full build makes.</summary>
+    [Fact]
+    public void AnotherView_LetsTheRequestsViewGo()
+    {
+        Hosted(fx =>
+        {
+            var s = fx.Session;
+            Click(fx, "req-two");
+            Click(fx, "send");
+            s.PumpUntil(() => s.Window.FindByAutomationId("response-body") is not null, Wait);
+            s.PumpFrames(3);
+            Click(fx, "url-display");   // the URL field, being edited
+            var (row, body, url) = WeakRequestsView(fx);
+
+            Switch(fx, KeyCode.Digit4);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            Assert.False(row.IsAlive, "a tree row outlived the Requests view");
+            Assert.False(body.IsAlive, "the response body outlived the Requests view");
+            Assert.False(url.IsAlive, "the URL field outlived the Requests view");
+
+            Switch(fx, KeyCode.Digit1);
+            s.PumpUntil(() => s.Window.FindByAutomationId("response-body") is not null, Wait);
+            s.PumpFrames(3);
+            Assert.True(HasText(Part(fx, "response-right"), "✓ 200 OK"));
+            Assert.True(Lit(TreeRow(fx, "req-two")));
+            AssertPartsAreAFullBuild(fx, "back on Requests");
+        });
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static (WeakReference Row, WeakReference Body, WeakReference Url) WeakRequestsView(Fixture fx) =>
+        (new(TreeRow(fx, "req-two")), new(fx.Session.Window.FindByAutomationId("response-body")!.Element),
+         new(fx.Session.Window.FindByAutomationId("url-input")!.Element));
+
     /// <summary>A response: it reaches the panel when the send ends, its body when the worker has
     /// formatted it, and the panel's own controls — the find bar, the tabs, pretty and raw —
     /// rebuild the panel alone, never the window; a find step not even the panel.</summary>

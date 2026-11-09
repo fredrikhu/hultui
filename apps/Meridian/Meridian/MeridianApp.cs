@@ -237,14 +237,24 @@ public partial class MeridianApp : Component, IDisposable
         // Track the revision signal so a Rerender() re-runs Build through the Effect.
         _ = _revision.Value;
         _responsePlaced = false;
+        // A ref into a view holds the whole view through its parents, so each one is emptied by a
+        // build that shows none of it (REACTIVITY.md, "A ref into a view keeps the whole view"): the
+        // URL field is this build's own, and set again by it when the field is shown.
+        _urlRef.Current = null;
 
         // The title bar is a part of its own (see Part), keyed by its host.
         var titleBar = TitleBarPart.Mount().FlexShrink(0);
         var body = BuildBody(); body.Key = "body";
         EndMapBuild();   // a build that shows no map lets its kept rows go
         // The response panel keeps the readout of a send in flight (TickWhileSending) while it is
-        // kept; with no panel on screen there is none.
-        if (!_responsePlaced) _sendElapsed.Current = null;
+        // kept; with no panel on screen there is none, and the panel's other refs go with it. Only
+        // the panel's own build sets them, and it builds only where it is placed.
+        if (!_responsePlaced)
+        {
+            _sendElapsed.Current = null;
+            _respTabRef.Current = null;
+            _responseBodyRef.Current = null;
+        }
         var root = Flex.Column(gap: 0)
             .FlexGrow(1)
             .Background(Azimuth.Bg)
