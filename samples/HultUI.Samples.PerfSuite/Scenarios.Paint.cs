@@ -4,6 +4,8 @@ using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
+using HultUI.Rendering.Skia;
+using SkiaSharp;
 
 namespace PerfSuite;
 
@@ -24,6 +26,37 @@ static partial class Scenarios
             t => t.CornerRadius(10f).Background(Gradient.Linear(135f, Color.FromHex("#6366F1"), Color.FromHex("#8B5CF6"))));
         yield return Tiles("transform + opacity", "rotated 4° and 85 % opaque",
             t => t.CornerRadius(10f).Transform(Transform2D.Rotate(4f)).Opacity(0.85f));
+
+        // A file manager's cut files: each icon a lone image below full opacity, as Vesper's Detail
+        // and Brief views draw them. The row prices a faded image: an offscreen group of its own on
+        // every frame, or its picture drawn at its alpha (plan 17 round 9 step 13b).
+        yield return new Scenario("paint/400 faded icons",
+            "400 icons at 45 % opacity (32 px pictures drawn at 16); one changes, the whole view repaints",
+            ctx =>
+            {
+                var bitmap = new SKBitmap(32, 32, SKColorType.Rgba8888, SKAlphaType.Premul);
+                using (var canvas = new SKCanvas(bitmap))
+                using (var paint = new SKPaint { IsAntialias = true, Color = new SKColor(79, 70, 229) })
+                {
+                    canvas.Clear(SKColors.Transparent);
+                    canvas.DrawRoundRect(4, 2, 24, 28, 3, 3, paint);
+                    paint.Color = SKColors.White;
+                    canvas.DrawRect(8, 10, 16, 2, paint);
+                    canvas.DrawRect(8, 16, 12, 2, paint);
+                }
+                var source = new SkiaImageSource(bitmap);
+                var icons = new ImageElement[400];
+                for (int i = 0; i < icons.Length; i++)
+                    icons[i] = Image.New(source).Width(16).Height(16).FlexShrink(0).Opacity(0.45f);
+                var wrap = Flex.Row(gap: 8).FlexWrap(FlexWrap.Wrap).FlexShrink(0).Padding(12).Children(icons);
+                ctx.Mount(ScrollView.New().FlexGrow(1).Background(Color.FromHex("#EEF2F7")).Children(wrap));
+                var target = icons[9];
+                return new Op
+                {
+                    Run = step => target.Opacity = step % 2 == 0 ? 0.5f : 0.45f,
+                    Check = _ => source.IsLoaded && icons[0].Opacity < 1f ? null : "the icons are not faded pictures",
+                };
+            });
 
         yield return new Scenario("paint/dense text screen",
             "A screen packed with ~1,600 small labels; one label changes colour, the whole view repaints",
