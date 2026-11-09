@@ -5,8 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 10
-- **Phase:** build — round 10, step 1 next (Round 10 build order below), once the five app installer runs cut on
-  facced69 finish green (the user asked for the releases before the round's work; see the log). The survey is merged
+- **Phase:** build — round 10, step 1 SPAWNED 2026-11-09 (brief `brief-r10b1.md`). The five app releases cut on facced69
+  (the user asked for them before the round's work) are all published. The survey is merged
   (reports `17-reports/r10-*`); build briefs `brief-r10b<N>.md` go in session 3484c586's scratchpad. Questions 27–32
   asked 2026-11-09; 27–30 answered as recommended the same day (27 → step 5, 28 → new step 15, 29 → step 7, 30 →
   step 12); 31 and 32 answered no (the user left them to the recommendation): steps 2 and 13 are app-only. Open for the user, none blocking: question 26 (a merged syntax theme to match VS Code; for
@@ -816,3 +816,5 @@ From 2026-11-08 (round 9's survey); earlier entries are in the archive ([to 2026
   Junction's own installer run on the same commit): a flake; `gh run rerun --failed` once.
 - 2026-11-09: the user left questions 31 and 32 to the recommendation: both no (`Ref<T>` unchanged; `PaneSplitter`
   gains no API). Steps 2 and 13 stay app-only.
+- 2026-11-09: meridian-v1.7.0 green on the re-run (test, test-linux, installer) and released (Meridian-Setup-1.7.0.exe);
+  all five releases published. Round 10 step 1 spawned.
