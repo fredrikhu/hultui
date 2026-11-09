@@ -2483,6 +2483,9 @@ private Element Shelf(IReadOnlyList<MediaItem> items)
   way). Check first that no build of the owner has run since that one without making these elements.
 - **`Clear()`** forgets them all, for a change to something every element shows that no state
   holds. **`Count`** is how many it holds; those that left the window go as the count doubles.
+- **The elements are held weakly:** one is handed back only while the window holds it, so a view
+  that left is not kept alive by the helper. A `Ref` or a list of the owner's own still is: see
+  [REACTIVITY.md](REACTIVITY.md), "A ref into a view keeps the whole view".
 - **The state is what the element shows and does:** its item, the cursor on it, its picture as the
   cache has it, and a setting every element shows (or `Clear()` when it moves). Its handlers are the
   old build's, so what they capture belongs in the state too.

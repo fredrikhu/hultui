@@ -850,9 +850,11 @@ is equal, and whether it is selected; the click captures that endpoint, so a kep
 row made now would. The order, the headings, the keys and the counts are worked out once a map, since a
 map is never changed (a send makes a new one). Two lessons:
 
-- **Let the kept elements go when the view is not built.** `KeptElements` holds the live elements, so a
-  map of 2,000 rows left for another view would stay alive behind it, which a test already guarded
-  against (a still pointer had done the same). The app's build forgets the rows when it made none.
+- **Let the kept elements go when the view is not built.** `KeptElements` held the live elements, so a
+  map of 2,000 rows left for another view would have stayed alive behind it, which a test already guarded
+  against (a still pointer had done the same). The app's build forgets the rows when it made none. Since
+  round 10 the helper holds its elements weakly anyway (see "A ref into a view keeps the whole view",
+  below); forgetting still lets go of the states.
 - **What is left is the list itself.** The build still walks every line, asks for each row and hands
   the list its children: about 35 B an endpoint a click, against 4.5 KB.
 
@@ -872,6 +874,60 @@ accessibility tree; now they come back as they were and mark nothing (Brief with
 files: 300.6 → 230.2 KB a key, 1.00 → 0 trees; Reel's player, alone in its container, 5.8 → 2.0
 KB a build). The same elements in the same order is the rule: a column handed back in another
 order, or with a new cell, marks its structure as any change does.
+
+### A ref into a view keeps the whole view
+
+An element knows its parent, and a subtree the reconciler removes keeps its links inside, so whatever
+holds one element of a view that left the window holds all of it: every row, every text, the pictures.
+Nothing on screen shows it; only the heap does. A `Ref<T>` field is the usual holder, since it keeps the
+element it last pointed at until something sets it again; a list a build fills and keeps is the other.
+Plan 17 round 10 found five behind the view that replaced theirs, each from a change that kept elements
+for speed:
+
+- **Empty a ref in the builds that do not show its element.** Meridian's build empties the response
+  panel's refs (the open tab, the body) when it placed no panel, as it already did the send's elapsed
+  readout, and the URL field's at its start, since only that build makes the field and sets it again.
+  Aperture's build lets go of the library grid's ref when it shows another view. Before, each of them kept
+  the Requests view or the library behind History, Environments or Settings.
+- **Where views share a ref, let go once the build is done.** Vesper's cursor ref is the row, cell or tile
+  of whichever view draws the cursor, so no one view can empty it. `OnAfterBuild` lets go of it, and of
+  Brief's scroll view's, when its element is no longer in the window (`Element.IsHosted`), after the
+  build's own reads; the build or key that next draws the cursor sets it again.
+- **Keep the value a later build reads, not the element.** Aperture's library build sized what it asks
+  for from the old grid's viewport height, and Vesper's Brief made its columns for the old scroll view's
+  offset. Both are kept as a number now, so what the next build makes is what it was. Before emptying a
+  ref, look for what reads it between builds (a handler, a post-frame callback, a timer, the next build).
+- **Empty a scratch list when you are done with it.** Aperture's Home reused one list of a shelf's cards
+  from shelf to shelf. Full after the build, it held the last shelf's cards, and through them the whole
+  Home that build made, while Home was on screen (a twin tree of 250 KB at five shelves) and behind every
+  other view after it.
+- **`KeptElements` holds its elements weakly** (round 10). An element is handed back only while the window
+  holds it, so `TryKeep` and `Live` return what they did. Held strongly, Meridian's request tree, which only
+  the Requests view builds, kept that view alive behind every other view from the day its rows were kept
+  (round 9): 1,350 KB of a 5,770 KB heap at 200 requests. The weak ref is the same 24 B object a `Ref` is,
+  made once per key, and one weak GC handle; no build allocates more.
+
+To find a holder: take a weak reference to an element of the view, switch views, collect
+(`GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();`), and if it is alive, walk the app's fields
+breadth-first for a path into the old view's tree. To pin a fix, assert the weak reference is dead, and
+take it, and any read of the view, in a `[MethodImpl(MethodImplOptions.NoInlining)]` helper: a value read in
+the test's own frame can keep the element alive (Aperture's grid test did, until its reads moved out).
+
+Headless, full GC and `GC.GetTotalMemory(true)`, the heap after the switch, JIT / NativeAOT:
+
+| View left | Before | After |
+|---|---|---|
+| Meridian Requests, 200 requests, none open → History | 2,364 / 2,161 KB | 1,027 / 874 KB |
+| Meridian Requests, 25 requests, none open → History | 933 / 773 KB | 733 / 585 KB |
+| Meridian Requests, 200 requests, a 239 KB JSON response → History | 12,461 / 12,263 KB | 10,623 / 10,476 KB |
+| Aperture Home, 5 libraries × 20 films → Settings | 1,528 / 1,386 KB | 1,013 / 867 KB |
+| Aperture Home, 8 × 40 → Settings | 1,994 / 1,850 KB | 1,180 / 1,025 KB |
+| Aperture library grid, 600 films → Settings | 1,666 / 1,539 KB | 1,292 / 1,163 KB |
+| Vesper Brief, 400 files → Detail | 1,825 / 1,664 KB | 1,406 / 1,253 KB |
+| Vesper Brief, 3,000 files → Detail | 2,646 / 2,472 KB | 2,214 / 2,062 KB |
+
+The old view was alive before and is collected after in every row. The bytes of a build or a key did not
+move (Meridian's full build at 200 requests 59.4 KB, Home and the grid's keys, Brief's Down and Insert).
 
 ### Keep the index out of a list's item
 
