@@ -114,6 +114,12 @@ public static class Nocturne
     /// <summary>An arbitrary colour scaled to <paramref name="pct"/> opacity (0..1).</summary>
     public static Color Alpha(Color c, double pct) => ColorMath.Alpha(c, pct);
 
+    /// <summary><paramref name="c"/> with its own alpha scaled by <paramref name="opacity"/> (0..1):
+    /// the colour as an element drawn at that opacity shows it. Unlike <see cref="Alpha"/>, a
+    /// colour that is already translucent (<see cref="On"/>'s muted steps) stays relative to itself.</summary>
+    public static Color Fade(Color c, double opacity) =>
+        new(c.R, c.G, c.B, (byte)Math.Clamp(Math.Round(c.A * opacity), 0, 255));
+
     /// <summary>Maps Nocturne roles onto the framework theme (context menus, focus, fields).</summary>
     public static HultUI.Core.Styling.Theme ToHultTheme() => new()
     {

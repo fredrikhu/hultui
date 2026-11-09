@@ -296,6 +296,15 @@ public partial class CommanderApp
         return scroll;
     }
 
+    /// <summary>How opaque an Equal row is drawn. The row fades each colour it draws, not itself:
+    /// <c>Opacity</c> on an element with children draws it offscreen, as a layer of its own, so
+    /// every Equal row on screen was a layer on every Sync frame (26 at 1240×820, 36–38 % of a GL
+    /// frame; plan 17 round 9 step 13).</summary>
+    private const float EqualRowOpacity = 0.55f;
+
+    /// <summary>A Sync row's colour at the row's <paramref name="opacity"/>.</summary>
+    private static Color Faded(Color c, float opacity) => opacity < 1f ? Nocturne.Fade(c, opacity) : c;
+
     private Element SyncRowView(SyncRow r, bool selected)
     {
         var d = r.Data;
@@ -309,29 +318,30 @@ public partial class CommanderApp
             row.Background(Nocturne.Alpha(Nocturne.Accent500, 0.13)).BorderColor(Nocturne.Accent600).BorderWidth(1f);
         else if (conflict)
             row.Background(Nocturne.Alpha(Nocturne.MarkRed, 0.08));
-        else if (d.Rel == SyncEngine.Rel.Equal)
-            row.Opacity = 0.55f;
+        // An Equal row reads dimmer: every colour it draws at 55 % (see EqualRowOpacity).
+        float fade = !selected && !conflict && d.Rel == SyncEngine.Rel.Equal ? EqualRowOpacity : 1f;
 
-        Color leftFg = d.LeftExists ? Nocturne.Text : Nocturne.On(0.30);
-        Color rightFg = d.RightExists ? Nocturne.Text : Nocturne.On(0.30);
+        Color leftFg = Faded(d.LeftExists ? Nocturne.Text : Nocturne.On(0.30), fade);
+        Color rightFg = Faded(d.RightExists ? Nocturne.Text : Nocturne.On(0.30), fade);
+        Color metaFg = Faded(Nocturne.On(0.45), fade);
 
         row.AddChild(Ui.Mono(d.LeftExists ? d.RelPath : "— missing —", 11.5f, leftFg)
             .MaxLines(1).TextOverflow(TextOverflow.Ellipsis).GridColumn(0));
-        row.AddChild(Ui.Mono(d.LeftExists ? FileSystem.ByteCount(d.LeftSize) : "", 10.5f, Nocturne.On(0.45))
+        row.AddChild(Ui.Mono(d.LeftExists ? FileSystem.ByteCount(d.LeftSize) : "", 10.5f, metaFg)
             .TextAlign(TextAlign.Right).GridColumn(1));
-        row.AddChild(Ui.Mono(d.LeftExists ? $"{d.LeftTime:MM-dd HH:mm}" : "", 10.5f, Nocturne.On(0.45)).GridColumn(2));
+        row.AddChild(Ui.Mono(d.LeftExists ? $"{d.LeftTime:MM-dd HH:mm}" : "", 10.5f, metaFg).GridColumn(2));
 
         // Center rail — glyph + color; clicking cycles the direction. It spans the row's
         // height, so the whole cell is the click target, not just the glyph.
         var (glyph, color) = SyncRail(r);
         var rail = Box.New().AlignSelf(AlignSelf.Stretch)
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
-            .Cursor(CursorType.Pointer).Children(Ui.Mono(glyph, 12f, color));
+            .Cursor(CursorType.Pointer).Children(Ui.Mono(glyph, 12f, Faded(color, fade)));
         rail.OnClick(ev => { ev.StopPropagation = true; CycleSyncDir(r); });
         row.AddChild(rail.GridColumn(3));
 
-        row.AddChild(Ui.Mono(d.RightExists ? $"{d.RightTime:MM-dd HH:mm}" : "", 10.5f, Nocturne.On(0.45)).GridColumn(4));
-        row.AddChild(Ui.Mono(d.RightExists ? FileSystem.ByteCount(d.RightSize) : "", 10.5f, Nocturne.On(0.45))
+        row.AddChild(Ui.Mono(d.RightExists ? $"{d.RightTime:MM-dd HH:mm}" : "", 10.5f, metaFg).GridColumn(4));
+        row.AddChild(Ui.Mono(d.RightExists ? FileSystem.ByteCount(d.RightSize) : "", 10.5f, metaFg)
             .TextAlign(TextAlign.Right).GridColumn(5));
         row.AddChild(Ui.Mono(d.RightExists ? d.RelPath : "— missing —", 11.5f, rightFg)
             .TextAlign(TextAlign.Right).MaxLines(1).TextOverflow(TextOverflow.Ellipsis).GridColumn(6));
