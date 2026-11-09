@@ -366,6 +366,15 @@ all. A prototype that patches any element's selected state (one condition in the
 thumbnail list's rows composite told the cursor's item, named and selected, with 0 trees and the
 same KB a key in both views; that is a framework change, left to the user.
 
+Focus that goes nowhere is the other half: an element holding the focus goes, and nothing takes it.
+Meridian's prompt and question (cards in its own tree, not `Dialog.Show`, which gives the focus back
+itself) took it into their field or button and let it go with the card: Escape out of "New request"
+left no focused element, and a reader was told the focus on nothing. They give it back as they close
+(`ReturnFocusToModalOpener`): to what held it when the card opened, while the card's field still has
+it, so a reader is told one move, the field to the "New request" button; a submit gives it back
+before its action runs, so an action that focuses something of its own wins. 0 trees, as before;
+66.07 → 66.10 KB an open or Escape without a reader.
+
 The coalesced layout refresh builds no tree either where a build would make the same nodes
 (2026-10-26, plan 17 round 5). A node keeps its box where it sits in the content of the scroll
 views above it (`UnscrolledRect`: the element's box less a sticky shift or an overlay's origin),

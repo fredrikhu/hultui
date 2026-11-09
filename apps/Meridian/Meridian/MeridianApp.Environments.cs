@@ -623,6 +623,7 @@ public partial class MeridianApp
     private void OpenDialog(string title, string placeholder, Action<string> onSubmit,
         Func<string, string?>? validate = null, string initial = "")
     {
+        NoteModalOpener();
         _dialog = (title, placeholder, onSubmit, validate);
         _dialogValue = initial;
         _dialogError = null;
@@ -644,6 +645,7 @@ public partial class MeridianApp
             return;
         }
         _dialog = null;
+        ReturnFocusToModalOpener();
         int builds = Builds;
         dialog.OnSubmit(_dialogValue);
         if (Builds == builds) MarkDirty();
@@ -652,7 +654,35 @@ public partial class MeridianApp
     private void CancelDialog()
     {
         _dialog = null;
+        ReturnFocusToModalOpener();
         MarkDirty();
+    }
+
+    // ── The focus back to what opened a prompt or a question ─────────────
+    // The prompt's field and the question's button take the focus when they open, and went with
+    // the card when it closed: the focus was left nowhere, and a reader was told so (Escape out of
+    // "New request" left no focused element). It goes back to what held it when the card opened —
+    // the "New request" button, a row's rename — as the card closes, while the card's field still
+    // has it: the opener is in the window's own tree, which the close does not take away, so it
+    // moves in one step, as a reader hears it. A submit gives it back before its action runs, so
+    // an action that focuses something of its own (after its build) wins, and a card the action
+    // opens takes the opener as its own.
+
+    /// <summary>What held the keyboard focus when the open prompt or question opened.</summary>
+    private Element? _modalOpener;
+
+    private void NoteModalOpener()
+    {
+        if (_dialog is null && _confirm is null) _modalOpener = _window.FocusedElement;
+    }
+
+    /// <summary>The prompt or the question is closing: the focus back to its opener, if it is still
+    /// in the window.</summary>
+    private void ReturnFocusToModalOpener()
+    {
+        var opener = _modalOpener;
+        _modalOpener = null;
+        if (opener is not null && _window.IsInTree(opener)) opener.Focus();
     }
 
     private Element BuildDialog((string Title, string Placeholder, Action<string> OnSubmit, Func<string, string?>? Validate) dialog)

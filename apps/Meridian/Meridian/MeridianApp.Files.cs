@@ -440,6 +440,7 @@ public partial class MeridianApp
     private void OpenConfirm(string title, string message, string confirm, Action onConfirm,
         (string Label, Action Run)? alternative = null)
     {
+        NoteModalOpener();
         _confirm = (title, message, confirm, onConfirm, alternative);
         _pendingConfirmFocus = true;
         MarkDirty();
@@ -453,6 +454,7 @@ public partial class MeridianApp
         if (_confirm is not { } confirm) return;
         if (alternative && confirm.Alternative is null) return;
         _confirm = null;
+        ReturnFocusToModalOpener();
         int builds = Builds;
         if (alternative) confirm.Alternative!.Value.Run();
         else confirm.OnConfirm();
@@ -462,6 +464,7 @@ public partial class MeridianApp
     private void CancelConfirm()
     {
         _confirm = null;
+        ReturnFocusToModalOpener();
         MarkDirty();
     }
 
