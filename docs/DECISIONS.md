@@ -725,6 +725,17 @@ their yellow, below), and none in Solarized Light and Dark, Kimbie Dark, One Dar
 Tomorrow Night Blue, nor in any JSON, XML or HTML file. A token's bold or italic is still not
 taken from the theme: it would change how wide a line is.
 
+One thing TextMateSharp 2.0.4 does not do as VS Code does: it never applies a rule that names a
+parent scope, because it looks for the rule's own scope among the token's parents too. Dark+'s
+"source.powershell variable.other.member", a member's yellow in a PowerShell file, names the scope
+every token of such a file sits in, so 53 lines of the six `.ps1` files went light blue, away from
+VS Code. A grammar whose root scope a rule's one parent names now gets a registry of its own whose
+theme has that rule without the parent, last in its file (VS Code prefers a rule with parents to
+one without for the same scope): PowerShell, and Less for dark_vs's "source.css.less
+entity.other.attribute-name.id". No fork. After it, Dark+ and Light+ change 2,335 lines and 9,067
+tokens, exactly step 14b's less the 61 PowerShell member tokens; a PowerShell fence in Markdown has
+no source.powershell scope and its members stay light blue, as in VS Code.
+
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
 BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction
