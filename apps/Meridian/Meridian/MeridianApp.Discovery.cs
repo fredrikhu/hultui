@@ -386,6 +386,8 @@ public partial class MeridianApp
             .Cursor(CursorType.Pointer)
             .AccessibleRole(AccessibilityRole.Button)
             .AccessibleName($"{endpoint.Method} {endpoint.Path}, {(observed ? "observed" : "spec-declared")}{(endpoint.Deprecated ? ", deprecated" : "")}")
+            // One of a set the user picks from, as a tab is: a reader says which row the detail shows.
+            .AccessibleSelected(selected)
             .AutomationId("ep-" + endpoint.Method + endpoint.Path.Replace('/', '-').Replace("{", "").Replace("}", ""));
         if (selected) row.Background(Azimuth.Raised);
 

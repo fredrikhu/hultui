@@ -236,6 +236,28 @@ public class DiscoveryViewTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    /// <summary>A reader is told which row the detail shows: the selected row says so, and the
+    /// rest say they are not, so a click moves "selected" from one row to the other.</summary>
+    [Fact]
+    public void TheSelectedRowIsToldToAReader()
+    {
+        Hosted((session, app) =>
+        {
+            ImportSpec(session, app);
+            Assert.All(EndpointNodes(session), n => Assert.False(n.IsSelected));
+
+            Click(session, "ep-GET-v1-charges-id");
+            Assert.Equal(["ep-GET-v1-charges-id"], EndpointNodes(session).Where(n => n.IsSelected == true).Select(n => n.AutomationId));
+            Assert.All(EndpointNodes(session), n => Assert.NotNull(n.IsSelected));
+
+            Click(session, "ep-GET-v1-legacy");
+            Assert.Equal(["ep-GET-v1-legacy"], EndpointNodes(session).Where(n => n.IsSelected == true).Select(n => n.AutomationId));
+        });
+    }
+
+    private static List<AccessibilityNode> EndpointNodes(HeadlessSession session) =>
+        Walk(session.Window.AccessibilityTree).Where(n => n.AutomationId?.StartsWith("ep-", StringComparison.Ordinal) == true).ToList();
+
     [Fact]
     public void GenerateWritesARealRequestFileIntoTheCollection()
     {
