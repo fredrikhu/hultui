@@ -110,54 +110,119 @@ public static class Secrets
 /// <c>meridian:&lt;env&gt;|&lt;workspace-root&gt;|&lt;key&gt;</c> for one environment's — an
 /// environment's name is a Windows file name, so it never holds the <c>|</c> a key may.
 /// AOT-safe straight P/Invoke.
+///
+/// <para>A read is a call into another process, about 25 µs, and the Environments table and the
+/// Request tab ask for every secret at each build, so answers are remembered for the process
+/// (<see cref="KeyringMemo"/>), as on Linux and macOS: a change made in Credential Manager shows
+/// after Meridian restarts. The app's own stores and forgets go through the memo and show at once.
+/// The Credential Manager matches names in any letter case, and so does the memo.</para>
 /// </summary>
 public sealed partial class WindowsCredentialKeyring : IKeyring
 {
     private const int CredTypeGeneric = 1;
     private const int CredPersistLocalMachine = 2;
+    private const int ErrorNotFound = 1168;
+
+    private readonly ICredentialStore _store;
+    private readonly KeyringMemo _memo = new(ignoreCase: true);
+
+    public WindowsCredentialKeyring() : this(new CredentialManager()) { }
+
+    /// <summary>The memo over another store than the Credential Manager: a test's.</summary>
+    internal WindowsCredentialKeyring(ICredentialStore store) => _store = store;
 
     public string? Get(string workspaceRoot, string? environment, string key)
     {
-        if (!OperatingSystem.IsWindows()) return null;
-        if (!CredReadW(Target(workspaceRoot, environment, key), CredTypeGeneric, 0, out var credPtr)) return null;
-        try
-        {
-            var cred = Marshal.PtrToStructure<Credential>(credPtr);
-            if (cred.CredentialBlob == IntPtr.Zero || cred.CredentialBlobSize == 0) return "";
-            return Marshal.PtrToStringUni(cred.CredentialBlob, (int)cred.CredentialBlobSize / 2);
-        }
-        finally
-        {
-            CredFree(credPtr);
-        }
+        if (_memo.TryRecall(workspaceRoot, environment, key, out var known)) return known;
+        var answer = _store.Read(Target(workspaceRoot, environment, key), out var value);
+        if (answer != StoreAnswer.Failed) _memo.Remember(workspaceRoot, environment, key, value);   // failed: ask again next time
+        return value;
     }
 
     public bool Set(string workspaceRoot, string? environment, string key, string value)
     {
-        if (!OperatingSystem.IsWindows()) return false;
-        var blob = Marshal.StringToHGlobalUni(value);
-        var target = Marshal.StringToHGlobalUni(Target(workspaceRoot, environment, key));
-        try
+        if (!_store.Write(Target(workspaceRoot, environment, key), value))
         {
-            var cred = new Credential
-            {
-                Type = CredTypeGeneric,
-                TargetName = target,
-                CredentialBlob = blob,
-                CredentialBlobSize = (uint)(value.Length * 2),
-                Persist = CredPersistLocalMachine,
-            };
-            return CredWriteW(ref cred, 0);
+            _memo.Forget(workspaceRoot, environment, key);
+            return false;
         }
-        finally
-        {
-            Marshal.FreeHGlobal(blob);
-            Marshal.FreeHGlobal(target);
-        }
+        _memo.Remember(workspaceRoot, environment, key, value);
+        return true;
     }
 
-    public bool Delete(string workspaceRoot, string? environment, string key) =>
-        OperatingSystem.IsWindows() && CredDeleteW(Target(workspaceRoot, environment, key), CredTypeGeneric, 0);
+    public bool Delete(string workspaceRoot, string? environment, string key)
+    {
+        var answer = _store.Delete(Target(workspaceRoot, environment, key));
+        if (answer == StoreAnswer.Failed) _memo.Forget(workspaceRoot, environment, key);
+        else _memo.Remember(workspaceRoot, environment, key, null);
+        return answer == StoreAnswer.Done;
+    }
+
+    /// <summary>What a store said: done (read or deleted), no such entry, or a failure (not asked
+    /// on this OS, or the call failed), which the memo does not keep.</summary>
+    internal enum StoreAnswer { Done, Missing, Failed }
+
+    /// <summary>The three calls behind the memo: the Credential Manager's, or a test's fake.</summary>
+    internal interface ICredentialStore
+    {
+        StoreAnswer Read(string target, out string? value);
+        bool Write(string target, string value);
+        StoreAnswer Delete(string target);
+    }
+
+    private sealed class CredentialManager : ICredentialStore
+    {
+        public StoreAnswer Read(string target, out string? value)
+        {
+            value = null;
+            if (!OperatingSystem.IsWindows()) return StoreAnswer.Failed;
+            if (!CredReadW(target, CredTypeGeneric, 0, out var credPtr))
+                return Marshal.GetLastPInvokeError() == ErrorNotFound ? StoreAnswer.Missing : StoreAnswer.Failed;
+            try
+            {
+                var cred = Marshal.PtrToStructure<Credential>(credPtr);
+                value = cred.CredentialBlob == IntPtr.Zero || cred.CredentialBlobSize == 0
+                    ? ""
+                    : Marshal.PtrToStringUni(cred.CredentialBlob, (int)cred.CredentialBlobSize / 2);
+                return StoreAnswer.Done;
+            }
+            finally
+            {
+                CredFree(credPtr);
+            }
+        }
+
+        public bool Write(string target, string value)
+        {
+            if (!OperatingSystem.IsWindows()) return false;
+            var blob = Marshal.StringToHGlobalUni(value);
+            var name = Marshal.StringToHGlobalUni(target);
+            try
+            {
+                var cred = new Credential
+                {
+                    Type = CredTypeGeneric,
+                    TargetName = name,
+                    CredentialBlob = blob,
+                    CredentialBlobSize = (uint)(value.Length * 2),
+                    Persist = CredPersistLocalMachine,
+                };
+                return CredWriteW(ref cred, 0);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(blob);
+                Marshal.FreeHGlobal(name);
+            }
+        }
+
+        public StoreAnswer Delete(string target)
+        {
+            if (!OperatingSystem.IsWindows()) return StoreAnswer.Failed;
+            if (CredDeleteW(target, CredTypeGeneric, 0)) return StoreAnswer.Done;
+            return Marshal.GetLastPInvokeError() == ErrorNotFound ? StoreAnswer.Missing : StoreAnswer.Failed;
+        }
+    }
 
     internal static string Target(string workspaceRoot, string? environment, string key) =>
         environment == null ? $"meridian|{workspaceRoot}|{key}" : $"meridian:{environment}|{workspaceRoot}|{key}";

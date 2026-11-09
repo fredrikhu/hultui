@@ -25,9 +25,9 @@ public sealed unsafe partial class MacKeychain : IKeyring
     public string? Get(string workspaceRoot, string? environment, string key)
     {
         if (!OperatingSystem.IsMacOS()) return null;
-        string entry = WindowsCredentialKeyring.Target(workspaceRoot, environment, key);
-        if (_memo.TryRecall(entry, out var known)) return known;
+        if (_memo.TryRecall(workspaceRoot, environment, key, out var known)) return known;
 
+        string entry = WindowsCredentialKeyring.Target(workspaceRoot, environment, key);
         byte[] service = Encoding.UTF8.GetBytes(entry), account = Encoding.UTF8.GetBytes(key);
         uint length = 0;
         nint data = 0;
@@ -35,14 +35,14 @@ public sealed unsafe partial class MacKeychain : IKeyring
             &length, &data, null);
         if (status == ErrSecItemNotFound)
         {
-            _memo.Remember(entry, null);
+            _memo.Remember(workspaceRoot, environment, key, null);
             return null;
         }
         if (status != 0) return null;   // locked and not unlocked, or access refused: ask again next time
         try
         {
             string value = length == 0 ? "" : Encoding.UTF8.GetString((byte*)data, (int)length);
-            _memo.Remember(entry, value);
+            _memo.Remember(workspaceRoot, environment, key, value);
             return value;
         }
         finally
@@ -72,10 +72,10 @@ public sealed unsafe partial class MacKeychain : IKeyring
                     (uint)password.Length, password, null);
             if (status != 0)
             {
-                _memo.Forget(entry);
+                _memo.Forget(workspaceRoot, environment, key);
                 return false;
             }
-            _memo.Remember(entry, value);
+            _memo.Remember(workspaceRoot, environment, key, value);
             return true;
         }
         finally
@@ -94,22 +94,22 @@ public sealed unsafe partial class MacKeychain : IKeyring
             null, null, &item);
         if (status == ErrSecItemNotFound)
         {
-            _memo.Remember(entry, null);
+            _memo.Remember(workspaceRoot, environment, key, null);
             return false;
         }
         if (status != 0)
         {
-            _memo.Forget(entry);
+            _memo.Forget(workspaceRoot, environment, key);
             return false;
         }
         status = SecKeychainItemDelete(item);
         CFRelease(item);
         if (status != 0)
         {
-            _memo.Forget(entry);
+            _memo.Forget(workspaceRoot, environment, key);
             return false;
         }
-        _memo.Remember(entry, null);
+        _memo.Remember(workspaceRoot, environment, key, null);
         return true;
     }
 
