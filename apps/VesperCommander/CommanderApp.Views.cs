@@ -118,15 +118,17 @@ public partial class CommanderApp
         if (ThumbTileShapeState(side).Changed(new ThumbTileShape(m, ResultsOf(side), Icons.DisplayScale, _dropTarget, _app.Theme)))
             ThumbTilesOf(side).Clear();
 
-        return VirtualListElement<ThumbRowItem>.New()
+        // A reader reads the rows as they are (RowsAreComposite): each tile is an item of its own,
+        // named after its file, and the cursor's is selected (Tile, ShowCursor), so a key that moves
+        // the ring with no build tells a reader the item it reached, with no tree. A row of tiles
+        // was one item named by all the files on it, and the cursor was in none of them. The rows
+        // off screen are not in the tree, as in any composite list; they come in as they realize.
+        var thumbs = VirtualListElement<ThumbRowItem>.New();
+        thumbs.RowsAreComposite = true;
+        return thumbs
             .ItemHeight((int)(m.TileH + m.Gap))
             .Items(new ThumbRows(list, perRow, ThumbCursor(side, list)))
             .RenderWith((row, _) => ThumbRow(side, row, m, marks))
-            // A row of tiles is one item to assistive technology (the tiles are not controls of
-            // their own), named by the files on it, as the list view names one. One delegate per
-            // pane, reading the marks as they are: the list keeps each row's label while the row
-            // is unchanged, and a change of marks (in the shape) makes them again.
-            .AccessibleItemLabel(ThumbLabelFn(side))
             .WithRef(ThumbVList(side))
             .FlexGrow(1)
             .Width(Dimension.Px(paneW));
@@ -211,12 +213,6 @@ public partial class CommanderApp
     private readonly GridState<ThumbRowShape> _thumbRowsL = new(), _thumbRowsR = new();
     private GridState<ThumbRowShape> ThumbRowsState(char side) => side == 'L' ? _thumbRowsL : _thumbRowsR;
 
-    private Func<ThumbRowItem, string?>? _thumbLabelL, _thumbLabelR;
-
-    private Func<ThumbRowItem, string?> ThumbLabelFn(char side) => side == 'L'
-        ? _thumbLabelL ??= row => ThumbRowLabel(row, Marks('L'))
-        : _thumbLabelR ??= row => ThumbRowLabel(row, Marks('R'));
-
     /// <summary>
     /// What a grid view's kept rows or cells show besides their entries and the cursor, as they
     /// were made with it: a shape, and the sets an entry looks itself up in — the marks and the
@@ -259,23 +255,6 @@ public partial class CommanderApp
             _shape = shape;
             return changed;
         }
-    }
-
-    /// <summary>A row of tiles as a reader says it: each file's name, a folder said to be one,
-    /// and the marked ones said to be marked.</summary>
-    private string ThumbRowLabel(ThumbRowItem row, HashSet<string> marks)
-    {
-        var sb = new System.Text.StringBuilder();
-        for (int k = 0; k < row.Count; k++)
-        {
-            var e = row.List[row.Start + k];
-            if (k > 0) sb.Append("; ");
-            if (e.IsParent) { sb.Append("Parent folder"); continue; }
-            sb.Append(e.Name);
-            if (e.IsDir) sb.Append(", folder");
-            if (marks.Contains(MarkKey(e))) sb.Append(", marked");
-        }
-        return sb.ToString();
     }
 
     /// <summary>
@@ -374,6 +353,9 @@ public partial class CommanderApp
             .Padding(new Thickness(4)).CornerRadius(Nocturne.RadiusRow)
             .BorderWidth(1f)
             .Cursor(CursorType.Default).Tooltip(EntryTooltip(side, e));
+        // An item to a reader, named after its entry (ItemName), the cursor's selected (ShowCursor).
+        tile.Role = HultUI.Core.Accessibility.AccessibilityRole.ListItem;
+        tile.AccessibleName = ItemName(e);
         ShowCursor(tile, cursor);
 
         // Image area on a Neutral900 backing. P2 shows the kind icon (images use a dimmed
@@ -432,12 +414,22 @@ public partial class CommanderApp
 
     /// <summary>The cursor on a Brief cell or a thumbnail tile, as a build makes it and as a key
     /// moves it with no build: the accent ring on the 1 px border every cell reserves, and the
-    /// accent fill.</summary>
+    /// accent fill; and to a reader the item selected, which the window tells with no tree (an
+    /// item's selected state is marked on its node, as a list's is).</summary>
     private static void ShowCursor(BoxElement el, bool cursor)
     {
         el.BorderColor = cursor ? Nocturne.Accent600 : Color.Transparent;
         el.BackgroundColor = cursor ? Nocturne.Alpha(Nocturne.Accent500, 0.13) : Color.Transparent;
+        el.AccessibleSelected = cursor;
     }
+
+    /// <summary>A Brief cell or a thumbnail tile as a reader says it: what the view shows, the entry's
+    /// name, a folder said to be one. Not its size and date, which these views do not show, and not
+    /// its mark, which its colour shows: a mark would rename the item, a node with children, and a
+    /// new name there builds the tree with a reader (60 files: 0 → 1 tree and +26–34 KB a mark,
+    /// where it is walked in place); Detail's row says it. The name is the entry's own string (a
+    /// folder's is made with its cell), so making a cell costs next to nothing more.</summary>
+    private static string ItemName(FileEntry e) => e.IsParent ? "Parent folder" : e.IsDir ? e.Name + ", folder" : e.Name;
 
     private static readonly Action<Element> CursorOn = static e => ShowCursor((BoxElement)e, cursor: true);
     private static readonly Action<Element> CursorOff = static e => ShowCursor((BoxElement)e, cursor: false);
@@ -682,6 +674,9 @@ public partial class CommanderApp
             .Padding(new Thickness(0, 9, 0, 9))
             .BorderWidth(1f)
             .Cursor(CursorType.Default).Tooltip(EntryTooltip(side, e));
+        // An item to a reader, named after its entry (ItemName), the cursor's selected (ShowCursor).
+        cell.Role = HultUI.Core.Accessibility.AccessibilityRole.ListItem;
+        cell.AccessibleName = ItemName(e);
         ShowCursor(cell, cursor);
 
         var icon = Icons.Draw(Icons.KindFor(e), marked ? Nocturne.MarkRed : (Color?)null);

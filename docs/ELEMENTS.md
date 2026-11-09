@@ -208,6 +208,14 @@ it is selectable and whether it is the one selected, and selecting it from assis
 clicks it, so the element has to select itself on click. `TabsElement` sets it on its headers
 (role `Tab`, in a strip of role `TabList`, beside a panel of role `TabPanel`).
 
+A view that lays out its own items and moves a cursor through them with no build (a grid of
+cells made of boxes, the tiles in a composite list's rows: Vesper's Brief and Thumbnails) gives
+each item the role `ListItem`, a name, and `AccessibleSelected` (true on the cursor's, false on
+the rest) as it is made, and sets it where it moves the cursor (with the ring's `Restyle`). The window marks an
+item's selected state on its node and tells it with no tree; a selected state on any other
+element (a tab, a button that is one of a set) builds the tree. Keep what changes often out of
+such an item's name: a new name on an element with children builds the tree.
+
 `AccessibleName` is what a screen reader announces. `Name` is only its last-resort fallback — reach for `AccessibleName` on anything user-facing, and leave `Name` for debugging.
 
 **A `BoxElement` with a click handler is announced as a button.** When no role is set, the

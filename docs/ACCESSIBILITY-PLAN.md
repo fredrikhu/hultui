@@ -357,14 +357,26 @@ switch panes, moved the active pane but left the focus on the one it left, so a 
 nothing; the focus goes with it now, and a reader is told the pane it reached, then (in Detail) its
 cursor's item, selected, with no tree built: a Tab without a reader 71.60 → 71.68 KB.
 
-In Brief and Thumbnails a cursor key still tells a reader nothing, and the app cannot tell it without
-a tree. A Brief cell's selected state (`AccessibleSelected`, set with the ring's `Restyle`) is patched
-only on a menu's entry or a row directly in a composite list (the window's property observer), and
-built for on any other element: 60 files, 0 → 1 tree and 2.2 → 36 KB a key with UIA, tried and taken
-out. A thumbnail tile is in a row of a list that publishes its rows as items, which has no node at
-all. A prototype that patches any element's selected state (one condition in the observer) with the
-thumbnail list's rows composite told the cursor's item, named and selected, with 0 trees and the
-same KB a key in both views; that is a framework change, left to the user.
+In Brief and Thumbnails a cursor key told a reader nothing (step 15): a Brief cell was a box with no
+role or name, so no node, and a thumbnail tile was in a row of a list that publishes its rows as
+items, one item named by all the files on it. Since step 15b each cell and tile is an item
+(`ListItem`) named after its entry ("f003.txt", "docs, folder", "Parent folder"), and the cursor's is
+selected, set with the ring (`ShowCursor`, which the ring's `Restyle` runs when a key moves it with
+no build); the thumbnail list's rows are composite (`RowsAreComposite`), so its tiles are read as
+they are; and the window marks an item's selected state on its node with no tree (below). A reader
+is told on every cursor key the item left, not selected, and the item reached, selected, and on Tab
+the pane, then its cursor's item, as in Detail. 60 files, 40 keys: 0 trees a key in Detail, Brief and
+Thumbnails with the tree, UIA and AT-SPI readers, as before; KB a key the same (Brief 2.21 / 2.33 /
+2.21 / 2.33 → 2.49 off / tree / UIA / AT-SPI, Thumbnails 1.97 / 2.06 / 1.85 / 1.81 → 1.96). The
+name is what these views show, the entry's name and a folder said to be one: not the size and date,
+which they do not show, nor a mark, which the colour shows. A mark in the name renames the item, a
+node with children, and the tree is built for that with a reader: tried, 0 → 1 tree and +26–34 KB a
+mark (Space), where a mark is walked in place with no tree now, as before (in Thumbnails 6 KB less
+than before, with no row labels to make). Detail's row says the mark. The cost is a navigation's,
+with a reader only: each cell is a node over its icon and name, and the tiles and their parts are
+nodes where a row was one (+34 and +95 nodes a navigation): Brief 237 → 250 KB with UIA (254 → 270
+AT-SPI), Thumbnails 262 → 294 (265 → 313); without a reader a navigation is within 0.5 KB. Thumbnail
+rows off screen are not in the tree, as in any composite list; they come in as they realize.
 
 Focus that goes nowhere is the other half: an element holding the focus goes, and nothing takes it.
 Meridian's prompt and question (cards in its own tree, not `Dialog.Show`, which gives the focus back

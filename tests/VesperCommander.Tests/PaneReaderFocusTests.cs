@@ -85,4 +85,41 @@ public class PaneReaderFocusTests
         Assert.Equal("Left pane, left", bridge.FocusedNode?.Name);
         Assert.Equal(trees, t.Session.Window.AccessibilityTreesBuilt);
     }
+
+    /// <summary>In Brief and Thumbnails a cursor key moves the ring with no build, and a reader is
+    /// told the item it reached, by its name, selected, and the one it left not, with no tree: each
+    /// cell and tile is an item, and the cursor's is selected, which the window marks on its node (plan
+    /// 17 round 9, step 15b). A reader was told nothing: a cell was no node, and a tile was in a row
+    /// that was one item named by all its files.</summary>
+    [Theory]
+    [InlineData("brief")]
+    [InlineData("thumbnails")]
+    public void ACursorKeyInBriefOrThumbnails_TellsAReaderTheItemItReached_AndBuildsNoTree(string view)
+    {
+        using var t = Open();
+        var bridge = t.Session.Window.InstallAccessibilityBridge();
+        t.Session.PumpFrames(3);
+        t.Press(view == "brief" ? KeyCode.F2 : KeyCode.F3, KeyModifiers.Ctrl);
+        t.Session.PumpFrames(3);
+        t.PutCursorOn('L', "f1.txt");
+        t.Session.PumpFrames(3);
+        var tree = t.Session.Window.AccessibilityTree;
+        Assert.Equal(["f1.txt"], Selected(tree).Select(n => n.Name!).ToArray());
+        Assert.All(Selected(tree), n => Assert.Equal(AccessibilityRole.ListItem, n.Role));
+        int trees = t.Session.Window.AccessibilityTreesBuilt, builds = t.Field<int>("_builds");
+
+        bridge.ClearDiffs();
+        t.Press(view == "brief" ? KeyCode.Down : KeyCode.Right);
+        t.Session.PumpFrames(2);
+        var told = bridge.Diffs.SelectMany(d => d.PropertyChanged)
+            .Where(c => c.PropertyName == AccessibilityProperties.IsSelected)
+            .Select(c => $"{c.Node.Name}={c.Node.IsSelected}").ToArray();
+        Assert.Equal(["f1.txt=False", "f2.txt=True"], told);
+        Assert.Equal(["f2.txt"], Selected(t.Session.Window.AccessibilityTree).Select(n => n.Name!).ToArray());
+        Assert.Equal(builds, t.Field<int>("_builds"));   // the ring moved with no build
+        Assert.Equal(trees, t.Session.Window.AccessibilityTreesBuilt);
+    }
+
+    private static IEnumerable<AccessibilityNode> Selected(AccessibilityNode node) =>
+        node.Children.SelectMany(Selected).Prepend(node).Where(n => n.IsSelected == true);
 }
