@@ -4661,13 +4661,18 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             // (Vesper's Brief), a tile in a composite list's row (its Thumbnails). The layout says
             // nothing of a grid, so the role is what tells one of a set: an item's selected state
             // goes on its own node, and nothing else in a tree is made from it. A rebuild for it
-            // built the whole tree on every cursor key: 60 files, 2.2 → 36 KB a key with UIA. Any
-            // other element's selected state (a tab, a button that is one of a set) still builds a
-            // tree, which tells what came with it.
+            // built the whole tree on every cursor key: 60 files, 2.2 → 36 KB a key with UIA. And a
+            // button that is one of a set (the Button role, set by the app), the same way: a row of a
+            // set the user picks from, which a click moves the selection between on the same elements
+            // (Meridian's endpoints). What else the click changes (the pane that follows) is told on
+            // its own path, in tree order with the mark when it comes in the same frame. A rebuild
+            // for it built the whole tree on every click: 2,000 endpoints, 121 → 974 KB a click with
+            // UIA. Any other element's selected state (a tab, whose panel follows; a role the app did
+            // not set) still builds a tree, which tells what came with it.
             else if (propertyName == AccessibilityProperties.IsSelected
                 && (element.IsMenuEntry || element.AccessibleSelected is not null
                     && (element.Parent is IAccessibleItemSource { PublishesItemNodes: false }
-                        || element.Role == AccessibilityRole.ListItem)))
+                        || element.Role is AccessibilityRole.ListItem or AccessibilityRole.Button)))
             {
                 if (!window._a11yOwnSelection.Contains(element)) window._a11yOwnSelection.Add(element);
             }

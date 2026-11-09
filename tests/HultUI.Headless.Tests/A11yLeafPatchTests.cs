@@ -25,7 +25,8 @@ namespace HultUI.Headless.Tests;
 /// node: a keystroke beside 200 rows 53 KB with UIA, a check box's click among 500 rows 87 KB, a
 /// playing video's scrubber two or three trees a second. An item's selected state is marked on its
 /// node the same way (round 9, step 15b): a cell of a grid a view lays out itself, a tile in a
-/// composite list's row; a selected state on anything else still builds the tree. Each case runs twice: once as it is, and
+/// composite list's row; and a button's, one of a set (round 10, step 1: Meridian's endpoints); a
+/// selected state on anything else still builds the tree. Each case runs twice: once as it is, and
 /// once with a change in the same frame that cannot be patched (an automation id, which no bridge
 /// tells), so the tree is rebuilt; what each bridge tells, and the trees, must be the same.
 /// </summary>
@@ -108,13 +109,15 @@ public class A11yLeafPatchTests
         "progress, toggle while pending", "number field", "leaf name", "leaf description", "leaf expanded",
         "canvas name", "label", "label in an explicitly named button", "two leaves, reverse order",
         "selection and leaves", "in an open overlay", "cursor in a grid of items", "cursor in a composite list's tiles",
+        "selected button, one of a set",
     };
 
     /// <summary>Cases the tree is rebuilt for, as before.</summary>
     public static TheoryData<string> Rebuilt => new()
     {
         "label in a button named from its content", "box that gains a name", "box whose name goes",
-        "text a button takes for its name", "radio", "box with a child, named", "masked", "selected, not an item",
+        "text a button takes for its name", "radio", "box with a child, named", "masked",
+        "selected, not an item or a button", "button that starts or stops saying selected",
     };
 
     private static BoxElement Rows(int n)
@@ -502,18 +505,62 @@ public class A11yLeafPatchTests
                     s.Step("up", () => Move(0));
                 });
             }
-            case "selected, not an item":
+            case "selected button, one of a set":
             {
-                // One of a set that is no item: a row, a button, that a pane beside it follows
-                // (Meridian's endpoints). A tree is built for it, as before.
-                var a = Flex.Row().AccessibleRole(AccessibilityRole.Button).AccessibleName("GET /a").AccessibleSelected(true)
-                    .Children(TextB.New("GET /a").FontSize(12f));
-                var b = Flex.Row().AccessibleRole(AccessibilityRole.Button).AccessibleName("GET /b").AccessibleSelected(false)
-                    .Children(TextB.New("GET /b").FontSize(12f));
+                // Rows that are buttons, one of them selected, and a pane beside them that follows the
+                // selection (Meridian's endpoints and their detail): a click moves the selected state
+                // from one row to the other on the same elements and renames the pane, with no tree
+                // built (plan 17, round 10, step 1). The last two also change the pane's heading, a
+                // label, which the coalesced layout refresh tells.
+                var rows = new BoxElement[4];
+                for (int i = 0; i < rows.Length; i++)
+                    rows[i] = Flex.Row(gap: 4).Height(Dimension.Px(22)).AccessibleRole(AccessibilityRole.Button)
+                        .AccessibleName($"GET /r{i}").AccessibleSelected(i == 0)
+                        .Children(TextB.New("GET").FontSize(9f), TextB.New($"/r{i}").FontSize(12f));
+                var detail = Box.New().Width(Dimension.Px(200)).Height(Dimension.Px(20)).AccessibleName("GET /r0");
+                var heading = TextB.New("Endpoint 0").FontSize(14f);
+                int selected = 0;
+                void Pick(int to)
+                {
+                    rows[selected].AccessibleSelected = false;
+                    rows[to].AccessibleSelected = true;
+                    detail.AccessibleName = $"GET /r{to}";
+                    selected = to;
+                }
+                return With(Flex.Row(gap: 8).Children(Flex.Column().Children(rows), Flex.Column().Children(heading, detail)), s =>
+                {
+                    s.Step("r2", () => Pick(2));
+                    s.Step("r1", () => Pick(1));
+                    s.Settled("r3, heading", () => { Pick(3); heading.Content = "Endpoint 3"; });
+                    s.Settled("r0, heading", () => { Pick(0); heading.Content = "Endpoint 0"; });
+                });
+            }
+            case "selected, not an item or a button":
+            {
+                // One of a set outside the rule: tabs an app makes itself (the Tab role on a box), whose
+                // panel follows. A tree is built for it, as before.
+                var a = Flex.Row().AccessibleRole(AccessibilityRole.Tab).AccessibleName("Overview").AccessibleSelected(true)
+                    .Children(TextB.New("Overview").FontSize(12f));
+                var b = Flex.Row().AccessibleRole(AccessibilityRole.Tab).AccessibleName("Details").AccessibleSelected(false)
+                    .Children(TextB.New("Details").FontSize(12f));
                 return With(Flex.Column().Children(a, b), s =>
                 {
                     s.Step("b", () => { a.AccessibleSelected = false; b.AccessibleSelected = true; });
                     s.Step("a", () => { b.AccessibleSelected = false; a.AccessibleSelected = true; });
+                });
+            }
+            case "button that starts or stops saying selected":
+            {
+                // A button's selected state is marked in place only when it says selected or not before
+                // and after: one that starts or stops saying it builds the tree.
+                var a = Flex.Row().AccessibleRole(AccessibilityRole.Button).AccessibleName("GET /a").AccessibleSelected(true)
+                    .Children(TextB.New("GET /a").FontSize(12f));
+                var b = Flex.Row().AccessibleRole(AccessibilityRole.Button).AccessibleName("GET /b")
+                    .Children(TextB.New("GET /b").FontSize(12f));
+                return With(Flex.Column().Children(a, b), s =>
+                {
+                    s.Step("a stops", () => a.AccessibleSelected = null);
+                    s.Step("b starts", () => b.AccessibleSelected = true);
                 });
             }
             default:

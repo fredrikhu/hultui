@@ -212,9 +212,13 @@ A view that lays out its own items and moves a cursor through them with no build
 cells made of boxes, the tiles in a composite list's rows: Vesper's Brief and Thumbnails) gives
 each item the role `ListItem`, a name, and `AccessibleSelected` (true on the cursor's, false on
 the rest) as it is made, and sets it where it moves the cursor (with the ring's `Restyle`). The window marks an
-item's selected state on its node and tells it with no tree; a selected state on any other
-element (a tab, a button that is one of a set) builds the tree. Keep what changes often out of
-such an item's name: a new name on an element with children builds the tree.
+item's selected state on its node and tells it with no tree. A row of a set the user picks from
+that is a button (Meridian's endpoint map: role `Button` set on the row, `AccessibleSelected` on
+every row, a click moving it between kept rows) is marked the same way. The role has to be set on
+the element (`.AccessibleRole(...)`): a `ButtonElement` or a clickable box with no role of its own,
+or any other role (a tab), builds the tree, as does an element that starts or stops saying it is
+selected. Keep what changes often out of such an item's name: a new name on an element with
+children builds the tree.
 
 `AccessibleName` is what a screen reader announces. `Name` is only its last-resort fallback — reach for `AccessibleName` on anything user-facing, and leave `Name` for debugging.
 

@@ -448,18 +448,28 @@ marked on the applied tree and told as a menu entry's is (`TryPatchA11y`); Junct
 walk builds no tree for either.
 
 Which selected states are marked on the applied tree with no build (the window's property observer,
-`Window.AccessibilityObserverAdapter`; plan 17 round 9 step 15b): a menu's entry (`IsMenuEntry`); a row directly in
-a composite list (its parent says `RowsAreComposite`); and an item, an element whose `Role` is
-`ListItem`, wherever it is: a cell of a grid a view lays out with boxes (Vesper's Brief: columns of
-cells in a scroll view), a tile in a composite list's row (its Thumbnails). Each must say selected or
-not before and after (`AccessibleSelected` set both times), and its node must be in the applied tree
-where its ancestors say (else the tree is built, as for any patch). The layout cannot tell a grid from
-any other boxes, so the item's role is what says it is one of a set. Its selected state goes on its
-own node and nothing else a build makes reads it, so the mark is what the build's diff would report.
-Any other element's selected state — a tab, a radio button, a button that is one of a set (Meridian's
-endpoints, which a detail pane follows) — still builds the tree, which also tells what came with it.
-Vesper's Brief, 60 files, with UIA: a cursor key 36 KB and a tree with that change alone, 2.2 KB and
-none with the rule.
+`Window.AccessibilityObserverAdapter`; plan 17 round 9 step 15b and round 10 step 1): a menu's entry
+(`IsMenuEntry`); a row directly in a composite list (its parent says `RowsAreComposite`); an item, an
+element whose `Role` is `ListItem`, wherever it is: a cell of a grid a view lays out with boxes
+(Vesper's Brief: columns of cells in a scroll view), a tile in a composite list's row (its
+Thumbnails); and a button, an element whose `Role` is `Button`, wherever it is: one of a set the user
+picks from that a click moves the selection between on the same elements (Meridian's Discovery map:
+endpoint rows, which a detail pane follows). The role is the one the app set (`Element.Role`), not one
+the builder infers: a `ButtonElement` or a box with a click handler and no role of its own still
+builds the tree. Each must say selected or not before and after (`AccessibleSelected` set both
+times: one that starts or stops saying it builds the tree), and its node must be in the applied tree
+where its ancestors say (else the tree is built, as for any patch). The layout cannot tell a grid or
+a set of rows from any other boxes, so the role the app gave is what says it is one of a set. Its
+selected state goes on its own node and nothing else a build makes reads it, so the mark is what the
+build's diff would report. What else the same change did is told on its own path: a leaf's new name
+patched with the mark, a label's or the children's change by the in-place walk, which then writes the
+mark itself (above); either way in tree order, as the diff lists them. Any other element's selected
+state — a tab (its panel follows), a radio button, a role the app did not set — still builds the
+tree, which also tells what came with it. Vesper's Brief, 60 files, with UIA: a cursor key 36 KB and
+a tree with that change alone, 2.2 KB and none with the rule. Meridian's map, a click with UIA (JIT,
+headless): 60 endpoints (253 nodes) 92.7 → 58.4 KB, 600 (1,873) 343.9 → 81.8 KB, 2,000 (6,073)
+973.9 → 121.1 KB, a tree a click → none, against 58.1 / 81.5 / 120.8 KB with no reader; a reader is
+told the same events in the same order.
 
 Threading: UIA may call provider methods from worker threads. Either marshal
 to the UI thread, or snapshot values onto the wrapper at construction/diff
