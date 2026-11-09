@@ -41,6 +41,7 @@ public static class SyntaxHighlighter
     private static Color? _defaultFg;
     private static readonly Dictionary<string, IGrammar?> GrammarByExt = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<int, Color?> ColorById = new();
+    private static readonly Dictionary<IReadOnlyList<string>, Color?> ColorByScopes = new(ScopeListComparer.Instance);
 
     /// <summary>How many times this thread has needed the registry, loaded or not. A test
     /// reads it to show that a question answered from a table never touched it.</summary>
@@ -344,6 +345,7 @@ public static class SyntaxHighlighter
             _defaultFg = null;
             GrammarByExt.Clear();
             ColorById.Clear();
+            ColorByScopes.Clear();
         }
         // Which extensions are highlightable does not depend on the theme: CanHighlight answers
         // from a fixed table.
@@ -522,7 +524,25 @@ public static class SyntaxHighlighter
             grammar.GetScopeName() is "source.json" or "source.json.comments" or "text.xml" ? LongDataLine : LongLine;
     }
 
+    // A token's colour depends on its scope names alone, and a text has few different lists of
+    // them (15 in a 2,463-line XML document of 22,039 tokens, 126 in a 3,641-line HTML page), so
+    // each list is matched against the theme once. Theme.Match builds a new list of every rule
+    // for every scope on each call: 58-75 bytes a token, 12-13 % of an XML tokenize's bytes. The
+    // dictionary keeps a copy of a list, not the one TextMateSharp hands every token of a scope.
+    // Scope names a grammar builds from the text ($1 in a rule's name) could make lists without
+    // end, so the dictionary starts again past MaxScopeLists.
+    private const int MaxScopeLists = 4_096;
+
     private static Color? ColorFor(List<string> scopes)
+    {
+        if (ColorByScopes.TryGetValue(scopes, out var known)) return known;
+        var color = MatchColor(scopes);
+        if (ColorByScopes.Count >= MaxScopeLists) ColorByScopes.Clear();
+        ColorByScopes[scopes.ToArray()] = color;
+        return color;
+    }
+
+    private static Color? MatchColor(List<string> scopes)
     {
         foreach (var rule in _theme!.Match(scopes))
         {
@@ -538,6 +558,29 @@ public static class SyntaxHighlighter
             return c == _defaultFg ? null : c;
         }
         return null;
+    }
+
+    /// <summary>Two lists of scope names are equal when they hold the same names in the same order.
+    /// By index: an interface's foreach would box the list's enumerator on every token.</summary>
+    internal sealed class ScopeListComparer : IEqualityComparer<IReadOnlyList<string>>
+    {
+        public static readonly ScopeListComparer Instance = new();
+
+        public bool Equals(IReadOnlyList<string>? a, IReadOnlyList<string>? b)
+        {
+            if (ReferenceEquals(a, b)) return true;
+            if (a is null || b is null || a.Count != b.Count) return false;
+            for (int i = a.Count - 1; i >= 0; i--)   // innermost first: lists differ there most
+                if (!string.Equals(a[i], b[i], StringComparison.Ordinal)) return false;
+            return true;
+        }
+
+        public int GetHashCode(IReadOnlyList<string> scopes)
+        {
+            var hash = new HashCode();
+            for (int i = 0; i < scopes.Count; i++) hash.Add(scopes[i], StringComparer.Ordinal);
+            return hash.ToHashCode();
+        }
     }
 
     // Lines as slices of the source (no per-line string allocs); trailing '\r' is

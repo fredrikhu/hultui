@@ -658,6 +658,51 @@ a page of 2160×779 px, DXGI `QueryVideoMemoryInfo` for this process:
   context is flushed after the release: without it a show added a new texture's 7.4 MB while the old
   one's stayed.
 
+### A tokenize's bytes are TextMateSharp's; the highlighter matches each scope list once (round 9)
+
+`SyntaxHighlighter.TokenizeLines` allocated 4–15 KB a line (plan 17 round 9, step 14). Measured on three
+of Meridian's pretty response bodies: 2,000 lines of an OpenAPI spec in JSON, 2,463 lines of XML and
+3,641 of HTML. The split is the call's bytes less those of TextMateSharp's own `TokenizeLine` walk
+over the same lines with the same grammar, on NativeAOT (JIT within a point), and allocation ticks by
+type on JIT:
+
+| Bytes of a call | JSON | XML | HTML |
+|---|---|---|---|
+| The whole call, a line | 4.10 KB | 5.19 KB | 14.71 KB |
+| TextMateSharp's own, a line | 3.68 KB | 4.26 KB | 13.96 KB |
+| The highlighter's `Theme.Match` on every token (58–75 bytes a token) | 8.2 % | 12.2 % | 3.4 % |
+| The spans it returns, and the rest | 2.2 % | 5.7 % | 1.7 % |
+
+TextMateSharp's share is spread over its scope lists (`string[]`, `List<string>`), tokens
+(`Token`, `IToken[]`), `AttributedScopeStack`, `StateStack` and Onigwrap's match results, 2–17 %
+each; in HTML two thirds are Onigwrap's capture results (`OnigCaptureIndex` 35 %, `int[]` 22 %,
+`IOnigCaptureIndex[]` 10 %). That is left alone: no fork of TextMateSharp or its regex wrapper.
+
+The theme match was the highlighter's. `Theme.Match` builds a new list of every rule of every scope
+on each call, and a token's colour depends only on its scope names, of which a text has few lists
+(15 in the XML's 22,039 tokens, 108 in the JSON's 11,841, 126 in the HTML's 24,981). Each list is now
+matched once, until the theme changes. Before → after, idle-gated and pinned, alternated (JIT twice,
+NativeAOT once; the least of 15 calls after 5 s of warm-up):
+
+| | JSON | XML | HTML |
+|---|---|---|---|
+| KB a call, JIT | 7,909 → 7,240 (−8.5 %) | 12,362 → 10,803 (−12.6 %) | 51,695 → 49,895 (−3.5 %) |
+| KB a call, NativeAOT | 8,201 → 7,532 (−8.2 %) | 12,783 → 11,224 (−12.2 %) | 53,558 → 51,758 (−3.4 %) |
+| ms a call, NativeAOT | 15.5 → 13.9 | 16.8 → 15.6 | 100.2 → 97.8 |
+
+Meridian's pretty toggle on the HTML page, all threads: 55,100–55,189 → 53,319–53,609 KB on JIT,
+56,564 → 54,763 KB on NativeAOT, 34–36 gen-0 collections in 20 toggles either way. Spans: 3,206 files
+(this repository, five other local ones and 40 `node_modules` files), 1,752,925 lines and 4,130,773
+spans, all identical.
+
+**Not done: colour from TextMateSharp's encoded tokens.** `TokenizeLine2` hands back each token's
+colour already matched, with no token objects and no scope lists, and saves a further 28 % of the
+JSON's bytes, 18 % of the XML's and 4 % of the HTML's (JIT). But it matches a theme rule's parent
+scopes as VS Code does, where the highlighter takes the first rule of a token's innermost scope that
+has a colour, whatever its parents. On the 3,206 files that changes 2,388 of the 1,752,346 lines, in
+TypeScript, JavaScript, PowerShell, shell, C++ and Markdown (none in the three bodies above). The
+colours a file gets are the user's to change; it waits for that.
+
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
 BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction
