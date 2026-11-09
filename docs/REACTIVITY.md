@@ -840,6 +840,31 @@ delete, new requests and folders, a folder renamed with what is in it, an enviro
 and keyboard on a row and its ⋯ across a build, History and back, changes on disk, the scale), the
 pixels, the reader tree, focus and every row's menu, each item run, matched a build that keeps nothing.
 
+**A selection only the view shows builds the view, and hands back the rows it does not move**
+(Meridian's Discovery map, round 9 step 11). A click on an endpoint built the whole window, the title
+bar and the rail too, and made every row of the map again: with a large spec imported, about 4.5 KB an
+endpoint a click. The click now builds the view alone (`MarkViewDirty`: no part shows the selection),
+and each row and group heading comes back by its key unless what it shows moved. The state is the
+endpoint itself, a record that is equal when every fact the row shows and the detail its click selects
+is equal, and whether it is selected; the click captures that endpoint, so a kept row selects what a
+row made now would. The order, the headings, the keys and the counts are worked out once a map, since a
+map is never changed (a send makes a new one). Two lessons:
+
+- **Let the kept elements go when the view is not built.** `KeptElements` holds the live elements, so a
+  map of 2,000 rows left for another view would stay alive behind it, which a test already guarded
+  against (a still pointer had done the same). The app's build forgets the rows when it made none.
+- **What is left is the list itself.** The build still walks every line, asks for each row and hands
+  the list its children: about 35 B an endpoint a click, against 4.5 KB.
+
+Headless, 1440×900, a click and three frames, idle-gated, JIT: 60 endpoints 365.3 → 54.7 KB a click
+(−85 %), 600 2,846.6 → 77.2 KB (−97 %), 2,000 9,073.0 → 124.4 KB (−99 %); elements made 333 / 2,493 /
+8,129 → 55 / 55 / 63, no part built; a click's time 1.5 → 1.1 ms, 4.3 → 1.5 ms, 6.4 → 2.4 ms (min;
+NativeAOT the same bytes, 0.78 → 0.71 ms, 1.47 → 0.87, 3.82 → 1.60). The
+pixels over a click walk match the old build's, and in a walk of clicks (the same row twice, the pointer
+over another row, a scrolled map, sends folded in, an observed row, the observed toggle, another view
+and back) the pixels, the reader tree and focus match a build that keeps nothing. Each row now tells a
+reader whether it is the selected one (`AccessibleSelected`).
+
 A column whose cells are all kept is left with no children by the time the reconciler reaches
 it, since the build moved every one into its new tree. Until round 5 those came back one by one,
 each marking the column's structure, so with a reader listening every key built the whole

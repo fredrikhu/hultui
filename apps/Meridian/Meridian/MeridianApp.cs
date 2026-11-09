@@ -241,6 +241,7 @@ public partial class MeridianApp : Component, IDisposable
         // The title bar is a part of its own (see Part), keyed by its host.
         var titleBar = TitleBarPart.Mount().FlexShrink(0);
         var body = BuildBody(); body.Key = "body";
+        EndMapBuild();   // a build that shows no map lets its kept rows go
         // The response panel keeps the readout of a send in flight (TickWhileSending) while it is
         // kept; with no panel on screen there is none.
         if (!_responsePlaced) _sendElapsed.Current = null;

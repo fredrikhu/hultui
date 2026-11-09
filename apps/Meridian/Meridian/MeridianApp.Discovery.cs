@@ -1,5 +1,6 @@
 using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
+using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
@@ -247,6 +248,8 @@ public partial class MeridianApp
 
         if (_map is { } map)
         {
+            // The counts as the map's lines have them: worked out once a map, not on every build.
+            var lines = LinesOf(map);
             if (map.SpecSource is { } source)
             {
                 var spec = Flex.Column(gap: 2).FlexShrink(0)
@@ -257,7 +260,7 @@ public partial class MeridianApp
                     Ui.Mono("✓", 11f, Azimuth.StatusPass),
                     Ui.Mono(source, 11f, Azimuth.TextDim),
                     map.SpecVersion is { } version ? Ui.Mono("v" + version, 10f, Azimuth.TextFaint) : Box.New()));
-                spec.AddChild(Ui.Mono($"{map.DeclaredCount} endpoints declared", 10f, Azimuth.TextMuted));
+                spec.AddChild(Ui.Mono($"{lines.Declared} endpoints declared", 10f, Azimuth.TextMuted));
                 panel.AddChild(spec);
             }
 
@@ -268,7 +271,7 @@ public partial class MeridianApp
             traffic.AddChild(Flex.Row(gap: Azimuth.S2).AlignItems(AlignItems.Center).Children(
                 Ui.Mono("◎", 11f, Azimuth.Accent300),
                 Text.New("live traffic").FontSize(11.5f).TextColor(Azimuth.TextDim)));
-            traffic.AddChild(Ui.Mono($"{map.ObservedCount} observed", 10f, Azimuth.TextMuted));
+            traffic.AddChild(Ui.Mono($"{lines.Observed} observed", 10f, Azimuth.TextMuted));
             panel.AddChild(traffic);
 
             panel.AddChild(Ui.Mono($"base: {map.BaseUrl}", 10f, Azimuth.TextFaint).AutomationId("disc-base"));
@@ -276,7 +279,7 @@ public partial class MeridianApp
                 panel.AddChild(Ui.Mono("probing for a spec…", 10f, Azimuth.Accent300).AutomationId("disc-probing"));
 
             panel.AddChild(Box.New().Height(Azimuth.S2));
-            int promoteCount = PromotionSet().Count;
+            int promoteCount = lines.Declared + (_promoteObserved ? lines.Observed : 0);   // PromotionSet().Count
             panel.AddChild(BarAction($"Promote {promoteCount} to collection…", "disc-promote", () =>
             {
                 int written = PromoteToCollection(PromotionSet());
@@ -288,7 +291,7 @@ public partial class MeridianApp
                 .AccessibleName($"include observed endpoints{(_promoteObserved ? ", on" : ", off")}")
                 .AutomationId("disc-include-observed");
             toggle.AddChild(Ui.Mono(_promoteObserved ? "☑" : "☐", 12f, _promoteObserved ? Azimuth.Accent300 : Azimuth.TextMuted));
-            toggle.AddChild(Text.New($"{map.ObservedCount} observed (marked inferred)").FontSize(11f).TextColor(Azimuth.TextMuted));
+            toggle.AddChild(Text.New($"{lines.Observed} observed (marked inferred)").FontSize(11f).TextColor(Azimuth.TextMuted));
             toggle.OnClick(_ => { _promoteObserved = !_promoteObserved; MarkDirty(); });
             panel.AddChild(toggle);
 
@@ -315,20 +318,102 @@ public partial class MeridianApp
         _map is not { } map ? []
         : map.Endpoints.Where(e => e.Confidence == Confidence.Declared || _promoteObserved).ToList();
 
+    // ── The map's rows ───────────────────────────────────────────────────
+    //
+    // A click on a row moves the selection, which the map and the detail show and no part does, so
+    // it builds the view alone (MarkViewDirty), and each row and group heading comes back from the
+    // build before when nothing it shows or does moved (KeptElements; REACTIVITY.md, "Hand back the
+    // elements a key does not change"). A click made the window again with every row, its closure,
+    // its keys and its name: 2,847 KB at 600 endpoints, 9,073 KB at 2,000; now the two rows it moves
+    // between. A row's state is its endpoint, a record that is equal when every fact the row shows
+    // and the detail a click selects is, and whether it is selected; the click captures that
+    // endpoint, so a kept row selects what a row made now would. The lines (the order, the headings,
+    // the keys and the counts) are worked out once a map: a map is never changed, a send or an import
+    // makes a new one. Shown in no build, the rows are let go, or a map left on screen would stay
+    // alive behind another view (DiscoveryViewTests' still pointer).
+    private readonly record struct EndpointRowState(Endpoint Endpoint, bool Selected, float Scale);
+    private readonly record struct MapHeadingState(string Text, float Scale);
+    private readonly KeptElements<EndpointRowState> _endpointRows = new();
+    private readonly KeptElements<MapHeadingState> _mapHeadings = new();
+    private MapLines? _mapLines;
+    private int _mapRowsBuild = -1;
+
+    /// <summary>A map's lines in the order the map shows them: each declared group's heading and
+    /// rows, then the observed endpoints, each with the key its element has.</summary>
+    private sealed record MapLines(ApiMap Map, MapLine[] Lines, int Declared, int Observed);
+
+    /// <summary>A group heading (<paramref name="Heading"/>) or an endpoint's row.</summary>
+    private readonly record struct MapLine(string Key, Endpoint? Endpoint, string? Heading);
+
+    /// <summary>Endpoint rows the map has made so far, for tests: a click makes the two it moves
+    /// between, however long the map.</summary>
+    internal int EndpointRowsMade { get; private set; }
+
+    /// <summary>Lets every kept row and heading go, so the next build makes them all: for a build
+    /// that shows no map, and for tests, whose oracle is a build that keeps nothing.</summary>
+    internal void ForgetMapRows()
+    {
+        if (_endpointRows.Count > 0) _endpointRows.Clear();
+        if (_mapHeadings.Count > 0) _mapHeadings.Clear();
+    }
+
+    /// <summary>At the end of every build of the window: a build that made no map rows lets the
+    /// kept ones go.</summary>
+    private void EndMapBuild()
+    {
+        if (_mapRowsBuild != Builds) ForgetMapRows();
+    }
+
+    private MapLines LinesOf(ApiMap map)
+    {
+        if (_mapLines is { } known && ReferenceEquals(known.Map, map)) return known;
+        var lines = new List<MapLine>(map.Endpoints.Count + 16);
+        // A spec can name one method twice in a path ("get" and "GET"); keys stay apart.
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        string KeyOf(Endpoint endpoint)
+        {
+            string key = "ep " + endpoint.Key;
+            for (int n = 2; !keys.Add(key); n++) key = $"ep {endpoint.Key} #{n}";
+            return key;
+        }
+
+        int declared = 0;
+        foreach (var group in map.Endpoints
+            .Where(e => e.Confidence == Confidence.Declared)
+            .GroupBy(e => e.Group).OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            lines.Add(new MapLine("group " + group.Key, null, group.Key.ToUpperInvariant()));
+            foreach (var endpoint in group)
+            {
+                lines.Add(new MapLine(KeyOf(endpoint), endpoint, null));
+                declared++;
+            }
+        }
+        int observed = 0;
+        foreach (var endpoint in map.Endpoints)
+        {
+            if (endpoint.Confidence != Confidence.Observed) continue;
+            lines.Add(new MapLine(KeyOf(endpoint), endpoint, null));
+            observed++;
+        }
+        return _mapLines = new MapLines(map, lines.ToArray(), declared, observed);
+    }
+
     private Element BuildEndpointMap()
     {
         var col = Flex.Column(gap: 0).FlexGrow(1);
         var map = _map;
+        var lines = map is null ? null : LinesOf(map);
 
         var header = Flex.Row(gap: Azimuth.S3).Height(36).FlexShrink(0).AlignItems(AlignItems.Center)
             .Padding(new Thickness(0, Azimuth.S3, 0, Azimuth.S3))
             .BorderColor(Azimuth.Border).BorderWidth(new Thickness(0, 0, 1, 0));
         header.AddChild(Text.New("Endpoint map").FontSize(13f).FontWeight(FontWeight.Medium).TextColor(Azimuth.TextDim));
-        if (map != null)
-            header.AddChild(Ui.Mono($"{map.DeclaredCount} declared · {map.ObservedCount} observed", 10.5f, Azimuth.TextMuted));
+        if (lines != null)
+            header.AddChild(Ui.Mono($"{lines.Declared} declared · {lines.Observed} observed", 10.5f, Azimuth.TextMuted));
         col.AddChild(header);
 
-        if (map == null || map.Endpoints.Count == 0)
+        if (map == null || lines == null || map.Endpoints.Count == 0)
         {
             col.AddChild(Flex.Column(gap: Azimuth.S2).FlexGrow(1)
                 .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
@@ -341,24 +426,45 @@ public partial class MeridianApp
             return col;
         }
 
+        // Every child of the list is keyed: the rows and headings by their lines, the observed
+        // heading and the gap above it by name.
+        _mapRowsBuild = Builds;
+        _endpointRows.Begin(Builds);
+        _mapHeadings.Begin(Builds);
         var scroll = ScrollView.New();
         var list = Flex.Column(gap: 1).Padding(new Thickness(Azimuth.S1, Azimuth.S3, Azimuth.S3, Azimuth.S3));
-
-        foreach (var group in map.Endpoints
-            .Where(e => e.Confidence == Confidence.Declared)
-            .GroupBy(e => e.Group).OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
+        var selection = _mapSelection;
+        float scale = Ui.DisplayScale;
+        bool observedShown = false;
+        foreach (var line in lines.Lines)
         {
-            list.AddChild(Ui.Mono(group.Key.ToUpperInvariant(), 10f, Azimuth.TextMuted).FlexShrink(0));
-            foreach (var endpoint in group) list.AddChild(EndpointRow(endpoint));
-        }
-
-        var observed = map.Endpoints.Where(e => e.Confidence == Confidence.Observed).ToList();
-        if (observed.Count > 0)
-        {
-            list.AddChild(Box.New().Height(Azimuth.S2));
-            list.AddChild(Ui.Mono("OBSERVED — NOT IN SPEC", 10f, Azimuth.StatusWarn).FlexShrink(0)
-                .AutomationId("disc-observed-header"));
-            foreach (var endpoint in observed) list.AddChild(EndpointRow(endpoint));
+            if (line.Endpoint is not { } endpoint)
+            {
+                var state = new MapHeadingState(line.Heading!, scale);
+                list.AddChild(_mapHeadings.TryKeep(line.Key, state, out var keptHeading)
+                    ? keptHeading
+                    : _mapHeadings.Made(line.Key, state, Ui.Mono(state.Text, 10f, Azimuth.TextMuted).FlexShrink(0)));
+                continue;
+            }
+            if (endpoint.Confidence == Confidence.Observed && !observedShown)
+            {
+                observedShown = true;
+                var gap = Box.New().Height(Azimuth.S2);
+                gap.Key = "observed-gap";
+                list.AddChild(gap);
+                var heading = Ui.Mono("OBSERVED — NOT IN SPEC", 10f, Azimuth.StatusWarn).FlexShrink(0)
+                    .AutomationId("disc-observed-header");
+                heading.Key = "observed-heading";
+                list.AddChild(heading);
+            }
+            var rowState = new EndpointRowState(endpoint,
+                selection is { } s && s.Method == endpoint.Method && s.Path == endpoint.Path, scale);
+            if (_endpointRows.TryKeep(line.Key, rowState, out var kept)) list.AddChild(kept);
+            else
+            {
+                EndpointRowsMade++;
+                list.AddChild(_endpointRows.Made(line.Key, rowState, EndpointRow(rowState)));
+            }
         }
 
         scroll.AddChild(list);
@@ -372,9 +478,10 @@ public partial class MeridianApp
     /// declared endpoints get the solid method tint, observed ones a hollow
     /// dashed-reading chip and an italic-equivalent muted path plus their
     /// evidence ("seen 4× · 200").</summary>
-    private Element EndpointRow(Endpoint endpoint)
+    private Element EndpointRow(EndpointRowState state)
     {
-        bool selected = _mapSelection?.Key == endpoint.Key;
+        var endpoint = state.Endpoint;
+        bool selected = state.Selected;
         bool observed = endpoint.Confidence == Confidence.Observed;
 
         var row = Flex.Row(gap: Azimuth.S2).Height(Azimuth.RowList).FlexShrink(0)
@@ -410,10 +517,16 @@ public partial class MeridianApp
             row.AddChild(Ui.Mono($"seen {endpoint.SeenCount}× · {string.Join(", ", endpoint.Codes.Keys.Order())}",
                 9.5f, Azimuth.TextFaint).FlexShrink(0));
 
-        var captured = endpoint;
-        row.OnClick(_ => { _mapSelection = captured; MarkDirty(); });
+        row.OnClick(_ => SelectEndpoint(endpoint));
         if (!selected) row.HoverBg(Azimuth.Raised, Color.Transparent);
         return row;
+    }
+
+    /// <summary>A click on a map row: the map and the detail show the selection, no part does.</summary>
+    private void SelectEndpoint(Endpoint endpoint)
+    {
+        _mapSelection = endpoint;
+        MarkViewDirty();
     }
 
     private Element BuildEndpointDetail(Endpoint endpoint)
