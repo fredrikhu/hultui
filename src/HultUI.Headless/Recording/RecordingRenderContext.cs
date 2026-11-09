@@ -25,7 +25,7 @@ namespace HultUI.Headless.Recording;
 /// answers — they are queries, not drawing, and are deliberately not recorded.
 /// </para>
 /// </remarks>
-public sealed class RecordingRenderContext : IRenderContext
+public sealed class RecordingRenderContext : IRenderContext, IFadingImageContext
 {
     private readonly IRenderContext _inner;
     private int _depth;
@@ -139,6 +139,20 @@ public sealed class RecordingRenderContext : IRenderContext
             + (source is IGpuImageSource ? " gpu" : "")
             + (source.IsLoaded ? "" : " (not loaded)"));
         _inner.DrawImage(source, destRect, fit);
+    }
+
+    // A faded image that draws itself at its alpha, when the inner context can: recorded as the
+    // draw it is, with its opacity, after the inner context said it drew it. When it cannot, the
+    // element pushes its group instead, and that is what is recorded.
+    bool IFadingImageContext.TryDrawImage(IImageSource source, Rect destRect, ImageFit fit, float opacity)
+    {
+        if (_inner is not IFadingImageContext fading || !fading.TryDrawImage(source, destRect, fit, opacity))
+            return false;
+        Record("DrawImage",
+            $"{Fmt(destRect)} {fit} intrinsic={F(source.IntrinsicSize.Width)}x{F(source.IntrinsicSize.Height)}"
+            + $" opacity={F(opacity)}"
+            + (source.IsLoaded ? "" : " (not loaded)"));
+        return true;
     }
 
     // The interface's default draws the whole image with Fill: without this the recorded call

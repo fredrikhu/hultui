@@ -9,7 +9,7 @@ using System.Runtime.InteropServices;
 
 namespace HultUI.Rendering.Skia;
 
-public sealed class SkiaRenderContext : IRenderContext, IDisposable
+public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDisposable
 {
     private SKCanvas? _canvas;
     private readonly Stack<int> _saveStack = new();
@@ -1533,6 +1533,26 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         // aliased, and geometry thinner than a destination pixel (Phosphor's `minus`
         // bar is 6% of its box) could land between samples and vanish outright.
         Canvas.DrawImage(image, srcRect, ToSkRect(drawRect), DownscaleSampling, _pooledPaint);
+    }
+
+    /// <summary>
+    /// A still image at an opacity in one draw: what <see cref="DrawImage(IImageSource, Rect, ImageFit)"/>
+    /// draws, its alpha scaled by the alpha <see cref="PushOpacity(float, Rect)"/> would composite
+    /// its group with. A GPU or frame-stream source keeps its group: false, nothing drawn.
+    /// </summary>
+    bool IFadingImageContext.TryDrawImage(IImageSource source, Rect destRect, ImageFit fit, float opacity)
+    {
+        if (source is IGpuImageSource || source is IPixelImageSource) return false;
+        if (source is not SkiaImageSource skiaSource || skiaSource.Bitmap is not { } bitmap
+            || skiaSource.Image is not { } image)
+            return true;   // nothing to draw, as DrawImage draws nothing
+
+        var (drawRect, srcRect) = ComputeImageFit(fit, bitmap.Width, bitmap.Height, destRect.Width, destRect.Height, destRect);
+        _pooledPaint.Reset();
+        _pooledPaint.IsAntialias = true;
+        _pooledPaint.Color = new SKColor(255, 255, 255, (byte)(opacity * 255));
+        Canvas.DrawImage(image, srcRect, ToSkRect(drawRect), DownscaleSampling, _pooledPaint);
+        return true;
     }
 
     /// <summary>

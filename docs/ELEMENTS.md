@@ -267,7 +267,17 @@ moved and hears neither.
 blends the group once, so overlapping children do not show through each other. The group
 is sized to what the subtree paints — each element's `PaintBounds`, unioned down the tree
 until a clip (`Overflow.Hidden`, a scroll view) cuts the children off. A plain `Box` with
-no children and one fill skips the group and fills in a fainter colour.
+no children and one fill skips the group and fills in a fainter colour, and a plain `Image`
+with no children draws its picture once at that alpha (within 2/255 of the group; a crop
+(`SourceRect`), a video or another GPU or frame-stream source keeps the group).
+
+A group is a layer on every frame it is drawn, about 0.01 ms of CPU and 0.013–0.02 ms of GPU
+each in a real window, and a list that fades a row with children makes one for each row on
+screen (Vesper's Brief view with 61 cut files: 43 % of a GL frame, 84 % of its GPU time; plan 17
+round 9). To dim a row, a card or a tile, fade its colours instead (each text and fill at the
+same share of its alpha, as an element at that opacity shows it) and give `Opacity` only to lone
+boxes and images. What overlaps then blends part by part: text over a faded fill is a level or
+two off at glyph edges, and a faded part shows what is under it, which the group hid.
 
 `PaintBounds` is the border box unless the element says otherwise. `BoxElement` adds its
 shadows and outline, `TextElement` the ink of text longer than its box. **A custom element

@@ -4,6 +4,8 @@ using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
+using HultUI.Rendering.Skia;
+using SkiaSharp;
 using Xunit;
 
 namespace HultUI.Headless.Tests;
@@ -225,6 +227,92 @@ public sealed class OpacityLayerTests
         var log = session.Window.RenderLog.ToString();
         Assert.DoesNotContain("PushOpacity", log);
         Assert.Contains("DrawRoundedRect (20,20 50x40) r=8 fill=#4F46E580", log);
+    }
+
+    // ── A faded image draws its picture at its alpha ──
+
+    /// <summary>96×64, drawn at half size as an icon is: an opaque gradient on the left, a
+    /// translucent green on the right, a white bar across, so the fade shows in every channel and
+    /// in alpha too.</summary>
+    private static SkiaImageSource Picture()
+    {
+        var bitmap = new SKBitmap(96, 64, SKColorType.Rgba8888, SKAlphaType.Premul);
+        for (int y = 0; y < 64; y++)
+            for (int x = 0; x < 96; x++)
+                bitmap.SetPixel(x, y, y is >= 28 and < 36 ? SKColors.White
+                    : x < 48 ? new SKColor((byte)(255 - x * 5), 40, (byte)(x * 5))
+                    : new SKColor(34, 197, 94, 128));
+        return new SkiaImageSource(bitmap);
+    }
+
+    [Fact]
+    public void AFadedImageDrawsAtItsAlphaWithoutAGroup()
+    {
+        using var session = Recording();
+        using var picture = Picture();
+        session.Window.SetRoot(Box.New().Padding(new Thickness(20)).Children(
+            Image.New(picture).Width(48).Height(32).Opacity(0.45f)));
+        session.PumpFrame();
+
+        var log = session.Window.RenderLog.ToString();
+        Assert.DoesNotContain("PushOpacity", log);
+        Assert.Contains("DrawImage (20,20 48x32) Contain intrinsic=96x64 opacity=0.45", log);
+    }
+
+    /// <summary>The picture faded on its own and faded in a group (a box around it, which fades as
+    /// one), side by side over a backdrop, at 1× and 1.5×: every pixel within 2 levels of the
+    /// group's, the backdrop showing through as much, and only the group's draw a layer.</summary>
+    [Theory]
+    [InlineData(1f)]
+    [InlineData(1.5f)]
+    public void AFadedImageLooksAsItsGroupDid(float scale)
+    {
+        using var session = HeadlessSession.Create(200, 80, scale,
+            options: new HeadlessOptions { RecordDrawCalls = true, PinnedText = true });
+        using var picture = Picture();
+        var grouped = Absolute(Box.New().Opacity(0.45f).Children(Image.New(picture).Width(48).Height(32)), 20, 20);
+        var alone = Absolute(Box.New().Children(Image.New(picture).Width(48).Height(32).Opacity(0.45f)), 120, 20);
+        session.Window.SetRoot(Box.New().Width(200).Height(80).Background(Indigo).Children(grouped, alone));
+        session.PumpFrame();
+        session.Window.RenderLog.Clear();
+
+        using var image = session.Window.CapturePixels();
+        using var bitmap = SKBitmap.FromImage(image);
+        Assert.Single(session.Window.RenderLog.Named("PushOpacity"));   // the group's, not the image's
+
+        int dx = (int)MathF.Round(100 * scale), x0 = (int)MathF.Round(16 * scale), y0 = (int)MathF.Round(16 * scale);
+        int w = (int)MathF.Round(56 * scale), h = (int)MathF.Round(40 * scale);
+        int max = 0, faded = 0;
+        for (int y = y0; y < y0 + h; y++)
+            for (int x = x0; x < x0 + w; x++)
+            {
+                SKColor a = bitmap.GetPixel(x, y), b = bitmap.GetPixel(x + dx, y);
+                max = Math.Max(max, Math.Max(Math.Abs(a.Red - b.Red), Math.Max(Math.Abs(a.Green - b.Green), Math.Abs(a.Blue - b.Blue))));
+                if (a != new SKColor(Indigo.R, Indigo.G, Indigo.B)) faded++;
+            }
+        Assert.True(max <= 2, $"the image alone differs from its group by up to {max} levels");
+        Assert.True(faded > 48 * 32 * scale * scale * 0.9, $"only {faded} pixels show the picture");
+
+        // On the bar, white at 45 % over the backdrop: the fade itself, not merely the same as the group's.
+        var bar = bitmap.GetPixel(dx + (int)MathF.Round(30 * scale), (int)MathF.Round(36 * scale));
+        static int Over(byte backdrop) => (int)MathF.Round(255 * 0.45f + backdrop * 0.55f);
+        Assert.InRange(bar.Red, Over(Indigo.R) - 2, Over(Indigo.R) + 2);
+        Assert.InRange(bar.Blue, Over(Indigo.B) - 2, Over(Indigo.B) + 2);
+    }
+
+    [Fact]
+    public void AFadedFrameStreamOrCropKeepsItsGroup()
+    {
+        using var session = Recording();
+        using var picture = Picture();
+        using var frames = new PixelFrameSink();
+        frames.Write(4, 4, PixelFormat.Rgba8888, Enumerable.Repeat((byte)200, 64).ToArray(), 16);
+        session.Window.SetRoot(Flex.Row(gap: 10).Padding(new Thickness(20)).Children(
+            Image.New(frames).Width(16).Height(16).Opacity(0.5f),
+            new ImageElement { Source = picture, SourceRect = new Rect(0, 0, 48, 32) }.Width(24).Height(16).Opacity(0.5f)));
+        session.PumpFrame();
+
+        Assert.Equal(2, session.Window.RenderLog.Named("PushOpacity").Count());
     }
 
     [Fact]

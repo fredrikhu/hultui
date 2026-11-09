@@ -42,6 +42,9 @@
     <!-- The perf suite's UIA and AT-SPI rigs stand in front of the bridges and, as they do, keep
          nothing of a diff past the call (ITreeDiffBorrower): the window lends them its diff. -->
     <InternalsVisibleTo Include="HultUI.Samples.PerfSuite" />
+    <!-- A faded image draws itself at its alpha, without an offscreen group, through a context
+         that can (IFadingImageContext): the Skia renderer is that context. -->
+    <InternalsVisibleTo Include="HultUI.Rendering.Skia" />
   </ItemGroup>
 
 </Project>
