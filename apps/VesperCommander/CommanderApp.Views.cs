@@ -526,7 +526,7 @@ public partial class CommanderApp
         var marks = Marks(side);
         float rowH = RowHeight;
 
-        var g = BriefGeometry(side, n);
+        var g = ScrollBriefBeforeBuild(side, n, cur, BriefGeometry(side, n));
         _briefRows[Si(side)] = g.Rows;
         _briefColW[Si(side)] = BriefColWidth;
         _viewPage[Si(side)] = g.Rows * Math.Max(1, g.VisCols);
@@ -613,6 +613,28 @@ public partial class CommanderApp
         int firstCol = overflow ? Math.Clamp((int)(scrollX / colW), 0, Math.Max(0, totalCols - 1)) : 0;
         int lastCol = Math.Min(totalCols - 1, firstCol + visCols + 1);   // +1 buffer column
         return new BriefGeom(paneW, availH, new BriefFit(rows, totalCols, overflow, visCols, firstCol, lastCol));
+    }
+
+    /// <summary>
+    /// A build that a scroll to the cursor waits for (<see cref="RequestScroll"/>: a key that moves
+    /// the cursor out of view, a filter, a folder loaded) scrolls first, on the live scroll view,
+    /// and makes the columns for that scroll. The scroll used to come after the build
+    /// (OnAfterBuild), and a scroll set from code fires no ScrollEvent to build again: the build
+    /// had made the columns for the scroll before it, so the columns a page jump scrolled to stayed
+    /// blank until the next key, and that key built again. OnAfterBuild still scrolls, and finds
+    /// the cursor in view. Never past the end of the columns this build makes (a filter that drops
+    /// columns): the layout clamps the scroll there, short of the columns made from it.
+    /// </summary>
+    private BriefGeom ScrollBriefBeforeBuild(char side, int n, int cur, BriefGeom g)
+    {
+        if (!g.Overflow || !(side == 'L' ? _pendingScrollL : _pendingScrollR)
+            || BriefScroll(side).Current is not { IsHosted: true } sv) return g;
+        float before = sv.ScrollOffsetX, colW = BriefColWidth;
+        float viewW = sv.Layout.AbsoluteContentBox.Width;
+        float x = (cur / g.Rows) * colW;
+        float want = x < before ? x : x + colW > before + viewW ? x + colW - viewW : before;
+        sv.ScrollOffsetX = Math.Min(want, Math.Max(0, g.TotalCols * colW - viewW));
+        return sv.ScrollOffsetX == before ? g : BriefGeometry(side, n);
     }
 
     /// <summary>Where the Brief grid puts its cells: rows per column, the columns, whether they
@@ -726,9 +748,9 @@ public partial class CommanderApp
 
     /// <summary>Whether the cursor's column is in full view in Brief, where
     /// <see cref="ScrollBriefToCursor"/> leaves the scroll as it is, and the columns made are the
-    /// ones a build would make at this scroll. A key that scrolls builds before it scrolls (as it
-    /// always has), so its build made the columns for the scroll before it: the next key builds
-    /// again, as every key used to.</summary>
+    /// ones a build would make at this scroll. A key that scrolls builds, and scrolls before it
+    /// builds (<see cref="ScrollBriefBeforeBuild"/>), so the next key finds the columns in view
+    /// made.</summary>
     private bool BriefCursorShown(char side)
     {
         if (BriefScroll(side).Current is not { IsHosted: true } sv

@@ -702,6 +702,13 @@ so a reveal asked for on the same frame the content appeared is not lost.
 `ScrollIntoView(child)` and `ScrollRangeIntoViewHorizontal(left, width)` are the
 element and sideways forms.
 
+**A scroll from code raises no event.** `ScrollEvent` is the wheel's; setting
+`ScrollOffsetX`/`ScrollOffsetY` or a reveal moves the view and tells no handler. A view that
+makes only what is in view, picked from the offset (Vesper's Brief columns), sets a scroll it
+is about to make *before* its build and picks from that: a build that makes what the old
+offset shows and then scrolls (from `OnAfterBuild`) leaves what it scrolled to unmade, with
+nothing to build it until the next key.
+
 **`ScrollSidewaysWith(ISidewaysScroller)`.** Set when the horizontal offset is owned by
 something other than the view's own `ScrollOffsetX` (a `HorizontalPan`). The wheel's
 sideways motion (a trackpad swipe, Shift+wheel) and `ScrollBy`'s `dx` go there instead,
