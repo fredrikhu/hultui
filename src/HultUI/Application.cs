@@ -502,6 +502,11 @@ public sealed class Application : IDisposable
     /// draws again soon after a video beside it stops.</summary>
     internal static readonly TimeSpan LiveRequestsQuietAfter = TimeSpan.FromMilliseconds(100);
 
+    /// <summary>How many posts waited in the main-thread queue when a live frame last drew, none of
+    /// which can have run since; 0 once the queue drains. A count above it is a post made since.
+    /// UI thread.</summary>
+    private int _liveFrameQueued;
+
     /// <summary>
     /// Draws one frame from inside the platform's modal resize loop.
     ///
@@ -533,6 +538,14 @@ public sealed class Application : IDisposable
     /// does once no request has come for <see cref="LiveRequestsQuietAfter"/>: a GPU source that
     /// signals only by posting (any <c>IGpuImageSource</c> outside HultUI.Media and WebView) is
     /// drawn at the timer's rate, as before requests were answered, rather than not at all.</para>
+    ///
+    /// <para>Only while such a source can be on screen (<see cref="GpuFrameSink.MaySignalOnlyByPosting"/>):
+    /// otherwise a post draws once, at the first event after it was made. A post the loop cannot
+    /// run changes nothing by waiting — the web view's placement, queued at a drag's first step,
+    /// or an await's continuation — and it drew the same picture again on every timer tick, 64 to
+    /// 65 frames a second while an edge was held, and a second frame at every step of a drag. A
+    /// source that only posts keeps one post in flight and posts no more until it runs, so for it
+    /// the post that waits is still a reason to draw on every event.</para>
     ///
     /// <para>Never inside a frame of the same window: a wait on the UI thread in a draw can pump
     /// the size loop's messages, and the frame drawn from there drew the same elements again
@@ -570,7 +583,12 @@ public sealed class Application : IDisposable
             // every posted-work frame was dropped once requests could be answered.
             bool asking = LiveFrameRequests.Answering && _lastLiveRequest != 0
                 && clock.GetElapsedTime(_lastLiveRequest, at) < LiveRequestsQuietAfter;
-            bool posted = !_mainThreadQueue.IsEmpty && !asking;
+            // And only a post made since the last live frame, unless a source that signals by
+            // posting alone may be on screen: a post that waits for the loop to end changes nothing
+            // by waiting, and SDL's timer drew the same picture again for it 64 times a second.
+            int queued = _mainThreadQueue.Count;
+            bool posted = queued != 0 && !asking
+                && (queued != _liveFrameQueued || GpuFrameSink.MaySignalOnlyByPosting);
             if (platform.ResizePending)
             {
                 long now = Environment.TickCount64;
@@ -585,6 +603,9 @@ public sealed class Application : IDisposable
                 platform.MakeCurrent();
                 window.RenderFrame(drawClean: requested || posted);
             }
+            else return;
+            // Any frame drawn shows whatever the posts waiting so far had to show.
+            _liveFrameQueued = queued;
         }
         finally
         {
@@ -1108,6 +1129,8 @@ public sealed class Application : IDisposable
     {
         while (_mainThreadQueue.TryDequeue(out var action))
             action();
+        // Nothing waits now: the next post is a new one to a live frame (RenderLiveResizeFrame).
+        _liveFrameQueued = 0;
     }
 
     /// <summary>

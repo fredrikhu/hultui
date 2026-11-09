@@ -20,20 +20,45 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
     private int _width, _height;
     private GpuSinkMode _mode;
     private bool _disposed;
+    private readonly bool _asks;
 
     public GpuFrameSink(PixelFrameSink pixels, IGpuFrameRenderer renderer)
+        : this(pixels, renderer, asksForLiveFrames: false)
+    {
+    }
+
+    /// <summary>A sink whose owner also asks for its frames inside Win32's size/move loop
+    /// (<see cref="LiveFrameRequests"/>), as HultUI.Media's player and the web view do, rather than
+    /// signalling them only by a post; see <see cref="MaySignalOnlyByPosting"/>.</summary>
+    internal GpuFrameSink(PixelFrameSink pixels, IGpuFrameRenderer renderer, bool asksForLiveFrames)
     {
         _pixels = pixels;
         _renderer = renderer;
         _renderInFrame = RenderInFrame;
         _prepareInFrame = PrepareInFrame;
         _skipInFrame = SkipInFrame;
+        _asks = asksForLiveFrames;
         Interlocked.Increment(ref s_live);
+        if (_asks) Interlocked.Increment(ref s_asking);
     }
 
-    // In the whole process: sinks made and not yet disposed, and image elements holding a GPU
-    // source of another kind, which have no Dispose to count by.
-    private static int s_live, s_otherKind;
+    // In the whole process: sinks made and not yet disposed, those of them whose owner asks for
+    // its frames, and image elements holding a GPU source of another kind, which have no Dispose
+    // to count by.
+    private static int s_live, s_asking, s_otherKind;
+
+    /// <summary>
+    /// Whether any image can hold a GPU source whose new frames are signalled only by a post to the
+    /// UI thread: a sink whose owner does not ask for its frames (<see cref="LiveFrameRequests"/>),
+    /// or a GPU source of another kind. Inside Win32's size/move loop such a post waits for the loop
+    /// to end, and a source that keeps one post in flight posts no more until it runs, so the post
+    /// that waits is all a live frame can go on: while this is true it draws for waiting posts on
+    /// every event, as before; while it is false only for a post made since its last frame
+    /// (Application.RenderLiveResizeFrame). As with <see cref="MayNeedUndrawnService"/>, a sink
+    /// nobody disposes, or an element dropped still holding a source, keeps it true.
+    /// </summary>
+    internal static bool MaySignalOnlyByPosting =>
+        Volatile.Read(ref s_live) > Volatile.Read(ref s_asking) || Volatile.Read(ref s_otherKind) > 0;
 
     /// <summary>
     /// Whether any image can hold a GPU source to serve while its window is not drawn
@@ -252,6 +277,7 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
         if (_disposed) return;
         _disposed = true;
         Interlocked.Decrement(ref s_live);
+        if (_asks) Interlocked.Decrement(ref s_asking);
         if (_mode == GpuSinkMode.Gpu) _renderer.ReleaseGL();
         // The surface's image for this sink: on Vulkan an allocation of its own, which would
         // otherwise live as long as the window.

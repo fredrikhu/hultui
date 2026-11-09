@@ -164,7 +164,10 @@ public sealed class LiveResizeFrameTests(ITestOutputHelper output)
         int dirty = Tick(10, () => box!.MarkPaintDirty());
         // Work posted from another thread is waiting, which the held loop cannot run: a playing
         // video's next frame, a web page's. A draw takes the newest picture from a source that
-        // renders in it (mpv's render thread is the UI thread).
+        // renders in it (mpv's render thread is the UI thread). Once: a post that waits changes
+        // nothing by waiting, and the timer drew the same picture again for it on every tick
+        // (plan 17 round 9) — a web view's placement, queued at a drag's first step, held a drag
+        // at 64 frames a second. A source that only posts is the next test.
         bool ran = false;
         Application.InvokeOnMainThread(() => ran = true);
         int posted = Tick(10);
@@ -176,7 +179,7 @@ public sealed class LiveResizeFrameTests(ITestOutputHelper output)
         Assert.True(ran);
         Assert.Equal(0, idle);
         Assert.Equal(10, dirty);
-        Assert.Equal(10, posted);
+        Assert.Equal(1, posted);
         Assert.Equal(0, afterDrain);
     }
 
@@ -242,19 +245,35 @@ public sealed class LiveResizeFrameTests(ITestOutputHelper output)
         Assert.True(drawn <= requests + 5, $"{drawn} frames in {seconds:0.00} s for {requests} requests");
     }
 
+    /// <summary>An app's own GPU source, which can signal its frames only by posting. Draws nothing.</summary>
+    private sealed class OwnGpuSource : IGpuImageSource
+    {
+        public Size IntrinsicSize => new(4, 4);
+        public bool IsLoaded => true;
+        public string? AlternateText => null;
+        public bool TryRenderFrame(IExternalGLSurface surface, out GpuFrame frame)
+        {
+            frame = default;
+            return false;
+        }
+    }
+
     /// <summary>
     /// Inside the modal size/move loop, a GPU source that signals only by posting — an
     /// <c>IGpuImageSource</c> outside HultUI.Media and WebView, which never asks for a frame — is
     /// drawn on each of SDL's live-resize timer ticks for its waiting post, as before requests were
     /// answered: it froze for the whole move once a window answering requests stopped drawing for
-    /// posted work (plan 17 round 5). Posted work is no reason to draw only while a source asks: for
-    /// 100 ms after a frame drawn for a request.
+    /// posted work (plan 17 round 5). It keeps one post in flight, so no new post comes while that
+    /// one waits. Posted work is no reason to draw only while a source asks: for 100 ms after a
+    /// frame drawn for a request. Without such a source on screen a waiting post draws once (plan
+    /// 17 round 9).
     /// </summary>
     [UiFact]
     public void InsideTheModalLoop_ASourceThatOnlyPosts_IsDrawnOnTheTimersTicks()
     {
         using var guard = ForegroundGuard.Begin();
-        var (app, hwnd, counter) = Open(Plain);
+        BoxElement? column = null;
+        var (app, hwnd, counter) = Open(c => column = (BoxElement)Plain(c));
         using var _ = app;
         var window = (SDL3Window)typeof(Window).GetProperty("PlatformWindow", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(app.PrimaryWindow)!;
@@ -269,13 +288,24 @@ public sealed class LiveResizeFrameTests(ITestOutputHelper output)
             return counter.Frames - before;
         }
 
-        bool ran = false;
-        int idle, posted, asked, afterAsking, afterQuiet;
+        bool ran = false, ranAlone = false;
+        int alone, idle, posted, asked, afterAsking, afterQuiet;
+        ImageElement? image = null;
         SendMessageW(hwnd, EnterSizeMove, 0, 0);
         try
         {
             idle = Tick(10);
-            // The source's post, from its own thread: it waits for the loop to end.
+            // No source that only posts on screen: a post that waits (a continuation) draws once.
+            var first = new Thread(() => Application.InvokeOnMainThread(() => ranAlone = true)) { IsBackground = true };
+            first.Start();
+            first.Join();
+            alone = Tick(10);
+
+            // The app's own source comes on screen (a change: drawn), and posts from its own
+            // thread: what waits is drawn on every tick.
+            image = ImageElement.New(new OwnGpuSource());
+            column!.AddChild(image);
+            Tick(1);
             var source = new Thread(() => Application.InvokeOnMainThread(() => ran = true)) { IsBackground = true };
             source.Start();
             source.Join();
@@ -293,13 +323,17 @@ public sealed class LiveResizeFrameTests(ITestOutputHelper output)
         finally
         {
             SendMessageW(hwnd, ExitSizeMove, 0, 0);
+            // An image holding a source counts as one that only posts until it lets go.
+            if (image is not null) image.Source = null;
         }
         app.RunFrame(TimeSpan.FromMilliseconds(16));   // the posts, held by the loop
 
-        output.WriteLine($"timer ticks inside the loop drew: idle {idle}, with a post waiting {posted}, for a request {asked}, " +
-            $"after it {afterAsking}, 150 ms later {afterQuiet}");
+        output.WriteLine($"timer ticks inside the loop drew: idle {idle}, a post waiting alone {alone}, with the source's " +
+            $"waiting {posted}, for a request {asked}, after it {afterAsking}, 150 ms later {afterQuiet}");
         Assert.True(ran);
+        Assert.True(ranAlone);
         Assert.Equal(0, idle);
+        Assert.Equal(1, alone);
         Assert.Equal(10, posted);
         Assert.Equal(1, asked);
         Assert.Equal(0, afterAsking);

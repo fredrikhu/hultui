@@ -539,7 +539,8 @@ public sealed class WebViewController : IDisposable
         public void UseGpuRenderer(IGpuFrameRenderer renderer)
         {
             if (owner._gpuSink is not null) throw new InvalidOperationException("A GPU renderer is already registered.");
-            owner._gpuSink = new GpuFrameSink(owner._sink, renderer);
+            // The controller asks for its frames inside Win32's size/move loop (OnRepaintRequested).
+            owner._gpuSink = new GpuFrameSink(owner._sink, renderer, asksForLiveFrames: true);
         }
 
         public void RequestRepaint() => owner.OnRepaintRequested();

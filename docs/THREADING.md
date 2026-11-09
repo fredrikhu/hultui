@@ -142,7 +142,10 @@ own frame took the newest picture. A GPU source of your own that only posts (an
 `IGpuImageSource` that never asks) is still drawn there for its waiting post, at
 the timer's rate, about 64 frames a second: the window leaves posted work undrawn
 only while a source has asked for a frame in the last 100 ms. Until round 5 of
-plan 17 such a source froze for the whole move or held drag.
+plan 17 such a source froze for the whole move or held drag. With no such source
+on screen, a waiting post (an `await` continuation, the web view's placement) is
+drawn once, at the first event after it was posted: it changes nothing by waiting,
+and SDL's timer drew the same picture again for it 64 times a second (round 9).
 
 Any wait on the UI thread inside a frame (`Parallel.For`, `Task.Wait`, a contended
 `lock`) can pump messages on Windows, and during a live resize those raise the
