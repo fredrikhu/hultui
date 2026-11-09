@@ -824,6 +824,22 @@ after End in Thumbnails a list's height in the reader tree 0.0005 px from a late
 before the change, Brief's columns after a key that scrolls them, made for the scroll before it until
 the next key.
 
+**A part that every full build makes keeps its rows too** (Meridian's request tree, round 9 step 9).
+The tree builds with each `MarkDirty` — a request opened, a send's start and its end, a save, each toast
+— and made every row again, with the ⋯ button and the menu each row gained in 41f48bd3. Each request
+and folder row now comes back by its path. Its state is what it shows: the method, the title, lit,
+unsaved, the first variable it feeds forward, how many it uses, its depth and the scale; a workspace
+opened lets them all go. **Capture the key, and look the rest up when the handler runs.** A folder's
+menu captured the folder's record from the scan its row was made from, so a kept row's Delete… would
+have counted the requests of that scan, not the one on screen; it now finds the folder by its path when
+it is picked. Headless, 1440×900, JIT, UI-thread bytes: a full build at 25 requests 327.6 → 127.6 KB
+(elements made 294 → 117), at 200 requests 1,587.5 → 132.8 KB (1,407 → 117; the tree part 1,389.2 → 15.8),
+now flat in the collection's size; a toast at 200 requests 3,180.7 → 272.1 KB, a send 3,270.4 → 361.0;
+NativeAOT within 1 %. In 29 scenes (opens, a send in flight and ended, an edit, a save, a rename, a
+delete, new requests and folders, a folder renamed with what is in it, an environment, a toast, hover
+and keyboard on a row and its ⋯ across a build, History and back, changes on disk, the scale), the
+pixels, the reader tree, focus and every row's menu, each item run, matched a build that keeps nothing.
+
 A column whose cells are all kept is left with no children by the time the reconciler reaches
 it, since the build moved every one into its new tree. Until round 5 those came back one by one,
 each marking the column's structure, so with a reader listening every key built the whole

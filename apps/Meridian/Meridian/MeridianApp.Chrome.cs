@@ -73,6 +73,7 @@ public partial class MeridianApp
 
     private Part TreePart => _treePart ??= new(_parts, () =>
     {
+        BeginTreeRows();
         // As in BuildResponsePart: a part can hear the revision before the app's rebuild takes
         // it out (outside an event, a signal write runs its effects at once).
         if (_workspace is null) return Box.New();

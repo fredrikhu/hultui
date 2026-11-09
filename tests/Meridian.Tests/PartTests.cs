@@ -192,6 +192,115 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    // ── The tree's rows, kept ────────────────────────────────────────────
+
+    /// <summary>The tree hands back each row a build does not change (MeridianApp.Requests.cs): a
+    /// full build — a request opened, a send, a save, each toast — that moves nothing a row shows
+    /// makes no request row, however big the collection; opening another request makes the two
+    /// rows whose light moved.</summary>
+    [Fact]
+    public void AFullBuild_MakesNoRequestRow_WhenNothingInTheTreeChanged()
+    {
+        for (int i = 0; i < 40; i++)
+            Write($"bulk/b{i:00}.req", $"GET {_server.Origin}/ok\nname Bulk {i}\n");
+        Hosted(fx =>
+        {
+            var s = fx.Session;
+            // Below the fold of the tree, so opened as a tree row's click opens them.
+            fx.App.OpenRequest(Path.Combine(_root, "two.req"));
+            s.PumpFrames(3);
+            int made = fx.App.RequestRowsMade;
+            for (int i = 0; i < 3; i++)
+            {
+                FullRebuild(fx.App);
+                s.PumpFrames(2);
+            }
+            Assert.Equal(0, fx.App.RequestRowsMade - made);
+            AssertPartsAreAFullBuild(fx, "after full builds");
+
+            made = fx.App.RequestRowsMade;
+            fx.App.OpenRequest(Path.Combine(_root, "get-ok.req"));
+            s.PumpFrames(3);
+            Assert.Equal(2, fx.App.RequestRowsMade - made);
+            Assert.True(Lit(TreeRow(fx, "req-get-ok")));
+            Assert.False(Lit(TreeRow(fx, "req-two")));
+            AssertPartsAreAFullBuild(fx, "after an open");
+        });
+    }
+
+    /// <summary>A row is made again when what it shows of its request moves: the unsaved dot, the
+    /// method saved, the file renamed (a new path, so a new row), the title changed on disk.</summary>
+    [Fact]
+    public void ATreeRowIsMadeAgain_WhenItsRequestIsDirtiedRenamedOrRetitled()
+    {
+        Hosted(fx =>
+        {
+            var s = fx.Session;
+            Click(fx, "req-get-ok");
+            Click(fx, "url-display");
+            int made = fx.App.RequestRowsMade;
+            s.Window.TypeText("x");
+            s.PumpFrames(3);
+            Assert.Equal(1, fx.App.RequestRowsMade - made);
+            Assert.True(HasDot(TreeRow(fx, "req-get-ok")), "no unsaved dot on the tree row");
+            s.Window.Window.ClearFocus();
+            s.PumpFrames(2);
+            AssertPartsAreAFullBuild(fx, "dirtied");
+
+            Click(fx, "method-chip");
+            Click(fx, "popover-PUT");
+            made = fx.App.RequestRowsMade;
+            s.Window.PressKey(KeyCode.S, KeyModifiers.Ctrl);
+            s.PumpFrames(3);
+            Assert.Equal(1, fx.App.RequestRowsMade - made);
+            Assert.Equal("PUT Get ok", TreeRow(fx, "req-get-ok").AccessibleName);
+            Assert.False(HasDot(TreeRow(fx, "req-get-ok")));
+            AssertPartsAreAFullBuild(fx, "saved");
+
+            made = fx.App.RequestRowsMade;
+            fx.App.RenameRequest(Path.Combine(_root, "two.req"), "second");
+            s.PumpFrames(3);
+            Assert.Equal(1, fx.App.RequestRowsMade - made);
+            Assert.Null(Part(fx, "tree").Descendant("req-two", required: false));
+            Assert.Equal("GET Two", TreeRow(fx, "req-second").AccessibleName);
+            AssertPartsAreAFullBuild(fx, "renamed");
+
+            // The watcher's rescan may first read the file half written, so one or two.
+            made = fx.App.RequestRowsMade;
+            Write("second.req", $"GET {_server.Origin}/two\nname Deux\n");
+            s.PumpUntil(() => TreeRow(fx, "req-second").AccessibleName == "GET Deux", Wait);
+            Assert.InRange(fx.App.RequestRowsMade - made, 1, 2);
+            AssertPartsAreAFullBuild(fx, "retitled");
+        });
+    }
+
+    /// <summary>A kept row's menu acts on the collection as it is when the menu opens, not as it was
+    /// when the row was made: a folder's Delete… counts the requests in it now, and a request's ⋯
+    /// renames its own file.</summary>
+    [Fact]
+    public void AKeptRowsMenu_ActsOnTheCollectionAsItIsNow()
+    {
+        Hosted(fx =>
+        {
+            var s = fx.Session;
+            Write("orders/late.req", $"GET {_server.Origin}/ok\nname Late\n");
+            s.PumpUntil(() => Part(fx, "tree").Descendant("req-late", required: false) is not null, Wait);
+            Click(fx, "folder-actions-orders");
+            Click(fx, "popover-Delete…");
+            Assert.True(HasTextContaining(Root(s), "orders/ and the 5 requests in it"),
+                "the folder's Delete… did not count the request added since its row was made");
+            s.Window.PressKey(KeyCode.Escape);
+            s.PumpFrames(3);
+            AssertPartsAreAFullBuild(fx, "after the folder's menu");
+
+            Click(fx, "req-actions-stall");
+            Click(fx, "popover-Rename…");
+            Assert.True(HasText(Root(s), "Rename stall.req"), "the row's Rename… named another file");
+            s.Window.PressKey(KeyCode.Escape);
+            s.PumpFrames(3);
+        });
+    }
+
     // ── What the parts show ──────────────────────────────────────────────
 
     /// <summary>The tree's unsaved dot: the first edit puts it on the request's row, Ctrl+S takes
@@ -569,11 +678,13 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
 
     private static readonly string[] PartKeys = ["titlebar", "rail", "tree", "response-right", "response-bottom", "history-archive"];
 
-    /// <summary>The parts on screen equal the parts a forced build of every one of them makes.</summary>
+    /// <summary>The parts on screen equal the parts a forced build of every one of them makes, with
+    /// no tree row handed back (MeridianApp.Requests.cs keeps the rows a build does not change).</summary>
     private static void AssertPartsAreAFullBuild(Fixture fx, string? when = null)
     {
         var kept = PartSigs(fx);
         int parts = fx.App.PartBuilds + fx.App.HistoryArchiveBuilds, onScreen = PartKeys.Count(k => TryPart(fx, k) is not null);
+        fx.App.ForgetTreeRows();
         FullRebuild(fx.App);
         fx.Session.PumpFrames(2);
         int built = fx.App.PartBuilds + fx.App.HistoryArchiveBuilds - parts;
@@ -698,6 +809,9 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
 
     private static bool HasText(Element root, string text) =>
         Descendants(root).Any(e => e is TextElement t && t.Content == text);
+
+    private static bool HasTextContaining(Element root, string text) =>
+        Descendants(root).Any(e => e is TextElement t && t.Content.Contains(text, StringComparison.Ordinal));
 
     private static bool HasTextStarting(Element root, string text) =>
         Descendants(root).Any(e => e is TextElement t && t.Content.StartsWith(text, StringComparison.Ordinal));

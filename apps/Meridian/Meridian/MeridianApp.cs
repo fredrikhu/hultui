@@ -368,6 +368,7 @@ public partial class MeridianApp : Component, IDisposable
             return;
         }
         _workspace = ws;
+        ForgetTreeRows();
         StopResponseWork();
         _tabs.Clear();
         _activeTab = -1;
