@@ -87,14 +87,17 @@ public class TokenizeBudgetTests
 
         protected override object? Invoke(MethodInfo? method, object?[]? args)
         {
-            if (method!.Name != nameof(IGrammar.TokenizeLine) || args is not [LineText text, var state, TimeSpan limit])
+            if (method!.Name is not (nameof(IGrammar.TokenizeLine) or nameof(IGrammar.TokenizeLine2))
+                || args is not [LineText text, var state, TimeSpan limit])
                 return method.Invoke(_grammar, args);
 
             _limits?.Add(limit);
-            if (_seen++ != _line)
-                return _grammar.TokenizeLine(text, (IStateStack?)state, TimeSpan.MaxValue);
-            Thread.Sleep(SyntaxHighlighter.LineBudget + TimeSpan.FromMilliseconds(50));
-            return _grammar.TokenizeLine(new LineText(text.Memory[.._at]), (IStateStack?)state, TimeSpan.MaxValue);
+            if (_seen++ == _line)
+            {
+                Thread.Sleep(SyntaxHighlighter.LineBudget + TimeSpan.FromMilliseconds(50));
+                text = new LineText(text.Memory[.._at]);
+            }
+            return method.Invoke(_grammar, [text, state, TimeSpan.MaxValue]);
         }
     }
 }

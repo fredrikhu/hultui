@@ -106,9 +106,11 @@ public class TokenizeDiffTests
         Assert.NotEmpty(result.New![Changed - 1]);
     }
 
-    /// <summary>What walking a line costs less than colouring it: no token's scope list, no
-    /// theme match, no spans. Bytes, not time: nearly all of the time is the grammar's regular
-    /// expressions, which a line needs either way.</summary>
+    /// <summary>What walking a line costs less than colouring it: no spans (10 % of these lines.
+    /// bytes; a shown line's tokens are the same encoded ones since plan 17 round 9, where they
+    /// used to be token objects with their scope lists, and a walked line saved a fifth). Bytes,
+    /// not time: nearly all of the time is the grammar's regular expressions, which a line needs
+    /// either way.</summary>
     [Fact]
     public void ALineNobodyShows_IsWalkedForLess()
     {
@@ -117,7 +119,7 @@ public class TokenizeDiffTests
         long shown = Bytes(() => Tokenize(null, [], New, [new(1, Lines)]));
         long walked = Bytes(() => Tokenize(null, [], New, [new(Lines, Lines)]));
 
-        Assert.True(walked < shown * 0.9, $"{walked:N0} bytes against {shown:N0}");
+        Assert.True(walked < shown * 0.95, $"{walked:N0} bytes against {shown:N0}");
 
         static long Bytes(Action tokenize)
         {

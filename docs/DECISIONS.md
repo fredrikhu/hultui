@@ -696,13 +696,34 @@ Meridian's pretty toggle on the HTML page, all threads: 55,100–55,189 → 53,3
 (this repository, five other local ones and 40 `node_modules` files), 1,752,925 lines and 4,130,773
 spans, all identical.
 
-**Not done: colour from TextMateSharp's encoded tokens.** `TokenizeLine2` hands back each token's
-colour already matched, with no token objects and no scope lists, and saves a further 28 % of the
-JSON's bytes, 18 % of the XML's and 4 % of the HTML's (JIT). But it matches a theme rule's parent
-scopes as VS Code does, where the highlighter takes the first rule of a token's innermost scope that
-has a colour, whatever its parents. On the 3,206 files that changes 2,388 of the 1,752,346 lines, in
-TypeScript, JavaScript, PowerShell, shell, C++ and Markdown (none in the three bodies above). The
-colours a file gets are the user's to change; it waits for that.
+**Since then (step 14c, the user's yes to question 23): colour from TextMateSharp's encoded
+tokens.** `TokenizeLine2` hands back each token as two numbers, its start and its attributes, with
+the theme's colour already in them: no token objects and no scope lists, so the per-list cache above
+is gone too. Same probe, same way:
+
+| | JSON | XML | HTML |
+|---|---|---|---|
+| KB a call, JIT | 7,240 → 5,112 (−29.4 %) | 10,803 → 8,765 (−18.9 %) | 49,895 → 47,675 (−4.4 %) |
+| KB a call, NativeAOT | 7,532 → 5,404 (−28.3 %) | 11,224 → 9,186 (−18.2 %) | 51,758 → 49,539 (−4.3 %) |
+| ms a call, JIT | 10.3–10.6 → 7.2 | 11.8–12.0 → 10.4–10.5 | 80.0–80.5 → 80.5–80.8 |
+| ms a call, NativeAOT | 13.8 → 9.6 | 15.5 → 13.8 | 97.9 → 96.8 |
+
+Meridian's pretty toggle: 53,333–53,403 → 51,096–51,146 KB on JIT, 54,765 → 52,544 on NativeAOT;
+gen-0 collections in 20 toggles 34–35 → 32–33 and 36 → 33.
+
+The colours change in Dark+ and Light+ only. TextMateSharp matches a token's colour scope by scope
+as VS Code does: each scope takes its own most specific rule, the innermost with a colour wins, and
+a rule naming a parent scope ("source.cpp keyword.operator.new") does not colour a token outside it.
+The highlighter used to take the first rule with a colour from any of the token's scopes, the theme's
+own file before the one it includes, parents ignored. The two differ only where a theme's file and
+the one it includes both have a rule for a token's scopes, or where a rule names a parent: of the
+bundled themes, Dark+ (which includes dark_vs) and Light+ (light_vs). On the 3,206 files: 2,388 of
+1,753,525 lines in each of the two, exactly the lines step 14b listed (TypeScript and JavaScript
+quoted keys become strings, `new` a keyword, numeric keys numbers, braces in `.tsx` lose the key
+colour, C members become variables, operators in a shell `${…}` plain; PowerShell members lost
+their yellow, below), and none in Solarized Light and Dark, Kimbie Dark, One Dark, Dracula or
+Tomorrow Night Blue, nor in any JSON, XML or HTML file. A token's bold or italic is still not
+taken from the theme: it would change how wide a line is.
 
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 

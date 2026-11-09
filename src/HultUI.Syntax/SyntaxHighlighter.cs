@@ -2,6 +2,7 @@ using System.Diagnostics;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using TextMateSharp.Grammars;
+using TextMateSharp.Internal.Grammars;
 using TextMateSharp.Registry;
 using TextMateSharp.Themes;
 using TmTheme = TextMateSharp.Themes.Theme;   // "Theme" alone collides with HultUI.Core.Styling.Theme
@@ -41,7 +42,6 @@ public static class SyntaxHighlighter
     private static Color? _defaultFg;
     private static readonly Dictionary<string, IGrammar?> GrammarByExt = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<int, Color?> ColorById = new();
-    private static readonly Dictionary<IReadOnlyList<string>, Color?> ColorByScopes = new(ScopeListComparer.Instance);
 
     /// <summary>How many times this thread has needed the registry, loaded or not. A test
     /// reads it to show that a question answered from a table never touched it.</summary>
@@ -194,8 +194,8 @@ public static class SyntaxHighlighter
     /// needs every line above it, for the state they leave (a block comment opened 900 lines
     /// up), but a diff needs nothing below its last line, and of the lines above it only that
     /// state. So each side stops at its last shown line; a line nobody shows is walked for its
-    /// state, which saves about a fifth of its bytes and leaves no spans to keep (a diff's lines
-    /// are a few in a hundred); and the lines both versions start with are walked once. On the
+    /// state and leaves no spans to keep (a diff's lines are a few in a hundred); and the lines
+    /// both versions start with are walked once. On the
     /// spans of a line shown this is <see cref="TokenizeLines(string, string, int, CancellationToken, TimeProvider?)"/>,
     /// and it holds a side to the same limits: a text too long for that gets none here.
     ///
@@ -345,7 +345,6 @@ public static class SyntaxHighlighter
             _defaultFg = null;
             GrammarByExt.Clear();
             ColorById.Clear();
-            ColorByScopes.Clear();
         }
         // Which extensions are highlightable does not depend on the theme: CanHighlight answers
         // from a fixed table.
@@ -473,28 +472,24 @@ public static class SyntaxHighlighter
                     line = line[..(char.IsHighSurrogate(line.Span[_longLine - 1]) ? _longLine - 1 : _longLine)];
                 }
                 long lineStarted = Stopwatch.GetTimestamp();
-                if (!inFirst && !inSecond)
-                {
-                    IStateStack next;
-                    try { next = grammar.TokenizeLine2(new LineText(line), state, _lineBudget).RuleStack; }
-                    catch { continue; }   // a broken grammar rule shouldn't kill the whole file
-                    if (Finished(lineStarted)) state = next;
-                    continue;
-                }
-
-                ITokenizeLineResult tokenized;
-                try { tokenized = grammar.TokenizeLine(new LineText(line), state, _lineBudget); }
+                ITokenizeLineResult2 tokenized;
+                try { tokenized = grammar.TokenizeLine2(new LineText(line), state, _lineBudget); }
                 catch { continue; }   // a broken grammar rule shouldn't kill the whole file
                 if (whole && Finished(lineStarted)) state = tokenized.RuleStack;
+                if (!inFirst && !inSecond) continue;   // walked for its state alone
 
-                int lineLength = line.Length;
+                // Two numbers a token: where it starts, and its attributes, which carry the colour
+                // the theme gives it (see ColorFor). A token ends where the next one starts, the
+                // last at the end of the line.
+                var tokens = tokenized.Tokens;
+                int count = tokens.Length / 2, lineLength = line.Length;
                 _spans.Clear();
-                foreach (var token in tokenized.Tokens)
+                for (int k = 0; k < count; k++)
                 {
-                    int s = Math.Clamp(token.StartIndex, 0, lineLength);
-                    int e = Math.Clamp(token.EndIndex, s, lineLength);
+                    int s = Math.Clamp(tokens[2 * k], 0, lineLength);
+                    int e = Math.Clamp(k + 1 < count ? tokens[2 * k + 2] : lineLength, s, lineLength);
                     if (e <= s) continue;
-                    if (ColorFor(token.Scopes) is not { } color) continue;
+                    if (ColorFor(EncodedTokenAttributes.GetForeground(tokens[2 * k + 1])) is not { } color) continue;
 
                     // Merge contiguous same-color tokens so the renderer draws fewer segments.
                     if (_spans.Count > 0 && _spans[^1].End == s && _spans[^1].Color == color)
@@ -524,63 +519,29 @@ public static class SyntaxHighlighter
             grammar.GetScopeName() is "source.json" or "source.json.comments" or "text.xml" ? LongDataLine : LongLine;
     }
 
-    // A token's colour depends on its scope names alone, and a text has few different lists of
-    // them (15 in a 2,463-line XML document of 22,039 tokens, 126 in a 3,641-line HTML page), so
-    // each list is matched against the theme once. Theme.Match builds a new list of every rule
-    // for every scope on each call: 58-75 bytes a token, 12-13 % of an XML tokenize's bytes. The
-    // dictionary keeps a copy of a list, not the one TextMateSharp hands every token of a scope.
-    // Scope names a grammar builds from the text ($1 in a rule's name) could make lists without
-    // end, so the dictionary starts again past MaxScopeLists.
-    private const int MaxScopeLists = 4_096;
-
-    private static Color? ColorFor(List<string> scopes)
+    // TextMateSharp encodes in each token the colour the theme gives it, matched as the scopes were
+    // pushed, so a line comes back as numbers: no token objects and no lists of scope names, 28 % of
+    // a JSON body's tokenize bytes and 18 % of an XML body's. Each scope takes its own most specific
+    // rule and the innermost scope with a colour wins, as in VS Code; a rule naming parent scopes
+    // ("source.cpp keyword.operator.new") no longer colours a token outside them. In Dark+ and
+    // Light+, the two bundled themes that include another file, that differs from taking the first
+    // rule with a colour from any scope of the token, the theme's own file before the included one:
+    // a quoted object key in TypeScript is a string now, `new` a keyword, a C member a variable.
+    // Only the colour is taken, as before; a theme's bold and italic stay unused, since they would
+    // change how wide a line is.
+    //
+    // Id 1 is the theme's default foreground, which a token no rule colours carries; it draws in
+    // the element's own text colour, and so does a rule's colour that is the editor's foreground.
+    private static Color? ColorFor(int id)
     {
-        if (ColorByScopes.TryGetValue(scopes, out var known)) return known;
-        var color = MatchColor(scopes);
-        if (ColorByScopes.Count >= MaxScopeLists) ColorByScopes.Clear();
-        ColorByScopes[scopes.ToArray()] = color;
+        if (id <= 1) return null;
+        if (!ColorById.TryGetValue(id, out var color))
+        {
+            color = ParseHex(_theme!.GetColor(id));
+            if (color == _defaultFg) color = null;
+            ColorById[id] = color;
+        }
         return color;
-    }
-
-    private static Color? MatchColor(List<string> scopes)
-    {
-        foreach (var rule in _theme!.Match(scopes))
-        {
-            if (rule.foreground <= 0) continue;
-            if (!ColorById.TryGetValue(rule.foreground, out var color))
-            {
-                color = ParseHex(_theme.GetColor(rule.foreground));
-                ColorById[rule.foreground] = color;
-            }
-            if (color is not { } c) continue;
-            // The default editor foreground carries no information — let the
-            // element's own text color show through instead.
-            return c == _defaultFg ? null : c;
-        }
-        return null;
-    }
-
-    /// <summary>Two lists of scope names are equal when they hold the same names in the same order.
-    /// By index: an interface's foreach would box the list's enumerator on every token.</summary>
-    internal sealed class ScopeListComparer : IEqualityComparer<IReadOnlyList<string>>
-    {
-        public static readonly ScopeListComparer Instance = new();
-
-        public bool Equals(IReadOnlyList<string>? a, IReadOnlyList<string>? b)
-        {
-            if (ReferenceEquals(a, b)) return true;
-            if (a is null || b is null || a.Count != b.Count) return false;
-            for (int i = a.Count - 1; i >= 0; i--)   // innermost first: lists differ there most
-                if (!string.Equals(a[i], b[i], StringComparison.Ordinal)) return false;
-            return true;
-        }
-
-        public int GetHashCode(IReadOnlyList<string> scopes)
-        {
-            var hash = new HashCode();
-            for (int i = 0; i < scopes.Count; i++) hash.Add(scopes[i], StringComparer.Ordinal);
-            return hash.ToHashCode();
-        }
     }
 
     // Lines as slices of the source (no per-line string allocs); trailing '\r' is
