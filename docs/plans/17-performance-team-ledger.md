@@ -881,3 +881,6 @@ From 2026-11-03 (round 8's survey); earlier entries are in the archive ([to 2026
   Release` 30 projects, 0 failures (Core 5,067, Headless 1,491, Junction 1,082 in 8 m 19 s, Vesper 900, Meridian 653,
   Aperture 356, Skia 387, Text 293, WebView 76, Media 86, Platform.SDL3 54). Still to run before the release: Fedora
   (`scripts/wsl-test.sh`), docfx `--warningsAsErrors`, and the suite again if steps 13b/15b land.
+- 2026-11-09: Fedora `wsl-test.sh` on the branch: 22 projects, 0 failures (Core 5,066 + 1 skipped, Headless 1,335 + 82,
+  Vesper 882 + 20, Skia 387, Text 293, Linux bridge 104); docfx `--warningsAsErrors` 0 warnings, 0 errors (run from the
+  repository root, where `docfx.json` is). The round can release as it is; it waits only for questions 20–25.
