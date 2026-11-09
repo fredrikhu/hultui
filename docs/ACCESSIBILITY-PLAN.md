@@ -343,6 +343,17 @@ A dialog with nothing focusable in it takes the focus itself (round 6, step 5): 
 Tab stop, so a reader is told the focus is on the dialog, named by its title. It was on the scrim,
 which since the scrim stopped being a button is a pane with no name.
 
+What holds the keyboard focus has to be a node, or a reader is told the focus is on nothing (plan 17
+round 9, step 15, fixed in the apps). A focusable box with no role or name is no node
+(`AccessibilityTreeBuilder.IsSemantic`), and the bridges are told a focus move only between nodes.
+Vesper's pane, the Tab stop that holds the focus while the cursor walks, was such a box: every Tab and
+click told nothing. It is a group (UIA Group, AT-SPI panel) named after its side and its folder,
+"Left pane, Downloads", with the pane's content under it. Its name changes with the folder, so a
+navigation with a reader builds the tree where it was walked in place (a node with children whose own
+name changed, which the walk does not take): 60 files, Enter and Backspace, 0 → 1 tree and +20 KB a
+navigation with UIA (209 → 230 KB), the same on AT-SPI; nothing without a reader, and no cursor key
+builds one (0 trees a key in Detail, Brief and Thumbnails, as before).
+
 The coalesced layout refresh builds no tree either where a build would make the same nodes
 (2026-10-26, plan 17 round 5). A node keeps its box where it sits in the content of the scroll
 views above it (`UnscrolledRect`: the element's box less a sticky shift or an overlay's origin),
