@@ -193,7 +193,9 @@ public partial class WebViewElement : Element, IAccessibleContentSource
         {
             WindowSystem = window.WindowSystem,
         };
-        if (_placement == placement) return;
+        // Drawn is on screen: a page another element hid (a rebuild's twin that stopped) is shown
+        // again, or its engine would keep it hidden, and WebView2's frames stopped, under this one.
+        if (_placement == placement && !_controller!.NeedsShowing) return;
         _placement = placement;
         if (_flushQueued) return;
         // Never call into an engine from inside a draw: WebView2 answers a new size with

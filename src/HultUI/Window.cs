@@ -1614,6 +1614,17 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         }
     }
 
+    /// <summary>What a drawn frame does for a GPU source that left the screen
+    /// (<see cref="GpuFrameSink.ReleaseWhileHidden"/>), for a window that is not drawn: its context
+    /// is made current for it, as <see cref="ServiceUndrawnSources"/> does.</summary>
+    private void ReleaseHiddenSourcesUndrawn()
+    {
+        if (!GpuFrameSink.AnyToRelease) return;
+        if (PlatformWindow.Surface is not IExternalGLSurface surface || !surface.SupportsExternalGL) return;
+        PlatformWindow.MakeCurrent();
+        GpuFrameSink.ReleaseHidden(surface);
+    }
+
     private static void CollectGpuSources(Element element, List<IGpuImageSource> into)
     {
         if (element is ImageElement { Source: IGpuImageSource source } && !into.Contains(source))
@@ -1892,6 +1903,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             for (int i = 0; i < _overlays.Count; i++)
                 ClearFlags(_overlays[i].Content, DirtyFlags.Children);
             ServiceUndrawnSources();
+            ReleaseHiddenSourcesUndrawn();
             if (_hoverMayBeStale) SettleHover();
             return false;
         }
@@ -1915,6 +1927,12 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // The drag ghost follows the pointer above everything, a dialog's own drag included.
         if (_isDragging && !_isExternalDrag)
             RenderDragGhost(ctx);
+
+        // A GPU source that left the screen gives its GL objects back here, inside a frame of the
+        // window it was drawn in, with that window's context current; one drawn in this frame has
+        // kept them (GpuFrameSink.ReleaseWhileHidden). One read when none waits.
+        if (GpuFrameSink.AnyToRelease && PlatformWindow.Surface is IExternalGLSurface external)
+            GpuFrameSink.ReleaseHidden(external);
 
         // After the overlays: a focused control can live inside one, and the ring belongs on
         // top of everything either way — it is drawn outside the control's own bounds, so a

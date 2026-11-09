@@ -22,7 +22,7 @@ namespace HultUI.WebView.WebView2;
 /// parent for keyboard focus and the input method, so this view forwards pointer input only
 /// (spike W0, and Microsoft's hosting guide).</para>
 /// </remarks>
-internal sealed unsafe partial class WebView2View : IWebEngineView
+internal sealed unsafe partial class WebView2View : IWebEngineView, IReleasesGpuWhileHidden
 {
     private enum Phase { Waiting, Creating, Ready, Failed, Disposed }
 
@@ -56,6 +56,13 @@ internal sealed unsafe partial class WebView2View : IWebEngineView
 
     /// <summary>Whether GL reads the captured frames in place, with no copy through the CPU.</summary>
     internal bool ZeroCopy => _capture?.ZeroCopy ?? false;
+
+    /// <summary>Whether the capture holds the texture GL reads in place, with its registration: from
+    /// the first frame drawn until the page is hidden or goes. For tests.</summary>
+    internal bool HoldsInterop => _capture?.HoldsInterop ?? false;
+
+    /// <summary>Whether the GL side was given back and no frame has been drawn since. For tests.</summary>
+    internal bool AwaitsFrame => _capture?.AwaitsFrame ?? false;
 
     public WebView2View(WebView2Engine engine, WebViewOptions options)
     {
@@ -259,6 +266,11 @@ internal sealed unsafe partial class WebView2View : IWebEngineView
     public void SetVisible(bool visible)
     {
         _visible = visible;
+        // Off screen, the controller has the frame sink give back the GPU objects the frames go
+        // through (IReleasesGpuWhileHidden); the capture keeps running. Shown, WebView2 sends the
+        // page's frame, a still page's too, and the draw that takes it makes them again (WebView2
+        // 157: every show measured, 11–27 ms on). Restarting the capture for that frame instead
+        // drew black, then white, then the page as it was, before the page as it is.
         if (_phase == Phase.Ready)
             Com.Call(_controller, ICoreWebView2Controller.put_IsVisible, visible ? 1 : 0);
     }

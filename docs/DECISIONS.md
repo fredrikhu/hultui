@@ -638,6 +638,26 @@ Spans: 3,206 files (3,094 with a grammar, from this repository, five other local
 (Babel's `helpers-generated.js`), whose long line ends inside a construct its start is not in: a headless
 tokenize used to carry that state on.
 
+### A hidden web view gives back its capture, not its picture or its capture session (round 9)
+
+A WebView2 page whose element leaves the screen gives back, in its window's next frame, the
+capture's interop texture and its GL registration, and on Vulkan the image the renderer lent its
+frame sink (plan 17 round 9, step 12). Four other parts were measured and left out, on NVIDIA 610,
+a page of 2160×779 px, DXGI `QueryVideoMemoryInfo` for this process:
+
+- **Restarting the capture on show** (so a still page sends a frame): its first frames were black,
+  then white, then the page as it was before it was hidden, then the page as it is, at every show.
+  With the capture left running, WebView2 sends the page's frame when it is shown — in every show
+  measured, 11–28 ms after the element is added — the same frames as when nothing was given back.
+- **Closing the capture's session and frame pool while hidden:** 0 MB (the survey).
+- **Deleting the frame sink's own GL texture** (GL renderer): 0 MB freed (hidden 72.2 MB, deleted
+  or kept), and the page's last picture with it. Kept, a page shown again shows that picture until
+  WebView2's frame replaces it, as before.
+- **Closing the WGL interop device while hidden:** opened again on show, it left 7.4 MB more behind
+  after a show or two, shown and hidden. It stays open until the controller goes. Likewise the D3D11
+  context is flushed after the release: without it a show added a new texture's 7.4 MB while the old
+  one's stayed.
+
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
 BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction

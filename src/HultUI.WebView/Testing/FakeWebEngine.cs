@@ -71,8 +71,10 @@ public sealed class FakeWebEngine : IWebEngine
 /// <summary>A page the fake shows: its title and the colour its frames are filled with.</summary>
 public sealed record FakePage(string Title, Color Colour);
 
-/// <summary>One fake page. Everything the controller and element sent it is recorded.</summary>
-public sealed class FakeWebEngineView : IWebEngineView
+/// <summary>One fake page. Everything the controller and element sent it is recorded. Like
+/// WebView2's, its <see cref="FakeWebEngine.GpuRenderer"/> gives its GL objects back while the
+/// page is hidden.</summary>
+public sealed class FakeWebEngineView : IWebEngineView, IReleasesGpuWhileHidden
 {
     private static readonly Uri Blank = new("about:blank");
     private readonly FakeWebEngine _engine;

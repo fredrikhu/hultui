@@ -23,6 +23,9 @@
          across rebuilds (PatchFrom) and asks for text input when its engine takes
          forwarded keys (WantsTextInput). -->
     <InternalsVisibleTo Include="HultUI.WebView" />
+    <!-- Its tests give a hidden page's frame sink its window's frame (GpuFrameSink.ReleaseHidden) and
+         read what it gave back. -->
+    <InternalsVisibleTo Include="HultUI.WebView.Tests" />
     <!-- TerminalElement registers element-owned handlers (OnOwn), keeps its controller across
          rebuilds (PatchFrom) and arms text input and the IME while focused (WantsTextInput). -->
     <InternalsVisibleTo Include="HultUI.Terminal" />

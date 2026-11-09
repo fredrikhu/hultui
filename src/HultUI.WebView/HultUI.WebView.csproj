@@ -21,6 +21,9 @@
     <InternalsVisibleTo Include="HultUI.WebView.Tests" />
     <InternalsVisibleTo Include="HultUI.WebView.Engines.Tests" />
     <InternalsVisibleTo Include="HultUI.WebView.Engines.Tests.CefProcess" />
+    <!-- WebView2's view says, through an internal marker (IReleasesGpuWhileHidden), that its
+         frames' GL objects may be given back while the page is off screen. -->
+    <InternalsVisibleTo Include="HultUI.WebView.WebView2" />
   </ItemGroup>
 
   <ItemGroup>

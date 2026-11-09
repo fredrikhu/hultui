@@ -79,6 +79,8 @@ public sealed class WebView2Tests
         public required Application App { get; init; }
         public required WebView2Engine Engine { get; init; }
         public required WebViewController Web { get; init; }
+        /// <summary>The column the page's element sits in, where <see cref="Open"/> made the page.</summary>
+        public HultUI.Core.Elements.BoxElement Root { get; init; } = null!;
 
         public bool PumpUntil(Func<bool> condition, double seconds = 20)
         {
@@ -138,9 +140,10 @@ public sealed class WebView2Tests
         var app = new Application(new SdlWindowingPlatform(), "WebView2", 480, 320);
         var engine = new WebView2Engine();
         var web = new WebViewController(engine, new WebViewOptions { UserDataFolder = Profile, DevTools = devTools });
-        app.SetRoot(Flex.Column().Children(WebViewElement.New(web).FlexGrow(1)));
+        var root = Flex.Column().Children(WebViewElement.New(web).FlexGrow(1));
+        app.SetRoot(root);
         web.NavigateToString(html);
-        var page = new Page { App = app, Engine = engine, Web = web };
+        var page = new Page { App = app, Engine = engine, Web = web, Root = root };
         Assert.True(page.PumpUntil(() => web.State != WebViewState.Initializing), "the engine never became ready");
         Assert.Equal(WebViewState.Ready, web.State);
         return page;
@@ -173,6 +176,74 @@ public sealed class WebView2Tests
             page.Web.ExecuteScriptAsync($"document.body.style.background = '{css}'");
             Assert.True(page.PumpUntil(() => Page.Near(page.ScreenMiddle(), rgb)), $"after {css}: {page.ScreenMiddle()}");
         }
+    });
+
+    /// <summary>
+    /// A page off screen gives back the GPU memory of its capture: in the window's next frame its
+    /// interop texture, the texture's GL registration and the interop device go (plan 17 round 9: a
+    /// hidden page kept 87–91 MB of this process's GPU memory at 2160×779 px, as much as a shown
+    /// one). Shown again, the frame WebView2 sends is drawn through objects made again for it: the
+    /// page as it is now — the same, or changed while hidden — as when the objects were kept; never
+    /// a black frame.
+    /// </summary>
+    [WebView2UiFact]
+    public void AHiddenPage_GivesItsInteropBack_AndShownAgainArrivesAsItIsNow() => OnSta(() =>
+    {
+        const string Green = "#00c060", Blue = "#2040e0";
+        (int, int, int) green = (0, 192, 96), blue = (32, 64, 224);
+        using var page = Open($"<html><body style='margin:0;background:{Green}'></body></html>");
+        var view = (WebView2View)page.Web.View;
+        Assert.True(page.PumpUntil(() => Page.Near(page.ScreenMiddle(), green)), $"first colour: {page.ScreenMiddle()}");
+        Assert.True(view.ZeroCopy && view.HoldsInterop);
+
+        // Hidden for half a second, as a toggle away and back is. Within a frame or two of
+        // put_IsVisible(false) WebView2 sends a black frame and then its white one, before and after
+        // this change alike, and a page shown that soon may draw the black one first.
+        (int R, int G, int B) Hide()
+        {
+            page.Root.RemoveChild(page.Root.Children[0]);
+            Assert.True(page.PumpUntil(() => !view.HoldsInterop, seconds: 5), "the hidden page kept its interop");
+            Assert.True(view.AwaitsFrame);
+            var clock = Stopwatch.StartNew();
+            page.PumpUntil(() => clock.ElapsedMilliseconds > 500);
+            return page.ScreenMiddle();
+        }
+        List<(int R, int G, int B)> Show((int, int, int) want)
+        {
+            page.Root.AddChild(WebViewElement.New(page.Web).FlexGrow(1));
+            var seen = new List<(int R, int G, int B)>();
+            var clock = Stopwatch.StartNew();
+            while (clock.Elapsed.TotalSeconds < 10)
+            {
+                page.App.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+                var colour = page.ScreenMiddle();
+                if (seen.Count == 0 || seen[^1] != colour) seen.Add(colour);
+                // Until the page shows and a frame WebView2 sent on show was drawn: on GL the sink's
+                // own texture keeps the last picture, which shows first.
+                if (Page.Near(colour, want) && !view.AwaitsFrame) break;
+                Thread.Sleep(1);
+            }
+            Assert.True(Page.Near(seen[^1], want), $"shown again, the page never arrived: {string.Join(" → ", seen)}");
+            Assert.True(view.ZeroCopy && view.HoldsInterop && !view.AwaitsFrame, "no frame came when the page was shown");
+            return seen;
+        }
+        // Before the page only what the hidden window showed: the app's white background here, which
+        // is also the white frame WebView2 sends while the page is hidden. Not black.
+        void OnlyThePage(List<(int R, int G, int B)> seen, (int R, int G, int B) hidden) =>
+            Assert.All(seen.Take(seen.Count - 1), c => Assert.True(Page.Near(c, hidden),
+                $"shown again, the window showed {c} before the page: {string.Join(" → ", seen)}"));
+
+        var hidden = Hide();
+        Assert.False(Page.Near(hidden, green), $"the window still showed the page: {hidden}");
+        OnlyThePage(Show(green), hidden);   // a still page: WebView2 sends its frame when shown
+
+        // Changed while hidden: the page arrives as it is now. On the way WebView2 itself may send its
+        // last frame of the page as it was (3 and 4 shows in 8, after and before this change), so
+        // that one is allowed; black is not.
+        Hide();
+        page.Await(page.Web.ExecuteScriptAsync($"document.body.style.background = '{Blue}'"));
+        var changed = Show(blue);
+        Assert.DoesNotContain(changed, c => Page.Near(c, (0, 0, 0)));
     });
 
     /// <summary>GL 1.1 entry points, which opengl32.dll exports directly; they act on the current context.</summary>
