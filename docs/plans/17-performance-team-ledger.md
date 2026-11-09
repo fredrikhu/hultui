@@ -5,7 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 9
-- **Phase:** build — round 9, step 13 next (steps 1–12 and 16 landed 2026-11-08/09; 16 steps in "Round 9 build order"). Build
+- **Phase:** build — round 9, step 14 next; step 13 measured, its pixel changes wait for questions 20–22 (step 13b);
+  steps 1–12 and 16 landed 2026-11-08/09 (16 steps in "Round 9 build order"). Build
   agents run one at a time in this worktree; their briefs go in session c484f5ac's scratchpad as `brief-r9b<N>.md`.
   Questions 14–19 answered. Open for the user: question 10 (`TokenizeDiff` public), the live screen-reader check of
   menus and disabled menu items (ACCESSIBILITY-PLAN.md). Weekly usage 17 % after the survey
@@ -505,7 +506,8 @@ From the round 1 surveys (details in `17-reports/`):
 
 ## Needs the user
 
-Round 9 questions (asked 2026-11-08; 14–16 from the survey reports as they came in, 17–19 with the merged survey).
+Round 9 questions (asked 2026-11-08; 14–16 from the survey reports as they came in, 17–19 with the merged survey;
+20–22 from step 13's measurement, 2026-11-09).
 Recommendations in brackets. Asked only if step 13 clears 5 %: faded images (≤ 2/255) and Vesper's faded rows and tiles.
 
 14. **dotnet-hover-holds-removed-view** (r9-4): `Window._lastHoveredElement` and `PointerState._hoveredElement` keep a
@@ -540,6 +542,25 @@ Recommendations in brackets. Asked only if step 13 clears 5 %: faded images (≤
     call: a patch, 0 trees), or in the framework (a focusable element is always semantic: trees change in every app)?
     [In the app, as a step after the perf steps, with meridian-focus-lost (Waiting).] → **in the app** (2026-11-08):
     step 15.
+20. **paint-image-fades-itself** (step 13 measured, 2026-11-09; framework): a lone `ImageElement` with `Opacity` < 1
+    draws its still image once at that alpha instead of in an offscreen layer (as a plain Box already does). Vesper's
+    cut icons today: 26.6 (Detail) / 61 (Brief) layers a frame. Real window, AOT, 1240×820 at 100 %, ABAB+BABA: Detail
+    GL frame 1.136 → 0.835 ms (−27 %), GPU 0.753 → 0.211 (−72 %); Vulkan 8-bit −16…−18 % / −83…−84 %; F16 −19…−20 % /
+    −64 %; Brief GL 1.425 → 0.818 (−43 %), GPU 1.323 → 0.216 (−84 %), Vulkan −29 % / −91 %. Pixels: Detail icons 611 / 431
+    / 8 of 6,976 px differ, at most 2/255 (GL / Vulkan / F16); Brief icons 0 / 0 / 360 px, at most 1/255. May faded images
+    change by ≤ 2/255? [Yes: invisible, and a sixth to two fifths of those frames.]
+21. **apps-vesper-faded-rows: Sync's Equal rows** (step 13): Sync with "Show equal" on fades each Equal row with
+    `row.Opacity = 0.55f` (21–26 layers a frame). Fading the row's text and fills to 55 % instead (as Meridian History,
+    question 13): Down/Up GL 0.824 → 0.511 ms (−38 %), GPU −77 %; Vulkan 8-bit −21 % / −82 %; wheel and hover GL −36…−37 %,
+    Vulkan −18…−22 %, F16 −20…−27 % (GPU −56…−81 %). Pixels: 13.7k–15.4k glyph-edge pixels at 1/255, one pixel at 9/255
+    (F16 at most 4/255). May they change? [Yes: as question 13.]
+22. **apps-vesper-faded-rows: cut thumbnail tiles** (step 13): a cut tile fades as a whole (`Opacity 0.45`, 29.5–33
+    layers a frame). Fading each part instead: GL −26…−27 % frame, GPU −71…−73 %; Vulkan −20 % / −83…−84 %; F16 −15…−17 %
+    / −68…−69 %. But the pixels move more: 99.7 % of a cut thumbnail's pixels by a mean of 5/255 (at most 6, F16 9) because
+    the tile's dark backing shows through the faded picture; a badge over its kind icon by up to 24/255; kind icons and
+    the cursor tile's ring and fill up to 7/255 (19 on F16); names up to 3/255. Leaving the backing out under the picture
+    should avoid most of the thumbnail shift (not built or measured). [Build that variant first and measure; if every
+    part stays within ~2/255 but the badge, ask again with its numbers.]
 
 Round 8 questions 11–13, round 7 questions 1–4, round 6 questions 1–9 and round 5's question 5, all answered, are in
 the archive ([round 8](17-performance-team-ledger-archive.md#needs-the-user-round-8),
@@ -816,3 +837,9 @@ From 2026-11-03 (round 8's survey); earlier entries are in the archive ([to 2026
   notes: measure a GPU release by showing again too (a deferred D3D11 destroy and a reopened WGL device added memory
   on show); sample page frames on show every frame (a sparse sampler missed black frames); mount counts are not "on
   screen" — rebuild twins mount and never unmount; use `IsHosted`.
+- 2026-11-09: round 9 step 13 measured (no commit; scratch `r9b13\summary.txt`): Vesper's faded layers cost far more
+  than 5 % in every view on GL, Vulkan 8-bit and F16 — Sync Equal rows 18–38 % of the CPU frame and 56–82 % of the GPU,
+  cut icons in Detail/Brief 16–43 % / 64–91 %, cut tiles 15–27 % / 68–84 % — so questions 20–22 go to the user (image
+  fade ≤ 2/255; Sync rows' glyph edges 1/255; cut tiles ~5/255 with a badge up to 24/255). Real windows at 100 % (only
+  the 1440p attached), 5 guarded launches, 0 guard firings, 0 new `nvlddmkm`. Guideline note: a faded image in a list
+  is a layer per image; for list rows and tiles fade the colours, and let an image draw at its alpha.
