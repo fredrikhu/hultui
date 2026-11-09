@@ -435,6 +435,20 @@ changes (the suite's composite walk, 1.0 tree a key). Since round 7 step 8b the 
 marked on the applied tree and told as a menu entry's is (`TryPatchA11y`); Junction's Changes caret
 walk builds no tree for either.
 
+Which selected states are marked on the applied tree with no build (the window's property observer,
+`Window.AccessibilityObserverAdapter`; plan 17 round 9 step 15b): a menu's entry (`IsMenuEntry`); a row directly in
+a composite list (its parent says `RowsAreComposite`); and an item, an element whose `Role` is
+`ListItem`, wherever it is: a cell of a grid a view lays out with boxes (Vesper's Brief: columns of
+cells in a scroll view), a tile in a composite list's row (its Thumbnails). Each must say selected or
+not before and after (`AccessibleSelected` set both times), and its node must be in the applied tree
+where its ancestors say (else the tree is built, as for any patch). The layout cannot tell a grid from
+any other boxes, so the item's role is what says it is one of a set. Its selected state goes on its
+own node and nothing else a build makes reads it, so the mark is what the build's diff would report.
+Any other element's selected state — a tab, a radio button, a button that is one of a set (Meridian's
+endpoints, which a detail pane follows) — still builds the tree, which also tells what came with it.
+Vesper's Brief, 60 files, with UIA: a cursor key 36 KB and a tree with that change alone, 2.2 KB and
+none with the rule.
+
 Threading: UIA may call provider methods from worker threads. Either marshal
 to the UI thread, or snapshot values onto the wrapper at construction/diff
 time (preferred — matches the design above and avoids cross-thread element

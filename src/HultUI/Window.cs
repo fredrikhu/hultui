@@ -4656,9 +4656,18 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             // A row of a list whose rows a reader reads as they are (RowsAreComposite), told its
             // selected state by a list that draws the selection: marked and told the same way. A
             // rebuild for it built the whole tree on every caret key of Junction's Changes list.
+            // And an item a view lays out and walks itself (the ListItem role, set by the app), told
+            // selected as its cursor reaches it with no build: a cell of a grid made of boxes
+            // (Vesper's Brief), a tile in a composite list's row (its Thumbnails). The layout says
+            // nothing of a grid, so the role is what tells one of a set: an item's selected state
+            // goes on its own node, and nothing else in a tree is made from it. A rebuild for it
+            // built the whole tree on every cursor key: 60 files, 2.2 → 36 KB a key with UIA. Any
+            // other element's selected state (a tab, a button that is one of a set) still builds a
+            // tree, which tells what came with it.
             else if (propertyName == AccessibilityProperties.IsSelected
                 && (element.IsMenuEntry || element.AccessibleSelected is not null
-                    && element.Parent is IAccessibleItemSource { PublishesItemNodes: false }))
+                    && (element.Parent is IAccessibleItemSource { PublishesItemNodes: false }
+                        || element.Role == AccessibilityRole.ListItem)))
             {
                 if (!window._a11yOwnSelection.Contains(element)) window._a11yOwnSelection.Add(element);
             }
