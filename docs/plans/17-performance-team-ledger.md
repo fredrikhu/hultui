@@ -5,10 +5,10 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 9
-- **Phase:** build — round 9, every step done but the user's decisions: questions 20–22 (step 13b, the fades; images
-  sent 2026-11-09, `artifacts/r9-fade-compare/`), 23 (encoded-token colours), 24 (Vesper pane name), 25 (cell/tile
-  selected patches, step 15b). Steps 1–12 and 14–16 landed 2026-11-08/09. When answered: build 13b/15b (and 23 if
-  yes), then the full test suite and Phase release — or, if the user prefers, release now and queue them for round 10. Build
+- **Phase:** build — round 9, the follow-ups the user approved (2026-11-09: "I agree with your recommendations"): step
+  13b (image fade, Sync rows; cut tiles' backing-free variant uncommitted with images), step 15b (cell/tile selected
+  patches), step 14b (images of question 23's colour changes) — one at a time, then the full suite again (Windows,
+  Fedora, docfx) and Phase release. Steps 1–12 and 14–16 landed 2026-11-08/09; the suite passed on 708eabfd. Build
   agents run one at a time in this worktree; their briefs go in session c484f5ac's scratchpad as `brief-r9b<N>.md`.
   Questions 14–19 answered. Open for the user: question 10 (`TokenizeDiff` public), the live screen-reader check of
   menus and disabled menu items (ACCESSIBILITY-PLAN.md). Weekly usage 17 % after the survey
@@ -552,34 +552,37 @@ Recommendations in brackets. Asked only if step 13 clears 5 %: faded images (≤
     GL frame 1.136 → 0.835 ms (−27 %), GPU 0.753 → 0.211 (−72 %); Vulkan 8-bit −16…−18 % / −83…−84 %; F16 −19…−20 % /
     −64 %; Brief GL 1.425 → 0.818 (−43 %), GPU 1.323 → 0.216 (−84 %), Vulkan −29 % / −91 %. Pixels: Detail icons 611 / 431
     / 8 of 6,976 px differ, at most 2/255 (GL / Vulkan / F16); Brief icons 0 / 0 / 360 px, at most 1/255. May faded images
-    change by ≤ 2/255? [Yes: invisible, and a sixth to two fifths of those frames.]
+    change by ≤ 2/255? [Yes: invisible, and a sixth to two fifths of those frames.] → **yes** (2026-11-09; step 13b).
 21. **apps-vesper-faded-rows: Sync's Equal rows** (step 13): Sync with "Show equal" on fades each Equal row with
     `row.Opacity = 0.55f` (21–26 layers a frame). Fading the row's text and fills to 55 % instead (as Meridian History,
     question 13): Down/Up GL 0.824 → 0.511 ms (−38 %), GPU −77 %; Vulkan 8-bit −21 % / −82 %; wheel and hover GL −36…−37 %,
     Vulkan −18…−22 %, F16 −20…−27 % (GPU −56…−81 %). Pixels: 13.7k–15.4k glyph-edge pixels at 1/255, one pixel at 9/255
-    (F16 at most 4/255). May they change? [Yes: as question 13.]
+    (F16 at most 4/255). May they change? [Yes: as question 13.] → **yes** (2026-11-09; step 13b).
 22. **apps-vesper-faded-rows: cut thumbnail tiles** (step 13): a cut tile fades as a whole (`Opacity 0.45`, 29.5–33
     layers a frame). Fading each part instead: GL −26…−27 % frame, GPU −71…−73 %; Vulkan −20 % / −83…−84 %; F16 −15…−17 %
     / −68…−69 %. But the pixels move more: 99.7 % of a cut thumbnail's pixels by a mean of 5/255 (at most 6, F16 9) because
     the tile's dark backing shows through the faded picture; a badge over its kind icon by up to 24/255; kind icons and
     the cursor tile's ring and fill up to 7/255 (19 on F16); names up to 3/255. Leaving the backing out under the picture
     should avoid most of the thumbnail shift (not built or measured). [Build that variant first and measure; if every
-    part stays within ~2/255 but the badge, ask again with its numbers.]
+    part stays within ~2/255 but the badge, ask again with its numbers.] → **as recommended** (2026-11-09): step 13b
+    builds the backing-free variant, uncommitted, with new comparison images; then ask again.
 23. **syntax-encoded-tokens-colours** (step 14, 2026-11-09): colouring from TextMateSharp's encoded tokens
     (`TokenizeLine2`) would save a further 28 % of the tokenizer's bytes on JSON, 18 % on XML, 4 % on HTML. It matches
     theme rules by parent scope, as VS Code does, so it changes colours on 2,388 of 1,752,346 corpus lines (mostly
     TypeScript/JavaScript, then PowerShell, shell, C++ and Markdown; nothing in Meridian's JSON/XML/HTML response bodies).
-    May colours change to VS Code's parent-scope matching? [Show before/after examples of the changed lines first.]
+    May colours change to VS Code's parent-scope matching? [Show before/after examples of the changed lines first.] →
+    **as recommended** (2026-11-09): step 14b makes before/after images; then ask again.
 24. **vesper-pane-name-folder** (step 15): Vesper's pane is now read as "Left pane, <folder>". Because the walk can't
     patch a name on a node with children, a folder change with a reader on costs one tree (~+20 KB, UIA 209 → 229 KB a
     navigation). A fixed "Left pane" name costs nothing. Keep the folder in the name? [Yes: a reader learns where it
-    is; the cost is once per navigation, only with a reader.]
+    is; the cost is once per navigation, only with a reader.] → **yes, keep it** (2026-11-09).
 25. **a11y-selected-patch-for-cells** (step 15; framework, internal): to tell a reader Vesper's cursor in Brief and
     Thumbnails with 0 trees, the window's selected-state patch (today only for a menu entry or a row directly inside a
     composite list, Window.cs:4659) must also take a cell or tile, and the thumbnail list must publish its rows as
     composite (`RowsAreComposite`). Prototype: the cursor item told by name and selected state, 0 trees, flat KB; +~100
     nodes a navigation with a reader (261 → 280 KB). Question 19 said "in the app"; this needs the framework. Allow it?
-    [Yes: internal, no API, and without it Brief and Thumbnails stay silent to a reader.]
+    [Yes: internal, no API, and without it Brief and Thumbnails stay silent to a reader.] → **yes** (2026-11-09; step
+    15b).
 
 Round 8 questions 11–13, round 7 questions 1–4, round 6 questions 1–9 and round 5's question 5, all answered, are in
 the archive ([round 8](17-performance-team-ledger-archive.md#needs-the-user-round-8),
@@ -884,3 +887,6 @@ From 2026-11-03 (round 8's survey); earlier entries are in the archive ([to 2026
 - 2026-11-09: Fedora `wsl-test.sh` on the branch: 22 projects, 0 failures (Core 5,066 + 1 skipped, Headless 1,335 + 82,
   Vesper 882 + 20, Skia 387, Text 293, Linux bridge 104); docfx `--warningsAsErrors` 0 warnings, 0 errors (run from the
   repository root, where `docfx.json` is). The round can release as it is; it waits only for questions 20–25.
+- 2026-11-09: the user agreed with the recommendations on questions 20–25: 20 and 21 yes (step 13b), 22 build the
+  backing-free variant and show new images first, 23 show before/after images first (step 14b), 24 keep the folder in
+  Vesper's pane name, 25 yes (step 15b).
