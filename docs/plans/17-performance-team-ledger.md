@@ -8,7 +8,8 @@ file after every step and commits it with the step's work. Full survey reports a
 - **Phase:** build — round 10, step 1 next (Round 10 build order below), once the five app installer runs cut on
   facced69 finish green (the user asked for the releases before the round's work; see the log). The survey is merged
   (reports `17-reports/r10-*`); build briefs `brief-r10b<N>.md` go in session 3484c586's scratchpad. Questions 27–32
-  asked 2026-11-09; none blocks a step's start (29 shapes step 7, 30 step 12). Open for the user, none blocking: question 26 (a merged syntax theme to match VS Code; for
+  asked 2026-11-09; 27–30 answered as recommended the same day (27 → step 5, 28 → new step 15, 29 → step 7, 30 →
+  step 12); 31 and 32 (optional public API, recommended no) stay open, and their steps take the app-only route. Open for the user, none blocking: question 26 (a merged syntax theme to match VS Code; for
   later), question 10 (`TokenizeDiff` public), the live screen-reader check of menus and disabled menu items
   (ACCESSIBILITY-PLAN.md). Older rounds are in [the archive](17-performance-team-ledger-archive.md) (search it, don't
   read it whole). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a pre-push hook refuses
@@ -112,17 +113,20 @@ names the report lines its brief quotes (`r10-k` = `17-reports/r10-k-<area>.md`)
    character; Junction's repo modal path (`RepoModalView.cs:187`) and MR list filter (`MergeRequests.cs:385`) build
    the view only. Junction prompt over Changes 194.4 → 1.4 KB a character, History 154.8 → 0.6; Aperture reply 135.1 →
    2.3. (b) a toast's going-away build is view-only (`ToastHost(() => IsShowing ? MarkDirty() : MarkViewDirty())`,
-   Junction, Aperture, Meridian): Junction 366.3 → 227.4 KB (−38 %), Aperture −39 %, Meridian −21…−23 %. Small, app.
+   Junction, Aperture, Meridian): Junction 366.3 → 227.4 KB (−38 %), Aperture −39 %, Meridian −21…−23 %. (c) **bug,
+   question 27 (a)**: Aperture's `browse.back` skips Backspace when the target is a `TextInput` or `TextArea`
+   (ApertureApp.cs:554; Search and the issue reply went back a page on Backspace since da0676d0). Small, app; each its
+   own commit.
 6. **text-textarea-cluster-walk-whole-line** (5; r10-5 Candidate 1) — `WrapLine` finds cluster ends only for rows that
    fall to `FindLineBreak`, from a known boundary before the row, not the whole hard line (`ClusterEnds`,
    TextAreaElement.cs:818, :646). Typing into a one-line 89k body with one emoji 1,216.8 → ~191 KB a key (−84 %);
    opening a 1 MB one-line bundle with an emoji 16,724.9 → ~327 KB (−98 %); docfx index.json ~−50 %. Rows identical
    (the `rows` corpora with an emoji or mark inserted, current walk as reference). Add a suite row ("input/type in a
    one-line JSON body with an emoji"). Small–medium, internal.
-7. **apps-vesper-sync-cursor-rebuilds-rows** (6; r10-8 Candidate 1; **question 29: reveal**) — Sync's rows get their
+7. **apps-vesper-sync-cursor-rebuilds-rows** (6; r10-8 Candidate 1; **question 29: yes, reveal**) — Sync's rows get their
    index from the loop, not `VisibleSyncRows().IndexOf(r)` (CommanderApp.Sync.cs:349, :92: O(rows²)): 300 files 2,568.6
    → 1,715.9 KB a key (−33 %); then rows kept (`KeptElements` by path; state selected and direction) and Down/Up without
-   a build: ~−95 %. The cursor reveal waits for question 29. Add the suite row "a cursor key over a plain 200-row list
+   a build: ~−95 %. Then the cursor reveal (approved): Sync scrolls to keep the cursor in view. Add the suite row "a cursor key over a plain 200-row list
    rebuilt through the root" with a kept-rows twin. Small + medium, app.
 8. **Junction builds less** (6; r10-6 Candidates 2 and 4) — (a) **apps-junction-diff-rows-keep-width**: leave
    `codeWidth` out of the diff's height shape when it neither wraps nor shows a review (`JunctionApp.Diff.cs:519`,
@@ -144,9 +148,9 @@ names the report lines its brief quotes (`r10-k` = `17-reports/r10-k-<area>.md`)
     culls a frame 579 → ~30, the map's elements 2,498 → ~100 KB (−58 % of the heap with the map shown). Kept rows move
     into the row template; headings need `RowHeights`; a reader must still hear every row (item nodes; check with the
     audit). Medium, app.
-12. **syntax-markdown-loads-every-grammar** (5; r10-5 Candidate 2; **question 30: the route**) — the first Markdown,
+12. **syntax-markdown-loads-every-grammar** (5; r10-5 Candidate 2; **question 30: route (c)**) — the first Markdown,
     Ruby, shell or F# file keeps ~29 MB of every embedded grammar until `SetTheme` (.md +29,444 KB, first call 82,868 KB
-    allocated). Route (c), recommended: load per text only the fence languages it names (scan fence info strings and
+    allocated). Route (c), approved: load per text only the fence languages it names (scan fence info strings and
     HTML blocks); tokens equal on round 7 step 12's corpus. No TextMateSharp fork. Medium–large, no API.
 13. **apps-pane-drag-sets-size** (6; r10-6 Candidate 3; absorbs Waiting apps-meridian-response-drag-build) — while a
     `PaneSplitter` drag runs, set the live pane's size through a `Ref` and `MarkLayoutDirty()`, build once on release:
@@ -157,6 +161,13 @@ names the report lines its brief quotes (`r10-k` = `17-reports/r10-k-<area>.md`)
     search for the first line the clip reaches in `DrawText` and `DrawParagraph`, only for labels of ~32 lines or more
     (prototype `PROBE_LINESEEK`): the 2,000-line row 1,999 → 60 line visits a step. Keep only if `step-ab.ps1` shows
     ≥ 5 % on `text/wheel over a 2,000-line plain label in a ScrollView`; else record it as examined. Small, no API.
+15. **vesper-brief-scrollbar-columns** (1 with 6; r10-1 Waiting re-rank; **question 28 (a): public API approved**) —
+    bug: Brief shows blank columns when scrolled with its scrollbar (the bar sets the offset with no `ScrollEvent`,
+    Scrollbar.cs:161/190; Brief makes columns only on one, CommanderApp.Views.cs:586). ScrollView tells listeners when
+    the user scrolls with the bar or by autoscroll (a new public callback or event; a scroll set from code still raises
+    nothing; existing `ScrollEvent` listeners unchanged); Brief listens beside `ScrollEvent`. Test: a track click and a
+    thumb drag over 400 files leave 0 blank columns (r10-1's `vbar` walk: 4 of 4 and 7 of 8 today). Docs (ELEMENTS.md,
+    the scroll section); docfx 0 warnings. Small, framework + app.
 
 ### Waiting
 
@@ -503,19 +514,22 @@ Round 10 questions (from the survey, 2026-11-09). Recommendations in brackets.
     also goes back: typing "ab" in Search and pressing Backspace leaves "a" and goes to Home; the issue reply does the
     same (`browse.back` = Escape or Backspace, ApertureApp.cs:554; only the cursor keys check for a text field). (a)
     Aperture skips `browse.back`'s Backspace when the target is a `TextInput` or `TextArea` (small, app), or (b) text
-    fields mark the keys they consume as handled (changes key routing in every app)? [(a).]
+    fields mark the keys they consume as handled (changes key routing in every app)? [(a).] → **(a)** (2026-11-09;
+    step 5).
 28. **vesper-brief-scrollbar-blank-columns** (r10-1; bug): scrolling Brief with its scrollbar shows blank columns (a
     track click 4 of 4 blank, a thumb drag 7 of 8 moves with a blank column, 0 builds). (a) Framework: ScrollView tells
     listeners when the user scrolls with the bar or by autoscroll (a new public callback or event; Brief listens beside
     `ScrollEvent`; a scroll set from code still raises nothing), (b) Brief hides its horizontal scrollbar, or (c) Brief
-    makes every column (400 files: 15 columns, ~400 cells a build against 5 columns)? [(a): public API.]
+    makes every column (400 files: 15 columns, ~400 cells a build against 5 columns)? [(a): public API.] → **(a),
+    the framework callback** (2026-11-09; step 15).
 29. **vesper-sync-cursor-reveal** (r10-8; bug): Sync's cursor leaves the view and nothing scrolls it back (after 40
     Downs in a 26-row view no highlighted row is on screen, `r10-apps\drv\shots\sync40.png`). Reveal the cursor
-    (scrolling the user will see)? [Yes, with step 7's kept rows.]
+    (scrolling the user will see)? [Yes, with step 7's kept rows.] → **yes** (2026-11-09; step 7).
 30. **syntax-markdown-grammars-route** (r10-5; step 12): the first Markdown/Ruby/shell/F# file keeps ~29 MB of grammars.
     (a) drop the registry after an idle minute (colours kept, the next file pays ~83 MB allocated and colour arrives
     later), (b) limit Markdown's fence languages (other fences uncoloured: a colour change; the 18 common ones still keep
-    17 MB), or (c) load per text only the fence languages it names (no colour change, medium–large)? [(c).]
+    17 MB), or (c) load per text only the fence languages it names (no colour change, medium–large)? [(c).] →
+    **(c)** (2026-11-09; step 12).
 31. **ref-lets-go-when-removed** (r10-4; optional, framework): should the public `Ref<T>` let go of its element when the
     element leaves the window? It would fix every app holder at once but changes what `Current` returns to code that
     reads a removed element (Aperture's Library.cs:45 does). [No: fix the apps (step 2) and write the guideline.]
@@ -790,3 +804,11 @@ From 2026-11-08 (round 9's survey); earlier entries are in the archive ([to 2026
   release, CI run 42675929595 green): junction-v1.24.0, vesper-v1.24.0, meridian-v1.7.0, aperture-v1.22.0,
   reel-v1.8.0, annotated (`git tag -a -F`), pushed 3 + 2; installer runs 42692675116 (Vesper), 42692675510 (Junction),
   42692676124 (Meridian), 42692706680 (Reel), 42692710316 (Aperture) started. Step 1 waits for them.
+- 2026-11-09: the user answered questions 27–30 as recommended: (27) Aperture skips Backspace as "back" in a text field
+  (step 5c); (28) the framework scroll callback, public API (new step 15); (29) Sync reveals its cursor (step 7); (30)
+  Markdown loads only the fence languages a text names (step 12). Questions 31 and 32 stay open (recommended no; steps
+  2 and 13 go app-only).
+- 2026-11-09: installer runs: junction-v1.24.0, vesper-v1.24.0, aperture-v1.22.0 and reel-v1.8.0 green and released;
+  meridian-v1.7.0 failed its Windows test job on `Junction.Tests.ComposerPartTests.WhatTheComposerShows_FollowsEveryWayItChanges`
+  (the test's own `git commit --amend` hit an `index.lock` held by the app's background git; the same test passed in
+  Junction's own installer run on the same commit): a flake; `gh run rerun --failed` once.
