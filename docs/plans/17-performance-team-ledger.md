@@ -4,22 +4,24 @@ State of [the performance team](17-performance-team.md). The orchestrator update
 file after every step and commits it with the step's work. Full survey reports are in
 [`17-reports/`](17-reports/).
 
-- **Round:** 9
-- **Phase:** release — round 9: the full suite passed on 2370eea5 (Windows 30 projects, Fedora 22, docfx 0); merge into
-  main (detached origin/main merge in this worktree, gated), push, CI incl. the meridian-keyring jobs (step 8 touched
-  the Linux/macOS keyring stores). Question 26 for later. Build
-  agents run one at a time in this worktree; their briefs go in session c484f5ac's scratchpad as `brief-r9b<N>.md`.
-  Questions 14–19 answered. Open for the user: question 10 (`TokenizeDiff` public), the live screen-reader check of
-  menus and disabled menu items (ACCESSIBILITY-PLAN.md). Weekly usage 17 % after the survey
-  (reset 2026-11-15 03:00 UTC; extra usage off); the 90 % pause applies to build steps (user, 2026-10-27). Older rounds are in [the archive](17-performance-team-ledger-archive.md)
-  (search it, don't read it whole). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a
-  pre-push hook refuses pushes built on the old history). To resume in a fresh context, run in this worktree: `/loop
-  Run the next step of the performance team: follow docs/plans/17-performance-team.md, with state in
-  docs/plans/17-performance-team-ledger.md. Read both once per session (afterwards only the ledger's Phase and the part
-  the step needs), do the step the ledger's Phase calls for, record it in the ledger, and commit.` Before resuming,
-  `git fetch` and merge main if it moved.
+- **Round:** 10
+- **Phase:** survey — round 10, to start in a fresh context (the loop stopped 2026-11-09 after round 9's release). Round 9
+  released: the branch merged into main as facced69; CI run 42675929595 green (test ~17 min, test-linux, docs,
+  meridian-keyring on Ubuntu and macOS). Questions 14–25 answered (22 declined); open for the user, none blocking:
+  question 26 (a merged syntax theme to match VS Code; for later), question 10 (`TokenizeDiff` public), the live
+  screen-reader check of menus and disabled menu items (ACCESSIBILITY-PLAN.md). Older rounds are in [the
+  archive](17-performance-team-ledger-archive.md) (search it, don't read it whole). History note: rewritten 2026-10-25
+  (every commit after 3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history). To resume in a
+  fresh context, run in this worktree: `/loop Run the next step of the performance team: follow
+  docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md. Read both once per session
+  (afterwards only the ledger's Phase and the part the step needs), do the step the ledger's Phase calls for, record it
+  in the ledger, and commit.` Before resuming, `git fetch` and merge main if it moved. The common survey brief from
+  round 9 is reusable: session c484f5ac's scratchpad `brief-r9-survey.md` (see Probe code); build steps use
+  `scripts/perf/step-ab.ps1`. Round 10's survey archives round 8's Landed rows, round 9's build order and answered
+  questions 14–25, and round 8's log entries (2026-11-03 to its release on 2026-11-08).
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`)
-- **Review commits since:** round 8's survey reviewed 17d4220a..df45b4a2 (round 7's build); round 9's survey reviews
+- **Review commits since:** round 10's survey reviews round 9's build, 4919ac40..facced69 (the last survey report
+  to the round 9 release). Round 9's survey reviewed eaa1ec29..10acc8c0; round 8's survey reviewed 17d4220a..df45b4a2 (round 7's build); round 9's survey reviews
   round 8's build, eaa1ec29..10acc8c0 (the last survey report to the round 8 release), which also brings main's merge
   3a15b5b1 (32 commits from other sessions: Meridian discovery and runner auth, text selection in scrolled views) —
   review it like the rest.
@@ -945,3 +947,9 @@ From 2026-11-03 (round 8's survey); earlier entries are in the archive ([to 2026
 - 2026-11-09: round 9 merged into main as facced69 (detached origin/main merge in this worktree; origin/main 10acc8c0 was
   in the branch and the merged tree is identical to the tested one, so the push gate held). Primary checkout
   fast-forwarded behind the guard; branch fast-forwarded to the merge and pushed. CI queued.
+- 2026-11-09: CI run 42675929595 on facced69 green: test ~17 min, test-linux ~5 min, docs, meridian-keyring (ubuntu-24.04,
+  macos-15; step 8's keyring memo change checked there). Round 9 landed 16 steps (1–12, 13b, 14, 14c, 15, 15b, 16; 14b
+  images, 13 measured first) in ~40 commits, fixed bugs on the way (Snap Layouts after a restore, a KeptElements prune,
+  hover after a rebuild, a Meridian folder-menu record, a spec that crashed the parser, reader focus in Vesper and
+  Meridian), added `scripts/perf/step-ab.ps1`, and changed pixels/colours only as the user approved (questions 20, 21,
+  23). Round → 10, Phase → survey; the loop stops, and round 10 starts in a fresh context.
