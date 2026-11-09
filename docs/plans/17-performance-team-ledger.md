@@ -942,3 +942,6 @@ From 2026-11-03 (round 8's survey); earlier entries are in the archive ([to 2026
   5,067, Headless 1,501, Junction 1,082 in 8 m 24 s, Vesper 903, Meridian 653, Aperture 356, Syntax 94), Fedora
   `wsl-test.sh` 22 projects 0 failures, docfx `--warningsAsErrors` 0 warnings. origin/main 10acc8c0 is in the branch.
   Phase → release.
+- 2026-11-09: round 9 merged into main as facced69 (detached origin/main merge in this worktree; origin/main 10acc8c0 was
+  in the branch and the merged tree is identical to the tested one, so the push gate held). Primary checkout
+  fast-forwarded behind the guard; branch fast-forwarded to the merge and pushed. CI queued.
