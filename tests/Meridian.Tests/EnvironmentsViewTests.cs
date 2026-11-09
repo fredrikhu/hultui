@@ -41,9 +41,14 @@ public class EnvironmentsViewTests : IClassFixture<TestHttpServer>, IDisposable
     {
         public readonly Dictionary<string, string> Store =
             new(ignoreCase ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        /// <summary>The values asked for, found or not.</summary>
+        public int Gets;
         private static string Entry(string root, string? env, string key) => $"{root}|{env}|{key}";
-        public string? Get(string workspaceRoot, string? environment, string key) =>
-            Store.GetValueOrDefault(Entry(workspaceRoot, environment, key));
+        public string? Get(string workspaceRoot, string? environment, string key)
+        {
+            Gets++;
+            return Store.GetValueOrDefault(Entry(workspaceRoot, environment, key));
+        }
         public bool Set(string workspaceRoot, string? environment, string key, string value)
         {
             // Remove first: a dictionary that ignores case keeps the old key's letters on a replace,
@@ -165,6 +170,55 @@ public class EnvironmentsViewTests : IClassFixture<TestHttpServer>, IDisposable
             Assert.Contains("timeout_ms=300000", text);
             Assert.Contains($"base_url={_server.Origin}", text);   // untouched
             Assert.Contains("secret api_token", text);             // flag preserved
+        });
+    }
+
+    /// <summary>A character in a value cell builds the view only when it makes its environment
+    /// unsaved: the dot in the list and the footer's count. The cell holds the text and nothing else
+    /// in the view reads it, and each build read every secret from the keyring again: 312 KB a
+    /// character at 3 × 12 keys, 1.2 MB at 5 × 40 (plan 17 round 9).</summary>
+    [Fact]
+    public void ACellCharacterBuildsTheViewOnlyWhenItMakesTheEnvironmentUnsaved()
+    {
+        Hosted((session, app, keyring) =>
+        {
+            keyring.Set(_rootFull(app), "local", "api_token", "tok-local");
+            GoToEnvironments(session);
+            int Typed(string text)
+            {
+                int builds = app.Builds;
+                foreach (var ch in text)
+                {
+                    session.Window.TypeText(ch.ToString());
+                    session.PumpFrames(2);
+                }
+                return app.Builds - builds;
+            }
+            string? Focused() => session.Window.Window.FocusedElement?.AutomationId;
+
+            Click(session, "cell-timeout_ms-local");
+            Assert.Equal("saved", SaveState(session));
+            Assert.Equal(1, Typed("1"));                     // local turns unsaved
+            Assert.Equal("1 unsaved", SaveState(session));
+            int gets = keyring.Gets;
+            Assert.Equal(0, Typed("23"));
+            Assert.Equal(0, keyring.Gets - gets);            // no secret read again
+            Assert.Equal("cell-timeout_ms-local", Focused());
+            Assert.Equal("30000123", Node(session, "cell-timeout_ms-local").Value);
+
+            Click(session, "cell-timeout_ms-staging");
+            Assert.Equal(1, Typed("9"));                     // and staging
+            Assert.Equal("2 unsaved", SaveState(session));
+            Assert.Equal(0, Typed("9"));
+
+            Save(session);
+            Assert.Equal("saved", SaveState(session));
+            Assert.Contains("timeout_ms=30000123", EnvText("local"));
+            Assert.Contains("timeout_ms=3000099", EnvText("staging"));
+            Assert.Equal("cell-timeout_ms-staging", Focused());
+            Assert.Equal(1, Typed("5"));                     // unsaved again
+            Assert.Equal("1 unsaved", SaveState(session));
+            Assert.Equal("30000995", Node(session, "cell-timeout_ms-staging").Value);
         });
     }
 

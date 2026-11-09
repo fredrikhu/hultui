@@ -95,13 +95,17 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
             ViewOnly("the URL box closing", () => s.Window.Window.ClearFocus());
             Click(fx, "subtab-headers");
 
-            // Headers, the sub-tabs, the body and the assertions of the same request.
-            ViewOnly("header value typing", () => { Click(fx, "header-value-0"); s.Window.TypeText("+json"); });
+            // Headers, the sub-tabs, the body and the assertions of the same request. A header value
+            // or body character builds only when it moves the Chain count, or (the body's first) makes
+            // the body block the sub-tab names; a value cell of the environment table only when it
+            // makes its environment unsaved (RequestsShellTests.AHeaderValueOrBodyCharacterBuilds…,
+            // EnvironmentsViewTests.ACellCharacterBuildsTheViewOnly…).
+            ViewOnly("header value typing a variable", () => { Click(fx, "header-value-0"); s.Window.TypeText("+json{{v}}"); });
             ViewOnly("header name typing", () => { Click(fx, "header-name-0"); s.Window.TypeText("X"); });
             ViewOnly("adding a header", () => Click(fx, "add-header"));
             ViewOnly("the Params sub-tab", () => Click(fx, "subtab-params"));
             ViewOnly("the Body sub-tab", () => Click(fx, "subtab-body"));
-            ViewOnly("body typing", () => { Click(fx, "body-editor"); s.Window.TypeText("{}"); });
+            ViewOnly("body typing, its first character", () => { Click(fx, "body-editor"); s.Window.TypeText("{}"); });
             ViewOnly("the Assertions sub-tab", () => Click(fx, "subtab-assertions"));
             ViewOnly("adding an assertion", () => Click(fx, "starter-status"));
             ViewOnly("assertion typing", () => { Click(fx, "assert-expected-0"); s.Window.TypeText("1"); });
@@ -138,7 +142,7 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
 
             // The environment table.
             Switch(fx, KeyCode.Digit5);
-            ViewOnly("environment value typing", () => { Click(fx, "cell-host-local"); s.Window.TypeText(".2"); });
+            ViewOnly("environment value typing, its first character", () => { Click(fx, "cell-host-local"); s.Window.TypeText(".2"); });
         });
     }
 

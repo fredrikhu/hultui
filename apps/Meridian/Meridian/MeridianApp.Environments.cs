@@ -338,7 +338,16 @@ public partial class MeridianApp
 
         var input = TextInput.New(doc.Values.GetValueOrDefault(key, "")).Style(Ui.Field);
         // A value shows in this table alone; the title bar names the environment, not its values.
-        input.OnTextChanged(v => { doc.SetValue(key, v); MarkViewDirty(); })
+        // The box holds what was typed, and nothing else in the view reads a value, so a character
+        // builds the view only when it makes the environment unsaved: the dot in the list and the
+        // footer's count. A build of the table was 312 KB a character at 3 × 12 keys and 1.2 MB at
+        // 5 × 40, each secret cell a keyring read (plan 17 round 9).
+        input.OnTextChanged(v =>
+            {
+                bool wasEdited = doc.Edited;
+                doc.SetValue(key, v);
+                if (doc.Edited != wasEdited) MarkViewDirty();
+            })
             .Height(Dimension.Px(26)).FlexGrow(1)
             .FontFamily(Fonts.Mono).FontSize(11.5f)
             .TextColor(Azimuth.Text);

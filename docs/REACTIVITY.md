@@ -536,7 +536,13 @@ A field holds the text typed into it, so a key needs a build only for what else 
 that text. On the Headers, Body and Auth sub-tabs the URL is read only by the Params and Chain
 counts: a URL character compares the two with what the last build showed, and builds nothing when
 neither moved and the request was already unsaved (round 7, step 10: 66.6 → 4.0 KB a character
-and −17 % time on NativeAOT, −27 % on JIT; a query typed out −83 %).
+and −17 % time on NativeAOT, −27 % on JIT; a query typed out −83 %). A header value and the body
+make the same comparison, the body also with its type (the first character into a request with no
+body block makes one, and the sub-tab says "Body json"); a value cell of the Environments table
+builds only when it makes its environment unsaved, the one thing the view shows of it besides the
+cell. That table had cost one `TextInput` per cell and a keyring read per secret on every
+character: 312 KB at 3 environments × 12 keys, 1.2 MB at 5 × 40, then 2.3–5.4 KB (round 9,
+step 8).
 
 **A selection a list and one panel show needs neither the window nor the view.** History's list
 draws its own selection, and the only other thing that shows it is the archived send beside the

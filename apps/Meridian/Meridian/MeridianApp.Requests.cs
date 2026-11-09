@@ -509,11 +509,12 @@ public partial class MeridianApp
     }
 
     /// <summary>What the sub-tab strip shows of a tab's URL: the pairs Params counts, and the
-    /// variables used and produced that Chain counts.</summary>
+    /// variables used and produced that Chain counts (the URL's, the header values' and the
+    /// body's).</summary>
     private readonly record struct UrlCounts(RequestTab Tab, int Params, int Chain);
 
-    /// <summary>The counts the last build of the strip showed, which a URL character that moves
-    /// neither leaves as they are.</summary>
+    /// <summary>The counts the last build of the strip showed, which a character in the URL, a
+    /// header value or the body that moves neither leaves as they are.</summary>
     private UrlCounts _urlCountsShown;
 
     private static UrlCounts UrlCountsOf(RequestTab tab)
@@ -574,6 +575,10 @@ public partial class MeridianApp
             {
                 bool wasDirty = tab.Dirty;
                 tab.Doc.SetHeader(index, CurrentHeader(tab, index).Name, v);
+                // The box holds what was typed; the rest of the editor reads a header's value only
+                // for the Chain count, so a character that moves no count shown and leaves the
+                // request as unsaved as it was builds nothing, as in the URL box (65 KB a character).
+                if (tab.Dirty == wasDirty && UrlCountsOf(tab) == _urlCountsShown) return;
                 DocEdited(tab, wasDirty);
             }, 0, $"header-value-{i}"));
             row.AddChild(RemoveButton($"Remove header {header.Name}", () =>
@@ -678,7 +683,12 @@ public partial class MeridianApp
             .OnTextChanged(text =>
             {
                 bool wasDirty = tab.Dirty;
-                tab.Doc.SetBody(tab.Doc.Body?.Type ?? "json", text);
+                var type = tab.Doc.Body?.Type;
+                tab.Doc.SetBody(type ?? "json", text);
+                // As a header value: the area holds the text, and the editor reads the body only for
+                // the Chain count and the sub-tab's type ("Body json", which the first character into
+                // a request with no body block makes). 59 KB a character when it built.
+                if (tab.Dirty == wasDirty && tab.Doc.Body?.Type == type && UrlCountsOf(tab) == _urlCountsShown) return;
                 DocEdited(tab, wasDirty);
             })
             .FontFamily(Fonts.Mono).FontSize(12f)
