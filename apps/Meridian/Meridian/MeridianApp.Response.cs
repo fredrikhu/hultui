@@ -297,6 +297,12 @@ public partial class MeridianApp
                 .FontWeight(active ? FontWeight.Medium : FontWeight.Regular)
                 .TextColor(active ? Azimuth.Text : Azimuth.TextMuted));
         if (active) b.Background(Azimuth.Raised);
+        // Focusable, but no Tab stop: a click focuses the tab as it does a button, and the Request
+        // tab's reveal hands the focus to its tab (RevealSent). Keys do what they did with nothing
+        // focused (the tab takes none), and it draws no ring.
+        b.IsFocusable = true;
+        b.TabIndex = -1;
+        if (active) b.WithRef(_respTabRef);
         b.OnClick(_ => { tab.RespTab = which; ResponseDirty(); });
         if (!active) b.HoverBg(Azimuth.Raised, Color.Transparent);
         return b;
@@ -684,8 +690,16 @@ public partial class MeridianApp
         return values;
     }
 
+    /// <summary>The response's open tab (Body, Headers, … Request), as its last build made it.</summary>
+    private readonly Ref<BoxElement> _respTabRef = new();
+
     private async void RevealSent()
     {
+        // The button goes as the values show (nothing is left to reveal) and the focus went with
+        // it, to nothing: a reader was told the focus on nothing. The Request tab, whose values
+        // show, takes it, and keeps it when the button comes back.
+        if (_window.FocusedElement is { AutomationId: "sent-reveal" } && _respTabRef.Current is { } open && _window.IsInTree(open))
+            open.Focus();
         _sentRevealUntilTs = System.Diagnostics.Stopwatch.GetTimestamp()
             + System.Diagnostics.Stopwatch.Frequency * RevealSeconds;
         ResponseDirty();

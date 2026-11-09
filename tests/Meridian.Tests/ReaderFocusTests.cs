@@ -1,6 +1,7 @@
 using HultUI.Core.Accessibility;
 using HultUI.Core.Events;
 using HultUI.Headless;
+using Meridian.Tests.Fixtures;
 using Xunit;
 
 namespace Meridian.Tests;
@@ -9,13 +10,14 @@ namespace Meridian.Tests;
 /// Where the keyboard focus goes, which is what a screen reader follows: never nowhere after a
 /// key or a click that had it somewhere. Hosted headless over a temp collection.
 /// </summary>
-public class ReaderFocusTests : IDisposable
+public class ReaderFocusTests : IClassFixture<TestHttpServer>, IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("meridian-focus-").FullName;
 
-    public ReaderFocusTests()
+    public ReaderFocusTests(TestHttpServer server)
     {
-        File.WriteAllText(Path.Combine(_root, "get-ok.req"), "GET http://127.0.0.1:9/ok\nname Get ok\n");
+        File.WriteAllText(Path.Combine(_root, "get-ok.req"),
+            $"GET {server.Origin}/ok\nname Get ok\nheader Authorization: Bearer abc.def\n");
     }
 
     public void Dispose()
@@ -84,6 +86,30 @@ public class ReaderFocusTests : IDisposable
             s.PumpFrames(3);
             Assert.True(File.Exists(Path.Combine(_root, "get-ok.req")));
             Assert.Same(send, s.Window.Window.FocusedElement);
+        });
+    }
+
+    /// <summary>The Request tab's reveal goes as the values show, and the focus went with it, to
+    /// nothing. The Request tab takes it, and a reader is told so.</summary>
+    [Fact]
+    public void RevealOnTheRequestTab_GivesTheFocusToTheTab()
+    {
+        Hosted((s, app) =>
+        {
+            var reader = s.Window.InstallAccessibilityBridge();
+            s.Window.FindByAutomationId("req-get-ok")!.Click();
+            s.PumpFrames(2);
+            s.Window.FindByAutomationId("send")!.Click();
+            s.PumpUntil(() => app.ActiveTab!.Result != null && app.ActiveTab.Sending == null, TimeSpan.FromSeconds(10));
+            s.PumpFrames(2);
+            s.Window.FindByAutomationId("resptab-request")!.Click();
+            s.PumpFrames(2);
+
+            s.Window.Click(Live(s, "sent-reveal"));   // the press focuses the button, the click reveals
+            s.PumpFrames(3);
+            Assert.Null(s.Window.FindByAutomationId("sent-reveal"));
+            Assert.Same(Live(s, "resptab-request"), s.Window.Window.FocusedElement);
+            Assert.Equal("Request", reader.FocusedNode?.Name);
         });
     }
 

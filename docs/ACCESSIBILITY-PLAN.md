@@ -373,7 +373,12 @@ left no focused element, and a reader was told the focus on nothing. They give i
 (`ReturnFocusToModalOpener`): to what held it when the card opened, while the card's field still has
 it, so a reader is told one move, the field to the "New request" button; a submit gives it back
 before its action runs, so an action that focuses something of its own wins. 0 trees, as before;
-66.07 → 66.10 KB an open or Escape without a reader.
+66.07 → 66.10 KB an open or Escape without a reader. The Request tab's "reveal (5 s)" button goes
+as the values show, with the focus its press gave it; the response's tabs are focusable now (no Tab
+stop, no ring, `TabIndex` −1), so a click focuses them as it does a button, and the reveal hands the
+focus to the Request tab: a reader is told the button, then the tab, where it was told the button,
+then nothing. 0 trees; 75.6 → 76.1 KB the click without a reader, one probe step (the focus moves
+to the button and back to the tab, where the button's removal only dropped it).
 
 The coalesced layout refresh builds no tree either where a build would make the same nodes
 (2026-10-26, plan 17 round 5). A node keeps its box where it sits in the content of the scroll
