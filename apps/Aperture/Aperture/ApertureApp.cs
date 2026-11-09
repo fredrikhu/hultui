@@ -202,6 +202,9 @@ public sealed partial class ApertureApp : Component, IDisposable
         var body = _stage == ApertureStage.Connect ? BuildConnectView() : BuildBrowsing();
         body.Key = "body";
         root.AddChild(body);
+        // A ref into a view holds the whole view through its parents (REACTIVITY.md, "A ref into a
+        // view keeps the whole view"): a build that shows no library grid lets go of the last one.
+        if (_stage == ApertureStage.Connect || Current.View != ApertureView.Library) LetGoOfGrid();
 
         // The player is a sheet over everything, so the view underneath keeps its state
         // (and its scroll position) while a film plays. It goes up the moment Play is

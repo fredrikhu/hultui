@@ -616,6 +616,40 @@ public class GridRowKeepTests
         return sb.ToString();
     }
 
+    /// <summary>Another view lets the library grid go (plan 17 round 10). The app's ref to the grid held
+    /// the whole library view through its parents behind Settings; a build that shows no grid now
+    /// empties it and keeps the one thing the next library build read from it, the viewport's height.
+    /// Back in the library the grid is made as before.</summary>
+    [Fact]
+    public void AnotherView_LetsTheGridGo_AndKeepsItsHeight()
+    {
+        Host((session, app, _, _) =>
+        {
+            var (grid, height, cards) = WeakGrid(session);
+            var library = app.Current;
+
+            app.Navigate(new Route(ApertureView.Settings));
+            Settle(session);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            Assert.False(grid.IsAlive, "the library view outlived its grid's build");
+            var kept = typeof(ApertureApp).GetField("_gridViewportHeight", BindingFlags.NonPublic | BindingFlags.Instance)!;
+            Assert.Equal(height, (float?)kept.GetValue(app));
+
+            app.Navigate(library);
+            session.PumpUntil(() => Grid(session) is { } g && g.Children.Count > 1, TimeSpan.FromSeconds(10));
+            Settle(session);
+            Assert.Equal(height, Grid(session)!.Layout.AbsoluteContentBox.Height);
+            Assert.Equal(cards, Rows(session).SelectMany(Cards).Count());
+        });
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static (WeakReference Grid, float Height, int Cards) WeakGrid(HeadlessSession session) =>
+        (new(Grid(session)), Grid(session)!.Layout.AbsoluteContentBox.Height, Rows(session).SelectMany(Cards).Count());
+
     // ── Hosting ──────────────────────────────────────────────────────────
 
     private static void Host(Action<HeadlessSession, ApertureApp, FakeMediaLibrary, HttpMessageHandler> body,
