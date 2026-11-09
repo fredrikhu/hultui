@@ -106,7 +106,9 @@ runs and nothing loads. Scripts are blocked, so are images, styles and fonts fro
 elsewhere, and links don't open. Only the page's own inline styles apply. It's a look at
 the markup, safe for any API's HTML. It uses Microsoft Edge's WebView2 on Windows and
 the system's Chromium Embedded Framework on Linux (on Fedora, `sudo dnf install cef`).
-Where neither is available, the pane says why.
+Where neither is available, the pane says why. Back to **web** within a minute, the page is
+there at once; after a minute on pretty, raw or anything else, Meridian lets the page and its
+browser go, and **web** takes about half a second to start them again.
 
 ## Set up environments
 

@@ -144,6 +144,100 @@ public class ResponseViewerTests : IClassFixture<TestHttpServer>, IDisposable
         }, webEngine: engine);
     }
 
+    /// <summary>
+    /// Off screen the preview's page is kept for a minute, so a toggle back is instant, and then let
+    /// go with its browser processes (plan 17 round 9: six of them, about 300 MB); each hide starts
+    /// the minute again, and the next toggle makes a new page. On a clock the test moves by hand.
+    /// </summary>
+    [Fact]
+    public void AHiddenPreview_IsLetGoAfterAMinute_AndNotBefore()
+    {
+        Write("page.req", $"GET {_server.Origin}/page\n");
+        var engine = new HultUI.WebView.Testing.FakeWebEngine();
+        var clock = new ManualClock();
+        Hosted((session, app) =>
+        {
+            app.PreviewClock = clock;
+            SendAndWait(session, app, "page");
+            Click(session, "body-web");
+            session.PumpFrames(3);
+            var page = app.PreviewWeb!;
+            var view = Assert.Single(engine.Views);
+
+            Click(session, "body-pretty");
+            clock.Advance(TimeSpan.FromSeconds(59));
+            session.PumpFrames(2);
+            Assert.Same(page, app.PreviewWeb);
+            Assert.False(view.IsDisposed);
+
+            Click(session, "body-web");   // back within the minute: the same page
+            session.PumpFrames(3);
+            Assert.Same(page, app.PreviewWeb);
+            clock.Advance(TimeSpan.FromSeconds(120));   // shown, it is kept however long
+            session.PumpFrames(2);
+            Assert.Same(page, app.PreviewWeb);
+
+            Click(session, "body-pretty");   // the minute starts again
+            clock.Advance(TimeSpan.FromSeconds(30));
+            session.PumpFrames(2);
+            Assert.Same(page, app.PreviewWeb);
+            clock.Advance(TimeSpan.FromSeconds(30));
+            session.PumpFrames(2);
+            Assert.Null(app.PreviewWeb);
+            Assert.True(view.IsDisposed);
+
+            Click(session, "body-web");
+            session.PumpFrames(3);
+            Assert.NotNull(app.PreviewWeb);
+            Assert.NotSame(page, app.PreviewWeb);
+            Assert.Equal(2, engine.Views.Count);
+            Assert.Contains("NavigateToString", engine.Views[1].Calls);
+            Assert.NotNull(session.Window.FindByAutomationId("body-web-view"));
+        }, webEngine: engine);
+    }
+
+    /// <summary>A clock that moves only when told; its timers fire as it passes their time.</summary>
+    private sealed class ManualClock : TimeProvider
+    {
+        private long _ticks;
+        private readonly List<ManualTimer> _timers = [];
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => _ticks;
+        public override DateTimeOffset GetUtcNow() => new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero).AddTicks(_ticks);
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = new ManualTimer(this, callback, state);
+            timer.Change(dueTime, period);
+            _timers.Add(timer);
+            return timer;
+        }
+
+        public void Advance(TimeSpan by)
+        {
+            _ticks += by.Ticks;
+            foreach (var timer in _timers.ToArray()) timer.FireIfDue(_ticks);
+        }
+
+        private sealed class ManualTimer(ManualClock clock, TimerCallback callback, object? state) : ITimer
+        {
+            private long? _due;
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                _due = dueTime == Timeout.InfiniteTimeSpan ? null : clock._ticks + dueTime.Ticks;
+                return true;
+            }
+            public void FireIfDue(long now)
+            {
+                if (_due is not { } due || due > now) return;
+                _due = null;
+                callback(state);
+            }
+            public void Dispose() => clock._timers.Remove(this);
+            public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
+        }
+    }
+
     [Fact]
     public void TheWebToggleIsOfferedForHtmlAlone()
     {

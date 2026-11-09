@@ -33,6 +33,75 @@ public partial class MeridianApp
     /// <summary>The preview's page, once one was made: for tests.</summary>
     internal WebViewController? PreviewWeb => _preview;
 
+    // ── The page off screen ──────────────────────────────────────────────
+    //
+    // The page stays while the user is on pretty, raw, another response or another view, so a
+    // toggle back to web is instant. Off screen its GPU memory goes at once (the web view gives it
+    // back), but the browser's processes stay: six of them, about 300 MB. After a minute off screen
+    // the page goes too, and the next toggle starts the browser again (plan 17 round 9: the first
+    // frame 0.4–0.7 s after the document goes in). One timer, armed when the page leaves the screen:
+    // an idle window wakes once for it, at the minute, and not at all while the page is shown.
+
+    /// <summary>How long the preview's page is kept off screen.</summary>
+    internal static readonly TimeSpan PreviewKeptHidden = TimeSpan.FromSeconds(60);
+
+    /// <summary>The clock the minute is timed on: the application's unless a test sets one it moves
+    /// by hand.</summary>
+    internal TimeProvider? PreviewClock { get; set; }
+
+    private TimeProvider Clock => PreviewClock ?? _app.Time;
+
+    // The page's elements a build made, kept while on screen: the one in the window and the newest.
+    // On screen is IsHosted, not mounted: a rebuild's twin is mounted too, and never unmounted.
+    private readonly List<PreviewPage> _previewPages = [];
+    private long _previewHiddenAt;       // Clock's timestamp when the page last left the screen
+    private ITimer? _previewLetGo;
+
+    private bool PreviewOnScreen(PreviewPage? besides = null)
+    {
+        foreach (var page in _previewPages)
+            if (page != besides && page.IsHosted) return true;
+        return false;
+    }
+
+    /// <summary>The preview's page in the tree: it says when it leaves.</summary>
+    private sealed class PreviewPage(MeridianApp app) : WebViewElement
+    {
+        protected override void OnUnmounted()
+        {
+            base.OnUnmounted();
+            app.PreviewUnmounted(this);
+        }
+    }
+
+    private void PreviewUnmounted(PreviewPage page)
+    {
+        if (_preview is null || PreviewOnScreen(besides: page)) return;
+        _previewHiddenAt = Clock.GetTimestamp();
+        // On the UI thread, where the page belongs: the timer fires on the pool.
+        _previewLetGo ??= Clock.CreateTimer(static state =>
+            HultUI.Application.InvokeOnMainThread(((MeridianApp)state!).LetPreviewGo),
+            this, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+        _previewLetGo.Change(PreviewKeptHidden, Timeout.InfiniteTimeSpan);
+    }
+
+    /// <summary>The minute ran out. Shown again since, the page is kept (its next leaving starts
+    /// the minute again); hidden again since, the minute is waited out from then.</summary>
+    private void LetPreviewGo()
+    {
+        if (_preview is null || PreviewOnScreen()) return;
+        var left = PreviewKeptHidden - Clock.GetElapsedTime(_previewHiddenAt);
+        if (left > TimeSpan.Zero)
+        {
+            _previewLetGo?.Change(left, Timeout.InfiniteTimeSpan);
+            return;
+        }
+        _preview.Dispose();
+        _preview = null;
+        _previewShown = null;
+        _previewPages.Clear();
+    }
+
     private static bool IsHtml(HttpResponseData response) =>
         response.Body.Kind == BodyKind.Text
         && response.ContentType?.Contains("html", StringComparison.OrdinalIgnoreCase) == true;
@@ -101,14 +170,18 @@ public partial class MeridianApp
             .Padding(new Thickness(0, Azimuth.S3, 0, Azimuth.S3))
             .Children(Text.New("rendered without scripts or network — links don't open")
                 .FontSize(10.5f).TextColor(Azimuth.TextFaint)));
-        var view = WebViewElement.New(_preview).FlexGrow(1);
+        var view = new PreviewPage(this) { Controller = _preview }.FlexGrow(1);
         view.AutomationId("body-web-view");
+        _previewPages.RemoveAll(static p => !p.IsHosted);
+        _previewPages.Add(view);
         col.AddChild(view);
         return col;
     }
 
     private void DisposePreview()
     {
+        _previewLetGo?.Dispose();
+        _previewLetGo = null;
         _preview?.Dispose();
         _preview = null;
         if (_ownsWebEngine) _webEngine?.Dispose();
