@@ -442,6 +442,62 @@ public class DiscoveryViewTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    // ── The map cache ────────────────────────────────────────────────────
+
+    /// <summary>The cache file says what it said when it was one string joined on the UI thread:
+    /// the base, the spec and its version, then an endpoint a line.</summary>
+    [Fact]
+    public void TheMapCacheIsWrittenAsBefore()
+    {
+        var full = new ApiMap("https://api.example", [
+            new Endpoint("GET", "/v1/charges/{id}", Confidence.Declared, "charges", Summary: "Retrieve\ta charge",
+                SeenCodes: new Dictionary<int, int> { [200] = 3, [404] = 1 }, SeenCount: 4),
+            new Endpoint("POST", "/v1/charges", Confidence.Declared, "charges", Deprecated: true),
+            new Endpoint("GET", "/internal/health", Confidence.Observed, "internal",
+                SeenCodes: new Dictionary<int, int> { [503] = 1 }, SeenCount: 1, InferredShape: "{ ok: boolean }"),
+        ], "openapi.json", "1.2.0");
+        var bare = ApiMap.Empty("https://api.example").Record("GET", "https://api.example/v1/ping", 204, null);
+        var path = Path.Combine(_root, ".meridian", "discovery", "x.map");
+        foreach (var map in new[] { full, bare, ApiMap.Empty("https://api.example") })
+        {
+            MeridianApp.WriteMap(map, path);
+            var lines = map.Endpoints.Select(e =>
+                string.Join('\t', e.Method, e.Path, e.Confidence, e.Group, e.SeenCount,
+                    string.Join(',', e.Codes.Select(c => $"{c.Key}={c.Value}")), e.Summary.Replace('\t', ' ')));
+            string before = $"{map.BaseUrl}\t{map.SpecSource}\t{map.SpecVersion}\n" + string.Join('\n', lines);
+            Assert.Equal(new UTF8Encoding(false).GetBytes(before), File.ReadAllBytes(path));
+        }
+    }
+
+    /// <summary>A send into a tracked base folds into the map and writes the cache off the UI thread:
+    /// at 600 endpoints the cache was 272 KB of strings on the UI thread a send.</summary>
+    [Fact]
+    public void ASendIntoATrackedBase_WritesTheCacheOffTheUiThread()
+    {
+        Hosted((session, app) =>
+        {
+            app.StartDiscovery(_server.Origin);
+            session.PumpUntil(() => session.Window.FindByAutomationId("disc-probing") is null, TimeSpan.FromSeconds(10));
+            ImportWalkSpec(session, app, 300);
+            var body = new ResponseBody(BodyKind.Text, """{"id":"x_1"}""", [], 12, false, null);
+            HttpResponseData Response(string url) => new(200, "OK", [], "application/json", body, null!, url);
+            for (int i = 0; i < 3; i++)
+                app.RecordInMap("GET", $"{_server.Origin}/v1/group05/items005/ab_{i}", Response($"{_server.Origin}/v1/group05/items005/ab_{i}"));
+            app.FlushMapCache();
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            app.RecordInMap("GET", _server.Origin + "/internal/health", Response(_server.Origin + "/internal/health"));
+            long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+            app.FlushMapCache();
+
+            var cache = Directory.GetFiles(Path.Combine(_root, ".meridian", "discovery"), "*.map").Single();
+            var text = File.ReadAllText(cache);
+            Assert.Contains("GET\t/internal/health\tObserved\tinternal\t1\t200=1\t", text);
+            Assert.Contains("GET\t/v1/group05/items005/{id}\tDeclared\tgroup05\t3\t200=3\tRead item 5", text);
+            Assert.True(bytes < 96 * 1024, $"a send allocated {bytes / 1024} KB on the UI thread");
+        });
+    }
+
     private void ImportWalkSpec(HeadlessSession session, MeridianApp app, int paths)
     {
         var specPath = Path.Combine(_root, "walk-openapi.json");

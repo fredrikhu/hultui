@@ -82,6 +82,49 @@ public class ApiMapTests
         Assert.Equal(1, endpoint.SeenCount);
     }
 
+    /// <summary>A send into a map of 2,000 endpoints matches its path in place and templatizes a new
+    /// one without splitting every known path: 396 KB a send to a known endpoint, 934 KB to a new path,
+    /// before. What is left is the new map's list.</summary>
+    [Fact]
+    public void ASendIntoALargeMap_SplitsNoKnownPath()
+    {
+        var map = OpenApi.Parse(BigSpec(400), "https://api.x", "spec", out _)!;
+        Assert.Equal(2000, map.Endpoints.Count);
+        for (int i = 0; i < 5; i++)
+        {
+            map.Record("GET", $"https://api.x/v1/res399/items/it_{i}", 200, null);
+            map.Record("GET", $"https://api.x/v2/other{i}/abc_{i}9", 200, null);
+        }
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        var known = map.Record("GET", "https://api.x/v1/res399/items/it_7", 200, null);
+        long knownBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+        before = GC.GetAllocatedBytesForCurrentThread();
+        var unknown = map.Record("GET", "https://api.x/v2/other7/abc_79", 200, null);
+        long unknownBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(1, known.Endpoints.Single(e => e.Method == "GET" && e.Path == "/v1/res399/items/{id}").SeenCount);
+        Assert.Equal(Confidence.Observed, unknown.Endpoints[^1].Confidence);
+        Assert.Equal("/v2/other7/{id}", unknown.Endpoints[^1].Path);
+        Assert.True(knownBytes < 48 * 1024, $"a send to a known endpoint allocated {knownBytes / 1024} KB");
+        Assert.True(unknownBytes < 160 * 1024, $"a send to a new path allocated {unknownBytes / 1024} KB");
+    }
+
+    [Theory]
+    [InlineData("/v1/charges/{id}", "/v1/charges/ch_1", true)]
+    [InlineData("/v1/charges/{id}", "/v1/charges", false)]
+    [InlineData("/v1/charges/{id}", "/v1/charges/ch_1/refunds", false)]
+    [InlineData("/v1/charges", "/v1/refunds", false)]
+    [InlineData("//v1//charges/", "/v1/charges", true)]
+    [InlineData("/v1/{a}/x/{b}", "/v1/1/x/2", true)]
+    [InlineData("/v1/{a}/x/{b}", "/v1/1/y/2", false)]
+    [InlineData("/", "/", true)]
+    [InlineData("/{", "/a", false)]
+    public void APathMatchesATemplateSegmentBySegment(string template, string concrete, bool matches)
+    {
+        Assert.Equal(matches, ApiMap.PathMatches(template, concrete));
+    }
+
     [Fact]
     public void ALiteralSegmentThatLooksLikeAnIdIsLeftAlone()
     {

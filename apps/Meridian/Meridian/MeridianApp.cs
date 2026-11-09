@@ -795,5 +795,6 @@ public partial class MeridianApp : Component, IDisposable
         _watcher?.Dispose();
         DisposePreview();
         Engine.Dispose();
+        FlushMapCache();   // a map saved just before is on disk when the app is gone
     }
 }

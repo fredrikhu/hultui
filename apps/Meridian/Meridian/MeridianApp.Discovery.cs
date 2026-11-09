@@ -46,17 +46,104 @@ public partial class MeridianApp
     /// per line. Losing it costs nothing — the spec re-imports and traffic
     /// re-observes — so the format stays trivially readable rather than
     /// versioned.</summary>
+    /// <remarks>Written off the UI thread, the latest map of each file at a time: every send into a
+    /// tracked base wrote the whole file on the UI thread, 1,106 KB of strings a send at 2,000
+    /// endpoints. A map is never changed, so the writer takes the one the send made, and sends that
+    /// land while it writes are written once, as the last of them. <see cref="Dispose"/> waits for
+    /// it.</remarks>
     private void SaveMap()
     {
         if (_map is not { } map || _workspace == null) return;
+        string path = MapCachePath(map.BaseUrl);
+        lock (_mapSaveLock)
+        {
+            _mapsToSave[path] = map;
+            _mapSaver ??= Task.Run(WriteMaps);
+        }
+    }
+
+    private readonly object _mapSaveLock = new();
+    private readonly Dictionary<string, ApiMap> _mapsToSave = new(StringComparer.Ordinal);
+    private Task? _mapSaver;
+
+    private void WriteMaps()
+    {
+        var batch = new List<KeyValuePair<string, ApiMap>>();
+        while (true)
+        {
+            lock (_mapSaveLock)
+            {
+                if (_mapsToSave.Count == 0)
+                {
+                    _mapSaver = null;
+                    return;
+                }
+                batch.AddRange(_mapsToSave);
+                _mapsToSave.Clear();
+            }
+            foreach (var (path, map) in batch)
+            {
+                // Derived state: a write that fails loses nothing the next send or import does not
+                // write again, and must not stop the writer.
+                try { WriteMap(map, path); }
+                catch (Exception e) when (e is not OutOfMemoryException) { }
+            }
+            batch.Clear();
+        }
+    }
+
+    /// <summary>Waits for the cache's writer, so a map saved just before is on disk (for Dispose, and
+    /// for tests).</summary>
+    internal void FlushMapCache()
+    {
+        Task? saver;
+        lock (_mapSaveLock) saver = _mapSaver;
+        saver?.Wait(TimeSpan.FromSeconds(10));
+    }
+
+    /// <summary>The cache file's text, written as it is made: the first line the base, the spec and
+    /// its version, then a line an endpoint, tab-separated, no newline at the end.</summary>
+    internal static void WriteMap(ApiMap map, string path)
+    {
         try
         {
-            var path = MapCachePath(map.BaseUrl);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            var lines = map.Endpoints.Select(e =>
-                string.Join('\t', e.Method, e.Path, e.Confidence, e.Group, e.SeenCount,
-                    string.Join(',', e.Codes.Select(c => $"{c.Key}={c.Value}")), e.Summary.Replace('\t', ' ')));
-            File.WriteAllText(path, $"{map.BaseUrl}\t{map.SpecSource}\t{map.SpecVersion}\n" + string.Join('\n', lines));
+            using var writer = new StreamWriter(path, append: false, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            writer.Write(map.BaseUrl);
+            writer.Write('\t');
+            writer.Write(map.SpecSource);
+            writer.Write('\t');
+            writer.Write(map.SpecVersion);
+            writer.Write('\n');
+            for (int i = 0; i < map.Endpoints.Count; i++)
+            {
+                var e = map.Endpoints[i];
+                if (i > 0) writer.Write('\n');
+                writer.Write(e.Method);
+                writer.Write('\t');
+                writer.Write(e.Path);
+                writer.Write('\t');
+                writer.Write(e.Confidence == Confidence.Declared ? nameof(Confidence.Declared) : nameof(Confidence.Observed));
+                writer.Write('\t');
+                writer.Write(e.Group);
+                writer.Write('\t');
+                writer.Write(e.SeenCount);
+                writer.Write('\t');
+                if (e.SeenCodes is { } codes)
+                {
+                    bool first = true;
+                    foreach (var (code, count) in codes)
+                    {
+                        if (!first) writer.Write(',');
+                        first = false;
+                        writer.Write(code);
+                        writer.Write('=');
+                        writer.Write(count);
+                    }
+                }
+                writer.Write('\t');
+                writer.Write(e.Summary.Replace('\t', ' '));
+            }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
