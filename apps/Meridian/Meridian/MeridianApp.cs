@@ -314,6 +314,12 @@ public partial class MeridianApp : Component, IDisposable
             _pendingConfirmFocus = false;
             if (_confirmRef.Current is { } ok && _window.IsInTree(ok)) ok.Focus();
         }
+        if (_pendingHistoryFocus)
+        {
+            _pendingHistoryFocus = false;
+            if (View == MeridianView.History && _historyListRef.Current is { } history && _window.IsInTree(history))
+                history.Focus();
+        }
         _responseFind.Service();
     }
 
@@ -341,8 +347,12 @@ public partial class MeridianApp : Component, IDisposable
     private void SetView(MeridianView v)
     {
         if (View == v) return;
+        // History's list takes the focus once it is built, so a reader follows the walk.
+        _pendingHistoryFocus = v == MeridianView.History;
         View = v;   // reactive → rebuild
     }
+
+    private bool _pendingHistoryFocus;
 
     private async void OpenFolder()
     {

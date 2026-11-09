@@ -378,7 +378,13 @@ as the values show, with the focus its press gave it; the response's tabs are fo
 stop, no ring, `TabIndex` −1), so a click focuses them as it does a button, and the reveal hands the
 focus to the Request tab: a reader is told the button, then the tab, where it was told the button,
 then nothing. 0 trees; 75.6 → 76.1 KB the click without a reader, one probe step (the focus moves
-to the button and back to the tab, where the button's removal only dropped it).
+to the button and back to the tab, where the button's removal only dropped it). Meridian's History
+walks its rows from the app's key handler, whatever holds the focus, and opened with nothing
+focused: a reader heard the rows' selection move in a list it was not in. The list (named "History")
+takes the focus when the view opens and is a Tab stop; it takes no key itself, so the keys are as
+they were, and draws no ring. A reader is told the list on opening, then each key's two rows as
+before, with the focus on their list: 0 trees a key (300 sends, 16.08 → 16.10 KB a key without a
+reader, 16.55 → 16.57 with UIA), the opening 645.7 → 646.1 KB.
 
 The coalesced layout refresh builds no tree either where a build would make the same nodes
 (2026-10-26, plan 17 round 5). A node keeps its box where it sits in the content of the scroll

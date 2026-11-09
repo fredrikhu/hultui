@@ -323,6 +323,13 @@ public partial class MeridianApp
             .SelectedIndex(SelectedHistoryIndex(rows))
             .FlexGrow(1);
         list.AutomationId("history-rows");
+        // The arrows walk the rows from the app's key handler, whatever holds the focus, and the view
+        // opened with nothing focused: a reader heard the rows' selection change in a list it was not
+        // in, with the focus on nothing. The list takes the focus when the view opens (OnAfterBuild)
+        // and is a Tab stop; it takes no key itself (no keyboard scroll), so the keys are as they
+        // were, and it draws no ring (the selection is the cursor).
+        list.IsFocusable = true;
+        list.AccessibleName = "History";
         list.WithRef(_historyListRef);
         col.AddChild(list);
         return col;

@@ -113,6 +113,44 @@ public class ReaderFocusTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    /// <summary>History's arrows walk the rows from the app's key handler, and the view opened with
+    /// nothing focused, so a reader heard the selection move in a list it was not in. The list takes
+    /// the focus when the view opens and holds it while walked, with no tree built for a key.</summary>
+    [Fact]
+    public void HistoryOpens_WithItsListFocused_AndTheListHoldsTheFocusWhileWalked()
+    {
+        var start = DateTimeOffset.Now.AddMinutes(-60);
+        for (int i = 0; i < 30; i++)
+            Meridian.Core.HistoryLog.Append(_root, new Meridian.Core.HistoryEntry(start.AddMinutes(i), "GET",
+                $"https://api.x/v1/items/{i}", 200, 10 + i, null, null));
+        Hosted((s, app) =>
+        {
+            var reader = s.Window.InstallAccessibilityBridge();
+            s.PumpFrames(2);
+            s.Window.PressKey(KeyCode.Digit4);
+            s.PumpFrames(3);
+            var list = Live(s, "history-rows");
+            Assert.Same(list, s.Window.Window.FocusedElement);
+            Assert.Equal(AccessibilityRole.List, reader.FocusedNode?.Role);
+            Assert.Equal("History", reader.FocusedNode?.Name);
+
+            s.Window.PressKey(KeyCode.Down);   // the first selection places the archive beside it
+            s.PumpFrames(3);
+            int trees = s.Window.AccessibilityTreesBuilt;
+            reader.ClearDiffs();
+            for (int i = 0; i < 4; i++)
+            {
+                s.Window.PressKey(KeyCode.Down);
+                s.PumpFrames(2);
+                Assert.Same(list, s.Window.Window.FocusedElement);
+            }
+            Assert.Equal(trees, s.Window.AccessibilityTreesBuilt);
+            // Each key tells the row it left and the row it reached (the nodes are marked in place).
+            Assert.Equal(8, reader.Diffs.SelectMany(d => d.PropertyChanged)
+                .Count(c => c.PropertyName == AccessibilityProperties.IsSelected));
+        });
+    }
+
     /// <summary>A prompt submitted gives the focus back too, when its action gives it to nothing
     /// of its own: "New folder" makes the folder and the focus is on the button again.</summary>
     [Fact]
