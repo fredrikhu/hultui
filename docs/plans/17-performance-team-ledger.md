@@ -9,7 +9,7 @@ file after every step and commits it with the step's work. Full survey reports a
   facced69 finish green (the user asked for the releases before the round's work; see the log). The survey is merged
   (reports `17-reports/r10-*`); build briefs `brief-r10b<N>.md` go in session 3484c586's scratchpad. Questions 27–32
   asked 2026-11-09; 27–30 answered as recommended the same day (27 → step 5, 28 → new step 15, 29 → step 7, 30 →
-  step 12); 31 and 32 (optional public API, recommended no) stay open, and their steps take the app-only route. Open for the user, none blocking: question 26 (a merged syntax theme to match VS Code; for
+  step 12); 31 and 32 answered no (the user left them to the recommendation): steps 2 and 13 are app-only. Open for the user, none blocking: question 26 (a merged syntax theme to match VS Code; for
   later), question 10 (`TokenizeDiff` public), the live screen-reader check of menus and disabled menu items
   (ACCESSIBILITY-PLAN.md). Older rounds are in [the archive](17-performance-team-ledger-archive.md) (search it, don't
   read it whole). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a pre-push hook refuses
@@ -532,9 +532,11 @@ Round 10 questions (from the survey, 2026-11-09). Recommendations in brackets.
     **(c)** (2026-11-09; step 12).
 31. **ref-lets-go-when-removed** (r10-4; optional, framework): should the public `Ref<T>` let go of its element when the
     element leaves the window? It would fix every app holder at once but changes what `Current` returns to code that
-    reads a removed element (Aperture's Library.cs:45 does). [No: fix the apps (step 2) and write the guideline.]
+    reads a removed element (Aperture's Library.cs:45 does). [No: fix the apps (step 2) and write the guideline.] → **no**
+    (2026-11-09; the user left it to the recommendation).
 32. **panesplitter-sizes-pane** (r10-6; optional, public API): should `PaneSplitter` take the pane's element and size it
-    during a drag, calling `onChanged` only on press and release? [No: step 13's app refs need no API.]
+    during a drag, calling `onChanged` only on press and release? [No: step 13's app refs need no API.] → **no**
+    (2026-11-09; the user left it to the recommendation).
 
 Round 9 question 26 (from step 14b, 2026-11-09), still open. Round 9's answered questions 14–25 are in
 [the archive](17-performance-team-ledger-archive.md#needs-the-user-round-9). Recommendations in brackets.
@@ -812,3 +814,5 @@ From 2026-11-08 (round 9's survey); earlier entries are in the archive ([to 2026
   meridian-v1.7.0 failed its Windows test job on `Junction.Tests.ComposerPartTests.WhatTheComposerShows_FollowsEveryWayItChanges`
   (the test's own `git commit --amend` hit an `index.lock` held by the app's background git; the same test passed in
   Junction's own installer run on the same commit): a flake; `gh run rerun --failed` once.
+- 2026-11-09: the user left questions 31 and 32 to the recommendation: both no (`Ref<T>` unchanged; `PaneSplitter`
+  gains no API). Steps 2 and 13 stay app-only.
