@@ -14,7 +14,8 @@ namespace VesperCommander.Tests;
 /// <summary>
 /// The cursor in Synchronize (F9): what a build of the rows costs, and what a cursor key does (plan
 /// 17 round 10 step 7). The rows are kept between builds, a cursor key moves the ring on the live
-/// rows with no build (CommanderApp.MoveSyncCursor), and the keys that change the rows still build. Each test holds the window to what a build that keeps no
+/// rows with no build (CommanderApp.MoveSyncCursor) and scrolls the cursor's row into view, and the
+/// keys that change the rows still build. Each test holds the window to what a build that keeps no
 /// row makes: the elements, their colours and rings, the reader's tree and the pixels.
 /// </summary>
 public class SyncCursorTests
@@ -141,8 +142,30 @@ public class SyncCursorTests
         AssertIsAFullBuild(t, "after two more Downs");
     }
 
+    /// <summary>The cursor stays on screen: each key scrolls its row into view (it left the view
+    /// after about 26 rows and nothing brought it back), with no build, and back up the same.</summary>
+    [Fact]
+    public void TheCursor_StaysOnScreen_After40Downs()
+    {
+        using var t = OpenSync(90);   // 60 rows shown, about 26 in view
+        int builds = Builds(t);
+        Press(t, KeyCode.Down, 40);
+        Assert.Equal(0, Builds(t) - builds);
+        Assert.Equal(40, t.Field<int>("_syncSel"));
+        Assert.True(Scroll(t).ScrollOffsetY > 0, "the view did not scroll");
+        AssertOnScreen(t, "after 40 Downs");
+        AssertIsAFullBuild(t, "after 40 Downs");
+
+        builds = Builds(t);
+        Press(t, KeyCode.Up, 30);
+        Assert.Equal(0, Builds(t) - builds);
+        Assert.Equal(10, t.Field<int>("_syncSel"));
+        AssertOnScreen(t, "after 30 Ups");
+    }
+
     /// <summary>A cursor key that has to build (as if the latest build had not made the rows) builds,
-    /// after keys that built nothing, and shows the cursor as a build that keeps no row does.</summary>
+    /// after keys that built nothing, shows the cursor as a build that keeps no row does, and
+    /// reveals its row once its build is in the window.</summary>
     [Fact]
     public void ACursorKeyThatHasToBuild_ShowsTheCursor()
     {
@@ -154,6 +177,7 @@ public class SyncCursorTests
         Assert.Equal(1, Builds(t) - builds);
         Assert.Equal(31, t.Field<int>("_syncSel"));
         Assert.Single(Ringed(t));
+        AssertOnScreen(t, "after a Down that built");
         AssertIsAFullBuild(t, "after a Down that built");
     }
 
@@ -245,6 +269,18 @@ public class SyncCursorTests
         node.Children.SelectMany(Selected).Prepend(node).Where(n => n.IsSelected == true);
 
     // ── what the window shows ────────────────────────────────────────────
+
+    /// <summary>The cursor's row lies inside the scroll view's viewport (layout is unscrolled: the
+    /// row's place on screen is its box less the scroll).</summary>
+    private static void AssertOnScreen(DiffViewTests.Fixture t, string when)
+    {
+        var sv = Scroll(t);
+        var ringed = Rows(t).Single(r => r.Value.BorderColor == Nocturne.Accent600).Value.Layout.AbsoluteBorderBox;
+        var view = sv.Layout.AbsoluteContentBox;
+        float top = ringed.Y - sv.ScrollOffsetY, bottom = ringed.Y + ringed.Height - sv.ScrollOffsetY;
+        Assert.True(top >= view.Y - 0.5f && bottom <= view.Y + view.Height + 0.5f,
+            $"{when}: the cursor's row is at {top:0.#}..{bottom:0.#}, the view {view.Y:0.#}..{view.Y + view.Height:0.#}");
+    }
 
     /// <summary>What the window shows now, then after a build of the window and every part that keeps
     /// no row, which must match: the elements (kinds, texts, colours as resolved, rings, where each

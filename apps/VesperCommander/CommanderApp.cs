@@ -867,6 +867,11 @@ public partial class CommanderApp : Component, IDisposable
         }
         _viewerFind.Service();
         _diffFind.Service();
+        if (_pendingSyncReveal)
+        {
+            _pendingSyncReveal = false;
+            if (_syncOpen) RevealSyncCursor();
+        }
         if (_pendingFindScroll)
         {
             _pendingFindScroll = false;

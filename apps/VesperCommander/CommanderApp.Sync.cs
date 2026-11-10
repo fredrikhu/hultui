@@ -5,6 +5,7 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Core.Styling;
 using VesperCommander.Theme;
 
@@ -145,8 +146,8 @@ public partial class CommanderApp
         switch (e.Key)
         {
             case KeyCode.Escape: CloseSync(); e.StopPropagation = true; break;
-            case KeyCode.Up: MoveSyncCursor(Math.Max(0, _syncSel - 1)); e.StopPropagation = true; break;
-            case KeyCode.Down: MoveSyncCursor(Math.Min(Math.Max(0, VisibleSyncCount() - 1), _syncSel + 1)); e.StopPropagation = true; break;
+            case KeyCode.Up: MoveSyncCursor(Math.Max(0, _syncSel - 1), reveal: true); e.StopPropagation = true; break;
+            case KeyCode.Down: MoveSyncCursor(Math.Min(Math.Max(0, VisibleSyncCount() - 1), _syncSel + 1), reveal: true); e.StopPropagation = true; break;
             case KeyCode.Space:
                 if (SyncRowAt(_syncSel) is { } row) CycleSyncDir(row);
                 e.StopPropagation = true; break;
@@ -164,13 +165,21 @@ public partial class CommanderApp
 
     /// <summary>The cursor to the row shown at <paramref name="to"/>: on the live rows with no build
     /// when the latest build made them (<see cref="MoveSyncRingLive"/>); otherwise the view builds
-    /// and the parts stay. Each key built the window, both parts and every row.</summary>
-    private void MoveSyncCursor(int to)
+    /// and the parts stay. Each key built the window, both parts and every row. With
+    /// <paramref name="reveal"/> (a key) the row is scrolled into view, after the build when there is
+    /// one (<see cref="OnAfterBuild"/>): the cursor left the view after a screen of rows, and nothing
+    /// brought it back. A click leaves the scroll, as in a pane.</summary>
+    private void MoveSyncCursor(int to, bool reveal)
     {
         int from = _syncSel;
         if (to == from) return;   // at an end of the list: nothing moves, nothing builds
         _syncSel = to;
-        if (MoveSyncRingLive(from, to)) return;
+        if (MoveSyncRingLive(from, to))
+        {
+            if (reveal) RevealSyncCursor();
+            return;
+        }
+        _pendingSyncReveal = reveal;
         MarkViewDirty();
     }
 
@@ -212,6 +221,21 @@ public partial class CommanderApp
             if (el.IsHosted) ShowSyncCursor(el, r, madeSelected);
         _syncRingMoved.Clear();
     }
+
+    /// <summary>Sync's scroll view of rows, for the reveal; let go once Sync left the window
+    /// (<see cref="LetGoOfLeftViews"/>).</summary>
+    private readonly Ref<ScrollViewElement> _syncScroll = new();
+
+    /// <summary>The cursor's row in view, by its place: every row is <see cref="RowHeight"/> high,
+    /// the column has no gap, so no row is read back.</summary>
+    private void RevealSyncCursor()
+    {
+        if (_syncScroll.Current is { IsHosted: true } sv && _syncSel >= 0 && _syncSel < VisibleSyncCount())
+            sv.ScrollRangeIntoView(_syncSel * RowHeight, RowHeight);
+    }
+
+    /// <summary>A cursor key that built asks for the reveal once its build is in the window.</summary>
+    private bool _pendingSyncReveal;
 
     private void DiffSyncRow(SyncRow row)
     {
@@ -400,7 +424,7 @@ public partial class CommanderApp
         if (_syncCellsShape.Changed(new SyncRowShape(RowHeight, _app.Theme))) _syncCells.Clear();
         _syncCells.Begin(_builds);
         _syncRowsBuild = _builds;
-        var scroll = ScrollView.Vertical().FlexGrow(1).Padding(new Thickness(4, 4, 4, 4));
+        var scroll = ScrollView.Vertical().WithRef(_syncScroll).FlexGrow(1).Padding(new Thickness(4, 4, 4, 4));
         var colb = Flex.Column(gap: 0);
         for (int i = 0; i < vis.Count; i++)
         {
@@ -478,7 +502,7 @@ public partial class CommanderApp
         row.OnClick(_ =>
         {
             int at = VisibleSyncRows().IndexOf(r);
-            if (at >= 0) MoveSyncCursor(at);
+            if (at >= 0) MoveSyncCursor(at, reveal: false);
         });
         return row;
     }
