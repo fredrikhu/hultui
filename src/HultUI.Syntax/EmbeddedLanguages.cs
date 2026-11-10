@@ -96,25 +96,37 @@ internal static partial class EmbeddedLanguages
         names.Remove(self);
         return [.. names];
 
+        // A raw grammar is TextMateSharp's Raw, a Dictionary<string, object>, and lists of them: walked
+        // with their own enumerators, a node costs nothing (through the interfaces, 3.6 MB for all 78).
         void Walk(object node)
         {
-            if (node is IDictionary<string, object> rule)
+            switch (node)
             {
-                foreach (var (key, value) in rule)
-                {
-                    if (key == "include" && value is string include)
-                    {
-                        if (include.Length == 0 || include[0] == '#' || include is "$self" or "$base") continue;
-                        int hash = include.IndexOf('#');
-                        var scope = hash < 0 ? include : include[..hash];
-                        if (!names.Contains(scope)) names.Add(scope);
-                    }
-                    else if (value is not null and not string) Walk(value);
-                }
+                case Dictionary<string, object> rule:
+                    foreach (var (key, value) in rule) Visit(key, value);
+                    break;
+                case IDictionary<string, object> rule:
+                    foreach (var (key, value) in rule) Visit(key, value);
+                    break;
+                case List<object> items:
+                    foreach (var item in items) Visit("", item);
+                    break;
+                case IEnumerable items:
+                    foreach (var item in items) Visit("", item);
+                    break;
             }
-            else if (node is IEnumerable items)
-                foreach (var item in items)
-                    if (item is not null and not string) Walk(item);
+        }
+
+        void Visit(string key, object? value)
+        {
+            if (key == "include" && value is string include)
+            {
+                if (include.Length == 0 || include[0] == '#' || include is "$self" or "$base") return;
+                int hash = include.IndexOf('#');
+                var scope = hash < 0 ? include : include[..hash];
+                if (!names.Contains(scope)) names.Add(scope);
+            }
+            else if (value is not null and not string) Walk(value);
         }
     }
 
