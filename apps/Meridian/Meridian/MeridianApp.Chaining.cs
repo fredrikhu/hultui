@@ -311,21 +311,48 @@ public partial class MeridianApp
             .Background(Azimuth.Alpha(Azimuth.Accent300, 0.12)).FlexShrink(0)
             .Children(Ui.ChipLabel("{{" + name + "}}", 11f, Azimuth.Accent300));
 
-    /// <summary>Chain nodes for every request in the tree, parsed on demand.
+    // The Chain sub-tab builds with the editor, a keystroke in the URL or a field too, and read and
+    // parsed every request of the collection for it: 2,848 KB a build at 200 requests, the key
+    // 2,919 KB where the Headers sub-tab's is 8.6 KB. A request's node is read once now, for the
+    // collection as it was scanned: every change to a request file on disk scans it again (the
+    // watcher, a save, a rename, a new request), and a new scan lets the nodes go. An open tab
+    // still gives its node from its document, saved or not, on every build.
+    private CollectionTree? _chainNodesOf;
+    private readonly Dictionary<string, Chain.Node> _chainNodes = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Request files the Chain sub-tab has read so far, for tests: once each a scan.</summary>
+    internal int ChainFilesRead { get; private set; }
+
+    /// <summary>Chain nodes for every request in the tree, each file read once a scan.
     /// The open tab contributes its in-memory (possibly unsaved) document.</summary>
     private List<Chain.Node> AnalyzeAllRequests()
     {
+        if (!ReferenceEquals(_chainNodesOf, _tree))
+        {
+            _chainNodes.Clear();
+            _chainNodesOf = _tree;
+        }
         var nodes = new List<Chain.Node>();
         void Walk(CollectionFolder folder)
         {
             foreach (var sub in folder.Folders) Walk(sub);
             foreach (var request in folder.Requests)
             {
-                var open = _tabs.FirstOrDefault(t => t.Path.Equals(request.Path, StringComparison.OrdinalIgnoreCase));
+                RequestTab? open = null;
+                foreach (var tab in _tabs)
+                    if (tab.Path.Equals(request.Path, StringComparison.OrdinalIgnoreCase)) { open = tab; break; }
                 if (open != null)
                     nodes.Add(Chain.Analyze(open.Path, open.Doc));
-                else if (TryReadFile(request.Path) is { } text)
-                    nodes.Add(Chain.Analyze(request.Path, ReqDocument.Parse(text)));
+                else if (_chainNodes.TryGetValue(request.Path, out var known))
+                    nodes.Add(known);
+                else
+                {
+                    ChainFilesRead++;
+                    if (TryReadFile(request.Path) is not { } text) continue;   // read again next build
+                    var node = Chain.Analyze(request.Path, ReqDocument.Parse(text));
+                    _chainNodes[request.Path] = node;
+                    nodes.Add(node);
+                }
             }
         }
         if (_tree != null) Walk(_tree.Root);
