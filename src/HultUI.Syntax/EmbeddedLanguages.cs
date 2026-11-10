@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections;
+using System.Text.RegularExpressions;
 
 namespace HultUI.Syntax;
 
@@ -16,18 +17,27 @@ namespace HultUI.Syntax;
 /// that includes it loses that pattern, or drops out when it was its only one. That changes nothing
 /// where the rule could not have matched anyway, so the text colours as it did with every grammar.</para>
 ///
-/// <para>A scan may answer too much, never too little: a grammar it cannot rule out is handed out. A
-/// grammar with no scan here reaches every grammar it names.</para>
+/// <para>Markdown, HTML, the shell, Ruby and F# have scans; the last three reach Markdown (a heredoc, a
+/// doc comment) and with it every other grammar, so they scan their own texts too. A scan reads the
+/// whole text, wherever the grammar is embedded in it, and may answer too much, never too little: a
+/// grammar it cannot rule out is handed out. A grammar with no scan reaches every grammar it names.</para>
 /// </summary>
-internal static class EmbeddedLanguages
+internal static partial class EmbeddedLanguages
 {
     internal const string Markdown = "text.html.markdown";
     internal const string HtmlDerivative = "text.html.derivative";
+    internal const string Html = "text.html.basic";
     internal const string Yaml = "source.yaml";
+    internal const string Shell = "source.shell";
+    internal const string Ruby = "source.ruby";
+    internal const string FSharp = "source.fsharp";
+    internal const string Css = "source.css";
+    internal const string JavaScript = "source.js";
 
     /// <summary>Whether a text in <paramref name="scope"/> gets a registry of the grammars it reaches,
-    /// rather than the one every other grammar shares.</summary>
-    public static bool Scans(string scope) => scope == Markdown;
+    /// rather than the one every other grammar shares: the grammars that reach Markdown, and with it
+    /// every other, through a fence, a heredoc or a doc comment.</summary>
+    public static bool Scans(string scope) => scope is Markdown or Shell or Ruby or FSharp;
 
     /// <summary>
     /// Every grammar <paramref name="text"/> (and <paramref name="other"/>, a diff's second version) can
@@ -45,14 +55,35 @@ internal static class EmbeddedLanguages
         queue.Enqueue(root);
         while (queue.TryDequeue(out var scope))
         {
-            var fired = scope == Markdown ? MarkdownReaches(text, other, longLine) : null;
+            var (covers, fired) = Decided(scope, text, other, longLine);
             foreach (var name in namesOf(scope)!)
             {
-                if (fired is not null && MarkdownCovers.Contains(name) && !fired.Contains(name)) continue;
+                if (covers is not null && covers.Contains(name) && !fired!.Contains(name)) continue;
                 if (namesOf(name) is not null && reached.Add(name)) queue.Enqueue(name);
             }
         }
         return reached;
+    }
+
+    /// <summary>For a grammar with a scan, the grammars it decides and, of those, the ones it found a
+    /// way into in these texts; nulls for a grammar with none, which reaches all it names.</summary>
+    private static (HashSet<string>? Covers, HashSet<string>? Fired) Decided(string scope, string text, string? other,
+        int longLine) => scope switch
+    {
+        Markdown => (MarkdownCovers, MarkdownReaches(text, other, longLine)),
+        Shell => (ShellCovers, Both(text, other, ShellReaches)),
+        Ruby => (RubyCovers, Both(text, other, RubyReaches)),
+        FSharp => (FSharpCovers, Both(text, other, FSharpReaches)),
+        Html => (HtmlCovers, Both(text, other, HtmlReaches)),
+        _ => (null, null),
+    };
+
+    private static HashSet<string> Both(string text, string? other, Action<string, HashSet<string>> scan)
+    {
+        var fired = new HashSet<string>(StringComparer.Ordinal);
+        scan(text, fired);
+        if (other is not null) scan(other, fired);
+        return fired;
     }
 
     /// <summary>The scopes of the other grammars a grammar includes, anywhere in it: in its patterns,
@@ -89,8 +120,8 @@ internal static class EmbeddedLanguages
 
     // ── Markdown ──────────────────────────────────────────────────────────
     //
-    // Markdown reaches a fence language through its fence rule, whose start names it; HTML (and with it
-    // JavaScript and CSS) through a tag, a comment or an entity, each of which starts with '<' or '&';
+    // Markdown reaches a fence language through its fence rule, whose start names it; HTML through a
+    // tag, a comment or an entity, each of which starts with '<' or '&';
     // and YAML through front matter, `\A-{3}\s*$`, which opens a text's first line. \A matches on any
     // line the tokenize starts from no state, and a line too long to keep its state leaves the next one
     // none, so any line that starts with three dashes counts.
@@ -300,4 +331,139 @@ internal static class EmbeddedLanguages
 
     private static bool SameLetter(char c, char want) =>
         c == want || char.IsAsciiLetter(want) && char.IsAsciiLetter(c) && (c | 0x20) == (want | 0x20);
+
+    // ── Shell, Ruby, F#, HTML ─────────────────────────────────────────────
+    //
+    // Each enters the languages it embeds through rules that a short literal starts, so its scan looks
+    // for that literal. A test holds each table to the rules of its grammar file.
+
+    /// <summary>The shell grammar's heredocs that embed a language, <c>(&lt;&lt;)-?\s*("|'|)\s*(NAME)</c>
+    /// and a delimiter after it, by NAME (in capitals, as it must be written), and the grammar each
+    /// includes.</summary>
+    internal static readonly (string Name, string Scope)[] ShellHeredocs =
+    [
+        ("RUBY", Ruby), ("PYTHON", "source.python"), ("APPLESCRIPT", "source.applescript"), ("HTML", Html),
+        ("MARKDOWN", Markdown), ("TEXTILE", "text.html.textile"), ("SHELL", Shell),
+    ];
+
+    internal static readonly HashSet<string> ShellCovers = [.. ShellHeredocs.Select(h => h.Scope)];
+
+    private static void ShellReaches(string text, HashSet<string> fired)
+    {
+        var all = text.AsSpan();
+        for (int at = all.IndexOf("<<"); at >= 0; at = Next(all, at + 1, "<<"))
+        {
+            int i = at + 2;
+            if (i < all.Length && all[i] == '-') i++;
+            i = SkipSpaces(all, i);
+            if (i < all.Length && all[i] is '"' or '\'') i = SkipSpaces(all, i + 1);
+            foreach (var (name, scope) in ShellHeredocs)
+                if (all[i..].StartsWith(name, StringComparison.Ordinal)) fired.Add(scope);
+        }
+    }
+
+    /// <summary>Ruby's heredocs that embed a language,
+    /// <c>(?=(?&gt;&lt;&lt;[-~]("?)((?:[_\w]+_|)NAME)\b\1))</c>, by NAME (JavaScript and the shell have
+    /// two), and the grammar each includes.</summary>
+    internal static readonly (string Name, string Scope)[] RubyHeredocs =
+    [
+        ("HTML", Html), ("XML", "text.xml"), ("SQL", "source.sql"), ("CSS", Css), ("CPP", "source.c++"),
+        ("C", "source.c"), ("JS", JavaScript), ("JAVASCRIPT", JavaScript), ("JQUERY", "source.js.jquery"),
+        ("SH", Shell), ("SHELL", Shell), ("LUA", "source.lua"), ("RUBY", Ruby),
+    ];
+
+    /// <summary>Ruby's data section, <c>^__END__\n</c>, takes HTML when markup follows.</summary>
+    internal const string RubyDataSection = "__END__";
+
+    internal static readonly HashSet<string> RubyCovers = [.. RubyHeredocs.Select(h => h.Scope), Html];
+
+    private static void RubyReaches(string text, HashSet<string> fired)
+    {
+        var all = text.AsSpan();
+        if (all.IndexOf(RubyDataSection) >= 0) fired.Add(Html);
+        for (int at = all.IndexOf("<<"); at >= 0; at = Next(all, at + 1, "<<"))
+        {
+            int i = at + 2;
+            if (i >= all.Length || all[i] is not ('-' or '~')) continue;
+            if (++i < all.Length && all[i] == '"') i++;
+            // The heredoc's word, to the first ASCII character no word holds: past ASCII any may be one.
+            int end = i;
+            while (end < all.Length && (all[end] > 0x7F || char.IsAsciiLetterOrDigit(all[end]) || all[end] == '_')) end++;
+            foreach (var (name, scope) in RubyHeredocs)
+                if (EndsAWord(all[i..end], name)) fired.Add(scope);
+        }
+    }
+
+    /// <summary>Whether <paramref name="name"/> stands in <paramref name="word"/> at its start or after
+    /// '_', and ends it, or ends its ASCII where a character past ASCII may end the word.</summary>
+    private static bool EndsAWord(ReadOnlySpan<char> word, string name)
+    {
+        for (int at = word.IndexOf(name); at >= 0; at = Next(word, at + 1, name))
+            if ((at == 0 || word[at - 1] == '_') && (at + name.Length == word.Length || word[at + name.Length] > 0x7F))
+                return true;
+        return false;
+    }
+
+    /// <summary>F#'s doc comments, a <c>///</c> line and a <c>(**</c> block, take Markdown.</summary>
+    internal static readonly string[] FSharpDocComments = ["///", "(**"];
+
+    internal static readonly HashSet<string> FSharpCovers = [Markdown];
+
+    private static void FSharpReaches(string text, HashSet<string> fired)
+    {
+        foreach (var opens in FSharpDocComments)
+            if (text.Contains(opens, StringComparison.Ordinal)) fired.Add(Markdown);
+    }
+
+    // HTML takes CSS in a <style> element, and JavaScript in a <script> element or an event handler's
+    // attribute (onclick="..."). The two tag names match in any case, as (?i:style) and (?i:script).
+
+    /// <summary>The event handlers' attribute names, as the HTML grammar's rule for them starts, less its
+    /// closing <c>(?![\w:-])</c>. Letters as written: the rule ignores no case.</summary>
+    internal const string HtmlEventHandlers =
+        "on(s(croll|t(orage|alled)|u(spend|bmit)|e(curitypolicyviolation|ek(ing|ed)|lect))|hashchange|"
+        + "c(hange|o(ntextmenu|py)|u(t|echange)|l(ick|ose)|an(cel|play(through)?))|t(imeupdate|oggle)|"
+        + "in(put|valid)|o(nline|ffline)|d(urationchange|r(op|ag(start|over|e(n(ter|d)|xit)|leave)?)|blclick)|"
+        + "un(handledrejection|load)|p(opstate|lay(ing)?|a(ste|use|ge(show|hide))|rogress)|e(nded|rror|mptied)|"
+        + "volumechange|key(down|up|press)|focus|w(heel|aiting)|l(oad(start|e(nd|d(data|metadata)))?|anguagechange)|"
+        + "a(uxclick|fterprint|bort)|r(e(s(ize|et)|jectionhandled)|atechange)|"
+        + "m(ouse(o(ut|ver)|down|up|enter|leave|move)|essage(error)?)|b(efore(unload|print)|lur))";
+
+    [GeneratedRegex(HtmlEventHandlers, RegexOptions.CultureInvariant)]
+    private static partial Regex EventHandler();
+
+    internal static readonly HashSet<string> HtmlCovers = [Css, JavaScript];
+
+    private static void HtmlReaches(string text, HashSet<string> fired)
+    {
+        if (OpensTag(text, "style")) fired.Add(Css);
+        if (OpensTag(text, "script") || EventHandler().IsMatch(text)) fired.Add(JavaScript);
+    }
+
+    /// <summary>Whether a '&lt;' is followed by <paramref name="tag"/> in any case, or by a character past
+    /// ASCII where one could stand for its letters (Oniguruma folds 'ſ' to s, 'ﬆ' to st).</summary>
+    private static bool OpensTag(string text, string tag)
+    {
+        var all = text.AsSpan();
+        for (int at = all.IndexOf('<'); at >= 0; at = Next(all, at + 1, '<'))
+        {
+            var after = all[(at + 1)..Math.Min(all.Length, at + 1 + tag.Length)];
+            foreach (var c in after)
+                if (c > 0x7F) return true;
+            if (after.Equals(tag, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
+    }
+
+    private static int Next(ReadOnlySpan<char> text, int from, ReadOnlySpan<char> what) =>
+        from > text.Length ? -1 : text[from..].IndexOf(what) is int at and >= 0 ? from + at : -1;
+
+    private static int Next(ReadOnlySpan<char> text, int from, char what) =>
+        from > text.Length ? -1 : text[from..].IndexOf(what) is int at and >= 0 ? from + at : -1;
+
+    private static int SkipSpaces(ReadOnlySpan<char> text, int at)
+    {
+        while (at < text.Length && char.IsWhiteSpace(text[at])) at++;
+        return at;
+    }
 }
