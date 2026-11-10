@@ -184,7 +184,14 @@ public sealed partial class ApertureApp
 
             var message = TextArea.New(_reportMessage)
                 .PlaceholderText("What happens, and roughly where — \"out of sync from 40 minutes in\"")
-                .OnTextChanged(v => { _reportMessage = v; MarkDirty(); })
+                // As the issue reply: the view builds only when the message starts or stops
+                // holding anything, which Send reads.
+                .OnTextChanged(v =>
+                {
+                    bool said = _reportMessage.Trim().Length > 0;
+                    _reportMessage = v;
+                    if (said != (v.Trim().Length > 0)) MarkViewDirty();
+                })
                 .Height(Dimension.Px(110)).TextColor(Halide.Text);
             message.AutomationId = "report-message";
             message.AccessibleName = "What's wrong";

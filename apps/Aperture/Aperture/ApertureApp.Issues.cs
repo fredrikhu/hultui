@@ -413,7 +413,15 @@ public sealed partial class ApertureApp
                 : issue.Status == IssueStatus.Open
                     ? "Answer — what you found, or what you changed"
                     : "Add to the conversation")
-            .OnTextChanged(v => { _issueReply = v; MarkDirty(); })
+            // The field shows what was typed; the rest of the box reads only whether it holds
+            // anything (Reply turns on, Resolve says "Reply and resolve"). A character builds the
+            // view when that flips and nothing otherwise: each one built the window, 135 KB.
+            .OnTextChanged(v =>
+            {
+                bool said = _issueReply.Trim().Length > 0;
+                _issueReply = v;
+                if (said != (v.Trim().Length > 0)) MarkViewDirty();
+            })
             .Height(Dimension.Px(90)).TextColor(Halide.Text);
         message.AutomationId = "issue-reply";
         message.AccessibleName = "Reply";
