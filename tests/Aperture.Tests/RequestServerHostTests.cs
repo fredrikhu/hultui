@@ -1510,4 +1510,50 @@ public class RequestServerHostTests
             Assert.Equal("No sound after the first reel", Assert.Single(requests.Reports).Message);
         }, () => backend);
     }
+
+    /// <summary>Backspace in a text field erases and stays on the page: it went back as well, out of
+    /// Search or away from a half-written reply (question 27 (a); since da0676d0). Outside a field
+    /// it still goes back, and so does Escape from a field.</summary>
+    [Fact]
+    public void BackspaceInAField_ErasesAndStays_AndOnThePageGoesBack()
+    {
+        var requests = Requests(RequestPermission.Request | RequestPermission.ManageIssues);
+        var blocky = requests.AddIssue("movie:603", IssueType.Video, "Blocky picture", byId: 2, by: "anna");
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Issues");
+            app.Navigate(new Route(ApertureView.Search));
+            Pump(session);
+            var search = session.Window.FindByAutomationId("search-input")!;
+            search.Element.Focus();
+            session.Window.TypeText("ab");
+            Pump(session, 2);
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Backspace);
+            Pump(session, 3);
+            Assert.Equal(ApertureView.Search, app.Current.View);
+            Assert.Equal("a", session.Window.FindByAutomationId("search-input")!.Value);
+
+            app.Navigate(new Route(ApertureView.Issue, blocky.Id.ToString(), "The Matrix"));
+            PumpUntilShown(session, "Blocky picture");
+            session.Window.FindByAutomationId("issue-reply")!.Element.Focus();
+            session.Window.TypeText("ab");
+            Pump(session, 2);
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Backspace);
+            Pump(session, 3);
+            Assert.Equal(ApertureView.Issue, app.Current.View);
+            Assert.Equal("a", session.Window.FindByAutomationId("issue-reply")!.Value);
+
+            // Escape from the reply goes back, to Search.
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Escape);
+            Pump(session, 3);
+            Assert.Equal(ApertureView.Search, app.Current.View);
+
+            // Backspace with no field focused goes back, to Home.
+            session.Window.Window.ClearFocus();
+            Pump(session, 2);
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Backspace);
+            Pump(session, 3);
+            Assert.Equal(ApertureView.Home, app.Current.View);
+        });
+    }
 }

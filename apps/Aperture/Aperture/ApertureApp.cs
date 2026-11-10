@@ -559,6 +559,9 @@ public sealed partial class ApertureApp : Component, IDisposable
         switch (Shortcuts.Find(e, "Browse")?.Id)
         {
             case "browse.back":
+                // Backspace in a text field is the field's: it erased a character and went back
+                // as well, out of Search or away from a half-written reply. Escape still goes back.
+                if (e.Key == KeyCode.Backspace && e.Target is TextInputElement or TextAreaElement) return;
                 if (GoBack()) e.Handled = true;
                 return;
             case "browse.search":
