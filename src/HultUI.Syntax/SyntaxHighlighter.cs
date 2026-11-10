@@ -181,7 +181,7 @@ public static class SyntaxHighlighter
         cancellationToken.ThrowIfCancellationRequested();
         lock (Gate)
         {
-            if (LanguageFor(path) is not { } language) return null;
+            if (LanguageFor(path, text) is not { } language) return null;
             return Tokenize(wrap is null ? language.Grammar : wrap(language.Grammar), language.Colours, text, maxLines,
                 clock ?? TimeProvider.System, cancellationToken);
         }
@@ -213,7 +213,7 @@ public static class SyntaxHighlighter
         lock (Gate)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (LanguageFor(path) is not { } language) return default;
+            if (LanguageFor(path, newText ?? oldText!, newText is null ? null : oldText) is not { } language) return default;
 
             var oldLines = oldText is null ? [] : SplitLines(oldText, oldShown[^1].Last);
             var newLines = newText is null ? [] : SplitLines(newText, newShown[^1].Last);
@@ -342,6 +342,7 @@ public static class SyntaxHighlighter
             _rootParents = null;
             LanguageByExt.Clear();
             LanguageByRoot.Clear();
+            Reachings.Clear();
         }
         // Which extensions are highlightable does not depend on the theme: CanHighlight answers
         // from a fixed table.
@@ -377,19 +378,132 @@ public static class SyntaxHighlighter
 
     /// <summary>
     /// The grammar for <paramref name="path"/>, resolved from its extension, then
-    /// from an alias, then — for extension-less files — from its name. Null when
-    /// nothing bundled parses it.
+    /// from an alias, then — for extension-less files — from its name, to tokenize
+    /// <paramref name="text"/> (and <paramref name="other"/>, a diff's second version)
+    /// with. Null when nothing bundled parses it.
     /// </summary>
-    private static Language? LanguageFor(string path)
+    private static Language? LanguageFor(string path, string text, string? other = null)
     {
         if (ResolveExtension(path) is not { } ext) return null;
         EnsureRegistry();
         // Keyed by the resolved extension, so every alias shares one cached grammar.
         if (LanguageByExt.TryGetValue(ext, out var language)) return language;
+        if (ScannedByExt.TryGetValue(ext, out var scanned)) return LanguageReaching(scanned, text, other);
         var scope = _options!.GetScopeByExtension(ext);
+        if (scope != null && EmbeddedLanguages.Scans(scope))
+        {
+            ScannedByExt[ext] = scope;
+            return LanguageReaching(scope, text, other);
+        }
         language = scope == null ? null : LanguageForRoot(scope);
         LanguageByExt[ext] = language;
         return language;
+    }
+
+    // ── A text that embeds other languages ───────────────────────────────
+    //
+    // A grammar that embeds others (Markdown) tokenizes each text with a registry of only the grammars
+    // the text can reach (EmbeddedLanguages), not the shared one: a Markdown file with no fences builds
+    // Markdown's rules, not those of 49 grammars. Registries are kept for the last few sets of grammars,
+    // and a text uses any whose set holds its own, since a grammar it cannot reach changes nothing; a new
+    // set replaces the sets it holds.
+
+    /// <summary>The extensions whose grammar scans its texts, and that grammar's scope.</summary>
+    private static readonly Dictionary<string, string> ScannedByExt = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>A registry for texts of <see cref="Root"/> that reach no grammar outside
+    /// <see cref="Scopes"/>, and the grammars it has <see cref="Loaded"/>.</summary>
+    private sealed record Reaching(string Root, HashSet<string> Scopes, Language Language, IReadOnlyList<string> Loaded);
+
+    /// <summary>The grammars TextMateSharp loaded into the registry that colours <paramref name="text"/>
+    /// as <paramref name="path"/>, or null when that is the shared registry. A test reads it.</summary>
+    internal static IReadOnlyList<string>? LoadedFor(string path, string text)
+    {
+        lock (Gate)
+        {
+            var language = LanguageFor(path, text);
+            return Reachings.Find(r => r.Language == language)?.Loaded;
+        }
+    }
+
+    /// <summary>The registries of texts that embed languages, the last used first.</summary>
+    private static readonly List<Reaching> Reachings = [];
+    internal const int MaxReachings = 4;
+
+    /// <summary>The scopes each grammar names, by scope; null for a scope with no grammar. Read from the
+    /// grammar files, so it holds across themes, and has an entry per scope any grammar names.</summary>
+    private static readonly Dictionary<string, string[]?> NamesByScope = new(StringComparer.Ordinal);
+
+    private static Language? LanguageReaching(string root, string text, string? other)
+    {
+        var parsed = new Dictionary<string, IRawGrammar>(StringComparer.Ordinal);
+        var reached = EmbeddedLanguages.Reach(root, text, other, LongLineFor(root), scope => NamesOf(scope, parsed));
+        if (reached.Count == 0) return null;
+        for (int i = 0; i < Reachings.Count; i++)
+        {
+            var known = Reachings[i];
+            if (known.Root != root || !known.Scopes.IsSupersetOf(reached)) continue;
+            Reachings.RemoveAt(i);
+            Reachings.Insert(0, known);
+            return known.Language;
+        }
+
+        IRegistryOptions options = _rootParents!.Any(parent => RootedOptions.Names(root, parent))
+            ? new RootedOptions(_options!, root)
+            : _options!;
+        var reach = new ReachOptions(options, root, reached, parsed);
+        var registry = new Registry(reach);
+        if (registry.LoadGrammar(root) is not { } grammar) return null;
+        var language = new Language(grammar, new Palette(registry.GetTheme()));
+        Reachings.RemoveAll(r => r.Root == root && reached.IsSupersetOf(r.Scopes));
+        Reachings.Insert(0, new Reaching(root, reached, language, reach.HandedOut));
+        if (Reachings.Count > MaxReachings) Reachings.RemoveAt(MaxReachings);
+        return language;
+    }
+
+    /// <summary>The scopes <paramref name="scope"/>'s grammar names, reading the grammar the first time
+    /// (into <paramref name="parsed"/>, for the registry to take rather than read it again).</summary>
+    private static string[]? NamesOf(string scope, Dictionary<string, IRawGrammar> parsed)
+    {
+        if (NamesByScope.TryGetValue(scope, out var names)) return names;
+        IRawGrammar? grammar = null;
+        try { grammar = _options!.GetGrammar(scope); }
+        catch { }   // a grammar that does not read is one TextMateSharp skips too
+        if (grammar is not null) parsed[scope] = grammar;
+        return NamesByScope[scope] = grammar is null ? null : EmbeddedLanguages.NamesIn(grammar, scope);
+    }
+
+    /// <summary>
+    /// The registry's options for texts that reach only <paramref name="reached"/>: to it any other
+    /// grammar is missing. A grammar read while finding them is handed out from <paramref name="parsed"/>.
+    /// </summary>
+    private sealed class ReachOptions(IRegistryOptions inner, string root, HashSet<string> reached,
+        Dictionary<string, IRawGrammar> parsed) : IRegistryOptions
+    {
+        /// <summary>The scopes of the grammars handed out, in order.</summary>
+        public readonly List<string> HandedOut = [];
+
+        public IRawTheme GetDefaultTheme() => inner.GetDefaultTheme();
+        public IRawTheme GetTheme(string scopeName) => inner.GetTheme(scopeName);
+
+        public IRawGrammar GetGrammar(string scopeName)
+        {
+            if (!reached.Contains(scopeName)) return null!;
+            var grammar = parsed.Remove(scopeName, out var read) ? read : inner.GetGrammar(scopeName);
+            if (grammar is not null) HandedOut.Add(scopeName);
+            return grammar!;
+        }
+
+        // TextMateSharp loads with a grammar the grammars its patterns and repository name, not those only a
+        // capture names (CoffeeScript's `...` names JavaScript); in the shared registry those were there
+        // anyway. Named here as the grammar's injections, they load with it. A registry applies only its
+        // root grammar's injections, and the root has none.
+        public ICollection<string> GetInjections(string scopeName)
+        {
+            if (scopeName == root || !NamesByScope.TryGetValue(scopeName, out var names) || names is null) return null!;
+            var reachable = names.Where(reached.Contains).ToList();
+            return reachable.Count == 0 ? null! : reachable;
+        }
     }
 
     // ── A theme rule that names the root scope ───────────────────────────
@@ -555,7 +669,7 @@ public static class SyntaxHighlighter
 
         // TextMateSharp measures a line's budget on the wall clock only; MaxValue is none.
         private readonly TimeSpan _lineBudget = clock == TimeProvider.System ? LineBudget : TimeSpan.MaxValue;
-        private readonly int _longLine = LongLineFor(grammar);
+        private readonly int _longLine = LongLineFor(grammar.GetScopeName());
         private readonly List<TextSpan> _spans = new(32);
 
         /// <summary>Walks lines <paramref name="from"/> to <paramref name="to"/> from
@@ -624,10 +738,11 @@ public static class SyntaxHighlighter
         private bool Finished(long lineStarted) =>
             _lineBudget == TimeSpan.MaxValue || Stopwatch.GetElapsedTime(lineStarted) < _lineBudget;
 
-        /// <summary>How many characters of a line <paramref name="grammar"/> colours.</summary>
-        private static int LongLineFor(IGrammar grammar) =>
-            grammar.GetScopeName() is "source.json" or "source.json.comments" or "text.xml" ? LongDataLine : LongLine;
     }
+
+    /// <summary>How many characters of a line the grammar of root scope <paramref name="scope"/> colours.</summary>
+    private static int LongLineFor(string scope) =>
+        scope is "source.json" or "source.json.comments" or "text.xml" ? LongDataLine : LongLine;
 
     // TextMateSharp encodes in each token the colour the theme gives it, matched as the scopes were
     // pushed, so a line comes back as numbers: no token objects and no lists of scope names, 28 % of
