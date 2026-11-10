@@ -220,7 +220,101 @@ public class DiffRowKeepTests
         });
     }
 
+    /// <summary>Unwrapped and with no review every row is one line high at any width, so a width
+    /// change keeps the rows on screen: a window resize, and the split between the file list and
+    /// the diff dragged (plan 17 round 10: a drag move made every row on screen again, 159.7 KB).
+    /// Wrapped, the rows are measured at the width, and a change makes them again.</summary>
+    [Fact]
+    public void AWidthChange_KeepsTheRows_UnlessTheyWrap()
+    {
+        Hosted((session, app) =>
+        {
+            var rows = Rows(app);
+            int made = app.DiffRowsMade;
+            foreach (var w in new[] { 1396, 1392, 1300, 1180, 1396, 1400 })
+                Resize(session, app, w);
+            Assert.True(app.DiffRowsMade == made, $"{app.DiffRowsMade - made} rows made over six widths");
+            Assert.Equal(rows, Rows(app));
+
+            var handle = Descendants(RootOf(session)).OfType<SplitterHandleElement>().First(h => h.Layout.AbsoluteBorderBox.Height > 0);
+            var box = handle.ScreenBorderBox;
+            float x = box.X + box.Width / 2, y = box.Y + box.Height / 2;
+            int builds = app.Builds;
+            session.Window.MouseDown(x, y);
+            session.PumpFrames(2);
+            foreach (var d in new[] { -4f, -40f, 60f, 4f })
+            {
+                x += d;
+                session.Window.MoveMouse(x, y);
+                session.PumpFrames(2);
+            }
+            session.Window.MouseUp(x, y);
+            session.PumpFrames(2);
+            Assert.True(app.Builds - builds >= 4, $"{app.Builds - builds} builds over four drag moves");
+            Assert.True(app.DiffRowsMade == made, $"{app.DiffRowsMade - made} rows made over a split drag");
+            Assert.Equal(rows, Rows(app));
+
+            // Wrapped: measured at the width, made again when it moves.
+            var body = Get<Ref<Element>>(app, "_diffBodyRef").Current!;
+            body.Focus();
+            session.Window.PressKey(KeyCode.W);
+            session.PumpFrames(3);
+            Assert.True(Get<bool>(app, "_diffWrap"));
+            int wrapped = app.DiffRowsMade;
+            Resize(session, app, 1200);
+            Assert.True(app.DiffRowsMade - wrapped >= Rows(app).Count, $"{app.DiffRowsMade - wrapped} rows made of {Rows(app).Count} after a wrapped width change");
+        });
+    }
+
+    /// <summary>The sideways offset is baked into the code cells: a width change that keeps it keeps
+    /// the rows, and one that clamps it (the column widened past what is left to scroll to) makes
+    /// them again at the offset the pan now has.</summary>
+    [Fact]
+    public void APannedDiff_KeepsItsRowsOverAWidthChange_UntilTheOffsetClamps()
+    {
+        DiffScrollTests.Hosted((session, app) =>
+        {
+            var pan = Get<HultUI.Core.Builders.HorizontalPan>(app, "_diffPan");
+            Assert.True(pan.CanPan, "the fixture's long lines left nothing to scroll");
+            // Twice: the first is clamped to what the pan knew before the build it sets off
+            // measured the column, the second to the column as laid out.
+            pan.PanTo(float.MaxValue);
+            session.PumpFrames(3);
+            pan.PanTo(float.MaxValue);
+            session.PumpFrames(3);
+            float panned = pan.Offset;
+            Assert.True(panned > 0);
+
+            // Narrower: more to scroll to, the offset stays, and so do the rows.
+            int made = app.DiffRowsMade;
+            var rows = Rows(app);
+            Resize(session, app, 1360);
+            Assert.Equal(panned, pan.Offset);
+            Assert.True(app.DiffRowsMade == made, $"{app.DiffRowsMade - made} rows made at a kept offset");
+            Assert.Equal(rows, Rows(app));
+
+            // Wider than when it was panned: the offset clamps, and the rows are made at it.
+            Resize(session, app, 1440);
+            Assert.True(pan.Offset < panned, $"the offset {pan.Offset} did not clamp below {panned}");
+            Assert.Equal(pan.MaxOffset, pan.Offset);
+            Assert.True(app.DiffRowsMade - made >= Rows(app).Count, $"{app.DiffRowsMade - made} rows made of {Rows(app).Count} after the offset clamped");
+        });
+    }
+
     // ── Harness ──────────────────────────────────────────────────────────
+
+    /// <summary>A window resize, then a view build at the width it laid out to: a build that runs
+    /// before the new layout reads the old one, so the next one is what sees the change.</summary>
+    private static void Resize(HeadlessSession session, JunctionApp app, int width)
+    {
+        session.Window.SetClientSize(width, 900);
+        session.PumpFrames(2);
+        Invoke(app, "RerenderView");
+        session.PumpFrames(2);
+    }
+
+    private static Element RootOf(HeadlessSession session) =>
+        (Element)typeof(HultUI.Window).GetField("_root", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(session.Window.Window)!;
 
     private static T Get<T>(JunctionApp app, string field) =>
         (T)typeof(JunctionApp).GetField(field, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;

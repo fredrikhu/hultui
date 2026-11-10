@@ -1034,6 +1034,18 @@ view while what it is derived from is the same: Changes made its view (git's ans
 stagings in flight applied) again on every call, new lists each time, so each build while git had
 not answered flattened the rows again.
 
+The other half of the rule: keep out of what makes the rows again (`InvalidateRows`) what no row
+reads. A width the rows are laid out at is layout's, and layout follows it without a new row.
+Junction's diff kept the code column's width in the shape it compares, so a split drag or a window
+resize made every diff row on screen again, though only wrapped rows (and the review's cards) are
+measured at it; an unwrapped row shows the width only through the sideways offset, which is in the
+rows' shape by itself and moves when a wider column clamps it. Leaving the width out unless rows wrap
+or the review is on (round 10 step 8; headless, 1440×900, a move or step and two frames, JIT) took a
+split-drag move 159.3 → 42.0 KB (−74 %; NativeAOT 157.2 → 41.2): the 127 rows the move replaced and
+their first layout, render 119.5 → 2.2 KB. A 4 px resize step went 32.1 → 20.3 KB (−37 %). Pixels,
+reader tree and focus are the same at every step of a walk through widths, the pan scrolled and
+clamped, split, wrap, a split drag and a review.
+
 ---
 
 ## Component Model

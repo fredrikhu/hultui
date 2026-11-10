@@ -504,9 +504,9 @@ public partial class JunctionApp
         _diffBarBuilt = _diffPan.CanPan;
 
         // What a row looks like depends on three things the list cannot see: whether lines
-        // wrap, which layout is showing, and how wide the code column is. When any of them
-        // moves the rows have to be measured again and rebuilt, because a realized row is
-        // otherwise reused exactly as it was.
+        // wrap, which layout is showing, and — when lines wrap or the review's cards are among
+        // the rows — how wide the code column is. When any of them moves the rows have to be
+        // measured again and rebuilt, because a realized row is otherwise reused exactly as it was.
         float codeWidth = _diffCodeWidth;
         // Switching mode or file re-arms the width settle: the first build of a shape is the
         // one that has to guess, so each shape is allowed its one corrective rebuild. A width
@@ -516,7 +516,13 @@ public partial class JunctionApp
         if (_diffWidthSettleKey != settleKey) { _diffWidthSettleKey = settleKey; _diffSettledWidth = float.NaN; }
 
         bool perRow = _diffWrap || review is not null;
-        var shape = (_diffWrap, _diffSplit, codeWidth, rows.Count, review?.HeightKey ?? -1);
+        // The width is part of the shape only when the rows are measured at it. Unwrapped and
+        // with no review every row is one line high, and the width reaches only the pan's
+        // viewport: its offset, clamped when the column widens, is in the rows' own shape
+        // below. A split drag or a window resize then makes no row again (plan 17 round 10 step
+        // 8: a drag move 159.3 → 42.0 KB, a 4 px resize step 32.1 → 20.3). -1 is no width a
+        // column has.
+        var shape = (_diffWrap, _diffSplit, perRow ? codeWidth : -1f, rows.Count, review?.HeightKey ?? -1);
         if (_diffHeightShape != shape)
         {
             if (perRow) RebuildDiffHeights(rows, codeWidth); else _diffHeights = [];
