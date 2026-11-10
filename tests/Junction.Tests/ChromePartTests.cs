@@ -287,7 +287,11 @@ public class ChromePartTests
             Action Key(KeyCode k) => () => s.Window.PressKey(k);
 
             // Changes: a line of the diff and its hunk picked for staging, and the picks cleared.
+            // The watcher reports the write 300 ms later and the window rebuilds, chrome and all:
+            // that has to land before anything is counted.
+            int gen = DataGen(fx.App, fx.A.Path);
             fx.A.Write("three.txt", "three\nfour\nfive\n");
+            s.PumpUntil(() => DataGen(fx.App, fx.A.Path) > gen, Wait);
             Switch(fx, KeyCode.Digit4);
             s.PumpUntil(() => DiffRow(fx, "four") is not null, Wait);
             Settle(fx);
@@ -868,20 +872,27 @@ public class ChromePartTests
     /// <summary>Pumps until the window has rebuilt nothing for a while: the loads the start, a
     /// switch or a disk change set off have landed (and the watcher's echoes of git's own lock
     /// files have passed), so what a test compares is not still moving.</summary>
-    private static void Settle(Fixture fx)
+    private static void Settle(Fixture fx) => Settle(fx.Session, fx.App);
+
+    private static void Settle(HeadlessSession s, JunctionApp app)
     {
-        var s = fx.Session;
-        int quiet = 0, last = fx.App.Builds + fx.App.ChromeBuilds;
+        int quiet = 0, last = app.Builds + app.ChromeBuilds;
         var until = DateTime.UtcNow + TimeSpan.FromSeconds(5);
         while (quiet < 30 && DateTime.UtcNow < until)
         {
             s.PumpFrame();
             Thread.Sleep(5);
-            int now = fx.App.Builds + fx.App.ChromeBuilds;
+            int now = app.Builds + app.ChromeBuilds;
             quiet = now == last ? quiet + 1 : 0;
             last = now;
         }
     }
+
+    /// <summary>How often the app has reloaded a repository's data: its watcher's reports and
+    /// its own git actions each bump it.</summary>
+    private static int DataGen(JunctionApp app, string path) =>
+        ((Dictionary<string, int>)typeof(JunctionApp).GetField("_dataGen", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(app)!).GetValueOrDefault(path);
 
     private static void Switch(Fixture fx, KeyCode view)
     {
@@ -1057,6 +1068,9 @@ public class ChromePartTests
             session.Application.SetRoot(app.Mount());
             session.PumpFrame();
             session.PumpUntil(() => ByIdIn(Root(session), "gitlab-mark") is not null, Wait);
+            // The mark is the project's load; the to-dos, the pipelines and the summary may still
+            // be landing, each building the chrome. The body counts builds from here.
+            Settle(session, app);
             body(repo, session, app);
         }
         finally { app?.Dispose(); }
