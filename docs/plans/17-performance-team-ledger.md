@@ -279,6 +279,14 @@ Re-ranked by the next survey.
   Aperture's `--probe`, XTerm.NET, WebView2, CEF, mpv interop, source generators and analyzers) and NativeAOT/trim
   warnings; measure with `step-ab.ps1` (base the last .NET 10 commit, `-Pairs 2 -Runtime Jit,Aot`) plus the AOT app
   walks (KB/key, start-up, working set); run every suite on Windows and Fedora and CI's macOS keyring job.
+  **SDKs installed 2026-11-11:** Windows 11.0.100 beside 10.0.300 (the user); WSL Fedora 11.0.100 + runtimes 11.0.0 and
+  10.0.15 (NETCore and AspNetCore) in `/usr/local/share/dotnet` via Microsoft's dotnet-install.sh, linked as
+  `/usr/local/bin/dotnet` (first on `wsl-test.sh`'s PATH), because Fedora 44 has only RCs (rc.1 updates, rc.3
+  updates-testing); Fedora's packaged 10.0.112 in `/usr/lib64/dotnet` untouched; remove ours when Fedora ships the
+  final package. Traps for the upgrade: with no `global.json` both machines now build `net10.0` with SDK 11, so pin
+  the base measurement's SDK (a temporary `global.json` at 10.0.300) or measure SDK and target change apart; apphosts
+  on Fedora read `/etc/dotnet/install_location` (→ Fedora's root, .NET 10 only), so `wsl-test.sh` must export
+  `DOTNET_ROOT=/usr/local/share/dotnet` once projects target `net11.0`.
 
 Closed from Waiting by the round 10 survey: apps-toast-gone-view-only (→ step 5), apps-meridian-response-drag-build
 (→ step 13, now 38.9–39.2 KB a move), vesper-brief-filter-clear-reveal's scrollbar half (→ question 28; the
@@ -1033,3 +1041,6 @@ From 2026-11-08 (round 9's survey); earlier entries are in the archive ([to 2026
   tested branch; origin/main facced69 was in the branch, so the push gate held). Primary checkout fast-forwarded behind
   the guard; branch fast-forwarded to the merge and pushed. CI run 42924747474 queued. Release tags drafted for after
   green CI: junction-v1.25.0, vesper-v1.25.0, meridian-v1.8.0, aperture-v1.23.0, reel-v1.9.0 (mpv-natives-ci present).
+- 2026-11-11: .NET 11 SDKs installed for round 11: the user on Windows (11.0.100); WSL Fedora 11.0.100 + .NET 10.0.15
+  runtimes via Microsoft's script in /usr/local/share/dotnet (the user chose it over Fedora's RC3 package). Upgrade
+  traps noted in Waiting dotnet-11-upgrade.
