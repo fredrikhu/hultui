@@ -673,6 +673,17 @@ sideways swipe, Shift+wheel and middle-click autoscroll all go there. Keys are s
 app's to route. `_pan.Scrollbar(track, thumb, border)` builds a draggable bar under the
 list. (`_pan.HandleScroll(e)` exists for a pan whose content is not a scroll view's.)
 
+**Give the pan its viewport after the layout, not only in `Build()`.** `ViewportWidth` is a
+laid-out width, and a build runs before the layout of its frame: a width read there is the
+frame before's, the window's at the first build, and a window resize or a pane beside it
+dragged lays out again with no build at all. Junction's diff set it only in its build, and
+the sideways wheel stopped short of the end of the longest line (361 of 963 px at the start)
+with a thumb the size it was built at. Read the width from the laid-out element after the
+frame (`Window.RequestPostFrameCallback`, asked for after a build and on `Window.Resized`)
+and assign it then: with the scrollbar on screen, its thumb takes the new size and place with
+no build. Build again only for what the build itself shows: the scrollbar coming or going
+(`CanPan`), or an `Offset` a wider viewport clamped below the one the cells were built at.
+
 ---
 
 **A rounded box clips round.** `Overflow.Hidden` on a box with a corner radius cuts its

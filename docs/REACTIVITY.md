@@ -244,6 +244,54 @@ included. A handler of yours that calls `MarkDirty()` from a `PointerMoveEvent` 
 every move: build a drag on these controls where you can, or keep it out of `Build()` (write
 the live element through a `Ref<T>`).
 
+### A splitter's drag can move the pane and build nothing
+
+Once a frame is still a build a frame, and the build is the view or the part the pane is in:
+Meridian's response pane with a 2,000-line body was built again on every move of its handle,
+and Junction's view beside its file list. What a move changes is the pane's size, which is
+layout's business. While `IsDragging`, give the pane on screen the size through a `Ref` and call
+`MarkLayoutDirty()`; let the press and the release build as before (ELEMENTS.md, "PaneSplitter",
+has the code). Plan 17 round 10 step 13, headless, a move and two frames, JIT (NativeAOT within
+2 %): Meridian 38.8 → 2.5 KB a move with the body (10.9 → 0.1 with none, 36.4 → 0.1 at the
+bottom), Junction's Changes 42.0 → 2.4 and Commit view 65.2 → 5.5; part or view builds a move
+1 → 0, elements made 32–51 → 0.
+
+What to look at before doing it:
+
+- **Everything a build reads from the size.** Junction's diff read its pan's viewport in the
+  build, and a build reads the layout of the frame before it (next section). Meridian's room for
+  the pane (`PaneSplitter.SetMax`) is worked out the build's way on each move.
+- **The press.** It builds: its handler holds the handle element it was built with, which a patch
+  left behind, so the lit handle comes from a build. It moves nothing, which tells it from a move:
+  the pane on screen already has the size.
+- **What is measured at the size.** Junction's wrapped diff lines, and a review's cards, are
+  measured at the code column's width; while they are on, a move builds as it did.
+- **An offset held at an edge.** Junction's diff panned to the end of its longest line keeps the
+  end at the column's edge, so a move that widens the column clamps the offset and the rows are
+  built at it: those moves still build (14 of the 31 that moved the size in the scenes, which
+  start panned to the end).
+- **Test it against a full build at every move,** in the same process (Meridian shows the
+  response's time, which differs between runs): pixels, the reader's tree, elements, focus and the
+  sizes, then a forced full build, then the same again. 157 steps of drags (Changes, Commit,
+  Meridian beside and under the editor; panned, split, wrapped, arrow keys) and resizes: none
+  differ, with a reader or without. With the full build only at the releases and keys, so that
+  moves add up, two releases in the Commit view differ in the handle's hover tint, and they do
+  the same when every move builds, as before.
+
+### What a build reads from layout is a frame old
+
+A build runs before the layout of its frame. A `Layout` box read in `Build()` is the frame
+before's (a new element's is empty), and a window resize, or a size written on the live tree,
+lays out again with no build at all. A number a build keeps from such a box goes stale until
+something builds: Junction's diff pan took its viewport from the window at the first build
+(1,298 px for a 696 px column) and from the old width after each resize, so the sideways wheel
+stopped short of the end of the longest line (361 of 963 px at the start) and the scrollbar's
+thumb kept its size. Read the width after the frame (`Window.RequestPostFrameCallback`, asked
+for after a build and on `Window.Resized`) and give it to whatever shows it in place:
+`HorizontalPan.ViewportWidth` assigned then moves the thumb on screen with no build. Build only
+when the answer changes what the build makes (the scrollbar coming or going, an offset the
+cells were built at). Junction's scenes, 125 steps: 67 differed from a full build, none now.
+
 ### A background callback that fires once per item posts one build at a time
 
 A cache or a worker that calls back once per item it finishes, on another thread, usually

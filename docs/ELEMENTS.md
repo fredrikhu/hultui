@@ -1214,6 +1214,33 @@ settings file is written once rather than sixty times a second. The grab is
 remembered as pointer-at-press plus size-at-press, so a splitter dragged past its
 minimum does not jump when the pointer comes back.
 
+**A pane that is costly to build can follow the drag with no build.** `onChanged` runs on
+the press, on each move and on the release; only the moves change the size while
+`IsDragging`. Have those give the pane on screen the size, through a `Ref`, and lay out
+again; let the press and the release build as before. The press lights the handle (the
+handler's element is the one built, so a build is what reaches the live one), and the
+release builds what reads the size, from the size the drag left:
+
+```csharp
+_split = new PaneSplitter(() =>
+{
+    if (_split.IsDragging && _paneRef.Current is { IsHosted: true } pane
+        && pane.Box.Width != Dimension.Px(_split.Size))   // the press moves nothing
+    {
+        pane.Width(_split.Size);
+        pane.MarkLayoutDirty();
+        return;
+    }
+    MarkDirty();
+}, Persist, min: 180, max: 600, initial: 260);
+```
+
+Everything else a build reads from the size has to follow the layout too, or be built: the
+diff beside Junction's file list reads its new width after the frame (its pan, see
+LAYOUT.md), and while its lines wrap at that width the drag builds as before. Meridian's
+response pane and Junction's two file lists do this (plan 17 round 10 step 13; a move with a
+2,000-line response 38.8 → 2.5 KB, in Junction's Changes 42.0 → 2.4 KB).
+
 **`SplitterHandleElement`** is the grip on screen: the resize cursor, a tint under
 the pointer and a stronger one while grabbed, a focus ring, and the keyboard —
 arrow keys along the axis move by `SplitterTheme.KeyStep` (Shift: five steps),
