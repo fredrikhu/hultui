@@ -203,7 +203,7 @@ public partial class JunctionApp
             {
                 if (_modal != f || f.CheckedPath != target) return;   // superseded
                 f.PathStatus = status;
-                MarkDirty();
+                MarkViewDirty();   // the hint and the button: the modal's, not the chrome's
             });
         });
     }

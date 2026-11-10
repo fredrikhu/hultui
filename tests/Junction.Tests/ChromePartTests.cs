@@ -107,6 +107,127 @@ public class ChromePartTests
         });
     }
 
+    /// <summary>A character in a prompt's fields or the rebase reword builds nothing: the field shows
+    /// what was typed, and only the confirm, the validator and Save read it. Each one built the
+    /// whole window, chrome too (plan 17 round 10: 194 KB a character over Changes). What they read
+    /// is what was typed.</summary>
+    [Fact]
+    public void APromptOrRewordCharacter_BuildsNothing_AndWhatReadsTheFieldReadsWhatWasTyped()
+    {
+        Hosted(fx =>
+        {
+            var s = fx.Session;
+            void BuildsNothing(string what, Action keys)
+            {
+                int builds = fx.App.Builds, chrome = fx.App.ChromeBuilds;
+                keys();
+                s.PumpFrames(3);
+                Assert.True(fx.App.Builds == builds, $"{what}: {fx.App.Builds - builds} builds");
+                Assert.True(fx.App.ChromeBuilds == chrome, $"{what}: {fx.App.ChromeBuilds - chrome} chrome builds");
+            }
+            TextInputElement Field() => Assert.IsType<TextInputElement>(s.Window.Window.FocusedElement);
+
+            // The new-branch prompt: the confirm creates the branch the field holds, and checks it out.
+            Invoke(fx.App, "PromptNewBranch");
+            s.PumpFrames(4);
+            BuildsNothing("the prompt", () =>
+            {
+                s.Window.TypeText("topic/typex");
+                s.Window.PressKey(KeyCode.Backspace);
+                s.Window.TypeText("d");
+            });
+            var name = Field().Text;
+            Assert.Contains("topic/typed", name);
+            s.Window.PressKey(KeyCode.Enter);
+            s.PumpUntil(() => fx.A.Git("rev-parse", "--abbrev-ref", "HEAD").Stdout.Trim() == name, Wait);
+            Settle(fx);
+            AssertChromeIsAFullBuild(fx, "after the branch the prompt made");
+
+            // The new-worktree prompt's second field: the validator reads the branch typed there and
+            // keeps the prompt open.
+            Invoke(fx.App, "PromptNewWorktree");
+            s.PumpFrames(4);
+            var second = Descendants(Root(s)).First(e => e.Key == "dialog-input-2");
+            second.Focus();
+            s.PumpFrames(2);
+            BuildsNothing("the second field", () => s.Window.TypeText("a..b"));
+            s.Window.PressKey(KeyCode.Enter);
+            s.PumpFrames(3);
+            Assert.NotNull(typeof(JunctionApp).GetField("_dialog", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(fx.App));
+            Assert.Contains("..", Get<HultUI.Core.Builders.ToastHost>(fx.App, "_toasts").Message ?? "");
+            s.Window.PressKey(KeyCode.Escape);
+            s.PumpFrames(3);
+            Settle(fx);
+
+            // The rebase reword: Save keeps the message typed.
+            Switch(fx, KeyCode.Digit2);
+            var commits = (System.Collections.IList)Get<object>(Get<object>(Get<object>(fx.App, "_history"), "Value"), "Commits");
+            Invoke(fx.App, "OpenRebase", commits[2]!);
+            s.PumpUntil(() => Get<object?>(fx.App, "_rebase") is not null, Wait);
+            s.PumpFrames(3);
+            var rows = (System.Collections.IList)Get<object>(Get<object>(fx.App, "_rebase"), "Rows");
+            Invoke(fx.App, "OpenRewordRow", rows[0]!);
+            s.PumpFrames(4);
+            var area = Assert.IsType<TextAreaElement>(s.Window.Window.FocusedElement);
+            BuildsNothing("the reword", () => s.Window.TypeText(" reworded"));
+            var message = area.Text;
+            Assert.Contains("reworded", message);
+            Invoke(fx.App, "SaveReword");
+            s.PumpFrames(3);
+            Assert.Equal(message, Get<string>(rows[0]!, "Reword"));
+            Assert.True(HasText(Root(s), message), "the rebase card shows the message typed");
+            AssertChromeIsAFullBuild(fx, "after the reword");
+        });
+    }
+
+    /// <summary>A character in the add-repository folder field and the merge requests' filter
+    /// builds the view, for the hint, the button and the rows kept, and not the chrome, which shows
+    /// nothing of either (118.6 KB a character); nor does the folder check that lands.</summary>
+    [Fact]
+    public void AFolderOrFilterCharacter_BuildsTheViewAndNoChrome()
+    {
+        Hosted(fx =>
+        {
+            var s = fx.Session;
+            Invoke(fx.App, "OpenAddRepo");
+            s.PumpFrames(4);
+            Assert.IsType<TextInputElement>(s.Window.Window.FocusedElement);
+            int builds = fx.App.Builds, chrome = fx.App.ChromeBuilds;
+            s.Window.TypeText("no-such-folder");
+            s.PumpUntil(() => HasText(Root(s), "Folder not found"), Wait);
+            Assert.True(fx.App.Builds > builds, "the hint needs a build");
+            Assert.Equal(chrome, fx.App.ChromeBuilds);
+            Assert.DoesNotContain(Descendants(Root(s)), e => e.Key == "modal-primary-on");
+
+            foreach (var _ in "no-such-folder") s.Window.PressKey(KeyCode.Backspace);
+            s.Window.TypeText(fx.B.Path);
+            s.PumpUntil(() => HasText(Root(s), "Git repository found"), Wait);
+            Assert.Contains(Descendants(Root(s)), e => e.Key == "modal-primary-on");
+            Assert.Equal(chrome, fx.App.ChromeBuilds);
+            AssertChromeIsAFullBuild(fx, "after the folder field");
+        });
+
+        HostedOnGitLab(new HostedAnswers(), (repo, session, app) =>
+        {
+            typeof(JunctionApp).GetMethod("OpenMergeRequests", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(app, [null]);
+            session.PumpFrames(4);
+            (typeof(JunctionApp).GetField("_mrSearchRef", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)
+                as HultUI.Core.Reactivity.Ref<TextInputElement>)!.Current!.Focus();
+            session.PumpFrames(2);
+            var before = (Sig(Part(session, "titlebar")), Sig(Part(session, "toolbar")), Sig(Part(session, "sidebar-expanded")));
+            int builds = app.Builds, chrome = app.ChromeBuilds;
+            session.Window.TypeText("ab");
+            session.PumpFrames(3);
+            Assert.True(app.Builds - builds >= 2, $"{app.Builds - builds} builds for two characters");
+            Assert.Equal(chrome, app.ChromeBuilds);
+            Assert.True(Descendants(Root(session)).OfType<TextElement>().Any(t => t.Content.StartsWith("Nothing matches \"ab\"", StringComparison.Ordinal)),
+                "the list says what it filtered by");
+            FullRebuild(app);
+            session.PumpFrames(3);
+            Assert.Equal(before, (Sig(Part(session, "titlebar")), Sig(Part(session, "toolbar")), Sig(Part(session, "sidebar-expanded"))));
+        });
+    }
+
     // ── What the chrome shows ────────────────────────────────────────────
 
     /// <summary>View: the toolbar's lit tab. A tab switch writes the View signal, which the
@@ -690,6 +811,14 @@ public class ChromePartTests
 
     private static void Invoke(JunctionApp app, string method, params object[] args) =>
         typeof(JunctionApp).GetMethod(method, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(app, args);
+
+    /// <summary>A field or property of anything, public or not.</summary>
+    private static T Get<T>(object target, string name)
+    {
+        const BindingFlags any = BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance;
+        var type = target.GetType();
+        return (T)(type.GetField(name, any)?.GetValue(target) ?? type.GetProperty(name, any)?.GetValue(target))!;
+    }
 
     // ── On GitLab ────────────────────────────────────────────────────────
 

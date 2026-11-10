@@ -145,12 +145,15 @@ public partial class JunctionApp
 
         // Input: bordered wrapper; the field itself is flush/borderless via theme.
         // A confirm-only prompt (no placeholder) has no field at all.
+        // A character builds nothing: the field shows what was typed, and nothing else on screen
+        // reads it (Validate and the confirm read _dialogValue on Enter). Each one built the whole
+        // window, chrome too: 194 KB a character over Changes (plan 17 round 10).
         if (spec.Placeholder is { } placeholder)
         {
             if (spec.FieldLabel is { } fieldLabel) card.AddChild(FieldCaption(fieldLabel, "dialog-input-label"));
             var input = TextInput.New(_dialogValue).Style(Ui.Field(sidePadding: 12f));
             input.PlaceholderText(placeholder)
-                .OnTextChanged(v => { _dialogValue = v; MarkDirty(); })
+                .OnTextChanged(v => _dialogValue = v)
                 .Height(Dimension.Px(38)).FlexShrink(0)
                 .TextColor(Nocturne.Text)
                 .WithRef(_dialogRef);
@@ -202,7 +205,7 @@ public partial class JunctionApp
             if (spec.SecondFieldLabel is { } label2) card.AddChild(FieldCaption(label2, "dialog-input-2-label"));
             var input2 = TextInput.New(_dialogValue2).Style(Ui.Field(sidePadding: 12f));
             input2.PlaceholderText(placeholder2)
-                .OnTextChanged(v => { _dialogValue2 = v; MarkDirty(); })
+                .OnTextChanged(v => _dialogValue2 = v)
                 .Height(Dimension.Px(38)).FlexShrink(0)
                 .TextColor(Nocturne.Text);
             input2.On<KeyDownEvent>(DialogKey);
