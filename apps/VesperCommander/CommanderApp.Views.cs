@@ -739,7 +739,8 @@ public partial class CommanderApp
     /// view drew the cursor) is let go, as nothing reads one out of the window (CursorRowBox wants a
     /// row on screen). Brief's scroll view too, keeping the one thing a later build reads from it, its
     /// offset (<see cref="BriefGeometry"/>, <see cref="RememberPaneScroll"/>). Both are set again by the
-    /// build or the key that next draws them.
+    /// build or the key that next draws them. The Sync rows a key moved the ring on the same once they
+    /// left (only Sync's next build reads them).
     /// </summary>
     private void LetGoOfLeftViews()
     {
@@ -755,6 +756,8 @@ public partial class CommanderApp
                 brief.Current = null;
             }
         }
+        // The Sync rows a key moved the ring on, once they left the window.
+        if (_syncRingMoved is [var (moved, _, _), ..] && !moved.IsHosted) _syncRingMoved.Clear();
     }
 
     /// <summary>At the start of a pane's build: the cells and tiles a key moved the ring on or off
