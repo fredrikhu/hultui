@@ -692,6 +692,7 @@ ScrollView.Horizontal()   // Horizontal scroll (row direction, X scrollbar shown
 | `ScrollbarColor` | -- | `Color` | `rgba(128,128,128,100)` |
 | `ScrollbarThumbColor` | -- | `Color` | `rgba(128,128,128,180)` |
 | `ScrollbarWidth` | -- | `float` | `6f` |
+| `UserScrolled` | -- | `Action?` | `null` |
 | `ContentWidth` | -- | `float` | (read-only) |
 | `ContentHeight` | -- | `float` | (read-only) |
 
@@ -725,12 +726,25 @@ so a reveal asked for on the same frame the content appeared is not lost.
 `ScrollIntoView(child)` and `ScrollRangeIntoViewHorizontal(left, width)` are the
 element and sideways forms.
 
-**A scroll from code raises no event.** `ScrollEvent` is the wheel's; setting
-`ScrollOffsetX`/`ScrollOffsetY` or a reveal moves the view and tells no handler. A view that
-makes only what is in view, picked from the offset (Vesper's Brief columns), sets a scroll it
-is about to make *before* its build and picks from that: a build that makes what the old
-offset shows and then scrolls (from `OnAfterBuild`) leaves what it scrolled to unmade, with
-nothing to build it until the next key.
+**`UserScrolled`: the user moved the view.** Called after the user's input moved the offset:
+the wheel, the scrollbar (a track click, each move of a thumb drag), the autoscroll (the middle
+button held, a selection held past the edge) and a virtual list's own scroll keys. Once per
+move that changed the offset, after the view has moved, so the listener reads where it went from
+`ScrollOffsetX`/`ScrollOffsetY` and may build its owner again from inside the call. Sideways
+motion handed to a `SidewaysScroller` moves the app's pan, not the offset, and calls nothing.
+`ScrollEvent` stays the wheel's, and its handlers run as before; for a wheel notch,
+`UserScrolled` comes as the view's own handler finishes, before an app's handler on the view.
+The scrollbar and the autoscroll raise no `ScrollEvent`, so a view that made what it shows
+again only on the wheel's event showed blank columns after a track click or a drag (Vesper's
+Brief, until plan 17's round 10).
+
+**A scroll from code raises nothing.** Setting `ScrollOffsetX`/`ScrollOffsetY`, `ScrollBy` or
+a reveal (including one assistive technology asks for) moves the view and tells no handler and
+no `UserScrolled`. A view that makes only what is in view, picked from the offset (Vesper's
+Brief columns), listens to `UserScrolled` for the user's scrolls, and sets a scroll it is about
+to make *before* its build and picks from that: a build that makes what the old offset shows
+and then scrolls (from `OnAfterBuild`) leaves what it scrolled to unmade, with nothing to build
+it until the next key.
 
 **`ScrollSidewaysWith(ISidewaysScroller)`.** Set when the horizontal offset is owned by
 something other than the view's own `ScrollOffsetX` (a `HorizontalPan`). The wheel's

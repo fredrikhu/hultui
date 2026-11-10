@@ -2908,7 +2908,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // Replaced by a rebuild rather than patched: scrolling it would move nothing on screen.
         if (!IsAttachedToRoot(view)) { _selectionScroll = null; return; }
 
-        if (!view.ScrollBy(0f, SelectionEdgeDistance(view) * SelectionEdgeScrollGain * dt))
+        if (!view.ScrollByUser(0f, SelectionEdgeDistance(view) * SelectionEdgeScrollGain * dt))
         {
             _selectionScrollStalled = true;   // at its end: nothing more until the pointer moves
             return;
@@ -3049,7 +3049,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         float vy = Ramp(_autoScrollPointer.Y - _autoScrollOrigin.Y);
         if (vx == 0f && vy == 0f) return;   // back inside the dead zone: parked, not finished
 
-        _autoScrollTarget.ScrollBy(vx * dt, vy * dt);
+        // A scroll view hears it as the user's (UserScrolled); a text area has no listener to tell.
+        if (_autoScrollTarget is ScrollViewElement view) view.ScrollByUser(vx * dt, vy * dt);
+        else _autoScrollTarget.ScrollBy(vx * dt, vy * dt);
 
         // Speed in layout units per second from the pointer's displacement on one axis,
         // measured past the dead zone so the first unit of movement outside it crawls

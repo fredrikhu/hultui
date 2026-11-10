@@ -493,6 +493,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         // step follows whichever row is at the top, so a line-at-a-time key moves a line.
         float step = _offsets is null ? _itemHeight : HeightOf(IndexAt(_scrollOffsetY));
         float page = Math.Max(step, Layout.AbsoluteContentBox.Height - step);
+        float beforeX = _scrollOffsetX, beforeY = _scrollOffsetY;
         switch (e.Key)
         {
             case KeyCode.Down: ScrollOffsetY += step; break;
@@ -504,6 +505,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             default: return;                                            // not ours; let it bubble
         }
         e.StopPropagation = true;
+        NotifyUserScrolled(beforeX, beforeY);
     }
 
     public static new VirtualListElement<T> New([OriginFile] string? file = null, [OriginLine] int line = 0) =>

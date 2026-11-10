@@ -92,6 +92,36 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     /// </summary>
     public ISidewaysScroller? SidewaysScroller { get; set; }
 
+    /// <summary>
+    /// Called after the user moves this view's offset: the wheel, the scrollbar (a track click,
+    /// each move of a thumb drag), the autoscroll (the middle button held, a selection held past
+    /// the view's edge) and a <see cref="VirtualListElement{T}"/>'s own scroll keys. Read
+    /// <see cref="ScrollOffsetX"/> and <see cref="ScrollOffsetY"/> for where it went.
+    ///
+    /// <para>It is what a view that makes only what is in view, picked from the offset, listens
+    /// to (Vesper's Brief columns). The scrollbar and the autoscroll raise no
+    /// <see cref="ScrollEvent"/>, so such a view that built again only on the wheel's event showed
+    /// blank columns after a track click or a drag. Called once per move that changed the offset,
+    /// and last, after the view has moved, so the listener may build its owner again from inside
+    /// the call.</para>
+    ///
+    /// <para>A scroll from code calls nothing: setting the offsets, <see cref="ScrollBy"/>, a
+    /// reveal (<see cref="ScrollRangeIntoView"/>, including one assistive technology asks for).
+    /// Nor does sideways motion handed to a <see cref="SidewaysScroller"/>, which moves the
+    /// app's own pan and not this offset. The wheel's <see cref="ScrollEvent"/> is unchanged: its
+    /// handlers run as before, and this comes after the view's own handler has moved it.</para>
+    /// </summary>
+    public Action? UserScrolled { get; set; }
+
+    /// <summary>Calls <see cref="UserScrolled"/> when the user's input moved the offset from
+    /// (<paramref name="beforeX"/>, <paramref name="beforeY"/>). The last thing each path does: the
+    /// listener may build the view's owner again.</summary>
+    private protected void NotifyUserScrolled(float beforeX, float beforeY)
+    {
+        if (UserScrolled is { } scrolled && (_scrollOffsetX != beforeX || _scrollOffsetY != beforeY))
+            scrolled();
+    }
+
     public ScrollViewElement()
     {
         // Default: vertical scroll. OverflowY=Scroll gives children unlimited
@@ -119,7 +149,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         float dy = evt.RemainingDeltaY * ScrollSpeed;
         if (dx == 0 && dy == 0) return;
 
-        float beforeY = _scrollOffsetY;
+        float beforeX = _scrollOffsetX, beforeY = _scrollOffsetY;
         if (dy != 0) ScrollOffsetY = beforeY - dy;
         bool movedY = _scrollOffsetY != beforeY;
 
@@ -137,6 +167,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         bool movedX = dx != 0 && ScrollSideways(dx);
 
         evt.Consume(this, movedX, movedY);
+        NotifyUserScrolled(beforeX, beforeY);
     }
 
     /// <summary>Moves the content sideways by a wheel's <paramref name="delta"/> (positive is
@@ -288,6 +319,17 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         }
         ScrollOffsetX = beforeX + dx;
         return moved || _scrollOffsetX != beforeX;
+    }
+
+    /// <summary><see cref="ScrollBy"/> for the window's autoscroll (the middle button held, a
+    /// selection held past the edge), which is the user's and so tells <see cref="UserScrolled"/>.
+    /// <see cref="ScrollBy"/> itself is a scroll from code.</summary>
+    internal bool ScrollByUser(float dx, float dy)
+    {
+        float beforeX = _scrollOffsetX, beforeY = _scrollOffsetY;
+        bool moved = ScrollBy(dx, dy);
+        NotifyUserScrolled(beforeX, beforeY);
+        return moved;
     }
 
     // ──── Scroll into view ────
@@ -447,6 +489,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
             MiddleClickAutoScroll = sv.MiddleClickAutoScroll;
             VerticalWheelScrollsSideways = sv.VerticalWheelScrollsSideways;
             SidewaysScroller = sv.SidewaysScroller;
+            UserScrolled = sv.UserScrolled;
             ShowScrollbarX = sv.ShowScrollbarX;
             ShowScrollbarY = sv.ShowScrollbarY;
             CopyScrollbarsFrom(sv);
