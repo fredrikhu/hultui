@@ -1044,3 +1044,8 @@ From 2026-11-08 (round 9's survey); earlier entries are in the archive ([to 2026
 - 2026-11-11: .NET 11 SDKs installed for round 11: the user on Windows (11.0.100); WSL Fedora 11.0.100 + .NET 10.0.15
   runtimes via Microsoft's script in /usr/local/share/dotnet (the user chose it over Fedora's RC3 package). Upgrade
   traps noted in Waiting dotnet-11-upgrade.
+- 2026-11-11: CI run 42924747474 on cc55bdcc green: test, test-linux, docs, meridian-keyring (ubuntu-24.04, macos-15).
+  Round 10 landed 16 kept steps (1–13, 13b, 15, 15b; 14 measured and declined) and its public additions the user
+  approved (`ScrollViewElement.UserScrolled`; Meridian map rows read as list items). App releases cut on cc55bdcc (the
+  user's request): junction-v1.25.0, vesper-v1.25.0, meridian-v1.8.0 (pushed first), aperture-v1.23.0, reel-v1.9.0;
+  installer runs 42927197621, 42927198218, 42927198241, 42927201764, 42927202800 started.
