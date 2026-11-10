@@ -42,11 +42,11 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     private IRenderContext? _linesContext;
     private System.Globalization.CultureInfo? _linesCulture;
 
-    // The rows of the lines an edit touched, worked out before they go into _lineStarts; and
-    // where each user-perceived character of a line being wrapped ends (ClusterEnds). Kept
-    // between passes, unless a pass left either large.
+    // The rows of the lines an edit touched, worked out before they go into _lineStarts, kept
+    // between passes unless a pass left it large; and where the user-perceived characters of a
+    // line being wrapped end, as far as its rows' searches read (Clusters).
     private List<int>? _touchedStarts;
-    private List<int>? _clusterEnds;
+    private Clusters? _clusters;
 
     // The height of a row, for the style metrics it was measured in.
     private float _lineHeight;
@@ -643,7 +643,7 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
                 WrapLine(into, pos, hardEnd, wrapWidth, style, asciiAdvance, ref charWidth);
             pos = hardEnd + 1;
         }
-        if (_clusterEnds is { Capacity: > 4096 }) _clusterEnds = null;
+        _clusters?.Done();
     }
 
     // `starts` with entries [head..tail) replaced by `touched` and the entries from tail on moved
@@ -811,24 +811,43 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
 
     // Where [start..hardEnd), too long to fit whole, breaks into lines: each wrapped line's
     // start after the first, appended to `into`. In a face proven monospace for printable ASCII
-    // (`asciiAdvance` above 0) a row of it breaks by its count; any other row is searched.
+    // (`asciiAdvance` above 0) a row of it breaks by its count; any other row is searched, by
+    // the line's user-perceived characters if it has any of more than one char.
     private void WrapLine(List<int> into, int start, int hardEnd, float wrapWidth, ResolvedInheritedStyle style,
         float asciiAdvance, ref float charWidth)
     {
-        var ends = ClusterEnds(start, hardEnd);
+        Clusters? clusters = null;
+        bool looked = false;
         int segStart = start;
         while (segStart < hardEnd)
         {
             // How many chars fit on this wrapped line?
             int lineEnd = asciiAdvance > 0f ? BreakByCount(segStart, hardEnd, wrapWidth, asciiAdvance) : -1;
             if (lineEnd < 0)
-                lineEnd = FindLineBreak(segStart, hardEnd, wrapWidth, style, ends, ref charWidth);
+            {
+                if (!looked)
+                {
+                    looked = true;
+                    if (HasJoiners(start, hardEnd))
+                        (clusters = _clusters ??= new()).Line(_text, start, hardEnd, wholeLine: !ClustersByRow);
+                }
+                clusters?.Row(segStart);
+                lineEnd = FindLineBreak(segStart, hardEnd, wrapWidth, style, clusters, ref charWidth);
+            }
             if (lineEnd >= hardEnd)
                 break;
             into.Add(lineEnd);
             segStart = lineEnd;
         }
     }
+
+    /// <summary>
+    /// Whether a searched row finds the ends of its user-perceived characters from a boundary at
+    /// or before its start, and only as far as its search reads (<see cref="Clusters"/>). False is
+    /// the reference path, those of the whole hard line found before its first row, as until plan
+    /// 17 round 10, for the tests that hold the two to the same rows.
+    /// </summary>
+    internal bool ClustersByRow { get; set; } = true;
 
     /// <summary>
     /// Whether a hard line of printable ASCII (U+0020 to U+007E) in a face the render context
@@ -846,7 +865,7 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     internal bool FitsByCount { get; set; } = true;
 
     // Every char from U+0020 to U+007E; one vectorized scan (as ushort: the char overload boxes
-    // its two bounds, see ClusterEnds).
+    // its two bounds, see HasJoiners).
     private static bool IsPrintableAscii(ReadOnlySpan<char> text) =>
         MemoryMarshal.Cast<char, ushort>(text).IndexOfAnyExceptInRange((ushort)0x20, (ushort)0x7E) < 0;
 
@@ -1003,38 +1022,132 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     }
 
     /// <summary>
-    /// Where each user-perceived character of [start..end) ends — the places a line may be
-    /// cut. Null when that is after every char: a char below U+0300, or among the dashes,
-    /// quotes, arrows and box drawing a plain-text document uses, never joins another into
-    /// one cluster (the joiners, marks, extenders and surrogates are all outside), so most
-    /// lines skip the walk.
+    /// Whether [start..end) has a char that may join another into one user-perceived character,
+    /// so that a row is cut only where one ends (<see cref="Clusters"/>). False when every char is
+    /// one: a char below U+0300, or among the dashes, quotes, arrows and box drawing a plain-text
+    /// document uses, never joins another into one cluster (the joiners, marks, extenders and
+    /// surrogates are all outside), so most lines skip the walk.
     /// </summary>
-    private List<int>? ClusterEnds(int start, int end)
+    private bool HasJoiners(int start, int end)
     {
         // The common answer — nothing above U+02FF — comes from a vectorized scan, and the
         // char-by-char test only runs from the first char past it.
         // As ushort: the char overload boxes its two bounds on every call (see NeedsBidi in
-        // HultUI.Text), and this runs once per line that wraps.
+        // HultUI.Text), and this runs once per line that wraps with a row searched.
         int i = System.Runtime.InteropServices.MemoryMarshal.Cast<char, ushort>(_text.AsSpan(start, end - start))
             .IndexOfAnyExceptInRange((ushort)0, (ushort)0x02FF);
-        if (i < 0) return null;
+        if (i < 0) return false;
         i += start;
         while (i < end && StandsAlone(_text[i])) i++;
-        if (i == end) return null;
-
-        var into = _clusterEnds ??= [];
-        into.Clear();
-        for (i = start; i < end;)
-        {
-            i += Math.Max(1, System.Globalization.StringInfo.GetNextTextElementLength(_text.AsSpan(i, end - i)));
-            into.Add(i);
-        }
-        return into;
+        return i < end;
 
         static bool StandsAlone(char c) =>
             c < '\u0300'
             || (c >= '\u2010' && c <= '\u2027') || (c >= '\u2030' && c <= '\u205E')
             || (c >= '\u2190' && c <= '\u23FF') || (c >= '\u2500' && c <= '\u25FF');
+    }
+
+    /// <summary>
+    /// Where the user-perceived characters (grapheme clusters) of a hard line end — the places a
+    /// searched row may be cut — found only for the rows searched, and only as far as a search
+    /// reads: from a boundary at or before the row's start, on (<see cref="Row"/>,
+    /// <see cref="Count"/>). Each end is the one walking the whole line from its start finds, by
+    /// construction: each is one call on the rest of the line from an end that walk reaches — the
+    /// line's start, the last end found, or a place between two chars below U+0300 other than CR
+    /// LF. There is a boundary between any two of those: only a mark, a joiner, a prepended or
+    /// Hangul letter, a regional indicator, or LF after CR, joins the char before it or the next,
+    /// and all of them but LF are at U+0300 or above. A cluster of one char — the line's last, or
+    /// one below U+0300 before another — is counted without the call.
+    /// <para>The whole line's ends listed before its first row, one entry a char, were most of a
+    /// keystroke: a one-line 89 K character JSON body with one emoji in it walked all of it at
+    /// every key, 1.2 MB a key against 191 KB without the emoji (plan 17, round 10).</para>
+    /// </summary>
+    private sealed class Clusters
+    {
+        // The ends after the row's start are [_first..); _walked is the last end found, or where
+        // the walk stands before it finds one. Ends before _first are earlier rows'.
+        private List<int> _ends = [];
+        private int _first, _walked, _lineEnd;
+        private string _text = "";
+        private bool _wholeLine;
+
+        /// <summary>Starts on hard line [start..end) of <paramref name="text"/>. With
+        /// <paramref name="wholeLine"/>, the reference: every end of the line found now, each by a
+        /// call (<see cref="ClustersByRow"/>).</summary>
+        public void Line(string text, int start, int end, bool wholeLine)
+        {
+            (_text, _lineEnd, _walked, _first, _wholeLine) = (text, end, start, 0, wholeLine);
+            _ends.Clear();
+            if (wholeLine)
+                while (_walked < end) Next();
+        }
+
+        /// <summary>The row from <paramref name="start"/>, after those before it: its clusters
+        /// are the ones that end after it.</summary>
+        public void Row(int start)
+        {
+            if (start > _walked)
+            {
+                // Past what is found (the rows between broke by their count): from the nearest
+                // place at or before the start where a cluster is known to end.
+                _ends.Clear();
+                _first = 0;
+                int from = start;
+                while (from > _walked && !Between(from)) from--;
+                _walked = from;
+                while (_walked < start) Next();
+            }
+            int at = _ends.BinarySearch(_first, _ends.Count - _first, start, null);
+            _first = at < 0 ? ~at : at + 1;
+            // The earlier rows' ends go once they are most of the list.
+            if (_first > _ends.Count / 2)
+            {
+                _ends.RemoveRange(0, _first);
+                _first = 0;
+            }
+        }
+
+        /// <summary><paramref name="k"/>, or how many clusters the line has left after the row's
+        /// start if fewer; found as far as that.</summary>
+        public int Count(int k)
+        {
+            while (_ends.Count - _first < k && _walked < _lineEnd) Next();
+            return Math.Min(k, _ends.Count - _first);
+        }
+
+        /// <summary>Where the row's first <paramref name="k"/> clusters end, k at most
+        /// <see cref="Count"/>(k).</summary>
+        public int End(int k)
+        {
+            if (_ends.Count - _first < k) Count(k);
+            return _ends[_first + k - 1];
+        }
+
+        /// <summary>After the pass: the text is not held, nor a large list.</summary>
+        public void Done()
+        {
+            _text = "";
+            _ends.Clear();
+            if (_ends.Capacity > 4096) _ends = [];
+        }
+
+        // The end of the cluster from _walked, which the whole line's walk reaches.
+        private void Next()
+        {
+            int at = _walked;
+            _walked += !_wholeLine && (at + 1 == _lineEnd || Between(at + 1))
+                ? 1
+                : Math.Max(1, System.Globalization.StringInfo.GetNextTextElementLength(_text.AsSpan(at, _lineEnd - at)));
+            _ends.Add(_walked);
+        }
+
+        // Whether the chars either side of `p` are both below U+0300 and not CR LF: a cluster
+        // ends there, wherever the one it ends started.
+        private bool Between(int p)
+        {
+            char a = _text[p - 1], b = _text[p];
+            return a < '̀' && b < '̀' && !(a == '\r' && b == '\n');
+        }
     }
 
     /// <summary>
@@ -1053,20 +1166,15 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     /// settles that the rest does not either.</para>
     /// </summary>
     private int FindLineBreak(int start, int hardEnd, float wrapWidth, ResolvedInheritedStyle style,
-        List<int>? clusterEnds, ref float charWidth)
+        Clusters? clusters, ref float charWidth)
     {
         if (start >= hardEnd) return hardEnd;
 
-        // The search counts clusters; k of them end at End(k). With no cluster list each
-        // char is one.
-        int first = 0, length = hardEnd - start;
-        if (clusterEnds is not null)
-        {
-            first = clusterEnds.BinarySearch(start);
-            first = first < 0 ? ~first : first + 1;
-            length = clusterEnds.Count - first;
-        }
-        int End(int k) => clusterEnds is null ? start + k : clusterEnds[first + k - 1];
+        // The search counts clusters; k of them end at End(k), the last at hardEnd. With no
+        // clusters each char is one. How many the rest of the line has is found only by
+        // reading that far, which the search does not: AtMost(k) is k, or that many if fewer.
+        int AtMost(int k) => clusters is null ? Math.Min(k, hardEnd - start) : clusters.Count(k);
+        int End(int k) => clusters is null ? start + k : clusters.End(k);
 
         // Every probe is a prefix of the same text, so they are read off one table of its
         // prefix widths (IRenderContext.MeasureTextPrefixes) — measured one at a time, each
@@ -1089,19 +1197,22 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         }
 
         // The answer is in [lo, hi]: a prefix of lo fits (or lo is the one-cluster floor),
-        // and once bounded, one of hi + 1 does not.
-        int lo = 1, hi = length;
+        // and once bounded, one of hi + 1 does not. Until then hi stands for the line's cluster
+        // count, not known, and nothing reads it: a probe of all of them returns if it fits and
+        // bounds if not, so lo stays below it.
+        int lo = 1, hi = int.MaxValue;
         bool bounded = false;
         float loWidth = 0;
-        int probe = Math.Clamp((int)(wrapWidth / Math.Max(charWidth, 0.01f)), 1, length);
+        int probe = AtMost(Math.Max((int)(wrapWidth / Math.Max(charWidth, 0.01f)), 1));
         int step = 0;
         for (int round = 0; ; round++)
         {
-            float width = Measure(End(probe) - start);
+            int end = End(probe);
+            float width = Measure(end - start);
             if (probe >= 8) charWidth = width / probe;
             if (width <= wrapWidth)
             {
-                if (probe == length) return hardEnd;
+                if (end == hardEnd) return hardEnd;
                 lo = probe;
                 loWidth = width;
             }
@@ -1119,7 +1230,7 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
             int predicted = lo + (int)((wrapWidth - loWidth) / Math.Max(charWidth, 0.01f));
             if (!bounded)
             {
-                probe = Math.Min(length, Math.Max(predicted + 1, lo + 1) + step);
+                probe = AtMost(Math.Max(predicted + 1, lo + 1) + step);
                 step = step == 0 ? Math.Max(1, lo / 8) : step * 2;
             }
             else
