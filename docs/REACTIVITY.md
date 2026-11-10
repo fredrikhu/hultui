@@ -867,6 +867,22 @@ over another row, a scrolled map, sends folded in, an observed row, the observed
 and back) the pixels, the reader tree and focus match a build that keeps nothing. Each row now tells a
 reader whether it is the selected one (`AccessibleSelected`).
 
+**A list that grows a row at a time keeps the rows it has, and builds alone** (Meridian's Runner,
+round 10 step 4). A run adds a result row as each request answers, and built the whole window for it
+with every row again: a run of n results made about n²/2 rows, 7.3 KB each, the list 1,467 KB of a
+build at 200 requests. Each row now comes back by its request's path (a run runs a request once), its
+state the result (a record nothing changes), its place and the scale; a run that starts over lets them
+all go. That left about 90 KB a result for the rest of the window — the scope rail, the title bar and
+the rail of views — none of which shows a result. The progress line, the list and the summary are now
+a part with a revision of their own (see "Keep what a key does not change in a child component"),
+which a result writes: about 20 KB a result, and a run going on behind another view builds nothing
+there. **Number the builds of a part's kept rows by the part's own builds**: numbered by the window's,
+every build the part made alone would have looked like a gap, and nothing would be handed back. A run
+of 200 (headless, the server waiting 20 ms a send, JIT; the rail's counts, taken from the scan since,
+took most of it: "What a build shows of files comes from what was read already", below): 1,799,085 → 24,302 KB a run, GCs 107/19/2 → 1/0/0, MeridianApp builds 202 → 2; what is left is
+the run's own sends. At every checkpoint of a run of 50 and of 200 the pixels and the reader tree match
+a build that keeps no row, and the trees the old build's.
+
 A column whose cells are all kept is left with no children by the time the reconciler reaches
 it, since the build moved every one into its new tree. Until round 5 those came back one by one,
 each marking the column's structure, so with a reader listening every key built the whole
@@ -1346,6 +1362,38 @@ The discipline in one line: **`Refresh()` bumps the generation (data changed →
 ### Stable content across reloads
 
 Because `Build()` renders from the cached `Value`, you can keep the previous result on screen while the next one loads instead of blanking to a spinner — gate the placeholder on "have we ever loaded anything" rather than "is a load in flight." Since the result is applied in a single batch, the view swaps from old to new in one frame with no empty state in between.
+
+### What a build shows of files comes from what was read already
+
+A small read in `Build()` does not freeze anything a person would notice; it allocates on every
+build, and a busy view builds often. Meridian's Runner counted the requests of the collection, of
+each folder and of the chosen scope on every build of the view by reading and parsing every request
+file, as a run does: 7.9 MB a build at 200 requests, and a run built the view once a result, 1.8 GB
+a run of 200. The collection's scan had read every file already, and its tree holds each request;
+the counts now come from the tree (36 KB a build). When the snapshot cannot give the old count
+exactly, say what the new one counts: a request file that cannot be read is counted now, and the run
+still leaves it out.
+
+What must be read can be read once a snapshot. The Chain sub-tab read and parsed every request on
+each build of the editor, a key in the URL too: 2.9 MB a key at 200 requests, where the Headers
+sub-tab's key is 8.6 KB. It now keeps each request's node with the scan it was read for, compared by
+reference, and lets them all go when a new scan takes its place. A snapshot that is a new object on
+every change makes the check one comparison, and nothing kept is older than the tree beside it:
+every change to a request file scans the collection again (the watcher, a save, a rename).
+
+```csharp
+private CollectionTree? _nodesOf;   // the scan the nodes were read for
+private readonly Dictionary<string, Chain.Node> _nodes = new(StringComparer.OrdinalIgnoreCase);
+
+private List<Chain.Node> AnalyzeAllRequests()
+{
+    if (!ReferenceEquals(_nodesOf, _tree)) { _nodes.Clear(); _nodesOf = _tree; }
+    // each request: its open tab's document, else _nodes[path], else read, parse and keep
+}
+```
+
+A key in the URL with the Chain sub-tab shown, 200 requests in one chain (headless, NativeAOT):
+3,293 → 117 KB, 8.4 → 1.4 ms, the same pixels.
 
 ---
 
