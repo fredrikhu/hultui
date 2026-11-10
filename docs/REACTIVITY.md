@@ -896,6 +896,12 @@ over another row, a scrolled map, sends folded in, an observed row, the observed
 and back) the pixels, the reader tree and focus match a build that keeps nothing. Each row now tells a
 reader whether it is the selected one (`AccessibleSelected`).
 
+What was left went in round 10, step 11: the map is now a virtual list of its lines (item rows, ELEMENTS.md
+"A scroll view of rows becomes a list"), so a build patches the list rather than a column of every row,
+and a hover move, a wheel notch and a drawn frame hit-test and cull the rows on screen. At 600 / 2,000
+endpoints a click allocates 77.3 / 124.0 → 51.5 / 59.9 KB and visits 1,847 / 6,131 → 116 elements in
+hit tests, a hover move 618 / 2,046 → 41, and the map holds 2,488 / 8,230 → 168 / 183 KB of the heap.
+
 **A list that grows a row at a time keeps the rows it has, and builds alone** (Meridian's Runner,
 round 10 step 4). A run adds a result row as each request answers, and built the whole window for it
 with every row again: a run of n results made about n²/2 rows, 7.3 KB each, the list 1,467 KB of a

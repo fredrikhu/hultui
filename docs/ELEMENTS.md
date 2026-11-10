@@ -213,8 +213,9 @@ cells made of boxes, the tiles in a composite list's rows: Vesper's Brief and Th
 each item the role `ListItem`, a name, and `AccessibleSelected` (true on the cursor's, false on
 the rest) as it is made, and sets it where it moves the cursor (with the ring's `Restyle`). The window marks an
 item's selected state on its node and tells it with no tree. A row of a set the user picks from
-that is a button (Meridian's endpoint map: role `Button` set on the row, `AccessibleSelected` on
-every row, a click moving it between kept rows) is marked the same way. The role has to be set on
+that is a button (Meridian's endpoint map was one until it became a virtual list in plan 17 round 10:
+role `Button` set on the row, `AccessibleSelected` on every row, a click moving it between kept rows)
+is marked the same way. The role has to be set on
 the element (`.AccessibleRole(...)`): a `ButtonElement` or a clickable box with no role of its own,
 or any other role (a tab), builds the tree, as does an element that starts or stops saying it is
 selected. Keep what changes often out of such an item's name: a new name on an element with
@@ -1603,6 +1604,26 @@ lambda that captures nothing, or keep the delegate in a field: a lambda that cap
 build's state is a new delegate every build and keeps nothing (which is right for a label
 that reads that state, unless the state is in the shape you invalidate on). On the walk with
 a recording bridge listening, keeping the labels takes a step from 274 to 112 KB.
+
+**A scroll view of rows becomes a list.** A `ScrollView` over a padded `Flex.Column` of rows and
+headings can move onto a list with the same pixels (Meridian's Discovery map, plan 17 round 10
+step 11). What to carry over:
+
+- **The column's padding and gaps are the rows' margins**: the first row takes the top padding,
+  the last the bottom, every row the sides and a gap as its bottom margin, and `RowHeights` gives
+  each row its height plus its margins. On the list itself the padding would hold the rows in
+  while scrolled.
+- **A heading's height is its text's**, as layout measures it: `TextMeasure.Measure(text,
+  TextMeasure.StyleFor(size, family)).Height`, kept per text and display scale.
+- **`.FlexGrow(1)` on the list.** A scroll view took its box's height by shrinking to it from its
+  content's; a list measures no children, and with nothing to shrink from it stays 0 tall.
+- **What the rows' labels said goes in the item's.** A reader walked to a row's child labels; an
+  item has none, so what only they said (Meridian's "seen 4× · 200") goes in the item label.
+
+Two things change for good. A wheel notch makes the rows it brings in (Meridian: 1.5 rows,
+7.4 KB a notch) where the scroll view moved the ones it had (0.1 KB). And the row under a still
+pointer: a long scroll lets go of the hovered row, so the window hits the pointer again and the row
+now under it takes its hover at once, where a scroll view's row tinted only when the pointer moved.
 
 **No sideways scroll.** The content width is pinned to the viewport, so `ScrollOffsetX`
 is always 0 and a wide row simply clips. A virtual list that has to pan sideways uses a
