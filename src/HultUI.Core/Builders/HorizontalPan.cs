@@ -54,13 +54,32 @@ public sealed class HorizontalPan : ISidewaysScroller
     public HorizontalPan(Action onChanged) => _onChanged = onChanged;
 
     /// <summary>Width of the widest content to be panned. The owner measures and assigns
-    /// this; <see cref="MeasureWidest"/> covers the monospace case.</summary>
-    public float ContentWidth { get; set; }
+    /// this; <see cref="MeasureWidest"/> covers the monospace case. Assigned after the
+    /// scrollbar is on screen, it moves the thumb there, as <see cref="ViewportWidth"/> does.</summary>
+    public float ContentWidth
+    {
+        get => _contentWidth;
+        set { if (value != _contentWidth) { _contentWidth = value; FollowOnScrollbar(); } }
+    }
 
     /// <summary>Width of the box the content shows through — the panned cell, not the whole
     /// surface. The owner assigns it, because only the owner knows which of its columns are
-    /// fixed and whether the space is split between several cells.</summary>
-    public float ViewportWidth { get; set; }
+    /// fixed and whether the space is split between several cells.
+    ///
+    /// <para>The width is the layout's, and a build runs before the layout of its frame, so an
+    /// owner that reads it from the laid-out box after the frame (a window resize, or a pane
+    /// beside it dragged, lays out again without building) assigns it then: the thumb of the
+    /// scrollbar on screen takes its new size and place at once, with no build. The offset is
+    /// read clamped to the new <see cref="MaxOffset"/>; when that moves it, the panned content,
+    /// built at the old offset, is the owner's to build again.</para></summary>
+    public float ViewportWidth
+    {
+        get => _viewportWidth;
+        set { if (value != _viewportWidth) { _viewportWidth = value; FollowOnScrollbar(); } }
+    }
+
+    private float _contentWidth;
+    private float _viewportWidth;
 
     /// <summary>How far right the content can go before its end reaches the viewport's.</summary>
     public float MaxOffset => Math.Max(0, ContentWidth - ViewportWidth);
@@ -128,8 +147,7 @@ public sealed class HorizontalPan : ISidewaysScroller
         // both against its real width. Working in pixels would mean knowing that width while
         // building, which is a frame too early — the bar would be wrong until something
         // rebuilt it.
-        float visible = ContentWidth > 0 ? Math.Min(1f, ViewportWidth / ContentWidth) : 1f;
-        float travelled = MaxOffset > 0 ? Offset / MaxOffset : 0;
+        float visible = Visible, travelled = Travelled;
 
         var bar = Flex.Row(gap: 0).Height(ScrollbarHeight).FlexShrink(0)
             .AlignItems(AlignItems.Center)
@@ -159,6 +177,38 @@ public sealed class HorizontalPan : ISidewaysScroller
             ev.StopPropagation = true;
         });
         return bar;
+    }
+
+    /// <summary>The thumb's share of the track.</summary>
+    private float Visible => ContentWidth > 0 ? Math.Min(1f, ViewportWidth / ContentWidth) : 1f;
+
+    /// <summary>How far along the track the thumb is, 0 to 1.</summary>
+    private float Travelled => MaxOffset > 0 ? Offset / MaxOffset : 0;
+
+    /// <summary>
+    /// Gives the thumb of the scrollbar on screen the size and place <see cref="Scrollbar"/>
+    /// would build it with now: for a width assigned after the build, read from a layout that
+    /// came after it. Nothing when no scrollbar is on screen: the next one is built from the
+    /// widths.
+    /// </summary>
+    private void FollowOnScrollbar()
+    {
+        if (_trackRef.Current is not { IsHosted: true } track || track.Children.Count != 3) return;
+        float visible = Visible, travelled = Travelled;
+        Element before = track.Children[0], thumb = track.Children[1], after = track.Children[2];
+        var width = Dimension.Percent(visible * 100);
+        if (thumb.Box.Width != width)
+        {
+            thumb.Box.Width = width;
+            thumb.MarkLayoutDirty();
+        }
+        if (before.Flex.FlexGrow != travelled)
+        {
+            before.Flex.FlexGrow = travelled;
+            after.Flex.FlexGrow = 1 - travelled;
+            before.MarkLayoutDirty();
+            after.MarkLayoutDirty();
+        }
     }
 
     /// <summary>True while a scrollbar drag is in progress.</summary>

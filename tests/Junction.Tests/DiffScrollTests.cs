@@ -109,6 +109,110 @@ public class DiffScrollTests
         }, content: "short\n");
     }
 
+    /// <summary>
+    /// The pan's viewport is the code column as it was laid out, not as a build guessed it. The
+    /// first build runs before any layout and guesses the window, about twice the column, and a
+    /// window resize lays out again without a build: the sideways wheel stopped hundreds of pixels
+    /// short of the end of the longest line (plan 17 round 10 step 13: 361 of 959 at the start)
+    /// and the thumb kept the size it was built with. At the start and after each resize the wheel
+    /// takes the end of the line to the column's edge (less the label's padding), and the thumb is
+    /// the column's share of the line.
+    /// </summary>
+    [Fact]
+    public void TheWheelReachesTheEndOfTheLongestLine_AtTheStartAndAfterResizes()
+    {
+        Hosted((session, app) =>
+        {
+            AssertTheEndIsReached(session, app, "at the start");
+            foreach (int width in new[] { 1396, 1392, 1200, 1000, 1100, 1400 })
+            {
+                WheelSideways(session, app, 4000f);   // back to the left margin
+                Quiet(session, app);   // the loads behind the other tabs build when they land
+                int builds = app.Builds;
+                session.Window.SetClientSize(width, 900);
+                session.PumpFrames(3);
+                // A few pixels cross no breakpoint, and the pan follows them with no build.
+                if (width is 1396 or 1392) Assert.Equal(builds, app.Builds);
+                AssertTheEndIsReached(session, app, $"at {width} px");
+            }
+        });
+    }
+
+    /// <summary>Frames until twenty in a row build nothing, for at most five seconds.</summary>
+    private static void Quiet(HeadlessSession session, JunctionApp app)
+    {
+        var until = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        for (int quiet = 0, last = app.Builds; quiet < 20 && DateTime.UtcNow < until;)
+        {
+            session.PumpFrame();
+            Thread.Sleep(5);
+            quiet = app.Builds == last ? quiet + 1 : 0;
+            last = app.Builds;
+        }
+    }
+
+    /// <summary>The thumb as it is on screen, then one turn of the wheel far to the right: it
+    /// takes the end of the longest line to the column's edge, and the thumb to the track's.
+    /// One turn, since each builds the rows at the offset it reached, and the build reads the
+    /// width the frame before was laid out at: a second turn went on from where the first
+    /// stopped short.
+    ///
+    /// <para>The app reckons the code column from the list's width less its fixed columns, and
+    /// with the staging boxes that is 2.5 px narrower than the column the layout gives: the line
+    /// goes that much further than the padding. So the end must be in view and at most
+    /// <see cref="Slack"/> short of the edge, and the thumb within it.</para></summary>
+    private static void AssertTheEndIsReached(HeadlessSession session, JunctionApp app, string when)
+    {
+        AssertTheThumb(app, when + ", at the left margin", atEnd: false);
+        WheelSideways(session, app, -4000f, turns: 1);
+        var cell = FirstCodeRow(app).Children.Last(c => c is BoxElement && c.Children.Count > 0);
+        var label = cell.Children[0];
+        var column = cell.Layout.AbsoluteContentBox;
+        float textEnd = label.Layout.AbsoluteContentBox.X + Pan(app).ContentWidth;
+        float shortOfEdge = column.X + column.Width - PadRight(app) - textEnd;
+        Assert.True(shortOfEdge >= -0.5f && shortOfEdge <= Slack,
+            $"{when}: the longest line ends at {textEnd:0.#} after the wheel, the column at {column.X + column.Width:0.#} "
+            + $"(less {PadRight(app):0.#} of padding); offset {Pan(app).Offset:0.#} of {Pan(app).MaxOffset:0.#}, "
+            + $"viewport {Pan(app).ViewportWidth:0.#} for a column of {column.Width:0.#}");
+        AssertTheThumb(app, when + ", at the end", atEnd: true);
+    }
+
+    private const float Slack = 4f;
+
+    /// <summary>The thumb is the column's share of the longest line (the column less the
+    /// label's padding, against the line), at the start or the end of the track.</summary>
+    private static void AssertTheThumb(JunctionApp app, string when, bool atEnd)
+    {
+        var cell = FirstCodeRow(app).Children.Last(c => c is BoxElement && c.Children.Count > 0);
+        var track = TrackOrNull(app) ?? throw new Xunit.Sdk.XunitException($"{when}: no scrollbar");
+        var bar = track.Layout.AbsoluteContentBox;
+        var thumb = track.Children[1].Layout.AbsoluteBorderBox;
+        float share = Math.Min(1f, (cell.Layout.AbsoluteContentBox.Width - PadRight(app)) / Pan(app).ContentWidth);
+        Assert.True(Math.Abs(Math.Max(30f, bar.Width * share) - thumb.Width) <= Slack,
+            $"{when}: the thumb is {thumb.Width:0.#} px of a {bar.Width:0.#} px track, for a column showing {share:P1} of the line "
+            + $"(column {cell.Layout.AbsoluteContentBox.Width:0.##}, line {Pan(app).ContentWidth:0.##}; the pan's viewport {Pan(app).ViewportWidth:0.##})");
+        float gap = atEnd ? bar.X + bar.Width - (thumb.X + thumb.Width) : thumb.X - bar.X;
+        Assert.True(Math.Abs(gap) <= 1f, $"{when}: the thumb is {gap:0.#} px from that end of the track");
+    }
+
+    /// <summary>The code label's padding on its right: what the column keeps clear of text.</summary>
+    private static float PadRight(JunctionApp app)
+    {
+        var label = FirstCodeRow(app).Children.Last(c => c is BoxElement && c.Children.Count > 0).Children[0];
+        return label.Layout.AbsoluteBorderBox.X + label.Layout.AbsoluteBorderBox.Width
+            - (label.Layout.AbsoluteContentBox.X + label.Layout.AbsoluteContentBox.Width);
+    }
+
+    private static void WheelSideways(HeadlessSession session, JunctionApp app, float dx, int turns = 4)
+    {
+        var list = FindList(app).Layout.AbsoluteBorderBox;
+        for (int i = 0; i < turns; i++)
+        {
+            session.Window.Wheel(list.X + list.Width / 2, list.Y + 40, dx, 0);
+            session.PumpFrames(2);
+        }
+    }
+
     // ── harness ──────────────────────────────────────────────────────────
     internal static void Hosted(Action<HeadlessSession, JunctionApp> body, string? content = null)
     {
