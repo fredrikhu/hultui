@@ -698,6 +698,21 @@ ScrollView.Horizontal()   // Horizontal scroll (row direction, X scrollbar shown
 
 Scroll offset is automatically clamped to the valid range based on content size.
 
+**An offset set before layout is kept.** Setting `ScrollOffsetX` or `ScrollOffsetY` before the
+view has a size, or content, to clamp against on that axis (before its first layout, as on the
+build that makes it, or with no content laid out yet) keeps the offset as given (not below 0),
+and reading it back gives it. The layout pass applies it once the view and its content have a
+size, clamped to the content then. Until plan 17's round 10 it clamped to 0 at once, so a view
+made with an offset opened at the start: Vesper's Brief, made again on the way back from
+another view, can now be made where it was left, and its columns made for that offset in the
+same build. A later setting (or `ScrollBy`, from the offset kept) replaces it; the user's scroll
+(the wheel, the scrollbar, the autoscroll, a virtual list's keys) moves what is on screen and
+drops it; a reveal asked for after it is applied from it (below). Applying it is a scroll from
+code and calls no `UserScrolled`. A patch keeps the live view's offset, kept or applied, as it
+always has. A `VirtualListElement` knows its rows' height before its layout, so there an offset
+waits for the viewport only, and lands where it did before (clamped to the rows at once, and to
+the rows less the viewport at the layout).
+
 **Interaction features:**
 
 - Mouse wheel scrolling
@@ -722,9 +737,11 @@ still cannot scroll sideways itself; wide lists use a pan (below and there).
 distance to show a band of content, and needs the viewport height to do it. Called
 before the view has been laid out (from `OnAfterBuild`, say — that runs before the
 layout pass), it holds the request and applies it when the extent is next computed,
-so a reveal asked for on the same frame the content appeared is not lost.
-`ScrollIntoView(child)` and `ScrollRangeIntoViewHorizontal(left, width)` are the
-element and sideways forms.
+so a reveal asked for on the same frame the content appeared is not lost. It is applied
+after an offset set before layout, from it: an offset put back, then the cursor's row
+revealed, moves the least distance from where it was put back. `ScrollIntoView(child)`
+and `ScrollRangeIntoViewHorizontal(left, width)` are the element and sideways forms; the
+sideways one does nothing before the view has a width (it holds no request).
 
 **`UserScrolled`: the user moved the view.** Called after the user's input moved the offset:
 the wheel, the scrollbar (a track click, each move of a thumb drag), the autoscroll (the middle

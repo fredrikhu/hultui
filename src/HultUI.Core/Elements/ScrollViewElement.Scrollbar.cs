@@ -138,7 +138,7 @@ public partial class ScrollViewElement
                 }
                 else
                 {
-                    ScrollOffsetY = trackOffset;
+                    MoveOffsetY(trackOffset);
                     MarkPaintDirty();
                     NotifyUserScrolled(beforeX, beforeY);
                 }
@@ -160,7 +160,7 @@ public partial class ScrollViewElement
                 }
                 else
                 {
-                    ScrollOffsetX = trackOffset;
+                    MoveOffsetX(trackOffset);
                     MarkPaintDirty();
                     NotifyUserScrolled(beforeX, beforeY);
                 }
@@ -189,9 +189,9 @@ public partial class ScrollViewElement
         float beforeX = _scrollOffsetX, beforeY = _scrollOffsetY;
 
         if (_dragAxis == DragAxis.Vertical)
-            ScrollOffsetY = _vBar.OffsetFromDrag(box, _contentHeight, position, _dragGrabOffset, vertical: true);
+            MoveOffsetY(_vBar.OffsetFromDrag(box, _contentHeight, position, _dragGrabOffset, vertical: true));
         else if (_dragAxis == DragAxis.Horizontal)
-            ScrollOffsetX = _hBar.OffsetFromDrag(box, _contentWidth, position, _dragGrabOffset, vertical: false);
+            MoveOffsetX(_hBar.OffsetFromDrag(box, _contentWidth, position, _dragGrabOffset, vertical: false));
 
         MarkPaintDirty();
         NotifyUserScrolled(beforeX, beforeY);

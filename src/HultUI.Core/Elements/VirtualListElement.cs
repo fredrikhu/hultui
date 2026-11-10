@@ -494,15 +494,16 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         float step = _offsets is null ? _itemHeight : HeightOf(IndexAt(_scrollOffsetY));
         float page = Math.Max(step, Layout.AbsoluteContentBox.Height - step);
         float beforeX = _scrollOffsetX, beforeY = _scrollOffsetY;
+        // The user's, so the list moves now (MoveOffsetY), as the wheel moves it.
         switch (e.Key)
         {
-            case KeyCode.Down: ScrollOffsetY += step; break;
-            case KeyCode.Up: ScrollOffsetY -= step; break;
-            case KeyCode.PageDown: ScrollOffsetY += page; break;
-            case KeyCode.PageUp: ScrollOffsetY -= page; break;
-            case KeyCode.Home: ScrollOffsetY = 0; break;
-            case KeyCode.End: ScrollOffsetY = _contentHeight; break;   // ScrollOffsetY clamps
-            default: return;                                            // not ours; let it bubble
+            case KeyCode.Down: MoveOffsetY(beforeY + step); break;
+            case KeyCode.Up: MoveOffsetY(beforeY - step); break;
+            case KeyCode.PageDown: MoveOffsetY(beforeY + page); break;
+            case KeyCode.PageUp: MoveOffsetY(beforeY - page); break;
+            case KeyCode.Home: MoveOffsetY(0); break;
+            case KeyCode.End: MoveOffsetY(_contentHeight); break;   // it clamps
+            default: return;                                        // not ours; let it bubble
         }
         e.StopPropagation = true;
         NotifyUserScrolled(beforeX, beforeY);
@@ -847,6 +848,18 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         return Math.Clamp(value, 0, Math.Max(0, TotalHeight - viewportHeight));
     }
 
+    /// <summary>The rows' height, what <see cref="ClampY"/> clamps against, for the same reason:
+    /// an offset set on a list whose rows just came is applied at once, not held for the layout
+    /// (<see cref="ScrollViewElement.ScrollOffsetY"/>).</summary>
+    private protected override float ScrollExtentY
+    {
+        get
+        {
+            EnsureOffsets();
+            return TotalHeight;
+        }
+    }
+
     /// <summary>The row containing <paramref name="y"/> in content coordinates.</summary>
     private int IndexAt(float y)
     {
@@ -961,6 +974,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
         _scrollOffsetX = ClampX(_scrollOffsetX);
         _scrollOffsetY = ClampY(_scrollOffsetY);
+        ApplyHeldOffsets();
         ApplyPendingReveal();
     }
 

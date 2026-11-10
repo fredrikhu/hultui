@@ -829,6 +829,10 @@ public partial class CommanderApp
         float colW = _briefColW[Si(side)];
         float x = (Cursor(side) / rows) * colW;
         float viewW = sv.Layout.AbsoluteContentBox.Width;
+        // A view the build just made has no width yet, and an offset set on it now is kept for its
+        // layout: the cursor's right edge, which scrolls the cursor's column out of view. The build
+        // made the columns for where the new view opens (BriefGeometry).
+        if (viewW <= 0) return;
         if (x < sv.ScrollOffsetX) sv.ScrollOffsetX = x;
         else if (x + colW > sv.ScrollOffsetX + viewW) sv.ScrollOffsetX = x + colW - viewW;
     }
