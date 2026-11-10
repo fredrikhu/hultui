@@ -5,8 +5,9 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 10
-- **Phase:** build — round 10, steps 1–13b landed, step 14 measured and declined (9f76ecb6); step 15 SPAWNED
-  2026-11-10 (brief `brief-r10b15.md`), then the full suite. The five app releases cut on facced69
+- **Phase:** build — round 10, every step done (1–13b, 15 landed; 14 declined). Full suite running (Windows, then
+  Fedora and docfx). Questions 35 (UserScrolled's scope) and 36 (Brief returns at the start) asked 2026-11-11; 36 may add a
+  step 15b before the release. The five app releases cut on facced69
   (the user asked for them before the round's work) are all published. The survey is merged
   (reports `17-reports/r10-*`); build briefs `brief-r10b<N>.md` go in session 3484c586's scratchpad. Questions 27–32
   asked 2026-11-09; 27–30 answered as recommended the same day (27 → step 5, 28 → new step 15, 29 → step 7, 30 →
@@ -262,6 +263,10 @@ Re-ranked by the next survey.
   four-way corpus scan loaded the machine; passed alone and on a quiet machine. Their build counts are load-sensitive:
   watch at the full suite and in CI.
 
+- **ondafterbuild-markdirty-dropped** (6, framework; found in round 10 step 15) — `MarkDirty` called from
+  `OnAfterBuild` is silently dropped, so Vesper's `RestorePaneScroll` retry never runs (Detail and Thumbnails restore on
+  the first build, so harmless today). A trap for app authors: document or make it work; measure at the next survey.
+
 Closed from Waiting by the round 10 survey: apps-toast-gone-view-only (→ step 5), apps-meridian-response-drag-build
 (→ step 13, now 38.9–39.2 KB a move), vesper-brief-filter-clear-reveal's scrollbar half (→ question 28; the
 filter-clear half stays).
@@ -307,6 +312,7 @@ Round 9 (the round round 10's survey reviews; it moves to the archive at round 1
 | 10 | 7b7a486c, a86b208f, a0ef7841, ea957e38 | syntax-markdown-loads-every-grammar | Approved route (question 30 (c)). A Markdown text gets a registry holding only the grammars it can reach (fence info strings: 52 fence rules, 193 terms mirrored from the grammar; '<' or '&' for HTML; `---` for YAML; up to 4 registries kept, cleared on `SetTheme`); shell heredocs, Ruby heredocs and `__END__`, F# `///` and `(**`, HTML `<style>`/`<script>`/on-event attributes scanned the same way; the grammar walk no longer boxes enumerators (3,590 → 37 KB over 78 grammars). Kept KB after the first file, full GC, JIT (AOT within 10): 3-line .md 29,446 → 1,310 (−95.6 %; allocated 82,873 → 3,345); no fences 29,499 → 1,340; 1 fence 29,485 → 1,658; 3 fences 29,605 → 3,930; 18 fences 30,513 → 21,372; repo README.md 29,742 → 4,014; a fence in every language 31,560 → 31,604 (allocated +0.4 %); .rb 29,315 → 1,030, .sh 29,179 → 600, .fs 29,227 → 559. First call README 155 → 58 ms JIT, 121 → 38 AOT; 3-line .md 119 → 9 JIT, 91 → 2.7 AOT; worst case (every language) +0.5 % AOT, +3.7 % JIT (first-use compile). Apps, retained after a full GC: Junction Files showing README.md 31,889 → 6,138 KB JIT (31,745 → 5,992 AOT); Vesper preview of README.md +30,612 → +4,868 KB. Colours: round 9's corpus (3,110 files tokenized, 1,758,209 lines + edge texts) on all 21 themes, 0 lines differ; TokenizeDiff equal on 81,086 lines, SpansForLanguage on 534 fences. Suite `-Pairs 2` JIT + AOT 0/0, no allocation moved (captures ea957e38). EmbeddedLanguageTests 10 (tables pinned to the grammar files, scan = each fence rule's expression on 255,024 lines; reverse edits fail); Syntax 104, Junction 1,088, Vesper 911, Meridian 662, Headless 1,539 (goldens) pass. Still shared: Typst (57 grammars), Julia (9.2 MB), PHP, Razor, HTML files. |
 | 10 | 7ca2b3db, 956194e7, bfcba907, 05d03300, c7f7e6ba, f5549b05, e4e99925 | junction-diff-pan-viewport + apps-pane-drag-sets-size | (a) Bug: after a build or a resize Junction reads the laid-out diff list after the frame and gives the pan its viewport; HorizontalPan's thumb follows a viewport assigned while the bar is shown (no API, no extra build a resize): one sideways wheel turn at start reaches 361 → 963 of 963 px; after resizes 967/1103, 1103/1203, 1203/1303, 963/1403 → all reached; thumb at start 655.7 → 351.6 px; a 4 px resize 20.3 → 20.4 KB, one extra layout-and-paint frame while the bar shows. (b) A splitter drag sizes the live pane through a `Ref` + `MarkLayoutDirty()` and builds on press and release only (and on a move while the diff wraps, a review is open, or an offset clamps). KB a move JIT (AOT): Meridian 2,000-line body 38.8 → 2.5 (38.6 → 2.5), no response 10.9 → 0.1, pane at the bottom 36.4 → 0.1; Junction Changes split 42.0 → 2.4 (41.2 → 2.4), Commit split 65.2 → 5.5 (64.1 → 5.5); part/window builds a move 1 → 0; the pane follows the pointer exactly. Vesper and Aperture have no splitter. 157 steps compared in-process with a forced full build (every diff row remade): pixels, reader tree, elements, focus, sizes, pan, 0 differ with and without a reader (before (a), 67 of 125 Junction steps differed). Follow-ups: the new refs let go in builds that don't show them (c7f7e6ba, f5549b05). Suite `-Pairs 2` JIT + AOT 0/0, no allocation moved, A/A clean (captures e4e99925). New tests (DiffScrollTests, HorizontalPanFollowTests ×2, Junction PaneSplitterTests, Meridian ResponseViewerTests; reverse edits fail); Core 5,072, Headless 1,541, Meridian 664, Vesper 911, Aperture 362 pass; Junction 1,089–1,090 of 1,091 (flakes on base too: → step 13b). REACTIVITY.md, ELEMENTS.md, LAYOUT.md. |
 | 10 | 0b276fec | junction-view-only-tests-settle (tests) | Cause: on Windows a folder made by TempRepo's copy reports a change the first time anything lists it, so the app's first `git for-each-ref` set off "refs\heads changed" in 25 of 25 fresh copies and the watcher reloaded ~300 ms later inside the counted window (chrome 14 → 21, data generation 0 → 1). `CopyTree` lists every folder of a copy before any watcher exists (0 of 19 copies report after; `FixtureQuietTests` fails 3 of 3 without it); `HostedOnGitLab` settles after the GitLab mark; `ViewOnlyClicks` waits for the watcher's report of its own write. 20 fresh runs each with 28 busy threads: `AFolderOrFilterCharacter` 3/20 (+2/20 instrumented) → 0/20; `ViewOnlyClicks` 0/20 → 0/20 (step 13's ~1 in 4 not reproduced here). Reverse edits of steps 5/8 still fail. `ReviewTests.TheKeyboardReachesTheCommentAgain` left (a different flake: nothing focused after a Tab). Junction 1,092 ×2 (one earlier run 1,091 + that flake), Headless 1,541, Core 5,082 pass. Tests only. |
+| 10 | 2f7ab168, 81b6d84e, b63f8ceb, ab8c714d, 495f1e85, 4cb55b86 | vesper-brief-scrollbar-columns | Approved (question 28 (a); public API). **Public `ScrollViewElement.UserScrolled` (`Action?`)**: "Called after the user moves this view's offset: the wheel, the scrollbar (a track click, each move of a thumb drag), the autoscroll (the middle button held, a selection held past the view's edge) and a VirtualListElement's own scroll keys"; once per move that changed the offset, last in each path; code scrolls (setters, `ScrollBy`, reveals) and moves handed to a `SidewaysScroller` raise nothing; `PatchFrom` carries it; the window's autoscroll goes through an internal `ScrollByUser`; `ScrollEvent` unchanged (scope wider than the brief: question 35). Vesper: Brief listens to `UserScrolled` and makes the columns it scrolls to; returns from another view at the start with columns made for the start (question 36); a folder that fits its pane has nothing to scroll (`FlexGrow` on the content made it ~1.7e38 px wide at 60 files). Blank columns in view, headless 1240×820: track click 400 files 4 of 4 → 0 (0 → 1 build); bar walk 400 / 3,000 / 60 files 15 / 22 / 22 → 0; autoscroll 182 frames 139 / 139 / 111 → 0; return from Detail, Thumbnails, viewer 17 / 17 / 0 → 0; wheel builds 25 → 4; steps not matching a full build 30 → 0 at 400 and 3,000. Brief KB a key Down 5.0 → 4.9, Up 5.2, 12 builds; 3,000 files 6.07, 105 builds. step-ab `-Pairs 1` JIT 0/0, no allocation moved (captures 4cb55b86). UserScrolledTests 9, BriefScrollColumnsTests 4, BriefReturnTests 4 (reverse edits fail); Core 5,072, Headless 1,550, Vesper 919, Junction 1,092, Meridian 664, Aperture 362 pass; docfx `--warningsAsErrors` 0. ELEMENTS.md. |
 
 ## Examined, not worth it
 
@@ -604,6 +610,19 @@ Round 10 questions (from the survey, 2026-11-09). Recommendations in brackets.
     the user's call. Keep the list items, or keep the rows as buttons (a list of Buttons is possible but loses the served
     items and the selected-state patch)? [Keep: a selectable list read as a list is the standard pattern, as Vesper's
     Brief cells were approved as list items in question 25.] → **keep list items** (2026-11-10).
+
+35. **scrollview-userscrolled-scope** (step 15, 2026-11-11; public API): question 28 approved a callback for "the
+    scrollbar or autoscroll"; step 15 made `ScrollViewElement.UserScrolled` fire for every user move — the wheel, the
+    scrollbar, autoscroll and a VirtualList's scroll keys — so one callback means "the user moved it" (`ScrollEvent` is
+    unchanged; Brief listens to `UserScrolled` alone). Keep the wider scope, or narrow it to bar + autoscroll (a small
+    change; Brief would listen beside `ScrollEvent`)? [Keep: one meaning, and a listener needn't combine two signals.]
+36. **vesper-brief-return-offset** (step 15, 2026-11-11; behaviour): Brief now comes back from Detail, Thumbnails or the
+    viewer/diff/sync at the start (offset 0) with its columns made for the start; before, it tried to restore its old
+    offset, but the restore landed only after a build and left the pane blank until a key (17 of 21 return steps
+    blank). The old position is no longer kept. (a) Keep returning at the start, or (b) restore the old position
+    properly as a step 15b (a ScrollView applies an offset set before its first layout once it has laid out — a fix to
+    how the existing setter behaves before layout, no new API — and Brief makes the columns for it)? [(b): returning
+    where you were is what a file manager should do; small.]
 
 Round 9 question 26 (from step 14b, 2026-11-09), still open. Round 9's answered questions 14–25 are in
 [the archive](17-performance-team-ledger-archive.md#needs-the-user-round-9). Recommendations in brackets.
@@ -967,3 +986,11 @@ From 2026-11-08 (round 9's survey); earlier entries are in the archive ([to 2026
   (memory ci-red-findings updated). Step 14 spawned.
 - 2026-11-10: round 10 step 14 measured and declined (9f76ecb6, DECISIONS.md only): the long-label line seek is a real
   3–4 % in every pair, under the 5 % bar; patch kept in the scratchpad. Step 15 spawned.
+- 2026-11-11: round 10 step 15 landed (2f7ab168, 81b6d84e, b63f8ceb, ab8c714d, 495f1e85; captures 4cb55b86): public
+  `ScrollViewElement.UserScrolled` (question 28 (a)); Brief shows 0 blank columns after a track click, a thumb drag,
+  autoscroll and a return from another view, at 60/400/3,000 files (before 4 of 4, 15–22 of 23, 111–139 of 182, 17 of
+  21), every step equal to a full build. Questions 35 (the callback's scope is wider than asked: the wheel and list keys
+  too) and 36 (Brief returns at the start, the old offset is not kept) asked. Guideline notes: a view that makes only
+  what its offset shows builds on `UserScrolled`, only when the set in view changes; a new scroll view opens at 0 and
+  can't take an offset before its first layout; `FlexGrow` on a horizontal ScrollView's content makes it ~1.7e38 px wide;
+  `MarkDirty` from `OnAfterBuild` is dropped (Waiting). Every build step done; full suite started.
