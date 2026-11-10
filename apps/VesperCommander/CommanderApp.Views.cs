@@ -583,12 +583,34 @@ public partial class CommanderApp
         }
 
         // Explicit width + height so the horizontal ScrollView can't shrink-wrap to content.
-        var scroll = ScrollView.Horizontal().WithRef(BriefScroll(side)).FlexShrink(0)
+        var view = ScrollView.Horizontal();
+        view.UserScrolled = BriefScrolled(side);
+        var scroll = view.WithRef(BriefScroll(side)).FlexShrink(0)
             .Width(Dimension.Px(g.PaneW)).Height(Dimension.Px(g.AvailH));
         scroll.Children(content);
-        // Any scroll re-windows which columns realize on the next build.
-        scroll.On<ScrollEvent>(_ => MarkViewDirty());
         return scroll;
+    }
+
+    /// <summary>
+    /// Brief's scroll view moved under the user's input — the wheel, the scrollbar (a track click,
+    /// each move of a thumb drag), the middle-button autoscroll: a build makes the columns the new
+    /// offset shows, when they are not the ones the last build made. The build reads the offset as
+    /// it now is (<see cref="BriefGeometry"/>), so one build makes them, and a move inside the
+    /// columns made builds nothing. Until plan 17's round 10 only the wheel's ScrollEvent built:
+    /// the scrollbar and the autoscroll raise none, and the columns they scrolled to stayed blank
+    /// until the next key (a track click left 4 of 4 columns in view blank). A scroll from code
+    /// tells nothing; the code that scrolls before its build makes the columns itself
+    /// (<see cref="ScrollBriefBeforeBuild"/>). One delegate a side, so a build makes none.
+    /// </summary>
+    private Action BriefScrolled(char side) => side == 'L'
+        ? _briefScrolledL ??= () => OnBriefScrolled('L')
+        : _briefScrolledR ??= () => OnBriefScrolled('R');
+
+    private Action? _briefScrolledL, _briefScrolledR;
+
+    private void OnBriefScrolled(char side)
+    {
+        if (!BriefGeometry(side, Rows(side).Count).Fit.Equals(_fit[Si(side)].Brief)) MarkViewDirty();
     }
 
     /// <summary>The Brief grid's geometry for a pane, as a build sizes it. Both dimensions come

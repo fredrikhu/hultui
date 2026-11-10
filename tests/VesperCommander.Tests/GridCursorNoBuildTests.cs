@@ -260,10 +260,10 @@ public class GridCursorNoBuildTests
         CursorNoBuildTests.AssertIsAFullBuild(t, "after the walk");
     }
 
-    private static ScrollViewElement BriefScroll(DiffViewTests.Fixture t) => t.Field<Ref<ScrollViewElement>>("_briefScrollL").Current!;
+    internal static ScrollViewElement BriefScroll(DiffViewTests.Fixture t) => t.Field<Ref<ScrollViewElement>>("_briefScrollL").Current!;
 
     /// <summary>The left pane's Brief columns at least partly in view that the latest build did not make.</summary>
-    private static int[] BlankColumns(DiffViewTests.Fixture t)
+    internal static int[] BlankColumns(DiffViewTests.Fixture t)
     {
         var scroll = BriefScroll(t);
         int rows = t.Field<int[]>("_briefRows")[0];
