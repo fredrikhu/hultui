@@ -250,7 +250,8 @@ public class DiffRowKeepTests
             }
             session.Window.MouseUp(x, y);
             session.PumpFrames(2);
-            Assert.True(app.Builds - builds >= 4, $"{app.Builds - builds} builds over four drag moves");
+            // The press and the release build; the moves size the list on screen (round 10 step 13).
+            Assert.True(app.Builds - builds == 2, $"{app.Builds - builds} builds over a press, four drag moves and a release");
             Assert.True(app.DiffRowsMade == made, $"{app.DiffRowsMade - made} rows made over a split drag");
             Assert.Equal(rows, Rows(app));
 

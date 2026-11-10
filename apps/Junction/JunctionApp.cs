@@ -807,6 +807,8 @@ public partial class JunctionApp : Component, IDisposable
         ResetSpinners();   // asked for again by any Spinner() built below
         _issueRulesLooked = false;   // the rules file is looked at again, once (see IssueRules)
         _highlightShown = null;   // set again by the diff pane built below (see HighlightForCurrent)
+        _changesColumnRef.Current = null;   // set again by a Changes column built below at the split
+                                            // (held, it kept the Changes view behind the next one)
         Builds++;
 
         // Track the revision signal so a Rerender() re-runs Build through the
