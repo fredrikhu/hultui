@@ -870,7 +870,7 @@ public partial class JunctionApp
         if (e.Key == KeyCode.Escape)
         {
             if (_mrOpen != null) { BackToMrList(); return true; }
-            if (inSearch && _mrQuery.Length > 0) { _mrQuery = ""; if (_mrSearchRef.Current is { } field) field.Text = ""; _mrSel = 0; MarkDirty(); return true; }
+            if (inSearch && _mrQuery.Length > 0) { _mrQuery = ""; if (_mrSearchRef.Current is { } field) field.Text = ""; _mrSel = 0; MarkViewDirty(); return true; }
             CloseMergeRequests();
             return true;
         }
@@ -883,7 +883,7 @@ public partial class JunctionApp
         if (_mrOpen is null && Shortcuts.Pressed("mr.search", e))
         {
             _pendingMrSearchFocus = true;
-            MarkDirty();
+            MarkViewDirty();
             return true;
         }
         if (Shortcuts.Pressed("mr.checkout", e))

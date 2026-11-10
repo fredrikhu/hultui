@@ -65,7 +65,9 @@ public partial class JunctionApp
         // points at the last prompt's (unmounted) input, and focusing that corpse
         // takes the keyboard away from the root handler this dialog's Enter needs.
         _pendingDialogFocus = spec.Placeholder != null;
-        MarkDirty();
+        // The card is the view's: the title bar, toolbar and sidebar show nothing of a dialog
+        // (MarkViewDirty). Every caller opens it on what is already on screen.
+        MarkViewDirty();
     }
 
     /// <summary>A confirm-only modal: the same card without a field, for the
@@ -74,12 +76,14 @@ public partial class JunctionApp
     private void OpenConfirm(string title, string body, string confirmLabel, Action onConfirm) =>
         OpenDialog(new DialogSpec(title, body, null, confirmLabel, (_, _) => onConfirm()));
 
+    /// <summary>Closes the card without acting on it — Escape, Cancel, a click beside it — which
+    /// changes nothing the chrome shows. <see cref="ConfirmDialog"/> builds the chrome too.</summary>
     private void CloseDialog()
     {
         _dialog = null;
         _dialogValue = "";
         _dialogValue2 = "";
-        MarkDirty();
+        MarkViewDirty();
     }
 
     private void ConfirmDialog()
@@ -94,6 +98,9 @@ public partial class JunctionApp
         var checkbox = _dialogChecked;
         var checkbox2 = _dialogChecked2;
         CloseDialog();
+        // What the card confirms may be the chrome's (a branch made and checked out, an account
+        // signed out): the whole window builds, as it always has, whatever the action marks.
+        MarkDirty();
         if (onConfirmFields != null) onConfirmFields(value, value2, checkbox);
         else if (onConfirm2 != null) onConfirm2(value, checkbox, checkbox2);
         else onConfirm(value, checkbox);

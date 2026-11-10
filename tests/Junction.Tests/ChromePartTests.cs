@@ -256,6 +256,149 @@ public class ChromePartTests
         });
     }
 
+    /// <summary>Clicks and keys that change only the view build it and no chrome part: a line or a
+    /// hunk picked for staging and the picks cleared, a prompt opened and closed without confirming
+    /// (Escape, Cancel, a click beside it), a popover closed with Escape, the search key of History,
+    /// Branches, Tags, Files and the merge requests, the merge requests' filter cleared with Escape,
+    /// and a folder closed and opened in Files and in a commit's files.
+    /// Each built the title bar, the toolbar and the sidebar too (plan 17 round 10: 118.6 KB a
+    /// click). A prompt confirmed still builds the chrome, as what it did may be the chrome's: here
+    /// a branch made and checked out, which the title bar shows.</summary>
+    [Fact]
+    public void ViewOnlyClicks_BuildTheViewAndNoChrome()
+    {
+        Hosted(fx =>
+        {
+            var s = fx.Session;
+            void ViewOnly(string name, Func<Action> act)
+            {
+                // A second click this soon would be a double-click: let the clock run past it.
+                s.PumpFrame(TimeSpan.FromSeconds(1));
+                s.PumpFrames(2);
+                var run = act();
+                int builds = fx.App.Builds, chrome = fx.App.ChromeBuilds;
+                run();
+                s.PumpFrames(3);
+                Assert.True(fx.App.Builds > builds, $"{name} did not rebuild the window");
+                Assert.True(fx.App.ChromeBuilds == chrome, $"{name} built the chrome ({fx.App.ChromeBuilds - chrome} part builds)");
+                AssertChromeIsAFullBuild(fx, "after " + name);
+            }
+            Action Click(Element e) => () => s.Window.Click(e);
+            Action Key(KeyCode k) => () => s.Window.PressKey(k);
+
+            // Changes: a line of the diff and its hunk picked for staging, and the picks cleared.
+            fx.A.Write("three.txt", "three\nfour\nfive\n");
+            Switch(fx, KeyCode.Digit4);
+            s.PumpUntil(() => DiffRow(fx, "four") is not null, Wait);
+            Settle(fx);
+            ViewOnly("a line picked", () => Click(DiffRow(fx, "four")!));
+            Assert.Single(Get<HashSet<Junction.Git.GitDiffLine>>(fx.App, "_stageSel"));
+            ViewOnly("the line let go", () => Click(DiffRow(fx, "four")!));
+            ViewOnly("the hunk picked", () => Click(DiffRow(fx, "@@")!));
+            Assert.Equal(2, Get<HashSet<Junction.Git.GitDiffLine>>(fx.App, "_stageSel").Count);
+            ViewOnly("the hunk let go", () => Click(DiffRow(fx, "@@")!));
+            ViewOnly("a line picked again", () => Click(DiffRow(fx, "five")!));
+            ViewOnly("Clear", () => Click(ButtonWith(fx, "Clear")));
+            Assert.Empty(Get<HashSet<Junction.Git.GitDiffLine>>(fx.App, "_stageSel"));
+
+            // A prompt opened and closed without confirming, three ways.
+            bool Open() => Get<object?>(fx.App, "_dialog") is not null;
+            ViewOnly("a prompt opens", () => () => Invoke(fx.App, "PromptNewBranch"));
+            Assert.True(Open());
+            ViewOnly("Escape closes it", () => Key(KeyCode.Escape));
+            Assert.False(Open());
+            ViewOnly("a prompt opens again", () => () => Invoke(fx.App, "PromptNewBranch"));
+            ViewOnly("Cancel closes it", () => Click(ButtonWith(fx, "Cancel")));
+            Assert.False(Open());
+            ViewOnly("a tag prompt opens", () => () => Invoke(fx.App, "PromptNewTag"));
+            ViewOnly("a click beside it closes it", () => () => s.Window.Click(6, 890));
+            Assert.False(Open());
+
+            // A popover from the toolbar (opening it builds the chrome: the menu is the toolbar's),
+            // closed with Escape.
+            s.PumpFrame(TimeSpan.FromSeconds(1));
+            s.Window.Click(Descendants(Part(fx, "toolbar")).First(e => e.AccessibleName == "Stash"));
+            s.PumpFrames(3);
+            Assert.NotNull(Get<object?>(fx.App, "_popover"));
+            ViewOnly("Escape closes the popover", () => Key(KeyCode.Escape));
+            Assert.Null(Get<object?>(fx.App, "_popover"));
+
+            // The search keys.
+            foreach (var view in new[] { KeyCode.Digit2, KeyCode.Digit5, KeyCode.Digit6, KeyCode.Digit7 })
+            {
+                Switch(fx, view);
+                ViewOnly($"/ in {fx.App.View}", () => Key(KeyCode.Slash));
+                Assert.IsType<TextInputElement>(s.Window.Window.FocusedElement);
+                Unfocus(fx);
+            }
+
+            // A folder closed and opened: in Files, and in the Commit tab's file list, on the newest
+            // commit (the one with a folder).
+            // Selected outright: the fixture's commits share a second, and the branches and tags on
+            // the one before put that one first in History about half the time.
+            Invoke(fx.App, "SetCommitSelection", fx.A.Head);
+            Invoke(fx.App, "Rerender");
+            s.PumpFrames(3);
+            Switch(fx, KeyCode.Digit7);
+            s.PumpUntil(() => TryFolder(fx, "src") is not null, Wait);
+            bool SrcFilesShown() => Descendants(Root(s)).Any(e => e.Key is string k && k.StartsWith("f:src/", StringComparison.Ordinal));
+            if (!SrcFilesShown()) { s.Window.Click(Folder(fx, "src")); s.PumpFrames(3); }
+            Assert.True(SrcFilesShown());
+            ViewOnly("a folder closes in Files", () => Click(Folder(fx, "src")));
+            Assert.False(SrcFilesShown());
+            ViewOnly("it opens again", () => Click(Folder(fx, "src")));
+            Assert.True(SrcFilesShown());
+            Switch(fx, KeyCode.Digit3);
+            ViewOnly("a folder closes in the commit's files", () => Click(Folder(fx, "src")));
+            ViewOnly("it opens again", () => Click(Folder(fx, "src")));
+
+            // A prompt confirmed: the branch it made is checked out, and the title bar says so.
+            Switch(fx, KeyCode.Digit4);
+            int chrome = fx.App.ChromeBuilds;
+            Invoke(fx.App, "PromptNewBranch");
+            s.PumpFrames(3);
+            s.Window.PressKey(KeyCode.A, KeyModifiers.Ctrl);
+            s.Window.TypeText("walked");
+            s.Window.PressKey(KeyCode.Enter);
+            s.PumpUntil(() => HasText(Part(fx, "titlebar"), "walked"), Wait);
+            Assert.True(fx.App.ChromeBuilds > chrome, "the confirmed prompt built no chrome");
+            Settle(fx);
+            AssertChromeIsAFullBuild(fx, "after the confirmed prompt");
+        });
+
+        // The merge requests: Escape clearing the filter, and the key that focuses it.
+        HostedOnGitLab(new HostedAnswers(), (repo, session, app) =>
+        {
+            typeof(JunctionApp).GetMethod("OpenMergeRequests", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(app, [null]);
+            session.PumpFrames(4);
+            var field = (typeof(JunctionApp).GetField("_mrSearchRef", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)
+                as HultUI.Core.Reactivity.Ref<TextInputElement>)!.Current!;
+            field.Focus();
+            session.PumpFrames(2);
+            session.Window.TypeText("ab");
+            session.PumpFrames(3);
+            void ViewOnly(string name, Action act)
+            {
+                int builds = app.Builds, chrome = app.ChromeBuilds;
+                act();
+                session.PumpFrames(3);
+                Assert.True(app.Builds > builds, $"{name} did not rebuild the window");
+                Assert.True(app.ChromeBuilds == chrome, $"{name} built the chrome ({app.ChromeBuilds - chrome} part builds)");
+            }
+            ViewOnly("Escape clearing the filter", () => session.Window.PressKey(KeyCode.Escape));
+            Assert.Equal("", field.Text);
+            Assert.Equal("", Get<string>(app, "_mrQuery"));
+            session.Window.Window.ClearFocus();
+            session.PumpFrames(2);
+            ViewOnly("/ in the merge requests", () => session.Window.PressKey(KeyCode.Slash));
+            Assert.Equal("mr-search", session.Window.Window.FocusedElement?.AutomationId);
+            var kept = (Sig(Part(session, "titlebar")), Sig(Part(session, "toolbar")), Sig(Part(session, "sidebar-expanded")));
+            FullRebuild(app);
+            session.PumpFrames(3);
+            Assert.Equal(kept, (Sig(Part(session, "titlebar")), Sig(Part(session, "toolbar")), Sig(Part(session, "sidebar-expanded"))));
+        });
+    }
+
     // ── What the chrome shows ────────────────────────────────────────────
 
     /// <summary>View: the toolbar's lit tab. A tab switch writes the View signal, which the
@@ -813,6 +956,24 @@ public class ChromePartTests
     }
 
     private static string Name(TempRepo repo) => System.IO.Path.GetFileName(repo.Path.TrimEnd('/', '\\'));
+
+    /// <summary>The realized diff row with a code text starting with <paramref name="text"/> ("@@" for
+    /// the hunk's header), or null while the diff is not on screen.</summary>
+    private static Element? DiffRow(Fixture fx, string text) =>
+        Get<HultUI.Core.Reactivity.Ref<Element>>(fx.App, "_diffBodyRef").Current is { IsHosted: true } list
+            ? list.Children.Skip(1).FirstOrDefault(r => Descendants(r).OfType<TextElement>().Any(t => t.Content.StartsWith(text, StringComparison.Ordinal)))
+            : null;
+
+    private static ButtonElement ButtonWith(Fixture fx, string text) =>
+        Descendants(Root(fx.Session)).OfType<ButtonElement>().First(b => Descendants(b).OfType<TextElement>().Any(t => t.Content == text));
+
+    /// <summary>A folder's row in the Files tree or the Commit tab's file list.</summary>
+    private static Element Folder(Fixture fx, string path) =>
+        TryFolder(fx, path) ?? throw new Xunit.Sdk.XunitException($"no folder row \"{path}\" in {fx.App.View}; rows: "
+            + string.Join(", ", Descendants(Root(fx.Session)).Select(e => e.Key).OfType<string>().Where(k => k.StartsWith("d:") || k.StartsWith("f:")).Take(12)));
+
+    private static Element? TryFolder(Fixture fx, string path) =>
+        Descendants(Root(fx.Session)).FirstOrDefault(e => e.Key is string k && (k == "d:" + path || k.StartsWith("d:" + path + "#", StringComparison.Ordinal)));
 
     private static bool HasText(Element root, string text) =>
         Descendants(root).OfType<TextElement>().Any(t => t.Content == text);

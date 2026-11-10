@@ -479,6 +479,12 @@ Three things decide whether it stays right and stays cheap:
   change nothing the parts show — selection moves, cursors, typing in a field of the view, search
   boxes — call `MarkViewDirty()` or `RerenderView()`, which do not. Forgetting to opt out costs a
   build; forgetting to opt in shows a stale toolbar, so make the safe one the default.
+  A dialog splits in two (Junction, round 10 step 8): opening it and closing it without acting
+  (Escape, Cancel, a click beside it) change only the view, but a confirm runs whatever the card
+  was for, which may be the chrome's (a branch checked out, an account signed out), so the confirm
+  keeps the full build whatever its action marks. The view-only clicks there — opening and
+  cancelling a dialog, closing a popover with Escape, the search keys, lines picked for staging,
+  folders opened and closed — each saved the three chrome parts, 123–137 KB a click.
 - **The host takes the root's place in the layout.** `Place()` returns the `ComponentHost`, an
   element between the parent and the part's root. Give it what the root had as a flex item
   (`FlexShrink(0)` for a fixed bar, so a crowded row cannot squeeze it), and give a root that

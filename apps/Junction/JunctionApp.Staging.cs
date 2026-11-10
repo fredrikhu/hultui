@@ -50,10 +50,12 @@ public partial class JunctionApp
     private static IEnumerable<GitDiffLine> HunkChangedLines(GitDiffHunk h) =>
         h.Lines.Where(l => l.Kind is DiffLineKind.Addition or DiffLineKind.Deletion);
 
+    // The picks are the view's alone (the diff's rows and its action bar): picking and letting
+    // go build the view, not the title bar, toolbar and sidebar (MarkViewDirty).
     private void ToggleStageLine(GitDiffLine l)
     {
         if (!_stageSel.Add(l)) _stageSel.Remove(l);
-        MarkDirty();
+        MarkViewDirty();
     }
 
     /// <summary>Toggle a whole hunk: select all its changed lines, or clear them
@@ -66,10 +68,10 @@ public partial class JunctionApp
             foreach (var l in changed) _stageSel.Remove(l);
         else
             foreach (var l in changed) _stageSel.Add(l);
-        MarkDirty();
+        MarkViewDirty();
     }
 
-    private void ClearStageSelection() { _stageSel.Clear(); MarkDirty(); }
+    private void ClearStageSelection() { _stageSel.Clear(); MarkViewDirty(); }
 
     /// <summary>
     /// Stages, unstages or discards the selected lines by synthesizing a patch and applying

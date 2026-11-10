@@ -437,10 +437,11 @@ public partial class JunctionApp : Component, IDisposable
         // reveal would scroll a body no longer on screen: Ctrl+F comes back to the source.
         _filesFind.Opening = () => _filesBlame = false;
         // Every change to which folders are open comes through here: the kept rows go with it.
-        _filesTree = new TreeView<string>(() => { _filesExpandGen++; MarkDirty(); });
+        // A folder opened or closed is the view's alone, as in the Changes lists' trees.
+        _filesTree = new TreeView<string>(() => { _filesExpandGen++; MarkViewDirty(); });
         // As the Files tree: every change to which folders are open comes through here, and the
         // kept rows go with it.
-        _commitFilesTree = NewChangeTree(() => { _commitTreeGen++; MarkDirty(); });
+        _commitFilesTree = NewChangeTree(() => { _commitTreeGen++; MarkViewDirty(); });
         _diffWrap = _settings.DiffWrap;
         _diffSplit = _settings.DiffSplit;
         _commitMsgExpanded = _settings.CommitMessageExpanded;
@@ -1261,7 +1262,8 @@ public partial class JunctionApp : Component, IDisposable
         // and (for the modal) typing flows to the focused field.
         if (_popover != null)
         {
-            if (e.Key == KeyCode.Escape) { _popover = null; MarkDirty(); e.StopPropagation = true; }
+            // Closing changes nothing the chrome shows, even for a menu the toolbar opened.
+            if (e.Key == KeyCode.Escape) { _popover = null; MarkViewDirty(); e.StopPropagation = true; }
             return;
         }
         if (_modal != null)
@@ -1548,7 +1550,7 @@ public partial class JunctionApp : Component, IDisposable
             if (Shortcuts.Pressed("files.search", e))
             {
                 _pendingFilesSearchFocus = true;
-                MarkDirty();
+                MarkViewDirty();
                 e.StopPropagation = true;
                 return;
             }
@@ -1562,7 +1564,7 @@ public partial class JunctionApp : Component, IDisposable
             if (Shortcuts.Pressed("history.search", e))
             {
                 _pendingHistorySearchFocus = true;
-                MarkDirty();
+                MarkViewDirty();
                 e.StopPropagation = true;
                 return;
             }
@@ -1575,7 +1577,7 @@ public partial class JunctionApp : Component, IDisposable
             if (Shortcuts.Pressed("tags.search", e))
             {
                 _pendingTagSearchFocus = true;
-                MarkDirty();
+                MarkViewDirty();
                 e.StopPropagation = true;
                 return;
             }
@@ -1588,7 +1590,7 @@ public partial class JunctionApp : Component, IDisposable
             if (Shortcuts.Pressed("branches.search", e))
             {
                 _pendingBranchSearchFocus = true;
-                MarkDirty();
+                MarkViewDirty();
                 e.StopPropagation = true;
                 return;
             }
