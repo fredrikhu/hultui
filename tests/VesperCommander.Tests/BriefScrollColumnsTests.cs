@@ -87,6 +87,35 @@ public class BriefScrollColumnsTests
         CursorNoBuildTests.AssertIsAFullBuild(t, "after a thumb drag");
     }
 
+    /// <summary>A folder whose columns fit the pane has nothing to scroll: a track click where the
+    /// bar would be, the wheel and the middle button leave it at the start. Its content used to
+    /// grow to fill the pane, and a horizontal scroll view gives its content all the width it asks
+    /// for, so it was 1.7e38 wide: each of those scrolled the columns out of view.</summary>
+    [Fact]
+    public void AFolderThatFitsThePane_HasNothingToScroll()
+    {
+        using var t = OpenBrief(files: 40);
+        var brief = Brief(t);
+        var box = brief.Layout.AbsoluteContentBox;
+        Assert.True(brief.ContentWidth <= box.Width, $"content {brief.ContentWidth} wide in a {box.Width} view");
+
+        t.Session.Window.MouseDown(box.Right - 30f, BarY(brief));
+        t.Session.PumpFrame();
+        t.Session.Window.MouseUp(box.Right - 30f, BarY(brief));
+        t.Session.PumpFrame();
+        for (int i = 0; i < 5; i++) t.Session.Window.Wheel(box.X + box.Width / 2, box.Y + box.Height / 2, 0, -1);
+        t.Session.PumpFrame();
+        t.Session.Window.MouseDown(box.X + box.Width / 2, box.Y + box.Height / 2, MouseButton.Middle);
+        t.Session.Window.MoveMouse(box.X + box.Width / 2 + 120f, box.Y + box.Height / 2);
+        t.Session.PumpFrames(30);
+        t.Session.Window.MouseUp(box.X + box.Width / 2 + 120f, box.Y + box.Height / 2, MouseButton.Middle);
+        t.Session.PumpFrame();
+
+        Assert.Equal(0f, Brief(t).ScrollOffsetX);
+        Assert.True(Blank(t) is [], $"columns {string.Join(", ", Blank(t))} in view and not made");
+        CursorNoBuildTests.AssertIsAFullBuild(t, "after the bar, the wheel and the middle button");
+    }
+
     /// <summary>The middle button held right of where it was pressed: each frame the view moves
     /// shows no blank column.</summary>
     [Fact]

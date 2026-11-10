@@ -540,8 +540,11 @@ public partial class CommanderApp
         if (BriefCellsState(side).Changed(shape)) cells.Clear();
         cells.Begin(_builds);
 
-        var content = Flex.Row(gap: 0).FlexShrink(0);
-        if (g.Overflow) content.Width(g.TotalCols * BriefColWidth); else content.FlexGrow(1);
+        // As wide as the columns, which is no wider than the pane when they fit. It used to grow to
+        // fill the pane when they fit, but a horizontal scroll view gives its content all the width
+        // it asks for: grown, it was 1.7e38 wide, so a folder that fits showed a scrollbar, and a
+        // track click, the wheel or the autoscroll scrolled its columns out of view.
+        var content = Flex.Row(gap: 0).FlexShrink(0).Width(g.TotalCols * BriefColWidth);
         if (g.FirstCol > 0)
         {
             var spacer = Box.New().Width(g.FirstCol * BriefColWidth).FlexShrink(0);
