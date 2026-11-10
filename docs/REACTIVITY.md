@@ -901,6 +901,11 @@ What was left went in round 10, step 11: the map is now a virtual list of its li
 and a hover move, a wheel notch and a drawn frame hit-test and cull the rows on screen. At 600 / 2,000
 endpoints a click allocates 77.3 / 124.0 → 51.5 / 59.9 KB and visits 1,847 / 6,131 → 116 elements in
 hit tests, a hover move 618 / 2,046 → 41, and the map holds 2,488 / 8,230 → 168 / 183 KB of the heap.
+Then the click stopped building the view: only the list and the detail beside it show the selection,
+so the detail became a part of its own (as History's archived send is, "Keep what a key does not
+change in a child component"), and a click sets the list's `SelectedIndex` through its ref and writes
+the detail's revision. The first selection still builds the view, which places the detail. A click:
+51.5 / 59.9 → 22.2 / 30.6 KB, no build.
 
 **A list that grows a row at a time keeps the rows it has, and builds alone** (Meridian's Runner,
 round 10 step 4). A run adds a result row as each request answers, and built the whole window for it

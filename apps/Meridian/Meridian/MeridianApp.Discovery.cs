@@ -321,11 +321,9 @@ public partial class MeridianApp
 
         var map = BuildEndpointMap(); map.Key = "disc-map";
         row.AddChild(map);
+        // The detail is a part of its own (see PlaceMapDetail), keyed by its host.
         if (_mapSelection is { } selected)
-        {
-            var detail = BuildEndpointDetail(selected); detail.Key = "disc-detail";
-            row.AddChild(detail);
-        }
+            row.AddChild(PlaceMapDetail(selected).FlexShrink(0));
         return row;
     }
 
@@ -419,8 +417,9 @@ public partial class MeridianApp
     // it is selected, and nothing else (RenderWith((line, selected) => …)), so the list keeps a
     // realized row while the line at its place is equal: a line holds its endpoint, a record that is
     // equal when every fact the row shows and the detail a click selects is. A click moves the
-    // selection, which the map and the detail show and no part does, so it builds the view alone
-    // (MarkViewDirty), and the list makes the two rows it moves between. The click captures the
+    // selection, which only the list and the detail beside it show, so it tells the list through
+    // its ref and the detail builds alone (SelectEndpoint, PlaceMapDetail); the list makes the two
+    // rows it moves between. The click captures the
     // row's endpoint, so a kept row selects what a row made now would. The lines (the order, the
     // headings, the keys, the counts) are worked out once a map: a map is never changed, a send or
     // an import makes a new one. The rows are as tall as they were in the column, and the column's
@@ -460,7 +459,9 @@ public partial class MeridianApp
     /// into a view keeps the whole view").</summary>
     private void EndMapBuild()
     {
-        if (_mapListBuild != Builds) _mapListRef.Current = null;
+        if (_mapListBuild == Builds) return;
+        _mapListRef.Current = null;
+        _mapDetailRef.Current = null;
     }
 
     private MapLines LinesOf(ApiMap map)
@@ -679,14 +680,74 @@ public partial class MeridianApp
         return row;
     }
 
-    /// <summary>A click on a map row: the map and the detail show the selection, no part does.</summary>
+    /// <summary>A click on a map row, or a reader's select or invoke of its item. Only the map's list
+    /// and the detail beside it show the selection, so with both on screen the list is told through
+    /// its ref and the detail builds alone: the window does not build. Otherwise — no detail yet (the
+    /// first selection), or the list on screen made from another map than this one (a send folded
+    /// into the map before the build it asks for) — the view builds.</summary>
     private void SelectEndpoint(Endpoint endpoint)
     {
         _mapSelection = endpoint;
-        MarkViewDirty();
+        if (_mapListRef.Current is not { IsHosted: true } list || _mapDetailRef.Current is not { IsHosted: true }
+            || _mapLines is not { } lines || !ReferenceEquals(lines.Map, _map) || !ReferenceEquals(list.Items, lines.Lines))
+        {
+            MarkViewDirty();
+            return;
+        }
+        // What BuildEndpointMap hands the list: the line SelectedLine finds.
+        list.SelectedIndex = SelectedLine(lines, endpoint);
+        if (MapDetailStale(endpoint)) _mapDetailRevision.Value++;
     }
 
-    private Element BuildEndpointDetail(Endpoint endpoint)
+    // ── The endpoint's detail: a part of its own ─────────────────────────
+    //
+    // The detail beside the map shows the selected endpoint, and nothing else in the view shows the
+    // selection but the map's list. A click built the view for it: the sources panel, the map's
+    // header and a patch of the list, which works every line's height out again. The detail is now a
+    // part (see Part) with a revision of its own: a click tells the list through its ref and writes
+    // the revision, so the detail builds alone (SelectEndpoint), as History's archived send does. It
+    // builds with the view when the view places it showing another endpoint than the selected one,
+    // and after a full rebuild (_partRevision, safe by default); a view-only build that leaves the
+    // selection where it was (the observed toggle) leaves it as it is.
+    private readonly PartGroup _mapDetailParts = new();
+    private readonly Signal<int> _mapDetailRevision = new(0);
+    private Part? _mapDetailPart;
+    private readonly Ref<BoxElement> _mapDetailRef = new();
+    /// <summary>What the detail was last built from: the endpoint and the full-rebuild revision.</summary>
+    private Endpoint? _mapDetailShown;
+    private int _mapDetailRevisionShown = -1;
+
+    /// <summary>Builds of the endpoint's detail so far, for tests.</summary>
+    internal int MapDetailBuilds => _mapDetailParts.Builds;
+
+    /// <summary>Whether the detail on screen is not what a build of it for <paramref name="selected"/>
+    /// makes now.</summary>
+    private bool MapDetailStale(Endpoint selected) =>
+        !ReferenceEquals(_mapDetailShown, selected) || _mapDetailRevisionShown != _partRevision.Peek();
+
+    /// <summary>The detail's host, for the view's build to place beside the map: built again first
+    /// when it is stale (<see cref="MapDetailStale"/>). The host takes the detail's place in the row:
+    /// it never shrinks, and the detail fills its height as it filled the row's.</summary>
+    private ComponentHost PlaceMapDetail(Endpoint selected)
+    {
+        var part = _mapDetailPart ??= new(_mapDetailParts, () =>
+        {
+            // Placed only beside a selected endpoint, and its own build runs after a click selected
+            // one; nothing takes the selection away but a new base, which builds the view.
+            if (_mapSelection is not { } endpoint) return Box.New();
+            _mapDetailShown = endpoint;
+            _mapDetailRevisionShown = _partRevision.Peek();
+            var detail = BuildEndpointDetail(endpoint);
+            detail.Key = "disc-detail";
+            detail.FlexGrow(1);
+            detail.WithRef(_mapDetailRef);
+            return detail;
+        }, own: _mapDetailRevision);
+        part.Mount();   // the first build, before asking what it was built from
+        return part.Place(stale: MapDetailStale(selected));
+    }
+
+    private BoxElement BuildEndpointDetail(Endpoint endpoint)
     {
         var panel = Flex.Column(gap: Azimuth.S2).FlexShrink(0)
             .Width(Azimuth.ResponseRight)

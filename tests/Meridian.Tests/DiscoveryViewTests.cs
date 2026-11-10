@@ -375,12 +375,13 @@ public class DiscoveryViewTests : IClassFixture<TestHttpServer>, IDisposable
     // ── A click at scale ─────────────────────────────────────────────────
     //
     // The map is a virtual list of its lines: only the rows on screen are elements. A click moves the
-    // selection, which only the map and the detail show: it builds the view, and the list keeps every
-    // row but the two it moves between (MeridianApp.Discovery.cs). The oracle is a build that keeps
-    // nothing.
+    // selection, which only the list and the detail beside it show: it tells the list, which makes
+    // the two rows it moves between, and the detail builds alone (MeridianApp.Discovery.cs). The
+    // oracle is a build that keeps nothing.
 
-    /// <summary>A click builds the view alone and makes the row it leaves and the row it reaches:
-    /// the same elements at 30 endpoints as at 300. It made every row again, 2.8 MB a click at 600.</summary>
+    /// <summary>A click makes the row it leaves and the row it reaches and builds the detail, not the
+    /// window: the same elements at 30 endpoints as at 300. It made every row again, 2.8 MB a click at
+    /// 600; then it built the view.</summary>
     [Fact]
     public void AClickMakesTheTwoRowsItMovesBetween_HoweverLongTheMap()
     {
@@ -395,18 +396,53 @@ public class DiscoveryViewTests : IClassFixture<TestHttpServer>, IDisposable
                 session.Window.Click(first);
                 session.PumpFrames(2);
 
-                int rows = app.EndpointRowsMade, builds = app.Builds, parts = app.PartBuilds;
+                int rows = app.EndpointRowsMade, builds = app.Builds, parts = app.PartBuilds, details = app.MapDetailBuilds;
                 ulong before = ElementId.New().Value;
                 session.Window.Click(second);
                 session.PumpFrames(2);
                 made.Add(ElementId.New().Value - before - 1);
 
                 Assert.Equal(2, app.EndpointRowsMade - rows);   // the row it left and the row it reached
-                Assert.Equal(1, app.Builds - builds);
+                Assert.Equal(0, app.Builds - builds);
                 Assert.Equal(0, app.PartBuilds - parts);         // the title bar and the rail show no selection
+                Assert.Equal(1, app.MapDetailBuilds - details);
                 Assert.True(Selected(session, "ep-PUT-v1-group00-items000-id"));
             });
         Assert.True(made[0] == made[1], $"a click made {made[0]} elements at 30 endpoints and {made[1]} at 300");
+    }
+
+    /// <summary>A click moves the selection with no build: the first builds the view (it places the
+    /// detail), then a click, the same row again and a reader's invoke of an item each tell the list and
+    /// build the detail alone, and the detail and the reader follow.</summary>
+    [Fact]
+    public void AClickMovesTheSelectionWithNoBuild()
+    {
+        Hosted((session, app) =>
+        {
+            var reader = session.Window.InstallActionRouter();
+            ImportSpec(session, app);
+            int builds = app.Builds;
+            ClickRow(session, "ep-GET-v1-charges");
+            Assert.Equal(1, app.Builds - builds);   // the first: the detail joins the view
+
+            builds = app.Builds;
+            int details = app.MapDetailBuilds;
+            ClickRow(session, "ep-GET-v1-charges-id");
+            Assert.Equal(0, app.Builds - builds);
+            Assert.Equal(1, app.MapDetailBuilds - details);
+            Assert.True(Contains(session, "Retrieve a charge"), "the detail does not show the endpoint clicked");
+            Assert.False(Selected(session, "ep-GET-v1-charges"));
+
+            ClickRow(session, "ep-GET-v1-charges-id");   // the same row: the detail is what it was
+            Assert.Equal(1, app.MapDetailBuilds - details);
+
+            reader.InvokeElement(MapItems(session).Single(n => n.Name == "GET /v1/legacy, spec-declared, deprecated").ElementId);
+            session.PumpFrames(2);
+            Assert.Equal(0, app.Builds - builds);
+            Assert.True(Selected(session, "ep-GET-v1-legacy"), "a reader's invoke did not move the selection");
+            Assert.True(Contains(session, "/v1/legacy"));
+            Assert.Equal(2, app.MapDetailBuilds - details);
+        });
     }
 
     /// <summary>At 2,000 endpoints the map is the rows on screen: the list made about a screen of
