@@ -186,6 +186,16 @@ AT-SPI bridge's objects take it and send state-changed:focused. The next
 rebuild's diff then has nothing to say about the move. Before, both kept the
 state of the last rebuild until the next one, which reported the move late.
 
+The window finds the two nodes down their elements' ancestors from the root, as a
+patch finds its nodes (`FindNodeDown`): it looks only at the children of the nodes
+on the way. Where that finds none (an element taken out, moved, or given a node of
+its own or an ancestor's since the tree was built, an overlay closed or opened
+since), one walk of the whole tree looks for it. Until plan 17's round 10 that walk
+was all there was: with the focused controls after a long list in the tree's order
+(Meridian's request pane after its endpoint map) it went past nearly every node,
+6,072 of 6,073 with the map at 2,000 endpoints. A focus that waited for its node
+and an announcement's source are found the same way.
+
 A move of a list's selection rebuilds no tree either (2026-10-11). The frame marks
 `IsSelected` on the item nodes it changed, in the applied tree, and hands the bridge
 those changes (`ApplyPatchedProperties`): the UIA wrappers take the new state and raise

@@ -135,8 +135,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     private IAccessibilityBridge _accessibilityBridge = NullAccessibilityBridge.Instance;
     private AccessibilityNode? _previousA11yTree;
     // The element whose node _previousA11yTree marks focused: the focused one when the tree
-    // was built, then each focus move's (see MoveA11yFocus). Null for none.
-    private ElementId? _a11yFocusId;
+    // was built, then each focus move's (see MoveA11yFocus). Null for none. The element, not its
+    // id, so the next move finds its node down its ancestors (FindA11yNode).
+    private Element? _a11yFocusElement;
     // The element the focus moved onto while it had no node in the applied tree — mounted in the
     // same handler, as Ctrl+F mounts a find bar and focuses its field. The bridge was told the
     // focus went nowhere; it is told where once the next rebuild has the node.
@@ -175,6 +176,14 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// <summary>How many layout refreshes built a tree without a walk, after others in a row could
     /// not be made in place (<see cref="_a11yRefreshSkips"/>). For tests. UI thread.</summary>
     internal int AccessibilityLayoutRefreshesSkipped { get; private set; }
+
+    /// <summary>How many nodes of the applied tree the focus's lookups looked at (<see cref="FindA11yNode"/>):
+    /// the children compared on the way down an element's ancestors, and each node a walk of the whole
+    /// tree went past where that found none. For a focus move's two nodes, a focus that waited for its
+    /// node, and an announcement's. For tests. UI thread.</summary>
+    internal long AccessibilityFocusNodesVisited { get; private set; }
+    // The children FindNodeDown compared, for the count above.
+    private int _a11yNodesScanned;
     // Set when an element reports an a11y-visible property change that cannot be patched in
     // (a role, an enabled state, a radio's selection, anything of an element with children, …).
     // Such changes aren't structural, so they force the next frame to rebuild+diff the tree —
@@ -841,17 +850,18 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// <summary>
     /// A focus move rebuilds no accessibility tree, so the applied one still marks the element
     /// that had the focus when it was built. Marks the move on it in place instead: the node
-    /// that had the focus and the one that has it now, found in one walk. A reader asking
-    /// either is then answered as of now, and the next rebuild's diff, which compares against
-    /// this tree, does not report the move again, late. Returns both nodes; null where the
-    /// element has none, or the tree marked no node. An element with no node yet is remembered
-    /// (<see cref="NotifyPendingA11yFocus"/>).
+    /// that had the focus and the one that has it now, each found down its element's ancestors,
+    /// and by one walk of the whole tree where that finds none (<see cref="FindA11yNode"/>). A
+    /// reader asking either is then answered as of now, and the next rebuild's diff, which
+    /// compares against this tree, does not report the move again, late. Returns both nodes; null
+    /// where the element has none, or the tree marked no node. An element with no node yet is
+    /// remembered (<see cref="NotifyPendingA11yFocus"/>).
     /// </summary>
     private (AccessibilityNode? Previous, AccessibilityNode? Focused) MoveA11yFocus(Element? element)
     {
         var tree = _previousA11yTree;
-        var previousId = _a11yFocusId;
-        _a11yFocusId = element?.Id;
+        var had = _a11yFocusElement;
+        _a11yFocusElement = element;
         _a11yPendingFocusId = null;
         if (tree is null)
         {
@@ -859,8 +869,13 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             return (null, null);
         }
 
-        AccessibilityNode? previous = null, focused = null;
-        FindNodes(tree, previousId, element?.Id, ref previous, ref focused);
+        // A walk of the whole tree was all there was: with the focused controls after a long list in
+        // the tree's order (Meridian's request pane after its map of 2,000 endpoints) it went past
+        // 6,072 of 6,073 nodes, where the way down looks at 55.
+        var previous = FindA11yNodeDown(tree, had);
+        var focused = FindA11yNodeDown(tree, element);
+        if ((previous is null && had is not null) || (focused is null && element is not null))
+            FindNodes(tree, previous is null ? had?.Id : null, focused is null ? element?.Id : null, ref previous, ref focused);
         // A row of a list whose items stand for its rows is read through its elements while it holds
         // the focus (AccessibilityTreeBuilder.OpenRow), so a move into one needs the tree that has
         // the element's node, and a move out of one the tree that does not.
@@ -894,8 +909,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     {
         if (_a11yPendingFocusId is not { } id) return;
         _a11yPendingFocusId = null;
-        if (id != _a11yFocusId) return;
-        if (FindById(tree, id) is { IsFocused: true } node)
+        if (_a11yFocusElement is not { } element || id != element.Id) return;
+        if (FindA11yNode(tree, element) is { IsFocused: true } node)
             _accessibilityBridge.NotifyFocusChanged(node, previous: null);
     }
 
@@ -1058,6 +1073,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             {
                 int at = OverlayNodeIndex(tree, top);
                 if (at < 0) return null;
+                _a11yNodesScanned += tree.Children.Count - at;
                 _a11yPaths.Add(at);
                 node = tree.Children[at];
             }
@@ -1068,6 +1084,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 {
                     int item = list.ItemOfRow(step);
                     if ((uint)item >= (uint)node.Children.Count) return null;
+                    _a11yNodesScanned++;
                     _a11yPaths.Add(item);
                     node = node.Children[item];
                 }
@@ -1081,6 +1098,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     found = c;
                     break;
                 }
+                _a11yNodesScanned += found < 0 ? children.Count : found + 1;
                 if (found < 0) return null;
                 _a11yPaths.Add(found);
                 node = children[found];
@@ -1173,7 +1191,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             }
         }
         if (diff is not null) _accessibilityBridge.ApplyChanges(diff, tree);
-        _a11yFocusId = _focusManager.FocusedElement?.Id;
+        _a11yFocusElement = _focusManager.FocusedElement;
         NotifyPendingA11yFocus(tree);
         return true;
     }
@@ -1237,7 +1255,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 patch.PropertyChanged.AddRange(refresh.Changes);
                 _accessibilityBridge.ApplyPatchedProperties(patch, tree);
             }
-            _a11yFocusId = _focusManager.FocusedElement?.Id; // what the walk compared against
+            _a11yFocusElement = _focusManager.FocusedElement; // what the walk compared against
             NotifyPendingA11yFocus(tree);
             return true;
         }
@@ -1309,10 +1327,12 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         return a.PathLength - b.PathLength;
     }
 
-    /// <summary>Finds the nodes of two elements in one walk, which stops once it has both.</summary>
-    private static bool FindNodes(AccessibilityNode node, ElementId? a, ElementId? b,
+    /// <summary>Finds the nodes of two elements in one walk of the whole tree, which stops once it
+    /// has both. For what <see cref="FindA11yNodeDown"/> does not find.</summary>
+    private bool FindNodes(AccessibilityNode node, ElementId? a, ElementId? b,
         ref AccessibilityNode? foundA, ref AccessibilityNode? foundB)
     {
+        AccessibilityFocusNodesVisited++;
         if (a is { } ia && node.ElementId == ia) foundA = node;
         if (b is { } ib && node.ElementId == ib) foundB = node;
         if ((a is null || foundA is not null) && (b is null || foundB is not null)) return true;
@@ -1324,29 +1344,37 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     }
 
     /// <summary>
-    /// Locates the AccessibilityNode matching the given element in the last
-    /// applied tree snapshot. Returns null if the element isn't represented
-    /// (e.g. it was flattened out as a decorative container) or no snapshot
-    /// has been built yet.
+    /// The node of <paramref name="element"/> in <paramref name="tree"/> (the applied tree, or the
+    /// one just built): found down its ancestors, or, where that finds none, by a walk of the whole
+    /// tree. Null when the element has none there (flattened out as a decorative container, not in
+    /// the tree yet) or there is no tree.
     /// </summary>
-    private AccessibilityNode? FindA11yNode(Element? element)
+    private AccessibilityNode? FindA11yNode(AccessibilityNode? tree, Element? element)
     {
-        if (element is null || _previousA11yTree is null) return null;
-        return FindById(_previousA11yTree, element.Id);
+        if (tree is null || element is null) return null;
+        AccessibilityNode? node = FindA11yNodeDown(tree, element), none = null;
+        if (node is null) FindNodes(tree, element.Id, null, ref node, ref none);
+        return node;
     }
 
-    private static AccessibilityNode? FindById(AccessibilityNode node, ElementId id)
+    /// <summary>
+    /// The node of <paramref name="element"/> in <paramref name="tree"/>, found down its ancestors
+    /// from the root as a patch finds its nodes (<see cref="FindNodeDown"/>): only the children of
+    /// the nodes on the way are looked at, not the whole tree. Null when the element is null, or that
+    /// way finds no node of it: it has none, or the tree was built otherwise than its ancestors say
+    /// now (one taken out, moved, or semantic since, an overlay closed or opened since), which a walk
+    /// of the whole tree is left to find. Leaves <see cref="_a11yPaths"/> as it found it.
+    /// </summary>
+    private AccessibilityNode? FindA11yNodeDown(AccessibilityNode tree, Element? element)
     {
-        if (node.ElementId == id) return node;
-        // By index: this walks the whole accessibility tree on every focus move while a
-        // client listens, and foreach over the interface boxes an enumerator per node.
-        var children = node.Children;
-        for (int i = 0; i < children.Count; i++)
-        {
-            var found = FindById(children[i], id);
-            if (found is not null) return found;
-        }
-        return null;
+        if (element is null) return null;
+        int paths = _a11yPaths.Count;
+        _a11yNodesScanned = 0;
+        var node = FindNodeDown(tree, element);
+        AccessibilityFocusNodesVisited += _a11yNodesScanned;
+        _a11yPaths.RemoveRange(paths, _a11yPaths.Count - paths);
+        // The root's own node is found without a look at it.
+        return node is not null && node.ElementId == element.Id ? node : null;
     }
 
     public void SetRoot(Element root)
@@ -1366,6 +1394,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         root.FocusManager = _focusManager;
         root.AccessibilityObserver = _a11yObserver;
         _previousA11yTree = null;
+        _a11yFocusElement = null;   // of the old tree: the next one's build marks what it marks
     }
 
     internal Element? Root => _root;
@@ -1830,7 +1859,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 if (!diff.IsEmpty)
                     _accessibilityBridge.ApplyChanges(diff, newTree);
                 _previousA11yTree = newTree;
-                _a11yFocusId = _focusManager.FocusedElement?.Id; // what the builder marked
+                _a11yFocusElement = _focusManager.FocusedElement; // what the builder marked
                 NotifyPendingA11yFocus(newTree);
             }
         }
@@ -1838,6 +1867,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         {
             // Client detached — drop the snapshot so the next attach rebuilds fresh.
             _previousA11yTree = null;
+            _a11yFocusElement = null;   // and the element, which may leave the tree while no one listens
             _a11yPendingFocusId = null;
             _a11yLayoutRefreshPending = false;
             _a11yOverlayRefreshPending = false;
@@ -1849,7 +1879,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             // After the rebuild, so an element that announces as it appears has its node.
             if (a11yActive)
                 foreach (var (source, text, politeness) in _announcements)
-                    _accessibilityBridge.Announce(FindA11yNode(source), text, politeness);
+                    _accessibilityBridge.Announce(FindA11yNode(_previousA11yTree, source), text, politeness);
             _announcements.Clear();
         }
         _a11yPropertyDirty = false;
