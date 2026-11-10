@@ -216,4 +216,14 @@ internal sealed class WheelGesture
         _lastMs = nowMs;
         _latched = evt.Latched ?? evt.ConsumedBy;
     }
+
+    /// <summary>The scroller the last gesture latched to, or null. Kept until the next wheel event,
+    /// however long that takes, unless <see cref="Release"/> lets go of it first.</summary>
+    public Element? Latched => _latched;
+
+    /// <summary>Lets go of the scroller: the window no longer shows it, so no event can be aimed
+    /// at it again, and <see cref="LatchFor"/> would let go of it at the next one anyway. Held
+    /// until then, it kept the whole view it was in alive — a build that removed it leaves its
+    /// subtree linked to it.</summary>
+    public void Release() => _latched = null;
 }

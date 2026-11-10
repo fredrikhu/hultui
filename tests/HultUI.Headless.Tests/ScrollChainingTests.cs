@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
@@ -252,6 +253,139 @@ public class ScrollChainingTests
         WheelDown(session, 100, 80);
 
         Assert.Equal(Notch, page.ScrollOffsetY);
+    }
+
+    // ──── What the latch holds ────
+    //
+    // The latch keeps the scroller until the next wheel event. One a build removed, or one in an
+    // overlay that closed, kept the whole view it was in alive until then (Meridian's Discovery
+    // map behind the Requests view, 8 MB at 2,000 endpoints): the window lets go of it at the end
+    // of that frame. Every read of the scroller is in a NoInlining helper, since a value read in
+    // the test's own frame can keep it alive.
+
+    /// <summary>A 300 × 200 host holding a 100px list of 300px, made here so no test method holds the list.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (HeadlessSession Session, BoxElement Host) HostWithList()
+    {
+        var session = HeadlessSession.Create(400, 300);
+        var host = Box.New().Width(300f).Height(200f)
+            .Children(ScrollView.New().Height(100f).FlexShrink(0).Children(Spacer(300)));
+        session.Application.SetRoot(Box.New().Children(host));
+        session.PumpFrame();
+        return (session, host);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static float ListOffset(BoxElement host) => ((ScrollViewElement)host.Children[0]).ScrollOffsetY;
+
+    /// <summary>Replaces the host's list, as a build would, and hands back only a weak reference to it.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference ReplaceList(BoxElement host)
+    {
+        var old = host.Children[0];
+        host.ReplaceChildren(Box.New().Height(100f));
+        return new WeakReference(old);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (OverlayHandle Handle, WeakReference Popup) ShowScrollingPopup(HeadlessSession session)
+    {
+        var popup = ScrollView.New().Width(150f).Height(100f).Children(Spacer(400));
+        var handle = session.Window.Window.ShowOverlay(popup, 200, 20);
+        session.PumpFrame();
+        return (handle, new WeakReference(popup));
+    }
+
+    private static void FullCollect()
+    {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AScrollViewABuildRemovedAfterAWheel_IsLetGo(bool pointerLeftTheWindow)
+    {
+        var (session, host) = HostWithList();
+        using var _ = session;
+        session.Window.MoveMouse(100, 50);
+        WheelDown(session, 100, 50, notches: 2);
+        Assert.Equal(2 * Notch, ListOffset(host));
+        session.PumpFrame();
+        // With the pointer gone nothing is hovered, and the release must not wait for hover.
+        if (pointerLeftTheWindow) session.Window.MouseLeaveWindow();
+
+        var old = ReplaceList(host);
+        session.PumpFrame();
+        FullCollect();
+
+        Assert.False(old.IsAlive, "the wheel latch kept the removed scroll view alive");
+    }
+
+    [Fact]
+    public void AScrollViewInAnOverlayThatClosedAfterAWheel_IsLetGo()
+    {
+        var (session, page, _) = PageWithList();
+        using var _s = session;
+        var (handle, popup) = ShowScrollingPopup(session);
+        WheelDown(session, 250, 60);
+        session.PumpFrame();
+
+        session.Window.Window.CloseOverlay(handle);
+        session.PumpFrame();
+        FullCollect();
+
+        Assert.False(popup.IsAlive, "the wheel latch kept the closed overlay's scroll view alive");
+        Assert.Equal(0, page.ScrollOffsetY);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference ShowWheeledRoot(HeadlessSession session)
+    {
+        var list = ScrollView.New().Width(300f).Height(100f).Children(Spacer(300));
+        session.Application.SetRoot(Box.New().Children(list));
+        session.PumpFrame();
+        WheelDown(session, 100, 50);
+        session.PumpFrame();
+        return new WeakReference(list);
+    }
+
+    /// <summary>A root shown before and kept comes back with its flags clear: no frame says a tree
+    /// changed, so the switch itself lets go.</summary>
+    [Fact]
+    public void AScrollViewOfARootReplacedAfterAWheel_IsLetGo()
+    {
+        using var session = HeadlessSession.Create(400, 300);
+        var kept = Box.New().Children(Spacer(100));
+        session.Application.SetRoot(kept);
+        session.PumpFrame();
+        var old = ShowWheeledRoot(session);
+
+        session.Application.SetRoot(kept);
+        session.PumpFrame();
+        FullCollect();
+
+        Assert.False(old.IsAlive, "the wheel latch kept the replaced root's scroll view alive");
+    }
+
+    /// <summary>A frame that changed the tree lets go only of a scroller it took away: the rest of a
+    /// gesture stays with a list that is still shown, as it did before.</summary>
+    [Fact]
+    public void AGestureStaysWithItsListThroughABuildThatKeepsIt()
+    {
+        var (session, page, list) = PageWithList();
+        using var _ = session;
+        WheelDown(session, 100, 100, notches: 6);   // the list runs out; the gesture is still its
+        Assert.Equal(200, list.ScrollOffsetY);
+
+        page.AddChild(Spacer(10));                  // a build elsewhere in the page
+        session.PumpFrame();
+        WheelDown(session, 100, 100);
+
+        Assert.Equal(0, page.ScrollOffsetY);
+        Assert.Equal(200, list.ScrollOffsetY);
     }
 
     // ──── Fields that step on the wheel ────

@@ -906,6 +906,12 @@ for speed:
   the Requests view builds, kept that view alive behind every other view from the day its rows were kept
   (round 9): 1,350 KB of a 5,770 KB heap at 200 requests. The weak ref is the same 24 B object a `Ref` is,
   made once per key, and one weak GC handle; no build allocates more.
+- **The window lets go of the scroll view a wheel gesture latched to** (round 10). A gesture stays with its
+  scroll view until the next wheel event (LAYOUT.md, "Nesting scroll views"), and that reference kept a view
+  that was wheeled and then left alive until the wheel next turned, anywhere in the window: Meridian's
+  Discovery map behind the Requests view, 8 MB at 2,000 endpoints. Now the frame that removes the scroll
+  view lets go of it, as do an overlay that closes with it and a new root. An app has nothing to do; a
+  retention check that wheels before it switches views measured the latch before this, not the app.
 
 To find a holder: take a weak reference to an element of the view, switch views, collect
 (`GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();`), and if it is alive, walk the app's fields
@@ -925,6 +931,11 @@ Headless, full GC and `GC.GetTotalMemory(true)`, the heap after the switch, JIT 
 | Aperture library grid, 600 films → Settings | 1,666 / 1,539 KB | 1,292 / 1,163 KB |
 | Vesper Brief, 400 files → Detail | 1,825 / 1,664 KB | 1,406 / 1,253 KB |
 | Vesper Brief, 3,000 files → Detail | 2,646 / 2,472 KB | 2,214 / 2,062 KB |
+| Meridian Discovery map, 2,000 endpoints, wheeled → Requests (the latch) | 14,283 / 14,037 KB | 6,052 / 5,901 KB |
+| Meridian Discovery map, 600 endpoints, wheeled → Requests (the latch) | 4,314 / 4,127 KB | 1,815 / 1,657 KB |
+| Meridian Discovery map, 60 endpoints, wheeled → Requests (the latch) | 1,122 / 948 KB | 841 / 670 KB |
+| Aperture library grid, 600 films, wheeled → Settings (the latch) | 1,566 / 1,430 KB | 1,300 / 1,164 KB |
+| Aperture Home, 5 × 20, wheeled → Settings (the latch) | 1,295 / 1,158 KB | 1,030 / 894 KB |
 
 The old view was alive before and is collected after in every row. The bytes of a build or a key did not
 move (Meridian's full build at 200 requests 59.4 KB, Home and the grid's keys, Brief's Down and Insert).

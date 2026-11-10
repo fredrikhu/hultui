@@ -1359,6 +1359,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         _root = root;
         _maxButtonCache = null;
         _hoverMayBeStale = true;   // hover may be on the old tree: settled after the next frame
+        // A wheel gesture latched to a scroller of the old tree lets go of it, and so of the tree.
+        if (_wheelGesture.Latched is { } latched && !IsShownInWindow(latched)) _wheelGesture.Release();
         SetScrollbarHover(null, default);
         root.OverlayHost = this;
         root.FocusManager = _focusManager;
@@ -1896,7 +1898,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             if (layoutWasDirty || styleWasDirty || (_root.DirtyFlags & DirtyFlags.Children) != 0
                 || (overlayChanges & OverlayChanges.Work) != 0)
                 _root.MarkPaintDirty();
-            NoteStructureForHover();
+            NoteStructureChange();
             ClearFlags(_root, DirtyFlags.Children);
             // The overlays' too: they are styled and laid out in such a frame now, and left set,
             // an overlay's structural flag would rebuild the tree on every pass.
@@ -1963,7 +1965,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
         // Clear remaining dirty flags after full render. Read first whether some tree's children
         // changed in this frame: a build before it, or a list that realized rows as it was drawn.
-        NoteStructureForHover();
+        NoteStructureChange();
         ClearAllFlags(_root);
         foreach (var overlay in _overlays)
             ClearAllFlags(overlay.Content);
@@ -3145,20 +3147,31 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     }
 
     /// <summary>Before a frame's flags are cleared: a change of some tree's children in it (a build
-    /// before it, or a list that realized its rows as it was drawn) may have taken the hovered
-    /// element away. A flag read, and one per open overlay.</summary>
-    private void NoteStructureForHover()
+    /// before it, or a list that realized its rows as it was drawn) may have taken away the hovered
+    /// element, or the scroller the last wheel gesture latched to. Nothing when neither is held;
+    /// otherwise a flag read, one per open overlay, and the walk up from a latched scroller only
+    /// in a frame that changed some tree.</summary>
+    private void NoteStructureChange()
     {
-        if (_lastHoveredElement is null) return;
-        if ((_root!.DirtyFlags & DirtyFlags.Children) != 0) { _hoverMayBeStale = true; return; }
+        if (_lastHoveredElement is null && _wheelGesture.Latched is null) return;
+        if (!SomeTreeChangedChildren()) return;
+        if (_lastHoveredElement is not null) _hoverMayBeStale = true;
+        // A latched scroller the build removed: held until the next wheel event — which may be
+        // minutes away, or never — it kept the whole view it was in alive (Meridian's Discovery
+        // map behind the Requests view, 8 MB at 2,000 endpoints). Checked whether or not anything
+        // is hovered: the pointer may have left the window.
+        if (_wheelGesture.Latched is { } latched && !IsShownInWindow(latched))
+            _wheelGesture.Release();
+    }
+
+    /// <summary>Whether the children of the window's tree or an open overlay's changed in this
+    /// frame (<see cref="DirtyFlags.Children"/> reaches the top of its tree).</summary>
+    private bool SomeTreeChangedChildren()
+    {
+        if ((_root!.DirtyFlags & DirtyFlags.Children) != 0) return true;
         for (int i = 0; i < _overlays.Count; i++)
-        {
-            if ((_overlays[i].Content.DirtyFlags & DirtyFlags.Children) != 0)
-            {
-                _hoverMayBeStale = true;
-                return;
-            }
-        }
+            if ((_overlays[i].Content.DirtyFlags & DirtyFlags.Children) != 0) return true;
+        return false;
     }
 
     /// <summary>Whether <paramref name="element"/> is in this window's tree or an open overlay's: what
@@ -3755,6 +3768,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // The pointer may have been over it (a menu closed by its own item): hover is settled
         // after the next frame. A tooltip is never hovered.
         if (entry.IsHitTestable) _hoverMayBeStale = true;
+        // A wheel gesture latched to a scroller in it lets go: nothing can be over that now, and
+        // the latch would keep the overlay's whole tree alive until the next wheel event.
+        if (_wheelGesture.Latched is { } latched && TopOf(latched) == entry.Content) _wheelGesture.Release();
         // What changes in it from now on is nothing a reader sees.
         if (ReferenceEquals(entry.Content.AccessibilityObserver, _a11yObserver))
             entry.Content.AccessibilityObserver = null;
