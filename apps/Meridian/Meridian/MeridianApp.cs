@@ -258,6 +258,7 @@ public partial class MeridianApp : Component, IDisposable
             _sendElapsed.Current = null;
             _respTabRef.Current = null;
             _responseBodyRef.Current = null;
+            _responsePanelRef.Current = null;
         }
         var root = Flex.Column(gap: 0)
             .FlexGrow(1)
