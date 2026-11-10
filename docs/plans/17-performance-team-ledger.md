@@ -5,22 +5,18 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 10
-- **Phase:** build — round 10, every step done (1–13b, 15, 15b landed; 14 declined); the final full suite RUNNING
-  (Windows, then Fedora and docfx), then Phase release; **after the release and green CI, cut new releases of all five
-  apps (user, 2026-11-11)**. Earlier: the early full Windows suite on ce839ef3 passed; step 15b was (question 36 (b): Brief returns to its old position; brief `brief-r10b15b.md`), then the full suite again (Windows,
-  Fedora, docfx) and the release. Question 35 answered: keep `UserScrolled` wide. The five app releases cut on facced69
-  (the user asked for them before the round's work) are all published. The survey is merged
-  (reports `17-reports/r10-*`); build briefs `brief-r10b<N>.md` go in session 3484c586's scratchpad. Questions 27–32
-  asked 2026-11-09; 27–30 answered as recommended the same day (27 → step 5, 28 → new step 15, 29 → step 7, 30 →
-  step 12); 31 and 32 answered no (the user left them to the recommendation): steps 2 and 13 are app-only. Open for the user, none blocking: question 26 (a merged syntax theme to match VS Code; for
-  later), question 10 (`TokenizeDiff` public), the live screen-reader check of menus and disabled menu items
-  (ACCESSIBILITY-PLAN.md). Older rounds are in [the archive](17-performance-team-ledger-archive.md) (search it, don't
-  read it whole). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a pre-push hook refuses
-  pushes built on the old history). To resume in a fresh context, run in this worktree: `/loop Run the next step of
-  the performance team: follow docs/plans/17-performance-team.md, with state in
-  docs/plans/17-performance-team-ledger.md. Read both once per session (afterwards only the ledger's Phase and the part
-  the step needs), do the step the ledger's Phase calls for, record it in the ledger, and commit.` Before resuming,
-  `git fetch` and merge main if it moved. Build steps use `scripts/perf/step-ab.ps1`.
+- **Phase:** release — round 10's full suite passed (Windows 30 projects, Fedora 22, docfx 0 warnings) on 776838cb's
+  source; merging into main, then CI; **after green CI, cut new releases of all five apps (user, 2026-11-11)**. Round 11
+  starts with Waiting dotnet-11-upgrade (the user is installing the .NET 11 SDK on 2026-11-11). To resume in a fresh
+  context, run in this worktree: `/loop Run the next step of the performance team: follow
+  docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md. Read both once per session
+  (afterwards only the ledger's Phase and the part the step needs), do the step the ledger's Phase calls for, record it
+  in the ledger, and commit.` Before resuming, `git fetch` and merge main if it moved. Build steps use
+  `scripts/perf/step-ab.ps1`. Open for the user, none blocking: question 26 (a merged syntax theme to match VS Code),
+  question 10 (`TokenizeDiff` public), question 33 (an unreadable request counted in the Runner's rail), the live
+  screen-reader check of menus. Older rounds are in [the archive](17-performance-team-ledger-archive.md) (search it,
+  don't read it whole). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a pre-push hook
+  refuses pushes built on the old history).
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`)
 - **Review commits since:** round 10's survey reviews round 9's build, 4919ac40..facced69 (the last survey report
   to the round 9 release; 82 commits, 81 not merges; no merge from main this round). Round 9's survey reviewed
@@ -1027,3 +1023,9 @@ From 2026-11-08 (round 9's survey); earlier entries are in the archive ([to 2026
   final full suite started.
 - 2026-11-11: the user: .NET 11 has just been released; consider it for the next round. Recorded as Waiting
   dotnet-11-upgrade, to go first in round 11 (its own measured step before the survey).
+- 2026-11-11: round 10 full suite on 776838cb (src as after step 15b): Windows `dotnet test HultUI.slnx -c Release` 30
+  projects, 0 failures (Core 5,078, Headless 1,553, Junction 1,092 in 8 m, Vesper 929, Meridian 664, Aperture 362);
+  Fedora `wsl-test.sh` 22 projects, 0 failures (Core 5,077 + 1, Headless 1,384 + 83, Vesper 911 + 20); docfx
+  `--warningsAsErrors` 0 warnings, 0 errors. origin/main facced69 is in the branch. The 27 idle MSBuild worker nodes left
+  by the runs blocked the user's .NET 11 SDK install ("Files In Use: .NET Host"); `dotnet build-server shutdown` cleared
+  them. Phase → release.
