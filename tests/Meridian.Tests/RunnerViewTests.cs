@@ -212,6 +212,60 @@ public class RunnerViewTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    /// <summary>The rail counts each scope from the scanned collection, with no file read
+    /// (MeridianApp.Runner.cs): what a count of the files in it finds. A file that cannot be read
+    /// is counted, and the run leaves it out, as it always has.</summary>
+    [Fact]
+    public void TheRailCountsEachScopeFromTheCollection_AnUnreadableFileIncluded()
+    {
+        Write("other/lone.req", $"GET {_server.Origin}/ok\nname Lone\n");
+        Write("other/deep/two.req", $"GET {_server.Origin}/ok\nname Deep two\n");
+        Write("other/_folder.req", "header X-Folder: 1\n");
+        Write("api/locked.req", $"GET {_server.Origin}/ok\nname Locked\n");
+        // Held with no sharing, a read of it fails: on Windows, and on Linux, where .NET takes
+        // an exclusive lock for FileShare.None.
+        using var held = new FileStream(Path.Combine(_root, "api", "locked.req"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        int readable = Requests(_root).Count(Readable);
+        if (OperatingSystem.IsWindows()) Assert.Equal(Requests(_root).Count() - 1, readable);
+        Hosted((session, app) =>
+        {
+            foreach (var (id, folder) in new[] { ("scope-all", _root), ("scope-api", Path.Combine(_root, "api")), ("scope-other", Path.Combine(_root, "other")) })
+                Assert.Equal($"{Requests(folder).Count()} req", ScopeCount(session, id));
+            Assert.Equal("Run 6 requests", session.Window.FindByAutomationId("run-start")!.Element.AccessibleName);
+
+            RunAndWait(session, app);
+            var ran = app.LastRunSummaryForTests!.Results;
+            Assert.Equal(readable, ran.Count);
+            Assert.Equal(readable < 6, ran.All(r => r.DisplayName != "Locked"));
+            Assert.True(Contains(session, $"{readable} / {readable}"), "the progress line counts what ran");
+        });
+    }
+
+    /// <summary>The requests of a scope on disk: its .req files and its folders', a folder's
+    /// defaults file and dot-folders left out, as the collection's scan does.</summary>
+    private static IEnumerable<string> Requests(string folder) =>
+        Directory.EnumerateFiles(folder, "*.req")
+            .Where(f => !Path.GetFileName(f).Equals("_folder.req", StringComparison.OrdinalIgnoreCase))
+            .Concat(Directory.EnumerateDirectories(folder)
+                .Where(d => !Path.GetFileName(d).StartsWith('.'))
+                .SelectMany(Requests));
+
+    private static bool Readable(string file)
+    {
+        try { File.ReadAllText(file); return true; }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+    }
+
+    /// <summary>The "N req" a scope row of the rail shows.</summary>
+    private static string? ScopeCount(HeadlessSession session, string automationId)
+    {
+        var row = session.Window.FindByAutomationId(automationId);
+        Assert.True(row != null, $"#{automationId} not found");
+        return row!.Element.Children.OfType<HultUI.Core.Elements.TextElement>()
+            .Select(t => t.Content).LastOrDefault(c => c.EndsWith(" req", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void FolderScopeRunsOnlyThatFolder()
     {

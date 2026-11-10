@@ -49,12 +49,19 @@ public partial class MeridianApp
                         EffectiveAuth(request.Path, doc).Spec));
             }
         }
-        CollectionFolder? Scoped(CollectionFolder folder) =>
-            folder.Path.Equals(_runScopePath, StringComparison.OrdinalIgnoreCase) ? folder
-            : folder.Folders.Select(Scoped).FirstOrDefault(f => f != null);
         if (_tree is { } tree)
-            Walk(_runScopePath == null ? tree.Root : Scoped(tree.Root) ?? tree.Root);
+            Walk(ScopeFolder(tree.Root, _runScopePath));
         return list;
+    }
+
+    /// <summary>The folder a scope covers: the collection's root for null, or for a folder no
+    /// longer in the tree.</summary>
+    private static CollectionFolder ScopeFolder(CollectionFolder root, string? path)
+    {
+        CollectionFolder? Scoped(CollectionFolder folder) =>
+            folder.Path.Equals(path, StringComparison.OrdinalIgnoreCase) ? folder
+            : folder.Folders.Select(Scoped).FirstOrDefault(f => f != null);
+        return path == null ? root : Scoped(root) ?? root;
     }
 
     internal void StartRun() => StartRun(ScopeRequests(), keepExisting: false);
@@ -231,13 +238,21 @@ public partial class MeridianApp
         return row;
     }
 
+    /// <summary>The requests in a scope, as the rail counts them: from the collection as it was
+    /// scanned, with no file read. The rail builds with every build of the app in this view, a
+    /// run's results included, and counts the collection, each folder and the scope; read and
+    /// parsed for the count, as <see cref="ScopeRequests"/> does for a run, they were 7,926 KB a
+    /// build at 200 requests. A file that cannot be read is counted, and left out of the run as
+    /// before: the progress line counts the requests the run has.</summary>
     private int ScopeRequestsCountFor(string? path)
     {
-        var keep = _runScopePath;
-        _runScopePath = path;
-        int count = ScopeRequests().Count;
-        _runScopePath = keep;
-        return count;
+        static int Count(CollectionFolder folder)
+        {
+            int n = folder.Requests.Count;
+            foreach (var sub in folder.Folders) n += Count(sub);
+            return n;
+        }
+        return _tree is { } tree ? Count(ScopeFolder(tree.Root, path)) : 0;
     }
 
     private Element BuildRunnerMain()
