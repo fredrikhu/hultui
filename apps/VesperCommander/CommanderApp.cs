@@ -283,7 +283,12 @@ public partial class CommanderApp : Component, IDisposable
         foreach (char side in "LR")
             _paneScroll[Si(side)] = ViewOf(side) switch
             {
-                ViewMode.Brief => BriefScroll(side).Current?.ScrollOffsetX ?? _briefScrollX[Si(side)],
+                // Brief comes back at the start, as it does from Detail: its new scroll view has
+                // no size to take an offset until its first layout, after the build that makes its
+                // columns (BriefGeometry makes them for the start). Put back from OnAfterBuild at
+                // a later build, the offset landed after that build too, and every column in view
+                // was blank (plan 17, round 10).
+                ViewMode.Brief => 0f,
                 ViewMode.Thumbnails => ThumbVList(side).Current?.ScrollOffsetY ?? 0f,
                 _ => VList(side).Current?.ScrollOffsetY ?? 0f,
             };
@@ -302,9 +307,6 @@ public partial class CommanderApp : Component, IDisposable
             float got;
             switch (ViewOf(side))
             {
-                case ViewMode.Brief:
-                    if (BriefScroll(side).Current is not { } bs) { settled = false; continue; }
-                    bs.ScrollOffsetX = want; got = bs.ScrollOffsetX; break;
                 case ViewMode.Thumbnails:
                     if (ThumbVList(side).Current is not { } tv) { settled = false; continue; }
                     tv.ScrollOffsetY = want; got = tv.ScrollOffsetY; break;

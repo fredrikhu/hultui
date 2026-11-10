@@ -424,12 +424,12 @@ public class ViewModesTests
     /// <summary>Detail lets Brief go (plan 17 round 10). The cursor's ref and Brief's scroll view's held
     /// the cell and the scroll view they last pointed at, and through their parents all of Brief behind
     /// Detail (its cells are held weakly, KeptElements). A build now lets go of a ref whose element left
-    /// the window, keeping Brief's scroll offset, which the next Brief build makes its columns for: back
-    /// in Brief from its end, the build makes the columns it left, as it did from the old scroll view.
-    /// (The new scroll view then shows its start, as before the change: Brief comes back blank until a
-    /// key scrolls it.)</summary>
+    /// the window. Back in Brief, the build makes a new scroll view, which opens at the start, and makes
+    /// the columns for the start (round 10 step 15; it used to make the columns it left at the end, and
+    /// Brief came back with every column in view blank). A key that moves the cursor scrolls to it and
+    /// makes its column, as it does from anywhere out of view.</summary>
     [Fact]
-    public void Detail_LetsBriefGo_AndBriefComesBackWhereItWas()
+    public void Detail_LetsBriefGo_AndBriefComesBackAtTheStart()
     {
         using var t = new DiffViewTests.Fixture();
         for (int i = 0; i < 400; i++) t.WriteLeft($"f{i:000}.txt", "x");
@@ -456,8 +456,17 @@ public class ViewModesTests
 
         t.Press(KeyCode.F2, KeyModifiers.Ctrl);   // back to Brief
         t.Session.PumpFrames(3);
-        Assert.Equal(made, BriefCellNames(t));
+        var back = BriefCellNames(t);
+        Assert.Equal(0f, t.Field<Ref<ScrollViewElement>>("_briefScrollL").Current!.ScrollOffsetX);
+        Assert.Contains("f000.txt", back);
+        Assert.DoesNotContain("f399.txt", back);
+        Assert.True(GridCursorNoBuildTests.BlankColumns(t) is [], "a column in view is not made");
+
+        t.Press(KeyCode.Up);   // the cursor to f398, out of view: Brief scrolls to it
+        t.Session.PumpFrames(2);
+        Assert.Contains("f398.txt", BriefCellNames(t));
         Assert.True(t.Field<Ref<BoxElement>>("_cursorRowL").Current is { IsHosted: true });
+        Assert.True(GridCursorNoBuildTests.BlankColumns(t) is [], "a column in view is not made");
     }
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
