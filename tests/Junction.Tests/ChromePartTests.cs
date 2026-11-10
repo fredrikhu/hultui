@@ -228,6 +228,34 @@ public class ChromePartTests
         });
     }
 
+    /// <summary>A toast that comes builds everything, as the change it reports may be the chrome's;
+    /// one that goes builds the view, where the toast was, and not the chrome (plan 17 round 10:
+    /// a toast over Changes 366 → 227 KB, flash to gone).</summary>
+    [Fact]
+    public void AToastGoing_BuildsTheViewAndNoChrome()
+    {
+        Hosted(fx =>
+        {
+            var s = fx.Session;
+            bool Shown() => Descendants(Root(s)).Any(e => e.Key == "toast");
+            int chrome = fx.App.ChromeBuilds;
+            Invoke(fx.App, "Flash", "Copied 1a2b3c4", null!);
+            s.PumpFrames(2);
+            Assert.True(Shown());
+            Assert.True(fx.App.ChromeBuilds >= chrome + 3, $"{fx.App.ChromeBuilds - chrome} part builds for a toast that came");
+
+            int builds = fx.App.Builds;
+            chrome = fx.App.ChromeBuilds;
+            s.PumpFrame(TimeSpan.FromSeconds(1.8));      // the hold ran out; fading
+            s.PumpFrame(TimeSpan.FromMilliseconds(300));  // gone
+            s.PumpFrames(2);
+            Assert.False(Shown());
+            Assert.True(fx.App.Builds > builds, "the toast went without a build");
+            Assert.Equal(chrome, fx.App.ChromeBuilds);
+            AssertChromeIsAFullBuild(fx, "after the toast");
+        });
+    }
+
     // ── What the chrome shows ────────────────────────────────────────────
 
     /// <summary>View: the toolbar's lit tab. A tab switch writes the View signal, which the

@@ -420,9 +420,11 @@ public partial class JunctionApp : Component, IDisposable
         // The diff's sideways offset is app state, so moving it has to rebuild the rows — the
         // view's: the chrome shows none of this, and a drag rebuilds once a frame.
         _diffPan = new HorizontalPan(MarkViewDirty);
+        // A toast that comes builds everything, as the change it reports may be the chrome's; one
+        // that goes builds the view, where the toast was and the chrome is not.
+        _toasts = new ToastHost(() => { if (_toasts!.IsShowing) MarkDirty(); else MarkViewDirty(); });
         // Same for the two file-list widths: the panes are rebuilt at the current width, so
         // a drag marks dirty rather than writing to an element that the next build replaces.
-        _toasts = new ToastHost(MarkDirty);
         _commitSplit = new PaneSplitter(MarkViewDirty, Persist, MinFileListWidth, MaxFileListWidth,
             settings.CommitFileListWidth);
         _changesSplit = new PaneSplitter(MarkViewDirty, Persist, MinFileListWidth, MaxFileListWidth,

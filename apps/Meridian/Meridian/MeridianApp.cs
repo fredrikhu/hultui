@@ -174,7 +174,9 @@ public partial class MeridianApp : Component, IDisposable
         // screenshot driver) gets the same window the user sees, rather than a frame that
         // reads as a theming bug the app does not have. Mirrors JunctionApp and CommanderApp.
         _app.Theme = Azimuth.ToHultTheme();
-        _toasts = new ToastHost(MarkDirty) { Seconds = 2.6f };
+        // A toast that comes builds the parts too, as the change it reports may be theirs; one
+        // that goes builds the view alone: the toast is the window's, not a part's.
+        _toasts = new ToastHost(() => { if (_toasts!.IsShowing) MarkDirty(); else MarkViewDirty(); }) { Seconds = 2.6f };
         // The window's dialogs are the real ones on a desktop and the scriptable
         // headless pair under test, so nothing needs substituting for either.
         _fileDialogs = fileDialogs ?? window.FileDialogs;

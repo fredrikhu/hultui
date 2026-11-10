@@ -103,7 +103,9 @@ public sealed partial class ApertureApp : Component, IDisposable
         _app.Theme = Halide.ToHultTheme();
 
         _settings = settings ?? new ApertureSettings(CredentialStore.Default);
-        _toasts = new ToastHost(MarkDirty) { Seconds = 2.6f };
+        // A toast that comes builds the parts too, as the change it reports may be theirs; one
+        // that goes builds the view alone: the toast is the window's, not a part's.
+        _toasts = new ToastHost(() => { if (_toasts!.IsShowing) MarkDirty(); else MarkViewDirty(); }) { Seconds = 2.6f };
         _posters = new PosterCache(PostArtworkLanded, http: posterHttp);
 
         if (library is not null)

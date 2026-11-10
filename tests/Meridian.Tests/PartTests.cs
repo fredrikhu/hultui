@@ -609,6 +609,35 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    /// <summary>A toast that comes builds the parts too, as the change it reports may be theirs; one
+    /// that goes builds the view alone, as the toast is the window's (plan 17 round 10: 271.3 →
+    /// 213.0 KB, flash to gone, at 25 requests).</summary>
+    [Fact]
+    public void AToastGoing_BuildsTheViewAndNoPart()
+    {
+        Hosted(fx =>
+        {
+            var s = fx.Session;
+            bool Shown() => Descendants(Root(s)).Any(e => e.Key == "toast");
+            int parts = fx.App.PartBuilds;
+            typeof(MeridianApp).GetMethod("Flash", BindingFlags.NonPublic | BindingFlags.Instance, [typeof(string)])!
+                .Invoke(fx.App, ["Saved get-ok.req"]);
+            s.PumpFrames(2);
+            Assert.True(Shown());
+            Assert.True(fx.App.PartBuilds > parts, "a toast that came built no part");
+
+            int builds = fx.App.Builds;
+            parts = fx.App.PartBuilds;
+            s.PumpFrame(TimeSpan.FromSeconds(2.7));     // the hold ran out; fading
+            s.PumpFrame(TimeSpan.FromMilliseconds(300)); // gone
+            s.PumpFrames(2);
+            Assert.False(Shown());
+            Assert.True(fx.App.Builds > builds, "the toast went without a build");
+            Assert.Equal(0, fx.App.PartBuilds - parts);
+            AssertPartsAreAFullBuild(fx, "after the toast");
+        });
+    }
+
     /// <summary>The environment: the title bar's chip follows a switch.</summary>
     [Fact]
     public void TheEnvironmentChip_FollowsASwitch()

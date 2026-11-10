@@ -151,6 +151,34 @@ public class PartTests
         });
     }
 
+    /// <summary>A toast that comes builds the parts too, as the change it reports may be theirs; one
+    /// that goes builds the view alone, as the toast is the window's (plan 17 round 10: Home 148.5 →
+    /// 90.1 KB, flash to gone).</summary>
+    [Fact]
+    public void AToastGoing_BuildsTheViewAndNoPart()
+    {
+        Host((session, app, _) =>
+        {
+            OpenGrid(session);
+            bool Shown() => Descendants(Root(session)).Any(e => e.Key == "toast");
+            int partBuilds = app.PartBuilds;
+            app.Flash("Marked as watched");
+            session.PumpFrames(2);
+            Assert.True(Shown());
+            Assert.True(app.PartBuilds - partBuilds >= 2, $"{app.PartBuilds - partBuilds} part builds for a toast that came");
+
+            int builds = app.Builds;
+            partBuilds = app.PartBuilds;
+            session.PumpFrame(TimeSpan.FromSeconds(2.7));     // the hold ran out; fading
+            session.PumpFrame(TimeSpan.FromMilliseconds(300)); // gone
+            session.PumpFrames(2);
+            Assert.False(Shown());
+            Assert.True(app.Builds > builds, "the toast went without a build");
+            Assert.Equal(0, app.PartBuilds - partBuilds);
+            AssertPartsAreAFullBuild(session, app, "after the toast");
+        });
+    }
+
     /// <summary>Every place the rail lights, in and out of each.</summary>
     [Fact]
     public void TheRailFollowsTheView()
