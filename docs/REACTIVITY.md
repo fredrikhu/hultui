@@ -1028,13 +1028,14 @@ for speed:
   of whichever view draws the cursor, so no one view can empty it. `OnAfterBuild` lets go of it, and of
   Brief's scroll view's, when its element is no longer in the window (`Element.IsHosted`), after the
   build's own reads; the build or key that next draws the cursor sets it again.
-- **Keep the value a later build reads, not the element, if the new element shows it.** Aperture's
+- **Keep the value a later build reads, not the element, and give it to the new element.** Aperture's
   library build sized what it asks for from the old grid's viewport height; that is kept as a number now,
   so what the next build makes is what it was. Vesper's Brief kept its old scroll view's offset the same
   way and made its columns for it, but the build that brings Brief back makes a new scroll view, which
-  opens at the start, and every column in view was blank (round 10). It makes them for the start now.
-  Before emptying a ref, look for what reads it between builds (a handler, a post-frame callback, a
-  timer, the next build).
+  opened at the start, and every column in view was blank (round 10). The build now sets the kept offset
+  on the new scroll view, which keeps an offset set before its first layout (ELEMENTS.md, section 6),
+  and makes the columns for it: Brief comes back where it was left. Before emptying a ref, look for
+  what reads it between builds (a handler, a post-frame callback, a timer, the next build).
 - **Empty a scratch list when you are done with it.** Aperture's Home reused one list of a shelf's cards
   from shelf to shelf. Full after the build, it held the last shelf's cards, and through them the whole
   Home that build made, while Home was on screen (a twin tree of 250 KB at five shelves) and behind every

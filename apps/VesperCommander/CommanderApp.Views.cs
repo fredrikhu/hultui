@@ -518,7 +518,13 @@ public partial class CommanderApp
         var marks = Marks(side);
         float rowH = RowHeight;
 
-        var g = ScrollBriefBeforeBuild(side, n, cur, BriefGeometry(side, n));
+        // With no Brief scroll view on screen (Brief comes back from another view, or shows for
+        // the first time) the build makes a new one: it opens where Brief was left, and the
+        // columns are made for that.
+        var g = BriefGeometry(side, n);
+        float openAt = 0f;
+        if (BriefScroll(side).Current is { IsHosted: true }) g = ScrollBriefBeforeBuild(side, n, cur, g);
+        else if ((openAt = BriefOpenAt(side, cur, g)) > 0f) g = BriefGeometry(side, n, openAt);
         _briefRows[Si(side)] = g.Rows;
         _briefColW[Si(side)] = BriefColWidth;
         _viewPage[Si(side)] = g.Rows * Math.Max(1, g.VisCols);
@@ -583,6 +589,8 @@ public partial class CommanderApp
 
         // Explicit width + height so the horizontal ScrollView can't shrink-wrap to content.
         var view = ScrollView.Horizontal();
+        // A new view keeps an offset set before its first layout and applies it there.
+        if (openAt > 0f) view.ScrollOffsetX = openAt;
         view.UserScrolled = BriefScrolled(side);
         var scroll = view.WithRef(BriefScroll(side)).FlexShrink(0)
             .Width(Dimension.Px(g.PaneW)).Height(Dimension.Px(g.AvailH));
@@ -619,7 +627,7 @@ public partial class CommanderApp
     /// height back is equally circular (it reflects the collapsed state). The window height
     /// minus the fixed chrome (title bar + tab strip + breadcrumb + footer) is a stable input
     /// that can't feed the loop. <see cref="BriefFit"/> is the part a cell's place depends on.</summary>
-    private BriefGeom BriefGeometry(char side, int n)
+    private BriefGeom BriefGeometry(char side, int n, float openAt = 0f)
     {
         float rowH = RowHeight;
         float availH = Math.Max(rowH, (_window.LayoutHeight > 0 ? _window.LayoutHeight : 820f) - BriefChromeHeight);
@@ -627,9 +635,10 @@ public partial class CommanderApp
         var (rows, totalCols, colW, overflow) = BriefGrid(n, paneW, availH, rowH);
         int visCols = overflow ? Math.Max(1, (int)(paneW / colW)) : totalCols;
         // The offset of the scroll view on screen. With none (the pane comes back to Brief from
-        // Detail, Thumbnails or a full-shell view), the build makes a new one, which opens at the
-        // start, and the columns are made for the start.
-        float scrollX = overflow && BriefScroll(side).Current is { IsHosted: true } shown ? Math.Max(0, shown.ScrollOffsetX) : 0;
+        // Detail, Thumbnails or a full-shell view), the build makes a new one, which opens at
+        // openAt (BriefOpenAt), and the columns are made for that.
+        float scrollX = !overflow ? 0
+            : BriefScroll(side).Current is { IsHosted: true } shown ? Math.Max(0, shown.ScrollOffsetX) : openAt;
         int firstCol = overflow ? Math.Clamp((int)(scrollX / colW), 0, Math.Max(0, totalCols - 1)) : 0;
         int lastCol = Math.Min(totalCols - 1, firstCol + visCols + 1);   // +1 buffer column
         return new BriefGeom(paneW, availH, new BriefFit(rows, totalCols, overflow, visCols, firstCol, lastCol));
@@ -655,6 +664,50 @@ public partial class CommanderApp
         float want = x < before ? x : x + colW > before + viewW ? x + colW - viewW : before;
         sv.ScrollOffsetX = Math.Min(want, Math.Max(0, g.TotalCols * colW - viewW));
         return sv.ScrollOffsetX == before ? g : BriefGeometry(side, n);
+    }
+
+    /// <summary>Where a tab's Brief was when it left the pane for another view: its scroll offset,
+    /// the cursor, and the result set it showed (null for the folder).</summary>
+    private readonly record struct BriefSpot(float X, int Cursor, ResultListing? Results);
+
+    /// <summary>The pane is about to show another view (Detail or Thumbnails, or the viewer, the
+    /// diff or sync over the panes): if it shows Brief, notes where, for the build that brings
+    /// Brief back (<see cref="BriefOpenAt"/>). Brief's scroll view leaves the window with it.</summary>
+    private void NoteBriefLeaving(char side)
+    {
+        var tab = ActiveTab(side);
+        if (tab.View != ViewMode.Brief) return;
+        tab.BriefLeft = BriefScroll(side).Current is { IsHosted: true } sv
+            ? new BriefSpot(sv.ScrollOffsetX, Cursor(side), tab.Results)
+            : null;
+    }
+
+    /// <summary>
+    /// Where the new scroll view of a build with none on screen opens: where the tab's Brief was
+    /// left for another view (<see cref="NoteBriefLeaving"/>), so Brief comes back showing the
+    /// columns it showed, and the build makes the columns for it. The new view keeps an offset set
+    /// before its first layout and applies it there (ScrollViewElement.ScrollOffsetX; until plan
+    /// 17's round 10 step 15b it clamped to 0 at once and Brief came back at the start). When the
+    /// cursor moved while Brief was away, from there the least distance that shows it, as a key
+    /// would scroll; the scroll view's width is the pane's (<see cref="BriefGeom.PaneW"/>). Never
+    /// past the end of the columns, which may be fewer now. The start when nothing was noted: the
+    /// first Brief, a folder changed while away (<see cref="NavigateTo"/> forgets the spot), a
+    /// result set fed in or taken away. Used once.
+    /// </summary>
+    private float BriefOpenAt(char side, int cur, BriefGeom g)
+    {
+        var tab = ActiveTab(side);
+        var left = tab.BriefLeft;
+        tab.BriefLeft = null;
+        if (!g.Overflow || left is not { } spot || !ReferenceEquals(spot.Results, tab.Results)) return 0f;
+        float colW = BriefColWidth, viewW = g.PaneW, x = spot.X;
+        if (cur != spot.Cursor)
+        {
+            float cx = (cur / Math.Max(1, g.Rows)) * colW;
+            if (cx < x) x = cx;
+            else if (cx + colW > x + viewW) x = cx + colW - viewW;
+        }
+        return Math.Clamp(x, 0f, Math.Max(0f, g.TotalCols * colW - viewW));
     }
 
     /// <summary>Where the Brief grid puts its cells: rows per column, the columns, whether they
@@ -761,8 +814,9 @@ public partial class CommanderApp
     /// through its parents (REACTIVITY.md, "A ref into a view keeps the whole view"): Brief's cells
     /// and columns behind Detail or Thumbnails. The cursor's row (a cell, a tile or a row, whichever
     /// view drew the cursor) is let go, as nothing reads one out of the window (CursorRowBox wants a
-    /// row on screen). Brief's scroll view too: the build that brings Brief back makes a new one, which
-    /// opens at the start, and <see cref="BriefGeometry"/> makes the columns for the start. Both are set
+    /// row on screen). Brief's scroll view too: its offset was noted as Brief left
+    /// (<see cref="NoteBriefLeaving"/>), and the build that brings Brief back makes a new view, opened
+    /// there, and the columns for it (<see cref="BriefOpenAt"/>). Both are set
     /// again by the build or the key that next draws them. The Sync rows a key moved the ring on and
     /// Sync's scroll view the same once they left (only Sync's next build and keys read them).
     /// </summary>
@@ -831,7 +885,7 @@ public partial class CommanderApp
         float viewW = sv.Layout.AbsoluteContentBox.Width;
         // A view the build just made has no width yet, and an offset set on it now is kept for its
         // layout: the cursor's right edge, which scrolls the cursor's column out of view. The build
-        // made the columns for where the new view opens (BriefGeometry).
+        // opened it where it belongs, the cursor shown when it moved (BriefOpenAt).
         if (viewW <= 0) return;
         if (x < sv.ScrollOffsetX) sv.ScrollOffsetX = x;
         else if (x + colW > sv.ScrollOffsetX + viewW) sv.ScrollOffsetX = x + colW - viewW;

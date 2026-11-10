@@ -69,6 +69,9 @@ public partial class CommanderApp : Component, IDisposable
         // Fwd holds folders returned-from after a Back. A new forward navigation clears Fwd.
         public readonly List<string> Back = new();
         public readonly List<string> Fwd = new();
+        // Where Brief was when it left the pane for another view, for the build that brings it
+        // back (NoteBriefLeaving, BriefOpenAt); null after a folder change.
+        public BriefSpot? BriefLeft;
     }
 
     /// <summary>The key an entry is held under in a mark set: its full path.
@@ -281,17 +284,19 @@ public partial class CommanderApp : Component, IDisposable
     {
         if (FullShellOpen) return;   // sync → diff: the panes are already gone, and noted
         foreach (char side in "LR")
+        {
+            // Brief puts its own back, on the build that brings it back (BriefOpenAt): the new
+            // scroll view keeps the offset set before its first layout, and that build makes the
+            // columns for it. Put back from OnAfterBuild, the offset landed after the build had
+            // made the start's columns, and every column in view was blank (plan 17, round 10).
+            NoteBriefLeaving(side);
             _paneScroll[Si(side)] = ViewOf(side) switch
             {
-                // Brief comes back at the start, as it does from Detail: its new scroll view has
-                // no size to take an offset until its first layout, after the build that makes its
-                // columns (BriefGeometry makes them for the start). Put back from OnAfterBuild at
-                // a later build, the offset landed after that build too, and every column in view
-                // was blank (plan 17, round 10).
                 ViewMode.Brief => 0f,
                 ViewMode.Thumbnails => ThumbVList(side).Current?.ScrollOffsetY ?? 0f,
                 _ => VList(side).Current?.ScrollOffsetY ?? 0f,
             };
+        }
         // A few builds rather than one: the offset clamps against a content size the list
         // may not know on the very first build after the panes come back.
         _pendingPaneScroll = 4;
@@ -544,6 +549,7 @@ public partial class CommanderApp : Component, IDisposable
     private void SetView(char side, ViewMode mode)
     {
         if (ActiveTab(side).View == mode) return;
+        NoteBriefLeaving(side);   // Brief, if it is the view the pane leaves, comes back there
         ActiveTab(side).View = mode;
         RequestScroll(side);
         MarkDirty();
@@ -926,6 +932,7 @@ public partial class CommanderApp : Component, IDisposable
         }
         tab.Dir = path;
         tab.Results = null;   // navigating anywhere leaves a fed-in result set behind
+        tab.BriefLeft = null;   // another folder's Brief starts at the start
         BumpGen(side);
         // Cursor reset now; the loader's onLoaded re-clamps once the listing lands.
         // If we ascended, try to land on the folder we came from.

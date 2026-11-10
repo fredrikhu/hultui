@@ -424,12 +424,13 @@ public class ViewModesTests
     /// <summary>Detail lets Brief go (plan 17 round 10). The cursor's ref and Brief's scroll view's held
     /// the cell and the scroll view they last pointed at, and through their parents all of Brief behind
     /// Detail (its cells are held weakly, KeptElements). A build now lets go of a ref whose element left
-    /// the window. Back in Brief, the build makes a new scroll view, which opens at the start, and makes
-    /// the columns for the start (round 10 step 15; it used to make the columns it left at the end, and
-    /// Brief came back with every column in view blank). A key that moves the cursor scrolls to it and
-    /// makes its column, as it does from anywhere out of view.</summary>
+    /// the window. Back in Brief, the build makes a new scroll view, opened where Brief was left, and
+    /// makes the columns for that (round 10 step 15b; before it, step 15 made the columns for the start,
+    /// where the new view opened, and earlier the columns left at the end were made in a view at the
+    /// start, every column in view blank). Only the offset is kept, not the elements: the cells back are
+    /// new ones.</summary>
     [Fact]
-    public void Detail_LetsBriefGo_AndBriefComesBackAtTheStart()
+    public void Detail_LetsBriefGo_AndBriefComesBackWhereItWasLeft()
     {
         using var t = new DiffViewTests.Fixture();
         for (int i = 0; i < 400; i++) t.WriteLeft($"f{i:000}.txt", "x");
@@ -457,14 +458,15 @@ public class ViewModesTests
         t.Press(KeyCode.F2, KeyModifiers.Ctrl);   // back to Brief
         t.Session.PumpFrames(3);
         var back = BriefCellNames(t);
-        Assert.Equal(0f, t.Field<Ref<ScrollViewElement>>("_briefScrollL").Current!.ScrollOffsetX);
-        Assert.Contains("f000.txt", back);
-        Assert.DoesNotContain("f399.txt", back);
+        Assert.Equal(scrolled, t.Field<Ref<ScrollViewElement>>("_briefScrollL").Current!.ScrollOffsetX);
+        Assert.Contains("f399.txt", back);
+        Assert.DoesNotContain("f000.txt", back);
         Assert.True(GridCursorNoBuildTests.BlankColumns(t) is [], "a column in view is not made");
+        Assert.True(t.Field<Ref<BoxElement>>("_cursorRowL").Current is { IsHosted: true });
 
-        t.Press(KeyCode.Up);   // the cursor to f398, out of view: Brief scrolls to it
+        t.Press(KeyCode.Home);   // the cursor to the start, out of view: Brief scrolls to it
         t.Session.PumpFrames(2);
-        Assert.Contains("f398.txt", BriefCellNames(t));
+        Assert.Contains("f000.txt", BriefCellNames(t));
         Assert.True(t.Field<Ref<BoxElement>>("_cursorRowL").Current is { IsHosted: true });
         Assert.True(GridCursorNoBuildTests.BlankColumns(t) is [], "a column in view is not made");
     }
