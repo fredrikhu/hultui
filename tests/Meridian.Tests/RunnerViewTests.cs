@@ -1,4 +1,6 @@
+using System.Reflection;
 using HultUI.Core.Accessibility;
+using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Headless;
 using Meridian.Core;
@@ -262,9 +264,61 @@ public class RunnerViewTests : IClassFixture<TestHttpServer>, IDisposable
     {
         var row = session.Window.FindByAutomationId(automationId);
         Assert.True(row != null, $"#{automationId} not found");
-        return row!.Element.Children.OfType<HultUI.Core.Elements.TextElement>()
+        return row!.Element.Children.OfType<TextElement>()
             .Select(t => t.Content).LastOrDefault(c => c.EndsWith(" req", StringComparison.Ordinal));
     }
+
+    /// <summary>A run hands back the result rows it made before (MeridianApp.Runner.cs): a run of n
+    /// results builds the view once a result and makes n rows, and the list on screen is what a
+    /// build that keeps no row makes. Expanding a row makes none; a run that starts over makes its
+    /// rows again.</summary>
+    [Fact]
+    public void ARunMakesOneRowAResult_AndKeepsTheRest()
+    {
+        for (int i = 0; i < 12; i++)
+            Write($"bulk/b{i:00}.req", $"GET {_server.Origin}/ok\nname Bulk {i}\n");
+        Hosted((session, app) =>
+        {
+            int made = app.RunRowsMade, builds = app.Builds;
+            RunAndWait(session, app);
+            int n = app.LastRunSummaryForTests!.Results.Count;
+            Assert.Equal(15, n);
+            Assert.True(app.Builds - builds >= n, $"{app.Builds - builds} builds for {n} results");
+            Assert.Equal(n, app.RunRowsMade - made);
+            AssertRunListIsAFullBuild(session, app, "after the run");
+
+            Click(session, "run-row-3");
+            Assert.NotNull(session.Window.FindByAutomationId("run-detail"));
+            AssertRunListIsAFullBuild(session, app, "a row expanded");
+            made = app.RunRowsMade;
+            Click(session, "run-row-3");
+            Assert.Null(session.Window.FindByAutomationId("run-detail"));
+            Assert.Equal(0, app.RunRowsMade - made);
+
+            made = app.RunRowsMade;
+            Click(session, "run-rerun-all");
+            session.PumpUntil(() => !app.RunnerRunning, TimeSpan.FromSeconds(15));
+            session.PumpFrames(2);
+            Assert.Equal(n, app.RunRowsMade - made);
+            AssertRunListIsAFullBuild(session, app, "after a second run");
+        });
+    }
+
+    /// <summary>The Runner's progress line, result list and summary on screen equal what a build
+    /// that keeps no result row makes.</summary>
+    private static void AssertRunListIsAFullBuild(HeadlessSession session, MeridianApp app, string when)
+    {
+        string kept = PartTests.Sig(RunnerMain(session));
+        app.ForgetRunRows();
+        typeof(MeridianApp).GetMethod("MarkDirty", BindingFlags.NonPublic | BindingFlags.Instance, Type.EmptyTypes)!
+            .Invoke(app, null);
+        session.PumpFrames(2);
+        string full = PartTests.Sig(RunnerMain(session));
+        Assert.True(kept == full, $"the kept result list is not what a full build makes ({when})");
+    }
+
+    private static Element RunnerMain(HeadlessSession session) =>
+        PartTests.Descendants(PartTests.Root(session)).First(e => e.Key == "runner-main");
 
     [Fact]
     public void FolderScopeRunsOnlyThatFolder()

@@ -1,5 +1,6 @@
 using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
+using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
@@ -70,7 +71,11 @@ public partial class MeridianApp
     {
         if (_runState == RunState.Running || scope.Count == 0) return;
         _runState = RunState.Running;
-        if (!keepExisting) _runResults.Clear();
+        if (!keepExisting)
+        {
+            _runResults.Clear();
+            _runRows.Clear();
+        }
         _runSummary = null;
         _runExpanded = -1;
         _lastScope = scope;
@@ -280,16 +285,21 @@ public partial class MeridianApp
 
         var scroll = ScrollView.New();
         var list = Flex.Column(gap: 1).Padding(new Thickness(Azimuth.S1, Azimuth.S2, Azimuth.S2, Azimuth.S2));
+        // Every child of the list is keyed, the rows by their requests' paths (KeptElements keys them).
         if (_runState == RunState.Idle)
         {
-            list.AddChild(Flex.Column(gap: Azimuth.S2).Padding(new Thickness(Azimuth.S4))
+            var idle = Flex.Column(gap: Azimuth.S2).Padding(new Thickness(Azimuth.S4))
                 .Children(
                     Text.New("nothing has run yet").FontSize(12f).TextColor(Azimuth.TextMuted),
                     Text.New("Pick a scope and Run — results stream in here, exactly as CI sees them.")
-                        .FontSize(11.5f).TextColor(Azimuth.TextFaint)));
+                        .FontSize(11.5f).TextColor(Azimuth.TextFaint));
+            idle.Key = "run-idle";
+            list.AddChild(idle);
         }
+        _runRows.Begin(Builds);
+        float scale = Ui.DisplayScale;
         for (int i = 0; i < _runResults.Count; i++)
-            AddRunRow(list, i);
+            AddRunRow(list, i, scale);
         scroll.AddChild(list);
         var scrollBox = Box.New().FlexGrow(1).FlexBasis(Dimension.Px(0));
         scrollBox.AddChild(scroll);
@@ -304,9 +314,44 @@ public partial class MeridianApp
         return col;
     }
 
-    private void AddRunRow(BoxElement list, int index)
+    // ── The result rows, kept ────────────────────────────────────────────
+    //
+    // A row comes back from the build before when nothing it shows or does moved (KeptElements;
+    // REACTIVITY.md, "Hand back the elements a key does not change"). A run builds the view once a
+    // result, and made every row again: at 200 requests the list was 1,467 KB of a build, 7.3 KB a
+    // row, so a run made n²/2 rows. A row is keyed by its request's path, which a run runs once,
+    // and a run that starts over lets every row go. Its state is its result, a record nothing
+    // changes; its place, which its id names and its click expands; and the scale.
+    private readonly record struct RunRowState(RunRequestResult Result, int Index, float Scale);
+    private readonly KeptElements<RunRowState> _runRows = new();
+
+    /// <summary>Result rows the Runner has made so far, for tests: a result makes one.</summary>
+    internal int RunRowsMade { get; private set; }
+
+    /// <summary>Lets every kept result row go, so the next build makes them all: for tests, whose
+    /// oracle is a build that keeps nothing.</summary>
+    internal void ForgetRunRows() => _runRows.Clear();
+
+    private void AddRunRow(BoxElement list, int index, float scale)
     {
         var result = _runResults[index];
+        var state = new RunRowState(result, index, scale);
+        list.AddChild(_runRows.TryKeep(result.Path, state, out var kept)
+            ? kept
+            : _runRows.Made(result.Path, state, RunRow(state)));
+
+        if (_runExpanded == index)
+        {
+            var detail = BuildRunRowDetail(result);
+            detail.Key = "run-detail";
+            list.AddChild(detail);
+        }
+    }
+
+    private Element RunRow(RunRowState state)
+    {
+        RunRowsMade++;
+        var (result, index) = (state.Result, state.Index);
         var (glyphColor, codeText) = result.Verdict switch
         {
             RunVerdict.Pass => (Azimuth.StatusPass, StatusOf(result)),
@@ -336,10 +381,7 @@ public partial class MeridianApp
         int rowIndex = index;
         row.OnClick(_ => { _runExpanded = _runExpanded == rowIndex ? -1 : rowIndex; MarkDirty(); });
         row.HoverBg(Azimuth.Raised, Color.Transparent);
-        list.AddChild(row);
-
-        if (_runExpanded == index)
-            list.AddChild(BuildRunRowDetail(result));
+        return row;
     }
 
     private static string StatusOf(RunRequestResult result) =>

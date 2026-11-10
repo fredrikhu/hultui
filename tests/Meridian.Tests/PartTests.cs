@@ -748,7 +748,7 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
 
     /// <summary>What a subtree shows: element kinds, keys, text, field and body text, the body's
     /// spans, colours, tooltips, names, opacity and enabled state, in tree order.</summary>
-    private static string Sig(Element e)
+    internal static string Sig(Element e)
     {
         var sb = new StringBuilder();
         void Walk(Element el, int depth)
@@ -828,7 +828,7 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
         Assert.Equal((root.X, root.Y, root.Width, root.Height), (host.X, host.Y, host.Width, host.Height));
     }
 
-    private static Element Root(HeadlessSession session) =>
+    internal static Element Root(HeadlessSession session) =>
         (Element)typeof(HultUI.Window).GetField("_root", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(session.Window.Window)!;
 
