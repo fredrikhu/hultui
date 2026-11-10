@@ -5,8 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 10
-- **Phase:** build — round 10, steps 1–13b and 15 landed (14 declined); an early full Windows suite running; then step
-  15b (question 36 (b): Brief returns to its old position; brief `brief-r10b15b.md`), then the full suite again (Windows,
+- **Phase:** build — round 10, steps 1–13b and 15 landed (14 declined); the early full Windows suite on ce839ef3 passed; step
+  15b SPAWNED (question 36 (b): Brief returns to its old position; brief `brief-r10b15b.md`), then the full suite again (Windows,
   Fedora, docfx) and the release. Question 35 answered: keep `UserScrolled` wide. The five app releases cut on facced69
   (the user asked for them before the round's work) are all published. The survey is merged
   (reports `17-reports/r10-*`); build briefs `brief-r10b<N>.md` go in session 3484c586's scratchpad. Questions 27–32
@@ -1002,3 +1002,6 @@ From 2026-11-08 (round 9's survey); earlier entries are in the archive ([to 2026
   `MarkDirty` from `OnAfterBuild` is dropped (Waiting). Every build step done; full suite started.
 - 2026-11-11: the user answered questions 35 (keep `UserScrolled` wide) and 36 ((b): restore Brief's old position, step
   15b). An early full Windows suite runs first; 15b follows, then the full suite again.
+- 2026-11-11: early full Windows suite on ce839ef3 (src as after step 15): `dotnet test HultUI.slnx -c Release` 30 projects,
+  0 failures (Core 5,072, Headless 1,550, Junction 1,092 in 8 m 35 s, Vesper 919, Meridian 664, Aperture 362, Skia 387, Text
+  293, Syntax 104, Linux bridge 104, Terminal.XTermNet 2,254). Step 15b spawned; the full suite runs again after it.
