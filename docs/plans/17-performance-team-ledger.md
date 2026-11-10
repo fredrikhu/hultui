@@ -5,8 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 10
-- **Phase:** release — round 10's full suite passed (Windows 30 projects, Fedora 22, docfx 0 warnings) on 776838cb's
-  source; merging into main, then CI; **after green CI, cut new releases of all five apps (user, 2026-11-11)**. Round 11
+- **Phase:** release — round 10 merged into main as cc55bdcc (pushed; CI run 42924747474 running); after the full suite
+  passed (Windows 30 projects, Fedora 22, docfx 0 warnings) on 776838cb's source; **after green CI, cut new releases of all five apps (user, 2026-11-11)**. Round 11
   starts with Waiting dotnet-11-upgrade (the user is installing the .NET 11 SDK on 2026-11-11). To resume in a fresh
   context, run in this worktree: `/loop Run the next step of the performance team: follow
   docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md. Read both once per session
@@ -1029,3 +1029,7 @@ From 2026-11-08 (round 9's survey); earlier entries are in the archive ([to 2026
   `--warningsAsErrors` 0 warnings, 0 errors. origin/main facced69 is in the branch. The 27 idle MSBuild worker nodes left
   by the runs blocked the user's .NET 11 SDK install ("Files In Use: .NET Host"); `dotnet build-server shutdown` cleared
   them. Phase → release.
+- 2026-11-11: round 10 merged into main as cc55bdcc (detached origin/main merge in this worktree, tree identical to the
+  tested branch; origin/main facced69 was in the branch, so the push gate held). Primary checkout fast-forwarded behind
+  the guard; branch fast-forwarded to the merge and pushed. CI run 42924747474 queued. Release tags drafted for after
+  green CI: junction-v1.25.0, vesper-v1.25.0, meridian-v1.8.0, aperture-v1.23.0, reel-v1.9.0 (mpv-natives-ci present).
