@@ -88,8 +88,15 @@ public partial class CommanderApp
         }));
     }
 
-    private List<SyncRow> VisibleSyncRows() =>
-        _syncShowEqual ? _syncRows : _syncRows.Where(r => r.Data.Rel != SyncEngine.Rel.Equal).ToList();
+    /// <summary>Calls of <see cref="VisibleSyncRows"/> on this thread. With "Show equal" off each
+    /// makes a filtered copy of the rows, so a build asks once, never once a row; a test counts.</summary>
+    [ThreadStatic] internal static int VisibleSyncRowsCalls;
+
+    private List<SyncRow> VisibleSyncRows()
+    {
+        VisibleSyncRowsCalls++;
+        return _syncShowEqual ? _syncRows : _syncRows.Where(r => r.Data.Rel != SyncEngine.Rel.Equal).ToList();
+    }
 
     /// <summary>Cycle a row's direction through the sensible options for its relationship
     /// (one-sided rows can only go one way or skip).</summary>
@@ -291,7 +298,7 @@ public partial class CommanderApp
 
         var scroll = ScrollView.Vertical().FlexGrow(1).Padding(new Thickness(4, 4, 4, 4));
         var colb = Flex.Column(gap: 0);
-        for (int i = 0; i < vis.Count; i++) colb.AddChild(SyncRowView(vis[i], i == _syncSel));
+        for (int i = 0; i < vis.Count; i++) colb.AddChild(SyncRowView(vis[i], i, i == _syncSel));
         scroll.AddChild(colb);
         return scroll;
     }
@@ -305,7 +312,11 @@ public partial class CommanderApp
     /// <summary>A Sync row's colour at the row's <paramref name="opacity"/>.</summary>
     private static Color Faded(Color c, float opacity) => opacity < 1f ? Nocturne.Fade(c, opacity) : c;
 
-    private Element SyncRowView(SyncRow r, bool selected)
+    /// <summary>A Sync row, <paramref name="idx"/> its place among the rows shown. The build passes
+    /// it from its loop: each row looked itself up in a fresh list of the rows shown, O(rows²) a
+    /// build (with "Show equal" off, a filtered copy a row: 2,568.6 → 1,715.9 KB a key at 300 files,
+    /// plan 17 round 10 step 7).</summary>
+    private Element SyncRowView(SyncRow r, int idx, bool selected)
     {
         var d = r.Data;
         bool conflict = d.Rel == SyncEngine.Rel.Conflict;
@@ -346,7 +357,6 @@ public partial class CommanderApp
         row.AddChild(Ui.Mono(d.RightExists ? d.RelPath : "— missing —", 11.5f, rightFg)
             .TextAlign(TextAlign.Right).MaxLines(1).TextOverflow(TextOverflow.Ellipsis).GridColumn(6));
 
-        int idx = VisibleSyncRows().IndexOf(r);
         row.OnClick(_ => { _syncSel = idx; MarkDirty(); });
         return row;
     }
