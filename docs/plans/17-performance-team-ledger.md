@@ -5,9 +5,9 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 10
-- **Phase:** build — round 10, every step done (1–13b, 15 landed; 14 declined). Full suite running (Windows, then
-  Fedora and docfx). Questions 35 (UserScrolled's scope) and 36 (Brief returns at the start) asked 2026-11-11; 36 may add a
-  step 15b before the release. The five app releases cut on facced69
+- **Phase:** build — round 10, steps 1–13b and 15 landed (14 declined); an early full Windows suite running; then step
+  15b (question 36 (b): Brief returns to its old position; brief `brief-r10b15b.md`), then the full suite again (Windows,
+  Fedora, docfx) and the release. Question 35 answered: keep `UserScrolled` wide. The five app releases cut on facced69
   (the user asked for them before the round's work) are all published. The survey is merged
   (reports `17-reports/r10-*`); build briefs `brief-r10b<N>.md` go in session 3484c586's scratchpad. Questions 27–32
   asked 2026-11-09; 27–30 answered as recommended the same day (27 → step 5, 28 → new step 15, 29 → step 7, 30 →
@@ -169,6 +169,11 @@ names the report lines its brief quotes (`r10-k` = `17-reports/r10-k-<area>.md`)
     settle step (wait until the watcher's initial change is drained, or count only builds the test caused) so the counts
     are exact under load; 20 runs under a loaded machine with 0 failures. Also look at the known flake
     `ReviewTests.TheKeyboardReachesTheCommentAgain` (memory ci-red-findings) if the same cause. Small, tests only.
+15b. **vesper-brief-return-offset** (1 with 6; question 36 (b), 2026-11-11) — Brief comes back from Detail, Thumbnails
+    or the viewer/diff/sync at the position it was left at, with its columns made for that offset: a ScrollView applies
+    an offset set before its first layout once it has laid out (a fix to the existing setter, no new API), and Brief
+    builds its columns for the restored offset (no blank column, no extra build where none is needed). Small, framework +
+    app.
 14. **paint-text-lines-seek** (2; r10-2 Candidate 1; r10-5 Examined says under the time bar) — measure first: binary
     search for the first line the clip reaches in `DrawText` and `DrawParagraph`, only for labels of ~32 lines or more
     (prototype `PROBE_LINESEEK`): the 2,000-line row 1,999 → 60 line visits a step. Keep only if `step-ab.ps1` shows
@@ -616,13 +621,14 @@ Round 10 questions (from the survey, 2026-11-09). Recommendations in brackets.
     scrollbar, autoscroll and a VirtualList's scroll keys — so one callback means "the user moved it" (`ScrollEvent` is
     unchanged; Brief listens to `UserScrolled` alone). Keep the wider scope, or narrow it to bar + autoscroll (a small
     change; Brief would listen beside `ScrollEvent`)? [Keep: one meaning, and a listener needn't combine two signals.]
+    → **keep it wide** (2026-11-11).
 36. **vesper-brief-return-offset** (step 15, 2026-11-11; behaviour): Brief now comes back from Detail, Thumbnails or the
     viewer/diff/sync at the start (offset 0) with its columns made for the start; before, it tried to restore its old
     offset, but the restore landed only after a build and left the pane blank until a key (17 of 21 return steps
     blank). The old position is no longer kept. (a) Keep returning at the start, or (b) restore the old position
     properly as a step 15b (a ScrollView applies an offset set before its first layout once it has laid out — a fix to
     how the existing setter behaves before layout, no new API — and Brief makes the columns for it)? [(b): returning
-    where you were is what a file manager should do; small.]
+    where you were is what a file manager should do; small.] → **(b)** (2026-11-11; step 15b).
 
 Round 9 question 26 (from step 14b, 2026-11-09), still open. Round 9's answered questions 14–25 are in
 [the archive](17-performance-team-ledger-archive.md#needs-the-user-round-9). Recommendations in brackets.
@@ -994,3 +1000,5 @@ From 2026-11-08 (round 9's survey); earlier entries are in the archive ([to 2026
   what its offset shows builds on `UserScrolled`, only when the set in view changes; a new scroll view opens at 0 and
   can't take an offset before its first layout; `FlexGrow` on a horizontal ScrollView's content makes it ~1.7e38 px wide;
   `MarkDirty` from `OnAfterBuild` is dropped (Waiting). Every build step done; full suite started.
+- 2026-11-11: the user answered questions 35 (keep `UserScrolled` wide) and 36 ((b): restore Brief's old position, step
+  15b). An early full Windows suite runs first; 15b follows, then the full suite again.
