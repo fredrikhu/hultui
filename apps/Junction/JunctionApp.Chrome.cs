@@ -30,7 +30,10 @@ public partial class JunctionApp
     //
     // Safe by default, then: a rebuild builds the chrome too. Only paths that change nothing
     // the chrome shows say so, with MarkViewDirty and RerenderView — the selection moves and
-    // cursors of History, Branches, Tags, Files and the Commit file list, and the search boxes.
+    // cursors of History, Branches, Tags, Files and the Commit file list, the search boxes and
+    // the keys that focus them, lines and hunks picked for staging, a dialog opened or closed
+    // without confirming (a confirm builds everything), a popover closed with Escape, and a
+    // folder opened or closed in Files or a commit's file list.
     // (A character in the composer's fields builds the composer at most: see ComposerPart.)
     // ChromePartTests holds every chrome input to what a full build of the chrome makes.
 

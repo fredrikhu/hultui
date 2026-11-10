@@ -65,7 +65,9 @@ public partial class JunctionApp
         // points at the last prompt's (unmounted) input, and focusing that corpse
         // takes the keyboard away from the root handler this dialog's Enter needs.
         _pendingDialogFocus = spec.Placeholder != null;
-        MarkDirty();
+        // The card is the view's: the title bar, toolbar and sidebar show nothing of a dialog
+        // (MarkViewDirty). Every caller opens it on what is already on screen.
+        MarkViewDirty();
     }
 
     /// <summary>A confirm-only modal: the same card without a field, for the
@@ -74,12 +76,14 @@ public partial class JunctionApp
     private void OpenConfirm(string title, string body, string confirmLabel, Action onConfirm) =>
         OpenDialog(new DialogSpec(title, body, null, confirmLabel, (_, _) => onConfirm()));
 
+    /// <summary>Closes the card without acting on it — Escape, Cancel, a click beside it — which
+    /// changes nothing the chrome shows. <see cref="ConfirmDialog"/> builds the chrome too.</summary>
     private void CloseDialog()
     {
         _dialog = null;
         _dialogValue = "";
         _dialogValue2 = "";
-        MarkDirty();
+        MarkViewDirty();
     }
 
     private void ConfirmDialog()
@@ -94,6 +98,9 @@ public partial class JunctionApp
         var checkbox = _dialogChecked;
         var checkbox2 = _dialogChecked2;
         CloseDialog();
+        // What the card confirms may be the chrome's (a branch made and checked out, an account
+        // signed out): the whole window builds, as it always has, whatever the action marks.
+        MarkDirty();
         if (onConfirmFields != null) onConfirmFields(value, value2, checkbox);
         else if (onConfirm2 != null) onConfirm2(value, checkbox, checkbox2);
         else onConfirm(value, checkbox);
@@ -145,12 +152,15 @@ public partial class JunctionApp
 
         // Input: bordered wrapper; the field itself is flush/borderless via theme.
         // A confirm-only prompt (no placeholder) has no field at all.
+        // A character builds nothing: the field shows what was typed, and nothing else on screen
+        // reads it (Validate and the confirm read _dialogValue on Enter). Each one built the whole
+        // window, chrome too: 194 KB a character over Changes (plan 17 round 10).
         if (spec.Placeholder is { } placeholder)
         {
             if (spec.FieldLabel is { } fieldLabel) card.AddChild(FieldCaption(fieldLabel, "dialog-input-label"));
             var input = TextInput.New(_dialogValue).Style(Ui.Field(sidePadding: 12f));
             input.PlaceholderText(placeholder)
-                .OnTextChanged(v => { _dialogValue = v; MarkDirty(); })
+                .OnTextChanged(v => _dialogValue = v)
                 .Height(Dimension.Px(38)).FlexShrink(0)
                 .TextColor(Nocturne.Text)
                 .WithRef(_dialogRef);
@@ -202,7 +212,7 @@ public partial class JunctionApp
             if (spec.SecondFieldLabel is { } label2) card.AddChild(FieldCaption(label2, "dialog-input-2-label"));
             var input2 = TextInput.New(_dialogValue2).Style(Ui.Field(sidePadding: 12f));
             input2.PlaceholderText(placeholder2)
-                .OnTextChanged(v => { _dialogValue2 = v; MarkDirty(); })
+                .OnTextChanged(v => _dialogValue2 = v)
                 .Height(Dimension.Px(38)).FlexShrink(0)
                 .TextColor(Nocturne.Text);
             input2.On<KeyDownEvent>(DialogKey);

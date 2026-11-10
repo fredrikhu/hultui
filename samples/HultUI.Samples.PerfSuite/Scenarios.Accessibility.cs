@@ -583,6 +583,14 @@ static partial class Scenarios
             "Press Tab in a 300-field form with the UIA bridge: the focus moves, no rebuild",
             ctx => TabThroughFields(ctx, UiaRig.Install(ctx.Window)));
 
+        yield return new Scenario("a11y/tab among 10 fields after 2,000 rows, UIA",
+            "Press Tab among 10 fields that come after 2,000 rows in the tree, with the UIA bridge: the focus moves, no rebuild, in a tree of 6,000 nodes",
+            ctx => TabPastRows(ctx, UiaRig.Install(ctx.Window)));
+
+        yield return new Scenario("a11y/rename a pane over 1,000 rows, UIA",
+            "Rename a group named after its folder, as Vesper's pane on a navigation, its 1,000 rows under it, with the UIA bridge: the pane's name and its title's, in a tree of 3,005 nodes",
+            ctx => RenamePane(ctx, UiaRig.Install(ctx.Window)));
+
         yield return new Scenario("a11y/wheel 1,000 rows, UIA",
             "Wheel 3 notches through 1,000 rows with the UIA bridge, each frame 120 ms apart so each rebuilds: bounds over ~130 rows on screen",
             ctx => WheelRows(ctx, UiaRig.Install(ctx.Window)));
@@ -852,6 +860,57 @@ static partial class Scenarios
                 moves = rig.FocusMoves;
                 return moved ? null : $"the {rig.Name} bridge was not told the focus moved";
             },
+        };
+    }
+
+    /// <summary>Ten fields beside 2,000 rows, after them in the tree's order, as Meridian's request
+    /// pane comes after its endpoint map: Tab among the fields, in a tree of 6,000 nodes.</summary>
+    private static Op TabPastRows(Ctx ctx, IBridgeRig rig)
+    {
+        var fields = new Element[10];
+        for (int i = 0; i < fields.Length; i++)
+            fields[i] = TextInput.New(Ui.Label(ctx.Rng)).Width(Dimension.Px(260));
+        ctx.Mount(Flex.Row().FlexGrow(1).Children(
+            ScrollView.New().FlexGrow(1).Children(Ui.Rows(ctx.Rng, 2_000)),
+            Flex.Column(gap: 8).FlexShrink(0).Padding(12).Children(fields)));
+        ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Tab);
+        ctx.Pump();
+        int moves = rig.FocusMoves;
+        return new Op
+        {
+            // Forward 5, back 5: among the fields, past none of the rows.
+            Run = step => ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Tab,
+                (step / 5) % 2 == 0 ? HultUI.Core.Events.KeyModifiers.None : HultUI.Core.Events.KeyModifiers.Shift),
+            Check = _ =>
+            {
+                bool moved = rig.FocusMoves > moves;
+                moves = rig.FocusMoves;
+                return !moved ? $"the {rig.Name} bridge was not told the focus moved"
+                    : Array.IndexOf(fields, ctx.Window.Window.FocusedElement) < 0 ? "the focus left the fields"
+                    : null;
+            },
+        };
+    }
+
+    /// <summary>A group named after its folder, as Vesper's pane is, over 1,000 rows, under a title:
+    /// renamed on each step with the folder's name it shows above its rows (a step must draw), the rows
+    /// as they were. A node with children whose own name changed built the whole tree until plan 17
+    /// round 10 step 10.</summary>
+    private static Op RenamePane(Ctx ctx, IBridgeRig rig)
+    {
+        var folder = Text.New("folder 1").FontSize(13f);
+        var pane = Flex.Column().FlexGrow(1).AccessibleRole(AccessibilityRole.Group).AccessibleName("Left pane, folder 1")
+            .Children(folder, ScrollView.New().FlexGrow(1).Children(Ui.Rows(ctx.Rng, 1_000)));
+        ctx.Mount(Flex.Column().FlexGrow(1).Children(Text.New("Files").FontSize(15f), pane));
+        return new Op
+        {
+            Run = step =>
+            {
+                string name = step % 2 == 0 ? "folder 0" : "folder 1";
+                pane.AccessibleName = $"Left pane, {name}";
+                folder.Content = name;
+            },
+            Check = Applied(rig),
         };
     }
 

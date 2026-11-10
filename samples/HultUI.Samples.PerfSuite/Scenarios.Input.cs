@@ -115,6 +115,30 @@ static partial class Scenarios
                 };
             });
 
+        yield return new Scenario("input/type in a one-line JSON body with an emoji",
+            "Type one character into an 89 K character JSON response on one line in a monospace TextArea, one emoji in a string three quarters in: the line wrapped again, every row but the emoji's by its count",
+            ctx =>
+            {
+                var sb = new System.Text.StringBuilder("[");
+                for (int i = 0; sb.Length < 89_000; i++)
+                    sb.Append("{\"id\":").Append(1_000 + i).Append(",\"name\":\"").Append(Ui.Label(ctx.Rng)).Append("\",\"tags\":[\"a\",\"b\"]},");
+                sb.Append("{}]");
+                string body = sb.ToString();
+                int at = body.IndexOf("\"name\":\"", body.Length * 3 / 4, StringComparison.Ordinal) + 8;
+                body = body.Insert(at, "\U0001F600 ");
+                var area = TextArea.New(body).FontFamily(FontFamilies.Monospace).FontSize(12f).FlexGrow(1);
+                ctx.Mount(Flex.Column().FlexGrow(1).Padding(8).Children(area));
+                ctx.Window.Click(area);
+                area.CursorPosition = body.Length / 4;
+                ctx.Pump();
+                int initial = area.Text.Length;
+                return new Op
+                {
+                    Run = step => ctx.Window.TypeText(((char)('a' + step % 26)).ToString()),
+                    Check = step => area.Text.Length == initial + step + 1 ? null : "the typed character did not reach the TextArea",
+                };
+            });
+
         yield return new Scenario("input/undo-redo in TextArea",
             "Ctrl+Z / Ctrl+Y in a 2,000-line TextArea that has 40 edits of history",
             ctx =>

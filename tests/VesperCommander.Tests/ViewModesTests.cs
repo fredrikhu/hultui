@@ -421,6 +421,71 @@ public class ViewModesTests
         finally { File.Delete(tmp); }
     }
 
+    /// <summary>Detail lets Brief go (plan 17 round 10). The cursor's ref and Brief's scroll view's held
+    /// the cell and the scroll view they last pointed at, and through their parents all of Brief behind
+    /// Detail (its cells are held weakly, KeptElements). A build now lets go of a ref whose element left
+    /// the window. Back in Brief, the build makes a new scroll view, opened where Brief was left, and
+    /// makes the columns for that (round 10 step 15b; before it, step 15 made the columns for the start,
+    /// where the new view opened, and earlier the columns left at the end were made in a view at the
+    /// start, every column in view blank). Only the offset is kept, not the elements: the cells back are
+    /// new ones.</summary>
+    [Fact]
+    public void Detail_LetsBriefGo_AndBriefComesBackWhereItWasLeft()
+    {
+        using var t = new DiffViewTests.Fixture();
+        for (int i = 0; i < 400; i++) t.WriteLeft($"f{i:000}.txt", "x");
+        t.Open();
+        t.Press(KeyCode.F2, KeyModifiers.Ctrl);   // view: Brief
+        t.Session.PumpFrames(2);
+        t.Press(KeyCode.End);
+        t.Session.PumpFrames(3);
+        var made = BriefCellNames(t);
+        Assert.Contains("f399.txt", made);
+        Assert.DoesNotContain("f000.txt", made);
+        var (cell, scrolled) = WeakBriefCell(t);
+        Assert.True(scrolled > 0);
+
+        t.Press(KeyCode.F1, KeyModifiers.Ctrl);   // view: Detail
+        t.Session.PumpFrames(3);
+        System.GC.Collect();
+        System.GC.WaitForPendingFinalizers();
+        System.GC.Collect();
+
+        Assert.False(cell.IsAlive, "Brief outlived its view behind Detail");
+        Assert.Null(t.Field<Ref<ScrollViewElement>>("_briefScrollL").Current);
+        Assert.Null(t.Field<Ref<BoxElement>>("_cursorRowL").Current);
+
+        t.Press(KeyCode.F2, KeyModifiers.Ctrl);   // back to Brief
+        t.Session.PumpFrames(3);
+        var back = BriefCellNames(t);
+        Assert.Equal(scrolled, t.Field<Ref<ScrollViewElement>>("_briefScrollL").Current!.ScrollOffsetX);
+        Assert.Contains("f399.txt", back);
+        Assert.DoesNotContain("f000.txt", back);
+        Assert.True(GridCursorNoBuildTests.BlankColumns(t) is [], "a column in view is not made");
+        Assert.True(t.Field<Ref<BoxElement>>("_cursorRowL").Current is { IsHosted: true });
+
+        t.Press(KeyCode.Home);   // the cursor to the start, out of view: Brief scrolls to it
+        t.Session.PumpFrames(2);
+        Assert.Contains("f000.txt", BriefCellNames(t));
+        Assert.True(t.Field<Ref<BoxElement>>("_cursorRowL").Current is { IsHosted: true });
+        Assert.True(GridCursorNoBuildTests.BlankColumns(t) is [], "a column in view is not made");
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static (System.WeakReference Cell, float Scrolled) WeakBriefCell(DiffViewTests.Fixture t)
+    {
+        var scroll = t.Field<Ref<ScrollViewElement>>("_briefScrollL").Current!;
+        var cell = scroll.Children[0].Children.Last(c => c.Children.Count > 0).Children[0];
+        return (new System.WeakReference(cell), scroll.ScrollOffsetX);
+    }
+
+    /// <summary>The names on the Brief cells made, all columns.</summary>
+    private static List<string> BriefCellNames(DiffViewTests.Fixture t) =>
+        t.Field<Ref<ScrollViewElement>>("_briefScrollL").Current!.Children[0].Children
+            .SelectMany(column => column.Children)
+            .Select(cell => cell.Children.OfType<TextElement>().Single().Content)
+            .ToList();
+
     private static void WritePng(string path, int w, int h)
     {
         using var bmp = new SkiaSharp.SKBitmap(w, h);

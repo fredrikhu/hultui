@@ -115,6 +115,36 @@ public class HomeShelfKeepTests
         });
     }
 
+    /// <summary>Another view lets Home go (plan 17 round 10). The shelves and cards Home keeps are held
+    /// weakly (KeptElements), and the scratch list of a shelf's cards is emptied once the shelves are
+    /// made: left full, it held the last shelf's cards, and through them the whole Home its build made,
+    /// behind Settings. Back on Home every shelf is there.</summary>
+    [Fact]
+    public void AnotherView_LetsHomeGo()
+    {
+        Host((session, app, _) =>
+        {
+            var home = WeakShelves(session);
+            var page = PageOf(session, "row-latest-lib1");
+
+            app.Navigate(new Route(ApertureView.Settings));
+            Settle(session);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            Assert.All(home, shelf => Assert.False(shelf.IsAlive, "a Home shelf outlived the view"));
+            app.Navigate(new Route(ApertureView.Home));
+            Settle(session);
+            Assert.Equal(6, Shelves(session).Count);
+            Assert.Equal(page, PageOf(session, "row-latest-lib1"));
+        });
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static WeakReference[] WeakShelves(HeadlessSession session) =>
+        Shelves(session).Select(s => new WeakReference(s)).ToArray();
+
     // ── Hosting ──────────────────────────────────────────────────────────
 
     private static void Host(Action<HeadlessSession, ApertureApp, FakeMediaLibrary> body, int width = 1440)

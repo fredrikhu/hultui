@@ -1,6 +1,7 @@
 using System.Reflection;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
 using HultUI.Core.Styling;
 using HultUI.Headless;
 using Xunit;
@@ -76,9 +77,58 @@ public class PaneSplitterTests
         });
     }
 
-    private static PaneSplitter Splitter(JunctionApp app) =>
+    /// <summary>
+    /// A drag's moves give the list on screen the pointer's width and build nothing (plan 17 round
+    /// 10 step 13: a move built the view, 42 KB in Changes); the release builds once, and the width
+    /// it leaves is the list's, the splitter's and the one remembered. In the Changes view and in
+    /// the Commit view, whose list beside the diff has a splitter of its own.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ADragMoveBuildsNothing_AndTheReleaseBuildsOnceAndRemembersTheWidth(bool commitView)
+    {
+        DiffScrollTests.Hosted((session, app) =>
+        {
+            if (commitView)
+            {
+                session.Window.PressKey(KeyCode.Digit2);   // History, the newest commit, its view
+                session.PumpFrames(3);
+                session.Window.PressKey(KeyCode.Home);
+                session.PumpFrames(3);
+                session.Window.PressKey(KeyCode.Digit3);
+                session.PumpUntil(() => app.Builds > 0 && HandleOrNull(session) is not null, TimeSpan.FromSeconds(20));
+            }
+            DiffScrollTests.Quiet(session, app);
+            var split = Splitter(app, commitView ? "_commitSplit" : "_changesSplit");
+            float before = split.Size;
+            var mid = Center(Handle(session));
+            session.Window.MouseDown(mid.X, mid.Y);
+            session.PumpFrames(2);
+
+            int builds = app.Builds;
+            foreach (var d in new[] { 10f, 40f, 90f, 60f })
+            {
+                session.Window.MoveMouse(mid.X + d, mid.Y);
+                session.PumpFrames(2);
+                Assert.Equal(before + d, PaneLeftOf(session, Handle(session)).Layout.AbsoluteBorderBox.Width, 1);
+            }
+            Assert.Equal(builds, app.Builds);
+
+            session.Window.MouseUp(mid.X + 60, mid.Y);
+            session.PumpFrames(2);
+            Assert.Equal(builds + 1, app.Builds);
+            Assert.Equal(before + 60, split.Size, 1);
+            Assert.Equal(before + 60, PaneLeftOf(session, Handle(session)).Layout.AbsoluteBorderBox.Width, 1);
+            var settings = (JunctionSettingsData)typeof(JunctionApp)
+                .GetField("_settings", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
+            Assert.Equal(before + 60, commitView ? settings.CommitFileListWidth : settings.ChangesFileListWidth, 1);
+        });
+    }
+
+    private static PaneSplitter Splitter(JunctionApp app, string field = "_changesSplit") =>
         (PaneSplitter)typeof(JunctionApp)
-            .GetField("_changesSplit", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
+            .GetField(field, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
 
     private static float Const(JunctionApp app, string name) =>
         (float)typeof(JunctionApp).GetField(name, BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
@@ -99,11 +149,14 @@ public class PaneSplitterTests
     }
 
     /// <summary>The splitter handle: the one box in the tree that asks for a resize cursor.</summary>
-    private static Element Handle(HeadlessSession session)
+    private static Element Handle(HeadlessSession session) =>
+        HandleOrNull(session) ?? throw new Xunit.Sdk.XunitException("the splitter handle is not on screen");
+
+    private static Element? HandleOrNull(HeadlessSession session)
     {
         Element? found = null;
         Walk(Root(session));
-        return found ?? throw new Xunit.Sdk.XunitException("the splitter handle is not on screen");
+        return found;
 
         void Walk(Element? e)
         {

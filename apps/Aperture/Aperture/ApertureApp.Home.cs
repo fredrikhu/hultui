@@ -97,7 +97,9 @@ public sealed partial class ApertureApp
     /// would make one from the same heading around the same cards (see <see cref="HomeShelfRow"/>).</summary>
     private readonly KeptElements<HomeShelfState> _homeShelfRows = new();
 
-    /// <summary>The cards on the page of the shelf being built, reused from shelf to shelf.</summary>
+    /// <summary>The cards on the page of the shelf being built, reused from shelf to shelf and emptied
+    /// once Home's shelves are made: left full, it held the last shelf's cards, and through them the
+    /// whole Home its build made, behind every other view.</summary>
     private readonly List<Element> _homeShelfCards = [];
 
     /// <summary>Shelves of library cards made, not handed back, for tests.</summary>
@@ -196,6 +198,7 @@ public sealed partial class ApertureApp
             }
             cursorBase += row.Count;
         }
+        _homeShelfCards.Clear();
 
         if (shown.Count < all.Count)
         {

@@ -500,6 +500,32 @@ public partial class JunctionApp
 
     // ── Left column: file lists + composer ───────────────────────────────
 
+    // The column on screen at the splitter's width, for a drag of the splitter to size.
+    private readonly HultUI.Core.Reactivity.Ref<BoxElement> _changesColumnRef = new();
+
+    /// <summary>
+    /// A file list's splitter moved (the Changes column's or the Commit view's list). While it is
+    /// dragged the width goes straight onto the list on screen and only layout runs: the diff
+    /// beside it takes what is left, and its pan reads that after the frame (FollowDiffWidth). A
+    /// move built the view, 42 KB with Changes' diff (plan 17 round 10 step 13). The press, which
+    /// lights the handle, the release, which remembers the width, and the arrow keys build the
+    /// view, which reads the width; so does a move while the diff's rows are measured at its
+    /// width (wrapped, or a review's cards), where the rows have to be measured again.
+    /// </summary>
+    private void FileListSplitMoved(PaneSplitter split, Element? list)
+    {
+        if (split.IsDragging && !_diffWrap && !ReviewRowsActive
+            && list is { IsHosted: true, Box.Width.Unit: DimensionUnit.Pixels }
+            && list.Box.Width != Dimension.Px(split.Size))   // the press moves nothing
+        {
+            list.Width(split.Size);
+            list.MarkLayoutDirty();
+            FollowDiffWidthAfterFrame();
+            return;
+        }
+        MarkViewDirty();
+    }
+
     private Element BuildChangesColumn(ChangesData data, bool fill = false)
     {
         // When the diff pane is hidden the column fills the view; otherwise it's a
@@ -507,7 +533,7 @@ public partial class JunctionApp
         var col = Flex.Column(gap: 0)
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 1, 0, 0));
         if (fill) col.FlexGrow(1);
-        else col.Width(_changesSplit.Size).FlexShrink(0);
+        else col.Width(_changesSplit.Size).FlexShrink(0).WithRef(_changesColumnRef);
 
         // A half-finished operation gets a pinned banner (status + Abort / Skip /
         // Continue) above the list.

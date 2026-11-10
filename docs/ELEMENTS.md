@@ -212,9 +212,14 @@ A view that lays out its own items and moves a cursor through them with no build
 cells made of boxes, the tiles in a composite list's rows: Vesper's Brief and Thumbnails) gives
 each item the role `ListItem`, a name, and `AccessibleSelected` (true on the cursor's, false on
 the rest) as it is made, and sets it where it moves the cursor (with the ring's `Restyle`). The window marks an
-item's selected state on its node and tells it with no tree; a selected state on any other
-element (a tab, a button that is one of a set) builds the tree. Keep what changes often out of
-such an item's name: a new name on an element with children builds the tree.
+item's selected state on its node and tells it with no tree. A row of a set the user picks from
+that is a button (Meridian's endpoint map was one until it became a virtual list in plan 17 round 10:
+role `Button` set on the row, `AccessibleSelected` on every row, a click moving it between kept rows)
+is marked the same way. The role has to be set on
+the element (`.AccessibleRole(...)`): a `ButtonElement` or a clickable box with no role of its own,
+or any other role (a tab), builds the tree, as does an element that starts or stops saying it is
+selected. Keep what changes often out of such an item's name: a new name on an element with
+children builds the tree.
 
 `AccessibleName` is what a screen reader announces. `Name` is only its last-resort fallback — reach for `AccessibleName` on anything user-facing, and leave `Name` for debugging.
 
@@ -687,10 +692,26 @@ ScrollView.Horizontal()   // Horizontal scroll (row direction, X scrollbar shown
 | `ScrollbarColor` | -- | `Color` | `rgba(128,128,128,100)` |
 | `ScrollbarThumbColor` | -- | `Color` | `rgba(128,128,128,180)` |
 | `ScrollbarWidth` | -- | `float` | `6f` |
+| `UserScrolled` | -- | `Action?` | `null` |
 | `ContentWidth` | -- | `float` | (read-only) |
 | `ContentHeight` | -- | `float` | (read-only) |
 
 Scroll offset is automatically clamped to the valid range based on content size.
+
+**An offset set before layout is kept.** Setting `ScrollOffsetX` or `ScrollOffsetY` before the
+view has a size, or content, to clamp against on that axis (before its first layout, as on the
+build that makes it, or with no content laid out yet) keeps the offset as given (not below 0),
+and reading it back gives it. The layout pass applies it once the view and its content have a
+size, clamped to the content then. Until plan 17's round 10 it clamped to 0 at once, so a view
+made with an offset opened at the start: Vesper's Brief, made again on the way back from
+another view, can now be made where it was left, and its columns made for that offset in the
+same build. A later setting (or `ScrollBy`, from the offset kept) replaces it; the user's scroll
+(the wheel, the scrollbar, the autoscroll, a virtual list's keys) moves what is on screen and
+drops it; a reveal asked for after it is applied from it (below). Applying it is a scroll from
+code and calls no `UserScrolled`. A patch keeps the live view's offset, kept or applied, as it
+always has. A `VirtualListElement` knows its rows' height before its layout, so there an offset
+waits for the viewport only, and lands where it did before (clamped to the rows at once, and to
+the rows less the viewport at the layout).
 
 **Interaction features:**
 
@@ -716,16 +737,31 @@ still cannot scroll sideways itself; wide lists use a pan (below and there).
 distance to show a band of content, and needs the viewport height to do it. Called
 before the view has been laid out (from `OnAfterBuild`, say — that runs before the
 layout pass), it holds the request and applies it when the extent is next computed,
-so a reveal asked for on the same frame the content appeared is not lost.
-`ScrollIntoView(child)` and `ScrollRangeIntoViewHorizontal(left, width)` are the
-element and sideways forms.
+so a reveal asked for on the same frame the content appeared is not lost. It is applied
+after an offset set before layout, from it: an offset put back, then the cursor's row
+revealed, moves the least distance from where it was put back. `ScrollIntoView(child)`
+and `ScrollRangeIntoViewHorizontal(left, width)` are the element and sideways forms; the
+sideways one does nothing before the view has a width (it holds no request).
 
-**A scroll from code raises no event.** `ScrollEvent` is the wheel's; setting
-`ScrollOffsetX`/`ScrollOffsetY` or a reveal moves the view and tells no handler. A view that
-makes only what is in view, picked from the offset (Vesper's Brief columns), sets a scroll it
-is about to make *before* its build and picks from that: a build that makes what the old
-offset shows and then scrolls (from `OnAfterBuild`) leaves what it scrolled to unmade, with
-nothing to build it until the next key.
+**`UserScrolled`: the user moved the view.** Called after the user's input moved the offset:
+the wheel, the scrollbar (a track click, each move of a thumb drag), the autoscroll (the middle
+button held, a selection held past the edge) and a virtual list's own scroll keys. Once per
+move that changed the offset, after the view has moved, so the listener reads where it went from
+`ScrollOffsetX`/`ScrollOffsetY` and may build its owner again from inside the call. Sideways
+motion handed to a `SidewaysScroller` moves the app's pan, not the offset, and calls nothing.
+`ScrollEvent` stays the wheel's, and its handlers run as before; for a wheel notch,
+`UserScrolled` comes as the view's own handler finishes, before an app's handler on the view.
+The scrollbar and the autoscroll raise no `ScrollEvent`, so a view that made what it shows
+again only on the wheel's event showed blank columns after a track click or a drag (Vesper's
+Brief, until plan 17's round 10).
+
+**A scroll from code raises nothing.** Setting `ScrollOffsetX`/`ScrollOffsetY`, `ScrollBy` or
+a reveal (including one assistive technology asks for) moves the view and tells no handler and
+no `UserScrolled`. A view that makes only what is in view, picked from the offset (Vesper's
+Brief columns), listens to `UserScrolled` for the user's scrolls, and sets a scroll it is about
+to make *before* its build and picks from that: a build that makes what the old offset shows
+and then scrolls (from `OnAfterBuild`) leaves what it scrolled to unmade, with nothing to build
+it until the next key.
 
 **`ScrollSidewaysWith(ISidewaysScroller)`.** Set when the horizontal offset is owned by
 something other than the view's own `ScrollOffsetX` (a `HorizontalPan`). The wheel's
@@ -1209,6 +1245,33 @@ settings file is written once rather than sixty times a second. The grab is
 remembered as pointer-at-press plus size-at-press, so a splitter dragged past its
 minimum does not jump when the pointer comes back.
 
+**A pane that is costly to build can follow the drag with no build.** `onChanged` runs on
+the press, on each move and on the release; only the moves change the size while
+`IsDragging`. Have those give the pane on screen the size, through a `Ref`, and lay out
+again; let the press and the release build as before. The press lights the handle (the
+handler's element is the one built, so a build is what reaches the live one), and the
+release builds what reads the size, from the size the drag left:
+
+```csharp
+_split = new PaneSplitter(() =>
+{
+    if (_split.IsDragging && _paneRef.Current is { IsHosted: true } pane
+        && pane.Box.Width != Dimension.Px(_split.Size))   // the press moves nothing
+    {
+        pane.Width(_split.Size);
+        pane.MarkLayoutDirty();
+        return;
+    }
+    MarkDirty();
+}, Persist, min: 180, max: 600, initial: 260);
+```
+
+Everything else a build reads from the size has to follow the layout too, or be built: the
+diff beside Junction's file list reads its new width after the frame (its pan, see
+LAYOUT.md), and while its lines wrap at that width the drag builds as before. Meridian's
+response pane and Junction's two file lists do this (plan 17 round 10 step 13; a move with a
+2,000-line response 38.8 → 2.5 KB, in Junction's Changes 42.0 → 2.4 KB).
+
 **`SplitterHandleElement`** is the grip on screen: the resize cursor, a tint under
 the pointer and a stronger one while grabbed, a focus ring, and the keyboard —
 arrow keys along the axis move by `SplitterTheme.KeyStep` (Shift: five steps),
@@ -1599,6 +1662,26 @@ lambda that captures nothing, or keep the delegate in a field: a lambda that cap
 build's state is a new delegate every build and keeps nothing (which is right for a label
 that reads that state, unless the state is in the shape you invalidate on). On the walk with
 a recording bridge listening, keeping the labels takes a step from 274 to 112 KB.
+
+**A scroll view of rows becomes a list.** A `ScrollView` over a padded `Flex.Column` of rows and
+headings can move onto a list with the same pixels (Meridian's Discovery map, plan 17 round 10
+step 11). What to carry over:
+
+- **The column's padding and gaps are the rows' margins**: the first row takes the top padding,
+  the last the bottom, every row the sides and a gap as its bottom margin, and `RowHeights` gives
+  each row its height plus its margins. On the list itself the padding would hold the rows in
+  while scrolled.
+- **A heading's height is its text's**, as layout measures it: `TextMeasure.Measure(text,
+  TextMeasure.StyleFor(size, family)).Height`, kept per text and display scale.
+- **`.FlexGrow(1)` on the list.** A scroll view took its box's height by shrinking to it from its
+  content's; a list measures no children, and with nothing to shrink from it stays 0 tall.
+- **What the rows' labels said goes in the item's.** A reader walked to a row's child labels; an
+  item has none, so what only they said (Meridian's "seen 4× · 200") goes in the item label.
+
+Two things change for good. A wheel notch makes the rows it brings in (Meridian: 1.5 rows,
+7.4 KB a notch) where the scroll view moved the ones it had (0.1 KB). And the row under a still
+pointer: a long scroll lets go of the hovered row, so the window hits the pointer again and the row
+now under it takes its hover at once, where a scroll view's row tinted only when the pointer moved.
 
 **No sideways scroll.** The content width is pinned to the viewport, so `ScrollOffsetX`
 is always 0 and a wide row simply clips. A virtual list that has to pan sideways uses a
@@ -2479,6 +2562,9 @@ private Element Shelf(IReadOnlyList<MediaItem> items)
   way). Check first that no build of the owner has run since that one without making these elements.
 - **`Clear()`** forgets them all, for a change to something every element shows that no state
   holds. **`Count`** is how many it holds; those that left the window go as the count doubles.
+- **The elements are held weakly:** one is handed back only while the window holds it, so a view
+  that left is not kept alive by the helper. A `Ref` or a list of the owner's own still is: see
+  [REACTIVITY.md](REACTIVITY.md), "A ref into a view keeps the whole view".
 - **The state is what the element shows and does:** its item, the cursor on it, its picture as the
   cache has it, and a setting every element shows (or `Clear()` when it moves). Its handlers are the
   old build's, so what they capture belongs in the state too.

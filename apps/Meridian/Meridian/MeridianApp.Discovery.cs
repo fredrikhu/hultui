@@ -4,6 +4,8 @@ using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using Meridian.Core;
 using Meridian.Theme;
@@ -319,11 +321,9 @@ public partial class MeridianApp
 
         var map = BuildEndpointMap(); map.Key = "disc-map";
         row.AddChild(map);
+        // The detail is a part of its own (see PlaceMapDetail), keyed by its host.
         if (_mapSelection is { } selected)
-        {
-            var detail = BuildEndpointDetail(selected); detail.Key = "disc-detail";
-            row.AddChild(detail);
-        }
+            row.AddChild(PlaceMapDetail(selected).FlexShrink(0));
         return row;
     }
 
@@ -410,48 +410,58 @@ public partial class MeridianApp
 
     // ── The map's rows ───────────────────────────────────────────────────
     //
-    // A click on a row moves the selection, which the map and the detail show and no part does, so
-    // it builds the view alone (MarkViewDirty), and each row and group heading comes back from the
-    // build before when nothing it shows or does moved (KeptElements; REACTIVITY.md, "Hand back the
-    // elements a key does not change"). A click made the window again with every row, its closure,
-    // its keys and its name: 2,847 KB at 600 endpoints, 9,073 KB at 2,000; now the two rows it moves
-    // between. A row's state is its endpoint, a record that is equal when every fact the row shows
-    // and the detail a click selects is, and whether it is selected; the click captures that
-    // endpoint, so a kept row selects what a row made now would. The lines (the order, the headings,
-    // the keys and the counts) are worked out once a map: a map is never changed, a send or an import
-    // makes a new one. Shown in no build, the rows are let go, or a map left on screen would stay
-    // alive behind another view (DiscoveryViewTests' still pointer).
-    private readonly record struct EndpointRowState(Endpoint Endpoint, bool Selected, float Scale);
-    private readonly record struct MapHeadingState(string Text, float Scale);
-    private readonly KeptElements<EndpointRowState> _endpointRows = new();
-    private readonly KeptElements<MapHeadingState> _mapHeadings = new();
+    // The map is a virtual list of its lines: only the rows on screen are elements. As a scroll view
+    // over a column of every row and heading, a hover move hit-tested every row (618 elements at 600
+    // endpoints, 2,046 at 2,000), every drawn frame culled them, a click's build patched them, and the
+    // map's elements took 2.5 MB of the heap at 600 endpoints. The rows show their line and whether
+    // it is selected, and nothing else (RenderWith((line, selected) => …)), so the list keeps a
+    // realized row while the line at its place is equal: a line holds its endpoint, a record that is
+    // equal when every fact the row shows and the detail a click selects is. A click moves the
+    // selection, which only the list and the detail beside it show, so it tells the list through
+    // its ref and the detail builds alone (SelectEndpoint, PlaceMapDetail); the list makes the two
+    // rows it moves between. The click captures the
+    // row's endpoint, so a kept row selects what a row made now would. The lines (the order, the
+    // headings, the keys, the counts) are worked out once a map: a map is never changed, a send or
+    // an import makes a new one. The rows are as tall as they were in the column, and the column's
+    // padding and gaps are the lines' margins (MapLineMargin), so the map looks and scrolls as it
+    // did. A reader is told every line, named as its row is, and selects or invokes one off screen
+    // as a click would (OnActivateItem).
     private MapLines? _mapLines;
-    private int _mapRowsBuild = -1;
+    private readonly Ref<VirtualListElement<MapLine>> _mapListRef = new();
+    private Func<MapLine, int, float>? _mapLineHeight;
+    private Func<MapLine, bool, Element>? _mapRow;
+    private Func<MapLine, string?>? _mapLineLabel;
+    private Action<MapLine>? _mapActivate;
+    private int _mapListBuild = -1;
 
     /// <summary>A map's lines in the order the map shows them: each declared group's heading and
-    /// rows, then the observed endpoints, each with the key its element has.</summary>
+    /// rows, then the observed endpoints under their own heading, each with the key its row has.</summary>
     private sealed record MapLines(ApiMap Map, MapLine[] Lines, int Declared, int Observed);
 
-    /// <summary>A group heading (<paramref name="Heading"/>) or an endpoint's row.</summary>
-    private readonly record struct MapLine(string Key, Endpoint? Endpoint, string? Heading);
+    /// <summary>A group heading (<paramref name="Heading"/>), the observed endpoints' heading
+    /// (<paramref name="Observed"/>), or an endpoint's row. <paramref name="First"/> and
+    /// <paramref name="Last"/> say the line takes the list's top or bottom padding (MapLineMargin).</summary>
+    private readonly record struct MapLine(string Key, Endpoint? Endpoint, string? Heading,
+        bool Observed = false, bool First = false, bool Last = false);
+
+    private const string ObservedHeading = "OBSERVED — NOT IN SPEC";
 
     /// <summary>Endpoint rows the map has made so far, for tests: a click makes the two it moves
-    /// between, however long the map.</summary>
+    /// between, however long the map, and a list makes the rows on screen.</summary>
     internal int EndpointRowsMade { get; private set; }
 
-    /// <summary>Lets every kept row and heading go, so the next build makes them all: for a build
-    /// that shows no map, and for tests, whose oracle is a build that keeps nothing.</summary>
-    internal void ForgetMapRows()
-    {
-        if (_endpointRows.Count > 0) _endpointRows.Clear();
-        if (_mapHeadings.Count > 0) _mapHeadings.Clear();
-    }
+    /// <summary>Has the list on screen make every row again, so the next frame makes them all: for
+    /// tests, whose oracle is a build that keeps nothing.</summary>
+    internal void ForgetMapRows() => _mapListRef.Current?.InvalidateRows();
 
-    /// <summary>At the end of every build of the window: a build that made no map rows lets the
-    /// kept ones go.</summary>
+    /// <summary>At the end of every build of the window: a build that shows no map lets go of the
+    /// list's ref, which through the list's parents would hold the whole view (REACTIVITY.md, "A ref
+    /// into a view keeps the whole view").</summary>
     private void EndMapBuild()
     {
-        if (_mapRowsBuild != Builds) ForgetMapRows();
+        if (_mapListBuild == Builds) return;
+        _mapListRef.Current = null;
+        _mapDetailRef.Current = null;
     }
 
     private MapLines LinesOf(ApiMap map)
@@ -483,10 +493,67 @@ public partial class MeridianApp
         foreach (var endpoint in map.Endpoints)
         {
             if (endpoint.Confidence != Confidence.Observed) continue;
+            if (observed == 0) lines.Add(new MapLine("observed-heading", null, ObservedHeading, Observed: true));
             lines.Add(new MapLine(KeyOf(endpoint), endpoint, null));
             observed++;
         }
+        if (lines.Count > 0)
+        {
+            lines[0] = lines[0] with { First = true };
+            lines[^1] = lines[^1] with { Last = true };
+        }
         return _mapLines = new MapLines(map, lines.ToArray(), declared, observed);
+    }
+
+    /// <summary>A line's margins: the column's padding (the list's top on the first line, its
+    /// bottom on the last, its sides on every line) and its gaps (1 under each line, and the room
+    /// above the observed heading), laid out by the list inside the line's place.</summary>
+    private static Thickness MapLineMargin(MapLine line) => new(
+        (line.First ? Azimuth.S1 : 0f) + (line.Observed ? Azimuth.S2 + 1f : 0f),
+        Azimuth.S3,
+        line.Last ? Azimuth.S3 : 1f,
+        Azimuth.S3);
+
+    /// <summary>A line's place in the list: its row's height and its margins.</summary>
+    private float MapLineHeight(MapLine line) =>
+        (line.Endpoint is not null ? Azimuth.RowList : HeadingHeight(line.Heading!)) + MapLineMargin(line).Vertical;
+
+    // A heading is a line of mono text at 10 px, as tall as layout measures it: worked out once a
+    // text and display scale, since the list asks for every line's height when it is patched.
+    private readonly Dictionary<string, float> _headingHeights = new(StringComparer.Ordinal);
+    private float _headingScale;
+
+    private float HeadingHeight(string text)
+    {
+        float scale = Ui.DisplayScale;
+        if (scale != _headingScale)
+        {
+            _headingHeights.Clear();
+            _headingScale = scale;
+        }
+        if (_headingHeights.TryGetValue(text, out float height)) return height;
+        height = TextMeasure.Measure(text, TextMeasure.StyleFor(10f, Fonts.Mono)).Height;
+        // No measure context yet (no window): a line's height in the default face, until a build measures.
+        if (height <= 0) return 13f;
+        _headingHeights[text] = height;
+        return height;
+    }
+
+    /// <summary>The line of the endpoint the detail shows: the same record, or else the first with
+    /// its method and path (the selection is the endpoint as it was when it was clicked, and a send
+    /// makes a new map), or -1.</summary>
+    private static int SelectedLine(MapLines lines, Endpoint? selection)
+    {
+        if (selection is null) return -1;
+        var all = lines.Lines;
+        int byName = -1;
+        for (int i = 0; i < all.Length; i++)
+        {
+            if (all[i].Endpoint is not { } endpoint) continue;
+            if (ReferenceEquals(endpoint, selection)) return i;
+            if (byName < 0 && endpoint.Method == selection.Method && endpoint.Path == selection.Path) byName = i;
+        }
+        return byName;
     }
 
     private Element BuildEndpointMap()
@@ -516,62 +583,64 @@ public partial class MeridianApp
             return col;
         }
 
-        // Every child of the list is keyed: the rows and headings by their lines, the observed
-        // heading and the gap above it by name.
-        _mapRowsBuild = Builds;
-        _endpointRows.Begin(Builds);
-        _mapHeadings.Begin(Builds);
-        var scroll = ScrollView.New();
-        var list = Flex.Column(gap: 1).Padding(new Thickness(Azimuth.S1, Azimuth.S3, Azimuth.S3, Azimuth.S3));
-        var selection = _mapSelection;
-        float scale = Ui.DisplayScale;
-        bool observedShown = false;
-        foreach (var line in lines.Lines)
-        {
-            if (line.Endpoint is not { } endpoint)
-            {
-                var state = new MapHeadingState(line.Heading!, scale);
-                list.AddChild(_mapHeadings.TryKeep(line.Key, state, out var keptHeading)
-                    ? keptHeading
-                    : _mapHeadings.Made(line.Key, state, Ui.Mono(state.Text, 10f, Azimuth.TextMuted).FlexShrink(0)));
-                continue;
-            }
-            if (endpoint.Confidence == Confidence.Observed && !observedShown)
-            {
-                observedShown = true;
-                var gap = Box.New().Height(Azimuth.S2);
-                gap.Key = "observed-gap";
-                list.AddChild(gap);
-                var heading = Ui.Mono("OBSERVED — NOT IN SPEC", 10f, Azimuth.StatusWarn).FlexShrink(0)
-                    .AutomationId("disc-observed-header");
-                heading.Key = "observed-heading";
-                list.AddChild(heading);
-            }
-            var rowState = new EndpointRowState(endpoint,
-                selection is { } s && s.Method == endpoint.Method && s.Path == endpoint.Path, scale);
-            if (_endpointRows.TryKeep(line.Key, rowState, out var kept)) list.AddChild(kept);
-            else
-            {
-                EndpointRowsMade++;
-                list.AddChild(_endpointRows.Made(line.Key, rowState, EndpointRow(rowState)));
-            }
-        }
-
-        scroll.AddChild(list);
+        // Every row is keyed by its line, as the column's children were.
+        _mapListBuild = Builds;
+        var list = VirtualListElement<MapLine>.New()
+            .Items(lines.Lines)
+            .RowHeights(_mapLineHeight ??= (line, _) => MapLineHeight(line))
+            .RenderWith(_mapRow ??= (line, selected) => MapRow(line, selected))
+            // One delegate from build to build, reading only its line, so the list keeps each label.
+            .AccessibleItemLabel(_mapLineLabel ??= static line => line.Endpoint is { } e ? EndpointName(e) : line.Heading)
+            .OnActivateItem(_mapActivate ??= line => { if (line.Endpoint is { } e) SelectEndpoint(e); })
+            .SelectedIndex(SelectedLine(lines, _mapSelection));
+        // The box's height, as the scroll view took it by shrinking to it: a list holds no
+        // children to measure until its rows are realized.
+        list.FlexGrow(1);
+        list.WithRef(_mapListRef);
         var box = Box.New().FlexGrow(1).FlexBasis(Dimension.Px(0));
-        box.AddChild(scroll);
+        box.AddChild(list);
         col.AddChild(box);
         return col;
     }
+
+    /// <summary>A line of the map as the list makes it: a group heading, the observed heading, or an
+    /// endpoint's row, with the line's margins.</summary>
+    private Element MapRow(MapLine line, bool selected)
+    {
+        Element row;
+        if (line.Endpoint is { } endpoint)
+        {
+            EndpointRowsMade++;
+            row = EndpointRow(endpoint, selected);
+        }
+        else if (line.Observed)
+            row = Ui.Mono(line.Heading!, 10f, Azimuth.StatusWarn).FlexShrink(0).AutomationId("disc-observed-header");
+        else
+            row = Ui.Mono(line.Heading!, 10f, Azimuth.TextMuted).FlexShrink(0);
+        row.Margin(MapLineMargin(line));
+        row.Key = line.Key;
+        return row;
+    }
+
+    /// <summary>What a reader hears for an endpoint's row: what the row shows. The row's labels were
+    /// its button's children, which a reader could walk to; an item has none, so an observed row's
+    /// evidence is in its name.</summary>
+    private static string EndpointName(Endpoint endpoint) =>
+        $"{endpoint.Method} {endpoint.Path}, {(endpoint.Confidence == Confidence.Observed ? "observed" : "spec-declared")}{(endpoint.Deprecated ? ", deprecated" : "")}"
+        + (Evidence(endpoint) is { } evidence ? ", " + evidence : "");
+
+    /// <summary>An observed endpoint's evidence, as its row shows it ("seen 4× · 200"), or null.</summary>
+    private static string? Evidence(Endpoint endpoint) =>
+        endpoint.Confidence == Confidence.Observed && endpoint.SeenCount > 0
+            ? $"seen {endpoint.SeenCount}× · {string.Join(", ", endpoint.Codes.Keys.Order())}"
+            : null;
 
     /// <summary>A map row. Confidence is a chip treatment, not just a section:
     /// declared endpoints get the solid method tint, observed ones a hollow
     /// dashed-reading chip and an italic-equivalent muted path plus their
     /// evidence ("seen 4× · 200").</summary>
-    private Element EndpointRow(EndpointRowState state)
+    private Element EndpointRow(Endpoint endpoint, bool selected)
     {
-        var endpoint = state.Endpoint;
-        bool selected = state.Selected;
         bool observed = endpoint.Confidence == Confidence.Observed;
 
         var row = Flex.Row(gap: Azimuth.S2).Height(Azimuth.RowList).FlexShrink(0)
@@ -582,7 +651,7 @@ public partial class MeridianApp
             .BorderWidth(new Thickness(2, 0, 0, 0))
             .Cursor(CursorType.Pointer)
             .AccessibleRole(AccessibilityRole.Button)
-            .AccessibleName($"{endpoint.Method} {endpoint.Path}, {(observed ? "observed" : "spec-declared")}{(endpoint.Deprecated ? ", deprecated" : "")}")
+            .AccessibleName(EndpointName(endpoint))
             // One of a set the user picks from, as a tab is: a reader says which row the detail shows.
             .AccessibleSelected(selected)
             .AutomationId("ep-" + endpoint.Method + endpoint.Path.Replace('/', '-').Replace("{", "").Replace("}", ""));
@@ -603,23 +672,82 @@ public partial class MeridianApp
 
         if (endpoint.Deprecated)
             row.AddChild(Ui.Mono("deprecated", 9f, Azimuth.StatusWarn).FlexShrink(0));
-        if (observed && endpoint.SeenCount > 0)
-            row.AddChild(Ui.Mono($"seen {endpoint.SeenCount}× · {string.Join(", ", endpoint.Codes.Keys.Order())}",
-                9.5f, Azimuth.TextFaint).FlexShrink(0));
+        if (Evidence(endpoint) is { } evidence)
+            row.AddChild(Ui.Mono(evidence, 9.5f, Azimuth.TextFaint).FlexShrink(0));
 
         row.OnClick(_ => SelectEndpoint(endpoint));
         if (!selected) row.HoverBg(Azimuth.Raised, Color.Transparent);
         return row;
     }
 
-    /// <summary>A click on a map row: the map and the detail show the selection, no part does.</summary>
+    /// <summary>A click on a map row, or a reader's select or invoke of its item. Only the map's list
+    /// and the detail beside it show the selection, so with both on screen the list is told through
+    /// its ref and the detail builds alone: the window does not build. Otherwise — no detail yet (the
+    /// first selection), or the list on screen made from another map than this one (a send folded
+    /// into the map before the build it asks for) — the view builds.</summary>
     private void SelectEndpoint(Endpoint endpoint)
     {
         _mapSelection = endpoint;
-        MarkViewDirty();
+        if (_mapListRef.Current is not { IsHosted: true } list || _mapDetailRef.Current is not { IsHosted: true }
+            || _mapLines is not { } lines || !ReferenceEquals(lines.Map, _map) || !ReferenceEquals(list.Items, lines.Lines))
+        {
+            MarkViewDirty();
+            return;
+        }
+        // What BuildEndpointMap hands the list: the line SelectedLine finds.
+        list.SelectedIndex = SelectedLine(lines, endpoint);
+        if (MapDetailStale(endpoint)) _mapDetailRevision.Value++;
     }
 
-    private Element BuildEndpointDetail(Endpoint endpoint)
+    // ── The endpoint's detail: a part of its own ─────────────────────────
+    //
+    // The detail beside the map shows the selected endpoint, and nothing else in the view shows the
+    // selection but the map's list. A click built the view for it: the sources panel, the map's
+    // header and a patch of the list, which works every line's height out again. The detail is now a
+    // part (see Part) with a revision of its own: a click tells the list through its ref and writes
+    // the revision, so the detail builds alone (SelectEndpoint), as History's archived send does. It
+    // builds with the view when the view places it showing another endpoint than the selected one,
+    // and after a full rebuild (_partRevision, safe by default); a view-only build that leaves the
+    // selection where it was (the observed toggle) leaves it as it is.
+    private readonly PartGroup _mapDetailParts = new();
+    private readonly Signal<int> _mapDetailRevision = new(0);
+    private Part? _mapDetailPart;
+    private readonly Ref<BoxElement> _mapDetailRef = new();
+    /// <summary>What the detail was last built from: the endpoint and the full-rebuild revision.</summary>
+    private Endpoint? _mapDetailShown;
+    private int _mapDetailRevisionShown = -1;
+
+    /// <summary>Builds of the endpoint's detail so far, for tests.</summary>
+    internal int MapDetailBuilds => _mapDetailParts.Builds;
+
+    /// <summary>Whether the detail on screen is not what a build of it for <paramref name="selected"/>
+    /// makes now.</summary>
+    private bool MapDetailStale(Endpoint selected) =>
+        !ReferenceEquals(_mapDetailShown, selected) || _mapDetailRevisionShown != _partRevision.Peek();
+
+    /// <summary>The detail's host, for the view's build to place beside the map: built again first
+    /// when it is stale (<see cref="MapDetailStale"/>). The host takes the detail's place in the row:
+    /// it never shrinks, and the detail fills its height as it filled the row's.</summary>
+    private ComponentHost PlaceMapDetail(Endpoint selected)
+    {
+        var part = _mapDetailPart ??= new(_mapDetailParts, () =>
+        {
+            // Placed only beside a selected endpoint, and its own build runs after a click selected
+            // one; nothing takes the selection away but a new base, which builds the view.
+            if (_mapSelection is not { } endpoint) return Box.New();
+            _mapDetailShown = endpoint;
+            _mapDetailRevisionShown = _partRevision.Peek();
+            var detail = BuildEndpointDetail(endpoint);
+            detail.Key = "disc-detail";
+            detail.FlexGrow(1);
+            detail.WithRef(_mapDetailRef);
+            return detail;
+        }, own: _mapDetailRevision);
+        part.Mount();   // the first build, before asking what it was built from
+        return part.Place(stale: MapDetailStale(selected));
+    }
+
+    private BoxElement BuildEndpointDetail(Endpoint endpoint)
     {
         var panel = Flex.Column(gap: Azimuth.S2).FlexShrink(0)
             .Width(Azimuth.ResponseRight)

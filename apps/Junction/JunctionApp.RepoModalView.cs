@@ -182,9 +182,11 @@ public partial class JunctionApp
     private Element ModalInput(string value, string placeholder, Action<string> onChange,
         Ref<TextInputElement>? refEl, bool mono)
     {
+        // A character builds the view, for the hint, the preview and the button, and not the
+        // chrome, which shows nothing of the form.
         var input = TextInput.New(value).Style(Ui.Field(sidePadding: 12f))
             .PlaceholderText(placeholder)
-            .OnTextChanged(v => { onChange(v); MarkDirty(); })
+            .OnTextChanged(v => { onChange(v); MarkViewDirty(); })
             .Height(Dimension.Px(38)).FlexShrink(0)
             .TextColor(Nocturne.Text);
         if (mono) input.FontFamily(Fonts.Mono).FontSize(12f);

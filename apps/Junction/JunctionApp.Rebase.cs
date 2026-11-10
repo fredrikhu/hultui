@@ -544,8 +544,9 @@ public partial class JunctionApp
         var taBox = Flex.Column(gap: 0)
             .Padding(new Thickness(6, 10, 6, 10))
             .Background(Nocturne.Bg).BorderColor(Nocturne.Divider).BorderWidth(1f).CornerRadius(Nocturne.RadiusMd);
+        // A character builds nothing, as in the prompt: the field shows the message, and Save reads it.
         var ta = TextArea.New(_rbRewordText);
-        ta.OnTextChanged(v => { _rbRewordText = v; MarkDirty(); })
+        ta.OnTextChanged(v => _rbRewordText = v)
             .Height(Dimension.Px(140))
             .FontFamily(Fonts.Mono).FontSize(12.5f)
             .TextColor(Nocturne.Text).WithRef(_rbRewordRef);

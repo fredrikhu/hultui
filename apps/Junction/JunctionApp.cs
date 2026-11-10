@@ -420,13 +420,16 @@ public partial class JunctionApp : Component, IDisposable
         // The diff's sideways offset is app state, so moving it has to rebuild the rows — the
         // view's: the chrome shows none of this, and a drag rebuilds once a frame.
         _diffPan = new HorizontalPan(MarkViewDirty);
-        // Same for the two file-list widths: the panes are rebuilt at the current width, so
-        // a drag marks dirty rather than writing to an element that the next build replaces.
-        _toasts = new ToastHost(MarkDirty);
-        _commitSplit = new PaneSplitter(MarkViewDirty, Persist, MinFileListWidth, MaxFileListWidth,
-            settings.CommitFileListWidth);
-        _changesSplit = new PaneSplitter(MarkViewDirty, Persist, MinFileListWidth, MaxFileListWidth,
-            settings.ChangesFileListWidth);
+        // A toast that comes builds everything, as the change it reports may be the chrome's; one
+        // that goes builds the view, where the toast was and the chrome is not.
+        _toasts = new ToastHost(() => { if (_toasts!.IsShowing) MarkDirty(); else MarkViewDirty(); });
+        // The two file-list widths: the lists are built at them, and a drag's moves give the
+        // list on screen the width and lay out again (FileListSplitMoved); the release, which
+        // remembers the width, builds the view.
+        _commitSplit = new PaneSplitter(() => FileListSplitMoved(_commitSplit, _fileScrollRef.Current),
+            Persist, MinFileListWidth, MaxFileListWidth, settings.CommitFileListWidth);
+        _changesSplit = new PaneSplitter(() => FileListSplitMoved(_changesSplit, _changesColumnRef.Current),
+            Persist, MinFileListWidth, MaxFileListWidth, settings.ChangesFileListWidth);
         _diffFind = NewFindBar("Find in diff…", () => _diffBodyRef.Current, RevealDiffHit, DiffFindMoved);
         _diffFind.Selection = DiffFindSelection;
         _filesFind = NewFindBar("Find in file…", () => _fileBodyRef.Current, RevealFilesHit, FilesFindMoved);
@@ -435,10 +438,11 @@ public partial class JunctionApp : Component, IDisposable
         // reveal would scroll a body no longer on screen: Ctrl+F comes back to the source.
         _filesFind.Opening = () => _filesBlame = false;
         // Every change to which folders are open comes through here: the kept rows go with it.
-        _filesTree = new TreeView<string>(() => { _filesExpandGen++; MarkDirty(); });
+        // A folder opened or closed is the view's alone, as in the Changes lists' trees.
+        _filesTree = new TreeView<string>(() => { _filesExpandGen++; MarkViewDirty(); });
         // As the Files tree: every change to which folders are open comes through here, and the
         // kept rows go with it.
-        _commitFilesTree = NewChangeTree(() => { _commitTreeGen++; MarkDirty(); });
+        _commitFilesTree = NewChangeTree(() => { _commitTreeGen++; MarkViewDirty(); });
         _diffWrap = _settings.DiffWrap;
         _diffSplit = _settings.DiffSplit;
         _commitMsgExpanded = _settings.CommitMessageExpanded;
@@ -483,6 +487,9 @@ public partial class JunctionApp : Component, IDisposable
         bool scaleChanged = MathF.Abs(Ui.DisplayScale - scale) >= 0.001f;
         Ui.DisplayScale = scale;
         if (RecomputeResponsive() || scaleChanged || DiffWrapNeedsRemeasure()) Rerender();
+        // The diff takes the width the window gained or lost, and the build, if there is one,
+        // reads the width of the frame before: the pan reads it after the layout.
+        FollowDiffWidthAfterFrame();
     }
 
     /// <summary>
@@ -800,6 +807,8 @@ public partial class JunctionApp : Component, IDisposable
         ResetSpinners();   // asked for again by any Spinner() built below
         _issueRulesLooked = false;   // the rules file is looked at again, once (see IssueRules)
         _highlightShown = null;   // set again by the diff pane built below (see HighlightForCurrent)
+        _changesColumnRef.Current = null;   // set again by a Changes column built below at the split
+                                            // (held, it kept the Changes view behind the next one)
         Builds++;
 
         // Track the revision signal so a Rerender() re-runs Build through the
@@ -1259,7 +1268,8 @@ public partial class JunctionApp : Component, IDisposable
         // and (for the modal) typing flows to the focused field.
         if (_popover != null)
         {
-            if (e.Key == KeyCode.Escape) { _popover = null; MarkDirty(); e.StopPropagation = true; }
+            // Closing changes nothing the chrome shows, even for a menu the toolbar opened.
+            if (e.Key == KeyCode.Escape) { _popover = null; MarkViewDirty(); e.StopPropagation = true; }
             return;
         }
         if (_modal != null)
@@ -1546,7 +1556,7 @@ public partial class JunctionApp : Component, IDisposable
             if (Shortcuts.Pressed("files.search", e))
             {
                 _pendingFilesSearchFocus = true;
-                MarkDirty();
+                MarkViewDirty();
                 e.StopPropagation = true;
                 return;
             }
@@ -1560,7 +1570,7 @@ public partial class JunctionApp : Component, IDisposable
             if (Shortcuts.Pressed("history.search", e))
             {
                 _pendingHistorySearchFocus = true;
-                MarkDirty();
+                MarkViewDirty();
                 e.StopPropagation = true;
                 return;
             }
@@ -1573,7 +1583,7 @@ public partial class JunctionApp : Component, IDisposable
             if (Shortcuts.Pressed("tags.search", e))
             {
                 _pendingTagSearchFocus = true;
-                MarkDirty();
+                MarkViewDirty();
                 e.StopPropagation = true;
                 return;
             }
@@ -1586,7 +1596,7 @@ public partial class JunctionApp : Component, IDisposable
             if (Shortcuts.Pressed("branches.search", e))
             {
                 _pendingBranchSearchFocus = true;
-                MarkDirty();
+                MarkViewDirty();
                 e.StopPropagation = true;
                 return;
             }

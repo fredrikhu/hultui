@@ -186,6 +186,16 @@ AT-SPI bridge's objects take it and send state-changed:focused. The next
 rebuild's diff then has nothing to say about the move. Before, both kept the
 state of the last rebuild until the next one, which reported the move late.
 
+The window finds the two nodes down their elements' ancestors from the root, as a
+patch finds its nodes (`FindNodeDown`): it looks only at the children of the nodes
+on the way. Where that finds none (an element taken out, moved, or given a node of
+its own or an ancestor's since the tree was built, an overlay closed or opened
+since), one walk of the whole tree looks for it. Until plan 17's round 10 that walk
+was all there was: with the focused controls after a long list in the tree's order
+(Meridian's request pane after its endpoint map) it went past nearly every node,
+6,072 of 6,073 with the map at 2,000 endpoints. A focus that waited for its node
+and an announcement's source are found the same way.
+
 A move of a list's selection rebuilds no tree either (2026-10-11). The frame marks
 `IsSelected` on the item nodes it changed, in the applied tree, and hands the bridge
 those changes (`ApplyPatchedProperties`): the UIA wrappers take the new state and raise
@@ -349,10 +359,11 @@ round 9, step 15, fixed in the apps). A focusable box with no role or name is no
 Vesper's pane, the Tab stop that holds the focus while the cursor walks, was such a box: every Tab and
 click told nothing. It is a group (UIA Group, AT-SPI panel) named after its side and its folder,
 "Left pane, Downloads", with the pane's content under it. Its name changes with the folder, so a
-navigation with a reader builds the tree where it was walked in place (a node with children whose own
-name changed, which the walk does not take): 60 files, Enter and Backspace, 0 → 1 tree and +20 KB a
+navigation with a reader built the tree where it was walked in place (a node with children whose own
+name changed, which the walk did not take): 60 files, Enter and Backspace, 0 → 1 tree and +20 KB a
 navigation with UIA (209 → 230 KB), the same on AT-SPI; nothing without a reader, and no cursor key
-builds one (0 trees a key in Detail, Brief and Thumbnails, as before). Tab, which Vesper takes to
+builds one (0 trees a key in Detail, Brief and Thumbnails, as before). Since plan 17 round 10 step 10
+the walk takes it (below), and a navigation builds no tree again. Tab, which Vesper takes to
 switch panes, moved the active pane but left the focus on the one it left, so a reader was told
 nothing; the focus goes with it now, and a reader is told the pane it reached, then (in Detail) its
 cursor's item, selected, with no tree built: a Tab without a reader 71.60 → 71.68 KB.
@@ -377,6 +388,15 @@ with a reader only: each cell is a node over its icon and name, and the tiles an
 nodes where a row was one (+34 and +95 nodes a navigation): Brief 237 → 250 KB with UIA (254 → 270
 AT-SPI), Thumbnails 262 → 294 (265 → 313); without a reader a navigation is within 0.5 KB. Thumbnail
 rows off screen are not in the tree, as in any composite list; they come in as they realize.
+
+Synchronize (F9) told a reader nothing of its cursor either: each row is a button named by what it
+shows ("f003.txt 11 B 11-10 06:38 → 11-10 04:38 4 B f003.txt"), a role inferred from its click, and the
+cursor was only its fill and ring. Since plan 17 round 10 step 7 a cursor key there builds nothing and
+moves the ring on the live rows, as in Brief; each row sets its role (`Button`, as the window marks a
+selected state in place only for a role the app set) and says whether it is the cursor's
+(`AccessibleSelected`), set with the ring. A reader is told on every cursor key the row left, not
+selected, and the row reached, selected, with no tree; the tree is the one it was, every node and name,
+with the selected state added.
 
 Focus that goes nowhere is the other half: an element holding the focus goes, and nothing takes it.
 Meridian's prompt and question (cards in its own tree, not `Dialog.Show`, which gives the focus back
@@ -434,11 +454,30 @@ its wrappers on the same tree, AT-SPI's objects stay and the new ones are cached
 25.9 KB; Aperture's library Down 286.1 → 260.4, the same nodes added and removed and the same AT-SPI
 signals. A test switch, `Window.AccessibilityBuildsEveryRefresh`, makes every refresh build the tree,
 for tests that hold a refresh made in place to a build.
-Where a build would make other nodes than a walk can, it builds the tree, as before: a node with
-children whose own properties changed (a tab named by its label, with a close button in it), a list
-whose items cross the 2,000 served on demand, described content in another number, an overlay opened
-or closed (its own refresh), the root's own node, or a change no diff tells (whether a node is
-focusable, another text source). A node's selected state, selected or not before and after, is no
+Since plan 17 round 10 step 10 the walk also takes a node with children whose own properties changed
+(Vesper's pane, named after its folder; a tab named by its label, with a close button in it): it makes
+the node again and carries the applied node's children over to it, the same nodes
+(`AccessibilityNode.CarryChildrenOf`), walks them under it as under the node it replaces, and puts it in
+that node's place, the children taking it as their parent just before (`AdoptChildren`); a child
+removed has the old node for its parent, as a diff has it. The bridges key their objects by id, so the
+node's UIA wrapper and AT-SPI object take the new node and tell the change a build's diff tells. The
+window's property observer sends a change of the name or the description of an element with children
+to that walk, in the frame (`_a11yWalkDue`), where it built the tree. KB a navigation with a reader
+(Enter into a folder of 5 files, Backspace out), tree / UIA / AT-SPI, 1 → 0 trees, the same events in
+the same order: Detail 1,000 files (2,105 nodes) 453.0 / 542.0 / 675.7 → 322.6 / 411.6 / 556.9, Brief
+453.1 / 492.5 / 537.0 → 336.2 / 375.6 / 420.3, Thumbnails 356.7 / 374.4 / 393.1 → 249.9 / 267.6 /
+286.2; at 60 files 8–12 % less. Junction's Commit button, named by its label with a count of what is
+staged and with its icon a node of its own, 2 → 0 trees a stage or unstage of one file (670 → 623 KB
+with the tree). A rename alone walks the tree and builds nothing: 3,005 nodes, 0 KB. A node made
+again is walked as any node is: a leaf that has children now (Vesper's path button in an archive,
+whose icon is a node there, and so is its text) gets them built as a build builds them, and a node
+whose name now takes the text inside it, with no other node under it, loses its children as a diff
+removes them; each failed the walk, which a renamed pane then reached on every descent into an
+archive.
+Where a build would make other nodes than a walk can, it builds the tree, as before: a described
+node or a list's item with children whose own properties changed, a list whose items cross the 2,000
+served on demand, described content in another number, an overlay opened or closed (its own refresh),
+the root's own node, or a change no diff tells (whether a node is focusable, another text source). A node's selected state, selected or not before and after, is no
 such change: the walk writes it in place and tells it, children or not. A frame something else asks
 a tree of (a property no patch takes, the first frame a reader is there) builds it too. A composite
 list's own selection move was such a property, and a kept composite row whose `AccessibleSelected`
@@ -448,18 +487,28 @@ marked on the applied tree and told as a menu entry's is (`TryPatchA11y`); Junct
 walk builds no tree for either.
 
 Which selected states are marked on the applied tree with no build (the window's property observer,
-`Window.AccessibilityObserverAdapter`; plan 17 round 9 step 15b): a menu's entry (`IsMenuEntry`); a row directly in
-a composite list (its parent says `RowsAreComposite`); and an item, an element whose `Role` is
-`ListItem`, wherever it is: a cell of a grid a view lays out with boxes (Vesper's Brief: columns of
-cells in a scroll view), a tile in a composite list's row (its Thumbnails). Each must say selected or
-not before and after (`AccessibleSelected` set both times), and its node must be in the applied tree
-where its ancestors say (else the tree is built, as for any patch). The layout cannot tell a grid from
-any other boxes, so the item's role is what says it is one of a set. Its selected state goes on its
-own node and nothing else a build makes reads it, so the mark is what the build's diff would report.
-Any other element's selected state — a tab, a radio button, a button that is one of a set (Meridian's
-endpoints, which a detail pane follows) — still builds the tree, which also tells what came with it.
-Vesper's Brief, 60 files, with UIA: a cursor key 36 KB and a tree with that change alone, 2.2 KB and
-none with the rule.
+`Window.AccessibilityObserverAdapter`; plan 17 round 9 step 15b and round 10 step 1): a menu's entry
+(`IsMenuEntry`); a row directly in a composite list (its parent says `RowsAreComposite`); an item, an
+element whose `Role` is `ListItem`, wherever it is: a cell of a grid a view lays out with boxes
+(Vesper's Brief: columns of cells in a scroll view), a tile in a composite list's row (its
+Thumbnails); and a button, an element whose `Role` is `Button`, wherever it is: one of a set the user
+picks from that a click moves the selection between on the same elements (Meridian's Discovery map:
+endpoint rows, which a detail pane follows). The role is the one the app set (`Element.Role`), not one
+the builder infers: a `ButtonElement` or a box with a click handler and no role of its own still
+builds the tree. Each must say selected or not before and after (`AccessibleSelected` set both
+times: one that starts or stops saying it builds the tree), and its node must be in the applied tree
+where its ancestors say (else the tree is built, as for any patch). The layout cannot tell a grid or
+a set of rows from any other boxes, so the role the app gave is what says it is one of a set. Its
+selected state goes on its own node and nothing else a build makes reads it, so the mark is what the
+build's diff would report. What else the same change did is told on its own path: a leaf's new name
+patched with the mark, a label's or the children's change by the in-place walk, which then writes the
+mark itself (above); either way in tree order, as the diff lists them. Any other element's selected
+state — a tab (its panel follows), a radio button, a role the app did not set — still builds the
+tree, which also tells what came with it. Vesper's Brief, 60 files, with UIA: a cursor key 36 KB and
+a tree with that change alone, 2.2 KB and none with the rule. Meridian's map, a click with UIA (JIT,
+headless): 60 endpoints (253 nodes) 92.7 → 58.4 KB, 600 (1,873) 343.9 → 81.8 KB, 2,000 (6,073)
+973.9 → 121.1 KB, a tree a click → none, against 58.1 / 81.5 / 120.8 KB with no reader; a reader is
+told the same events in the same order.
 
 Threading: UIA may call provider methods from worker threads. Either marshal
 to the UI thread, or snapshot values onto the wrapper at construction/diff

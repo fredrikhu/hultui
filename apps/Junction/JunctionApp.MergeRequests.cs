@@ -382,7 +382,8 @@ public partial class JunctionApp
         box.AddChild(Ui.Icon(Icons.MagnifyingGlass, 12f, Nocturne.On(0.45)));
         var input = TextInput.New(_mrQuery)
             .PlaceholderText("Press / to search…")
-            .OnTextChanged(v => { _mrQuery = v; _mrSel = 0; MarkDirty(); })
+            // The view builds for the rows the query keeps; the chrome shows nothing of them.
+            .OnTextChanged(v => { _mrQuery = v; _mrSel = 0; MarkViewDirty(); })
             // The field fills the box's 28px of content: at 24 the theme's own padding left
             // the glyphs' descenders under the bottom edge.
             .Height(Dimension.Px(28)).FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
@@ -869,7 +870,7 @@ public partial class JunctionApp
         if (e.Key == KeyCode.Escape)
         {
             if (_mrOpen != null) { BackToMrList(); return true; }
-            if (inSearch && _mrQuery.Length > 0) { _mrQuery = ""; if (_mrSearchRef.Current is { } field) field.Text = ""; _mrSel = 0; MarkDirty(); return true; }
+            if (inSearch && _mrQuery.Length > 0) { _mrQuery = ""; if (_mrSearchRef.Current is { } field) field.Text = ""; _mrSel = 0; MarkViewDirty(); return true; }
             CloseMergeRequests();
             return true;
         }
@@ -882,7 +883,7 @@ public partial class JunctionApp
         if (_mrOpen is null && Shortcuts.Pressed("mr.search", e))
         {
             _pendingMrSearchFocus = true;
-            MarkDirty();
+            MarkViewDirty();
             return true;
         }
         if (Shortcuts.Pressed("mr.checkout", e))

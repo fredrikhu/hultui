@@ -29,6 +29,14 @@ static partial class Scenarios
             "Press Tab in a 300-field form with the AT-SPI bridge: the focus moves, no rebuild",
             ctx => TabThroughFields(ctx, AtSpiRig.Install(ctx.Window)));
 
+        yield return new Scenario("a11y/tab among 10 fields after 2,000 rows, AT-SPI",
+            "Press Tab among 10 fields that come after 2,000 rows in the tree, with the AT-SPI bridge: the focus moves, no rebuild, in a tree of 6,000 nodes",
+            ctx => TabPastRows(ctx, AtSpiRig.Install(ctx.Window)));
+
+        yield return new Scenario("a11y/rename a pane over 1,000 rows, AT-SPI",
+            "Rename a group named after its folder, as Vesper's pane on a navigation, its 1,000 rows under it, with the AT-SPI bridge: the pane's name and its title's, in a tree of 3,005 nodes",
+            ctx => RenamePane(ctx, AtSpiRig.Install(ctx.Window)));
+
         yield return new Scenario("a11y/wheel 1,000 rows, AT-SPI",
             "Wheel 3 notches through 1,000 rows with the AT-SPI bridge, each frame 120 ms apart so each refreshes the tree's boxes",
             ctx => WheelRows(ctx, AtSpiRig.Install(ctx.Window)));

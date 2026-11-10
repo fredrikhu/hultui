@@ -127,8 +127,9 @@ public partial class MeridianApp : Component, IDisposable
     private bool _forceResponseBottom;
 
     // The response pane's size, dragged by the handle on its inner edge: its width beside the
-    // editor, its height under it. Session state, as the flip is. Moving it rebuilds the pane
-    // alone (ResponseDirty): the handle and the size are both the pane's.
+    // editor, its height under it. Session state, as the flip is. A drag's moves size the pane
+    // on screen; its press and release and the arrow keys rebuild the pane alone (ResponseDirty):
+    // the handle and the size are both the pane's.
     internal const float ResponseMinWidth = 480f;
     private const float TitleBarHeight = 40f;
     private readonly PaneSplitter _responseWidth;
@@ -174,7 +175,9 @@ public partial class MeridianApp : Component, IDisposable
         // screenshot driver) gets the same window the user sees, rather than a frame that
         // reads as a theming bug the app does not have. Mirrors JunctionApp and CommanderApp.
         _app.Theme = Azimuth.ToHultTheme();
-        _toasts = new ToastHost(MarkDirty) { Seconds = 2.6f };
+        // A toast that comes builds the parts too, as the change it reports may be theirs; one
+        // that goes builds the view alone: the toast is the window's, not a part's.
+        _toasts = new ToastHost(() => { if (_toasts!.IsShowing) MarkDirty(); else MarkViewDirty(); }) { Seconds = 2.6f };
         // The window's dialogs are the real ones on a desktop and the scriptable
         // headless pair under test, so nothing needs substituting for either.
         _fileDialogs = fileDialogs ?? window.FileDialogs;
@@ -186,11 +189,12 @@ public partial class MeridianApp : Component, IDisposable
         // History's search, walk and filters show in the History view alone (see Part).
         _historyFind = new TextSearch(MarkViewDirty);
         // Each pane is after its handle (right of it, under it). The largest is the window's
-        // room less the editor's floor, held at build time (ResponsePaneSize).
-        _responseWidth = new PaneSplitter(ResponseDirty, null, ResponseMinWidth, 10_000f, Azimuth.ResponseRight,
-            SplitterAxis.Horizontal, trailing: true);
-        _responseHeight = new PaneSplitter(ResponseDirty, null, BottomPaneMinHeight, 10_000f, Azimuth.ResponseBottom,
-            SplitterAxis.Vertical, trailing: true);
+        // room less the editor's floor, held at build time (ResponsePaneSize). A drag moves the
+        // pane on screen and builds nothing (ResponseSplitMoved).
+        _responseWidth = new PaneSplitter(() => ResponseSplitMoved(bottom: false), null, ResponseMinWidth, 10_000f,
+            Azimuth.ResponseRight, SplitterAxis.Horizontal, trailing: true);
+        _responseHeight = new PaneSplitter(() => ResponseSplitMoved(bottom: true), null, BottomPaneMinHeight, 10_000f,
+            Azimuth.ResponseBottom, SplitterAxis.Vertical, trailing: true);
 
         View = MeridianView.Requests;
 
@@ -237,14 +241,25 @@ public partial class MeridianApp : Component, IDisposable
         // Track the revision signal so a Rerender() re-runs Build through the Effect.
         _ = _revision.Value;
         _responsePlaced = false;
+        // A ref into a view holds the whole view through its parents, so each one is emptied by a
+        // build that shows none of it (REACTIVITY.md, "A ref into a view keeps the whole view"): the
+        // URL field is this build's own, and set again by it when the field is shown.
+        _urlRef.Current = null;
 
         // The title bar is a part of its own (see Part), keyed by its host.
         var titleBar = TitleBarPart.Mount().FlexShrink(0);
         var body = BuildBody(); body.Key = "body";
         EndMapBuild();   // a build that shows no map lets its kept rows go
         // The response panel keeps the readout of a send in flight (TickWhileSending) while it is
-        // kept; with no panel on screen there is none.
-        if (!_responsePlaced) _sendElapsed.Current = null;
+        // kept; with no panel on screen there is none, and the panel's other refs go with it. Only
+        // the panel's own build sets them, and it builds only where it is placed.
+        if (!_responsePlaced)
+        {
+            _sendElapsed.Current = null;
+            _respTabRef.Current = null;
+            _responseBodyRef.Current = null;
+            _responsePanelRef.Current = null;
+        }
         var root = Flex.Column(gap: 0)
             .FlexGrow(1)
             .Background(Azimuth.Bg)

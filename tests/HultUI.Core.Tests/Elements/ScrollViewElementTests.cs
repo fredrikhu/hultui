@@ -18,8 +18,11 @@ public class ScrollViewElementTests
         Assert.Equal(Overflow.Scroll, sv.Box.OverflowY);
     }
 
+    /// <summary>With no content to clamp against, the offset used to clamp to 0 at once, and a list
+    /// given its offset before its rows were laid out opened at the top. It is kept now, and applied
+    /// once there is content, clamped to it. Nothing moves meanwhile.</summary>
     [Fact]
-    public void ScrollOffset_ClampsToZeroWhenNoContent()
+    public void ScrollOffset_SetWithNoContent_IsKept_AndAppliedWhenTheContentComes()
     {
         var sv = ScrollViewElement.New();
         sv.Box.Width = 200;
@@ -29,7 +32,157 @@ public class ScrollViewElementTests
         sv.UpdateContentSize();
 
         sv.ScrollOffsetY = 100;
+        Assert.Equal(100, sv.ScrollOffsetY);
+
+        _layout.PerformLayout(sv, 200, 200);
+        sv.UpdateContentSize();
+        Assert.Equal(100, sv.ScrollOffsetY);   // still nothing to scroll: still kept
+
+        var child = BoxElement.New();
+        child.Box.Width = 200;
+        child.Box.Height = 250;
+        sv.AddChild(child);
+        _layout.PerformLayout(sv, 200, 200);
+        sv.UpdateContentSize();
+        Assert.Equal(50, sv.ScrollOffsetY);    // clamped to the content: 250 - 200
+    }
+
+    private ScrollViewElement Tall(float contentWidth = 200, float contentHeight = 500)
+    {
+        var sv = ScrollViewElement.New();
+        sv.Box.Width = 200;
+        sv.Box.Height = 100;
+        var child = BoxElement.New();
+        child.Box.Width = contentWidth;
+        child.Box.Height = contentHeight;
+        sv.AddChild(child);
+        return sv;
+    }
+
+    private void LayOut(ScrollViewElement sv)
+    {
+        _layout.PerformLayout(sv, 200, 100);
+        sv.UpdateContentSize();
+    }
+
+    /// <summary>An offset set before the view's first layout (on the build that makes it) is kept,
+    /// reads back as set, and is what the view shows after the layout, clamped to the content then.
+    /// It used to clamp to 0 at once: the view opened at the start.</summary>
+    [Fact]
+    public void ScrollOffset_SetBeforeTheFirstLayout_IsAppliedByIt_Clamped()
+    {
+        var sv = Tall();
+        sv.ScrollOffsetY = 150;
+        Assert.Equal(150, sv.ScrollOffsetY);
+        LayOut(sv);
+        Assert.Equal(150, sv.ScrollOffsetY);
+
+        var past = Tall();
+        past.ScrollOffsetY = 999;
+        LayOut(past);
+        Assert.Equal(400, past.ScrollOffsetY);   // 500 - 100
+
+        var wide = Tall(contentWidth: 700);
+        wide.Box.OverflowX = Overflow.Scroll;
+        wide.ScrollOffsetX = 250;
+        wide.ScrollOffsetY = -40;
+        LayOut(wide);
+        Assert.Equal(250, wide.ScrollOffsetX);
+        Assert.Equal(0, wide.ScrollOffsetY);
+
+        var beyond = Tall(contentWidth: 700);
+        beyond.Box.OverflowX = Overflow.Scroll;
+        beyond.ScrollOffsetX = 9_000;
+        LayOut(beyond);
+        Assert.Equal(500, beyond.ScrollOffsetX);   // 700 - 200
+    }
+
+    /// <summary>A later scroll from code before the layout wins over the offset kept, and one
+    /// relative to it (ScrollBy) moves from it.</summary>
+    [Fact]
+    public void ScrollOffset_SetAgainBeforeTheFirstLayout_TheLaterWins()
+    {
+        var sv = Tall();
+        sv.ScrollOffsetY = 150;
+        sv.ScrollOffsetY = 60;
+        LayOut(sv);
+        Assert.Equal(60, sv.ScrollOffsetY);
+
+        var by = Tall();
+        by.ScrollOffsetY = 150;
+        by.ScrollBy(0, 30);
+        Assert.Equal(180, by.ScrollOffsetY);
+        LayOut(by);
+        Assert.Equal(180, by.ScrollOffsetY);
+    }
+
+    /// <summary>The user's scroll moves what is on screen, or nothing: on a view with nothing to
+    /// scroll yet it holds nothing for later, and it drops an offset code kept, so the content that
+    /// comes opens where the user left the view.</summary>
+    [Fact]
+    public void ScrollOffset_KeptForTheContent_TheUsersScrollWins()
+    {
+        var sv = ScrollViewElement.New();
+        sv.Box.Width = 200;
+        sv.Box.Height = 100;
+        LayOut(sv);
+        sv.ScrollOffsetY = 150;
+
+        EventDispatcher.Dispatch(new ScrollEvent { Position = new Point(100, 50), DeltaY = -1 }, sv);
         Assert.Equal(0, sv.ScrollOffsetY);
+
+        var child = BoxElement.New();
+        child.Box.Width = 200;
+        child.Box.Height = 500;
+        sv.AddChild(child);
+        LayOut(sv);
+        Assert.Equal(0, sv.ScrollOffsetY);
+    }
+
+    /// <summary>A reveal asked after an offset set before the layout reveals from that offset once
+    /// the layout gives the view a size: the least distance from where it was set.</summary>
+    [Fact]
+    public void ScrollOffset_SetBeforeTheFirstLayout_ThenARevealOfABandItShows_StaysPut()
+    {
+        var sv = Tall();
+        sv.ScrollOffsetY = 300;
+        sv.ScrollRangeIntoView(350, 20);
+        LayOut(sv);
+        Assert.Equal(300, sv.ScrollOffsetY);
+
+        var below = Tall();
+        below.ScrollOffsetY = 300;
+        below.ScrollRangeIntoView(450, 20);
+        LayOut(below);
+        Assert.Equal(370, below.ScrollOffsetY);   // 470 - 100
+    }
+
+    /// <summary>A sideways reveal before the view has a width has no least distance to scroll and
+    /// leaves the offset as it is. Set from it, the kept offset would be the band's right edge,
+    /// which scrolls the band out of view on the left.</summary>
+    [Fact]
+    public void ScrollRangeIntoViewHorizontal_BeforeTheFirstLayout_LeavesTheOffsetAsSet()
+    {
+        var sv = Tall(contentWidth: 700);
+        sv.Box.OverflowX = Overflow.Scroll;
+        sv.ScrollOffsetX = 200;
+        sv.ScrollRangeIntoViewHorizontal(300, 40);
+        Assert.Equal(200, sv.ScrollOffsetX);
+        LayOut(sv);
+        Assert.Equal(200, sv.ScrollOffsetX);
+    }
+
+    /// <summary>Applying a kept offset is a scroll from code: it tells no UserScrolled listener.</summary>
+    [Fact]
+    public void ScrollOffset_SetBeforeTheFirstLayout_IsAppliedWithoutUserScrolled()
+    {
+        var sv = Tall();
+        int told = 0;
+        sv.UserScrolled = () => told++;
+        sv.ScrollOffsetY = 150;
+        LayOut(sv);
+        Assert.Equal(150, sv.ScrollOffsetY);
+        Assert.Equal(0, told);
     }
 
     [Fact]

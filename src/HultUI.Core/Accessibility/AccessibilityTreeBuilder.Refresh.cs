@@ -10,7 +10,7 @@ public static partial class AccessibilityTreeBuilder
     /// What a layout refresh found to change in an applied tree, kept by the window between
     /// refreshes so that finding nothing allocates nothing: the nodes that moved in their scroll
     /// views' content, the ones that went out of view or came into it, the scroll views whose offset
-    /// or geometry changed, the leaves made again for a change of their own properties, the lists
+    /// or geometry changed, the nodes made again for a change of their own properties, the lists
     /// served on demand whose items changed in number or selection, the nodes whose children are
     /// others now, with their new children, and the changes a diff would have reported, in its
     /// order: the nodes added and removed, the parents whose children are in another order, the
@@ -75,8 +75,10 @@ public static partial class AccessibilityTreeBuilder
         /// (<see cref="AccessibilityNode.ReplaceChildren"/>), a child
         /// (<see cref="AccessibilityNode.ReplaceChild"/>), a list's items served on demand
         /// (<see cref="AccessibilityNode.ReplaceServedItems"/>). A node's new children before the
-        /// leaves made again: a leaf's place is its index among its parent's children as a build
-        /// makes them.</summary>
+        /// nodes made again: a node's place is its index among its parent's children as a build
+        /// makes them. A node made again with the children of the one it replaces is their parent
+        /// before it goes in (<see cref="AccessibilityNode.AdoptChildren"/>), and goes in before its
+        /// own children made again: the walk found it first.</summary>
         internal void Apply()
         {
             foreach (var (node, rect) in Moves) node.MoveTo(rect);
@@ -85,7 +87,11 @@ public static partial class AccessibilityTreeBuilder
             foreach (var (node, offset, viewport, content) in Scrolls) node.ReplaceScrollView(offset, viewport, content);
             foreach (var (node, version) in TextVersions) node.ReplaceTextVersion(version);
             foreach (var (node, children) in Restructured) node.ReplaceChildren(children);
-            foreach (var (parent, index, node) in Remade) parent.ReplaceChild(index, node);
+            foreach (var (parent, index, node) in Remade)
+            {
+                node.AdoptChildren();
+                parent.ReplaceChild(index, node);
+            }
             foreach (var (node, count, selected) in Served) node.ReplaceServedItems(count, selected);
         }
 
@@ -116,18 +122,20 @@ public static partial class AccessibilityTreeBuilder
     /// would make, flattened where it flattens, with the items and content it would make — against
     /// the applied tree, and finds what a build would make otherwise there: a box moved in its scroll
     /// views' content, a node gone out of view or come into it, a scroll view scrolled or resized, a
-    /// leaf whose own properties changed (made again, as <see cref="RemakeLeaf"/> makes it), children
-    /// added, gone or in another order (the new ones built as a build builds them, the rest kept),
-    /// with the changes a diff against such a build would report, in its order, into
-    /// <paramref name="refresh"/>. Nothing is written to the tree. A wheel over a list of 1,000 rows
-    /// built and diffed 3,001 nodes for one scroll view's offset, and a row a key made again in a
-    /// composite list built and diffed every node of the window.
+    /// node whose own properties changed (made again, as <see cref="RemakeLeaf"/> makes a leaf, with
+    /// the children of one that has them carried over, and walked as any node's: a leaf's new children
+    /// are built), children added, gone or in another order (the
+    /// new ones built as a build builds them, the rest kept), with the changes a diff against such a
+    /// build would report, in its order, into <paramref name="refresh"/>. Nothing is written to the
+    /// tree. A wheel over a list of 1,000 rows built and diffed 3,001 nodes for one scroll view's
+    /// offset, a row a key made again in a composite list built and diffed every node of the window,
+    /// and so did a pane renamed after the folder it went into.
     /// <para>False, with <see cref="LayoutRefresh.Mismatch"/> saying why, when a build would make
     /// another tree than one made that way: a node another element's (with the same id), described
     /// content in another number, a list whose items cross the number they are served on demand
-    /// from, a node with children whose own properties changed, the window's root node's own, an
-    /// overlay opened or closed, or a change no diff tells (a node focusable or not, another text
-    /// source). The window builds the tree then, as it always did.</para>
+    /// from, a described node or a list's item with children whose own properties changed, the
+    /// window's root node's own, an overlay opened or closed, or a change no diff tells (a node
+    /// focusable or not, another text source). The window builds the tree then, as it always did.</para>
     /// </summary>
     internal static bool TryRefreshInPlace(AccessibilityNode tree, Element root,
         IReadOnlyList<(Element Content, float X, float Y)> overlays, FocusManager? focusManager, LayoutRefresh refresh)
@@ -233,14 +241,24 @@ public static partial class AccessibilityTreeBuilder
                 // A change no diff tells (a value under a text) is read from the node: only a new
                 // tree carries it.
                 if (refresh.Changes.Count == start) return refresh.Fail("a change no diff tells");
-                // Only a leaf is made again: the children of one with children would have to move.
-                if (applied.Children.Count != 0) return refresh.Fail("a node with children changed");
                 if (parent is null) return refresh.Fail("the root's node changed");
                 refresh.Remade.Add((parent, index, made));
-                // Its children, which it must have none of, as a build would make them.
+                // The new node takes the applied one's children, none for a leaf, and they are walked in
+                // their place under it as the same node's are, below; what they change goes on it. A node
+                // with children (Vesper's pane, named after its folder; a tab named by its label, with a
+                // close button in it) failed the walk, and a navigation in a folder of 1,000 files with a
+                // reader built the tree of 2,105 nodes, about 130 KB. A leaf that has children now (a
+                // button named by the text inside it whose icon is a node now, and so its text too:
+                // Vesper's path button in an archive) gets them as a build makes them, all new; it failed
+                // the walk. A bridge keys its objects by id, so the node's object takes the new node and
+                // tells the change, as for a build.
+                made.CarryChildrenOf(applied, parent);
+                var appliedScroll = applied.ScrollOffset;
                 return MatchChildren(element, made, isRoot, focusManager, ChildPlace(element, place),
-                    ClipForChildren(element, isRoot ? place.OnScreen(box) : clip, place), currAbove, currAbove,
-                    refresh, ref childrenMatched, mustBeLeaf: true);
+                    ClipForChildren(element, isRoot ? place.OnScreen(box) : clip, place),
+                    new Point(prevAbove.X + appliedScroll.X, prevAbove.Y + appliedScroll.Y),
+                    new Point(currAbove.X + offset.X, currAbove.Y + offset.Y), refresh, ref childrenMatched,
+                    was: applied);
             }
         }
 
@@ -262,16 +280,18 @@ public static partial class AccessibilityTreeBuilder
         return MatchChildren(element, applied, isRoot, focusManager, ChildPlace(element, place),
             ClipForChildren(element, isRoot ? place.OnScreen(box) : clip, place),
             new Point(prevAbove.X + appliedOffset.X, prevAbove.Y + appliedOffset.Y),
-            new Point(currAbove.X + offset.X, currAbove.Y + offset.Y), refresh, ref childrenMatched, mustBeLeaf: false);
+            new Point(currAbove.X + offset.X, currAbove.Y + offset.Y), refresh, ref childrenMatched);
     }
 
     /// <summary>The children of <paramref name="node"/>, as <see cref="BuildChild"/> makes them for
     /// <paramref name="element"/>: its content, its items, none when its name is the text inside it,
     /// or its element children's nodes.</summary>
-    /// <param name="mustBeLeaf">The node is one made again: a build would make no children for it.</param>
+    /// <param name="was">For a node made again that carries the applied one's children
+    /// (<see cref="AccessibilityNode.CarryChildrenOf"/>): the applied one, which a child removed has for
+    /// its parent, as a diff takes it from the previous tree.</param>
     private static bool MatchChildren(Element element, AccessibilityNode node, bool isRoot, FocusManager? focusManager,
         Place place, Rect clip, Point prevAbove, Point currAbove, LayoutRefresh refresh, ref int childrenMatched,
-        bool mustBeLeaf)
+        AccessibilityNode? was = null)
     {
         if (element is IAccessibleContentSource content)
         {
@@ -280,7 +300,6 @@ public static partial class AccessibilityTreeBuilder
             float scale = content.AccessibleContentScale > 0 ? content.AccessibleContentScale : 1f;
             var roots = content.AccessibleContent;
             if (roots.Count == 0) return node.Children.Count == 0 || refresh.Fail("content");
-            if (mustBeLeaf) return refresh.Fail("content");
             return MatchContent(AccessibleOwnerSlots.SlotOf(element.Id), roots, node, place.Unscrolled(box),
                 place.OnScreen(box), scale, clip, prevAbove, currAbove, refresh);
         }
@@ -292,19 +311,22 @@ public static partial class AccessibilityTreeBuilder
             {
                 if (!node.IsVirtualItemContainer || node.Children.Count != 0) return refresh.Fail("a list's items");
                 // Its items' number and selection are the node's own: told as a diff tells them, and
-                // put in place. A node made again carries them as they are.
-                if (!mustBeLeaf) ServedItemChanges(node, items, refresh.Changes, refresh.Served);
+                // put in place. A node made again carries them as they are, and so finds nothing here.
+                ServedItemChanges(node, items, refresh.Changes, refresh.Served);
                 return true;
             }
             if (node.IsVirtualItemContainer) return refresh.Fail("a list's items");
-            if (mustBeLeaf && items.ItemCount != 0) return refresh.Fail("a list's items");
-            return MatchItems(element, items, node, open, focusManager, place, clip, prevAbove, currAbove, refresh);
+            return MatchItems(element, items, node, was ?? node, open, focusManager, place, clip, prevAbove, currAbove, refresh);
         }
         if (node.ItemSource is not null || node.IsVirtualItemContainer) return refresh.Fail("a list's items");
-        if (!isRoot && ConsumesTextContent(element)) return node.Children.Count == 0 || refresh.Fail("children");
-        // The window's root node has the overlays' parts after its element's children.
-        bool windowRoot = node.Parent is null && !mustBeLeaf;
-        var kids = new ChildWalk(node, windowRoot ? childrenMatched : node.Children.Count, mayChange: !mustBeLeaf);
+        // The window's root node has the overlays' parts after its element's children (a node made
+        // again has its parent already, CarryChildrenOf).
+        bool windowRoot = node.Parent is null;
+        var kids = new ChildWalk(node, windowRoot ? childrenMatched : node.Children.Count, was ?? node);
+        // Named by the text inside it, and none of its children have nodes then: those it had are gone
+        // (a button whose icon went, out of an archive), as a diff removes them.
+        if (!isRoot && ConsumesTextContent(element))
+            return node.Children.Count == 0 || EndChildren(ref kids, refresh);
         if (!MatchElementChildren(element, ref kids, focusManager, place, clip, prevAbove, currAbove, refresh)
             || !EndChildren(ref kids, refresh))
             return false;
@@ -319,18 +341,19 @@ public static partial class AccessibilityTreeBuilder
     /// children not found yet are in <see cref="LayoutRefresh.Unfound"/> then, and each one found is
     /// looked for there, as a diff pairs a node's children by their ids from the first difference on.
     /// </summary>
-    private struct ChildWalk(AccessibilityNode node, int count, bool mayChange)
+    private struct ChildWalk(AccessibilityNode node, int count, AccessibilityNode was)
     {
         /// <summary>The node whose children these are.</summary>
         public readonly AccessibilityNode Node = node;
 
+        /// <summary>The node as the applied tree has it: <see cref="Node"/>, or the one a node made again
+        /// replaces, whose children it carries until the refresh is applied
+        /// (<see cref="AccessibilityNode.CarryChildrenOf"/>). A child removed has it for its parent.</summary>
+        public readonly AccessibilityNode Was = was;
+
         /// <summary>How many of its applied children are its element's: all but the overlays' parts
         /// under the window's root node.</summary>
         public readonly int Count = count;
-
-        /// <summary>False for a node made again for a change of its own: a build makes no children
-        /// for one, and the walk finds none in place.</summary>
-        public readonly bool MayChange = mayChange;
 
         /// <summary>The applied child expected next, while the children are the applied ones in order.</summary>
         public int Next;
@@ -407,10 +430,9 @@ public static partial class AccessibilityTreeBuilder
 
     /// <summary>The children of <paramref name="kids"/>' node are not the applied ones in order from
     /// its next on: those before it are its first children as a build makes them, and the rest are
-    /// each looked for by id. False when the node may have no other children.</summary>
+    /// each looked for by id. False when two of the applied children have one id.</summary>
     private static bool BeginChange(ref ChildWalk kids, LayoutRefresh refresh)
     {
-        if (!kids.MayChange) return refresh.Fail("children");
         var nodes = kids.Node.Children;
         var pending = refresh.Pending;
         kids.Start = pending.Count;
@@ -468,7 +490,7 @@ public static partial class AccessibilityTreeBuilder
         {
             var gone = nodes[i];
             if (!unfound.Remove(gone.ElementId)) continue;   // found
-            was ??= node.ChildrenStandIn();
+            was ??= kids.Was.ChildrenStandIn();
             RemoveRecursive(refresh.Removed, gone, was);
         }
         if (kids.Reordered) refresh.Reordered.Add(node);
@@ -545,8 +567,10 @@ public static partial class AccessibilityTreeBuilder
     /// them but what the row <paramref name="open"/> holds. An item's id is its place: items added to
     /// the list's end are new nodes, made as a build makes them, and those gone from it are removed,
     /// as a diff tells them.</summary>
-    private static bool MatchItems(Element list, IAccessibleItemSource source, AccessibilityNode listNode, ItemRow open,
-        FocusManager? focusManager, Place place, Rect clip, Point prevAbove, Point currAbove, LayoutRefresh refresh)
+    /// <param name="wasList">The list's node as the applied tree has it: <paramref name="listNode"/>, or the one
+    /// it was made again from (<see cref="ChildWalk.Was"/>).</param>
+    private static bool MatchItems(Element list, IAccessibleItemSource source, AccessibilityNode listNode, AccessibilityNode wasList,
+        ItemRow open, FocusManager? focusManager, Place place, Rect clip, Point prevAbove, Point currAbove, LayoutRefresh refresh)
     {
         int count = source.ItemCount;
         var nodes = listNode.Children;
@@ -584,7 +608,7 @@ public static partial class AccessibilityTreeBuilder
             PlaceInPlace(node, unscrolled, offscreen, prevAbove, currAbove, refresh);
             if (!holdsRow) continue;
             // The row under it as a build makes it: the one open, none when it closed.
-            var kids = new ChildWalk(node, node.Children.Count, mayChange: true);
+            var kids = new ChildWalk(node, node.Children.Count, node);
             if (i == open.Item && !MatchChild(open.Element!, ref kids, focusManager, place, clip, prevAbove, currAbove, refresh))
                 return false;
             if (!EndChildren(ref kids, refresh)) return false;
@@ -614,7 +638,7 @@ public static partial class AccessibilityTreeBuilder
         AccessibilityNode? was = null;
         for (int i = kept; i < nodes.Count; i++)
         {
-            was ??= listNode.ChildrenStandIn();
+            was ??= wasList.ChildrenStandIn();
             RemoveRecursive(refresh.Removed, nodes[i], was);
         }
         AccessibilityNode[] items = count == 0 ? [] : new AccessibilityNode[count];

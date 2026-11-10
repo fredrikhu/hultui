@@ -363,4 +363,114 @@ public class A11yFocusMoveTests
         Assert.True(rig.Focused(fields[1]));
         Assert.Equal([$"state-changed:focused {Id(fields[0])} 0", $"state-changed:focused {Id(fields[1])} 1"], rig.Signals.Lines);
     }
+
+    // ── Finding the two nodes ──
+
+    private static int Count(AccessibilityNode node)
+    {
+        int n = 1;
+        foreach (var child in node.Children) n += Count(child);
+        return n;
+    }
+
+    private static IEnumerable<AccessibilityNode> Walk(AccessibilityNode node)
+    {
+        yield return node;
+        foreach (var child in node.Children)
+            foreach (var n in Walk(child)) yield return n;
+    }
+
+    /// <summary>Labels, two to a row, one after the other.</summary>
+    private static Element Rows(int count)
+    {
+        var rows = new Element[count];
+        for (int i = 0; i < count; i++)
+            rows[i] = Flex.Row(gap: 8).FlexShrink(0).Children(TextB.New($"{i}"), TextB.New($"Row {i}"));
+        return Flex.Column().FlexShrink(0).Children(rows);
+    }
+
+    [Fact]
+    public void AMove_FindsBothNodesDownTheirElements_NotByAWalkOfTheTree()
+    {
+        // Ten fields after 2,000 rows in the tree's order, six boxes deep, as Meridian's request pane
+        // comes after its endpoint map. A move found the node that lost the focus and the one that took
+        // it by a walk of the tree from its start: past 4,000 nodes here, as past 6,072 of Meridian's
+        // 6,073 with its map at 2,000 endpoints (plan 17 round 10). Down each field's ancestors only the
+        // children of the nodes on the way are looked at: the root's, a scroll view and the ten fields.
+        using var session = HeadlessSession.Create(800, 600);
+        var bridge = session.Window.InstallAccessibilityBridge();
+        var fields = new TextInputElement[10];
+        for (int i = 0; i < fields.Length; i++) fields[i] = TextInput.New($"value {i}");
+        Element deep = Flex.Column(gap: 4).Children(fields);
+        for (int d = 0; d < 6; d++) deep = Flex.Column().Children(deep);
+        session.Window.SetRoot(Flex.Row().Children(ScrollView.New().Children(Rows(2_000)), deep));
+        session.PumpFrames(2);
+        session.Window.PressKey(KeyCode.Tab);
+        session.PumpFrame();
+        var window = session.Window.Window;
+        Assert.Same(fields[0], window.FocusedElement);
+        var tree = bridge.CurrentTree!;
+        Assert.True(Count(tree) > 4_000, $"{Count(tree)} nodes");
+        Assert.Equal(11, tree.Children.Count);
+        int trees = session.Window.AccessibilityTreesBuilt;
+
+        for (int i = 1; i < fields.Length; i++)
+        {
+            long visited = window.AccessibilityFocusNodesVisited;
+            session.Window.PressKey(KeyCode.Tab);
+            visited = window.AccessibilityFocusNodesVisited - visited;
+
+            Assert.Equal(fields[i].Id, bridge.FocusedNode?.ElementId);
+            Assert.Same(tree.Children[i + 1], bridge.FocusedNode);
+            Assert.Equal([fields[i].Id], Walk(tree).Where(n => n.IsFocused).Select(n => n.ElementId));
+            // Each of the two among the root's eleven children: no more than 2 × 11.
+            Assert.InRange(visited, 2, 22);
+            session.PumpFrame();
+        }
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+    }
+
+    [Fact]
+    public void AMove_OntoANodeItsElementsAncestorsDoNotLeadTo_FindsItByAWalk_AndTellsItAtOnce()
+    {
+        // The group takes a name, and so a node of its own, in the handler that moves the focus into it:
+        // the applied tree, built before, has the field's node among the root's children, and there is no
+        // node of the group on the way down the field's ancestors. A walk of the tree finds the field's,
+        // and the bridge is told before the frame, not by the refresh the name asks for.
+        using var session = HeadlessSession.Create(800, 600);
+        var bridge = session.Window.InstallAccessibilityBridge();
+        var fields = new[] { TextInput.New("a"), TextInput.New("b") };
+        var group = Flex.Column(gap: 4).Children(fields);
+        var into = Button.New("Into the group");
+        into.OnClick(_ =>
+        {
+            group.AccessibleName = "Group";
+            fields[1].Focus();
+        });
+        session.Window.SetRoot(Flex.Column().Children(ScrollView.New().Height(300).Children(Rows(150)), into, group));
+        session.PumpFrames(2);
+        var window = session.Window.Window;
+        var tree = bridge.CurrentTree!;
+        Assert.DoesNotContain(Walk(tree), n => n.ElementId == group.Id);
+        long visited = window.AccessibilityFocusNodesVisited;
+
+        session.Window.Click(into);
+
+        visited = window.AccessibilityFocusNodesVisited - visited;
+        var focused = Assert.IsType<AccessibilityNode>(bridge.FocusedNode);
+        Assert.Equal(fields[1].Id, focused.ElementId);
+        Assert.True(focused.IsFocused);
+        Assert.Same(tree, focused.Parent);
+        // The walk went past the 300 labels before the field.
+        Assert.True(visited > 300, $"{visited} nodes looked at");
+
+        // The name the frame walks in place (plan 17 round 10 step 10): the group's new node, with the
+        // fields under it, and no tree.
+        int trees = session.Window.AccessibilityTreesBuilt;
+        session.PumpFrame();
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+        var node = Walk(bridge.CurrentTree!).Single(n => n.ElementId == fields[1].Id);
+        Assert.Equal(group.Id, node.Parent?.ElementId);
+        Assert.True(node.IsFocused);
+    }
 }

@@ -31,6 +31,10 @@ public class KeptElementsTests
         /// <summary>Another view in the same shape, made without the helper: its cards, keyed as the
         /// shelves' are, are patched onto the shelves' live ones.</summary>
         public bool Other;
+        /// <summary>Another view of another shape, which no card is patched onto: the shelves leave
+        /// the window, and the build asks the helper nothing (as Meridian's tree, built only by the
+        /// Requests view).</summary>
+        public bool Away;
         private int _builds;
 
         public int Builds => _builds;
@@ -40,6 +44,7 @@ public class KeptElementsTests
         public override Element Build()
         {
             _builds++;
+            if (Away) return TextB.New("another view").FontSize(11f);
             if (!Other) Cards.Begin(_builds);
             var page = Flex.Column(gap: 8);
             for (int s = 0; s < 2; s++)
@@ -249,6 +254,67 @@ public class KeptElementsTests
 
         Assert.Equal(100, shelves.Made);
     }
+
+    /// <summary>The helper holds its elements weakly: the window holds what it shows, and an element
+    /// is handed back only while it is there. Held strongly, the cards of a view another view replaced
+    /// kept that whole view alive through their parents, as Meridian's request tree kept the Requests
+    /// view behind History (plan 17 round 10). Coming back makes every card, as it did.</summary>
+    [Fact]
+    public void TheCardsOfAViewThatLeft_AreNotKeptAlive()
+    {
+        var (session, shelves) = Host();
+        using var held = session;
+        var page = WeakCardAndPage(shelves, 3, out var card);
+
+        Step(session, shelves, () => shelves.Away = true);
+        Collect();
+
+        Assert.False(card.IsAlive, "a card of the view that left is still alive");
+        Assert.False(page.IsAlive, "the view that left is still alive");
+        Assert.Null(shelves.Cards.Live("c3"));
+        int made = shelves.Made;
+        Step(session, shelves, () => shelves.Away = false);
+        Assert.Equal(made + 8, shelves.Made);
+        Assert.Equal("card 3", Card(shelves, 3).AccessibleName);
+    }
+
+    /// <summary>A card still in the window lives through a collection and is handed back: what holds
+    /// it is the window, not the helper.</summary>
+    [Fact]
+    public void ACardInTheWindow_IsHandedBackAfterACollection()
+    {
+        var (session, shelves) = Host();
+        using var held = session;
+        Step(session, shelves, () => shelves.Cursor = 1);
+        var cards = WeakCards(shelves);
+        Collect();
+        int made = shelves.Made;
+
+        Step(session, shelves, () => shelves.Cursor = 5);
+
+        Assert.Equal(made + 2, shelves.Made);
+        Assert.All(Enumerable.Range(0, 8), i => Assert.Same(cards[i].Target, Card(shelves, i)));
+        Assert.Same(Card(shelves, 5), shelves.Cards.Live("c5"));
+        Assert.True(Card(shelves, 5).Outline.Width > 0);
+    }
+
+    private static void Collect()
+    {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static WeakReference WeakCardAndPage(Shelves shelves, int i, out WeakReference card)
+    {
+        card = new WeakReference(Card(shelves, i));
+        return new WeakReference(shelves.Mount().Children[0]);
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static WeakReference[] WeakCards(Shelves shelves) =>
+        Enumerable.Range(0, 8).Select(i => new WeakReference(Card(shelves, i))).ToArray();
 
     /// <summary>Cards that left the window are let go as more are made: a walk through many keeps
     /// about what is on screen.</summary>

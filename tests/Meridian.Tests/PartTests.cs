@@ -380,6 +380,47 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    /// <summary>Another view lets the Requests view go (plan 17 round 10). The tree's kept rows hold
+    /// their elements weakly (KeptElements), and a build that shows no response panel or URL field
+    /// empties the refs into them: the open response tab, the body, the URL field. Each of them held
+    /// the whole view through its parents (the tree, the editor, the response and its body) behind
+    /// History. Back on Requests the view is what a full build makes.</summary>
+    [Fact]
+    public void AnotherView_LetsTheRequestsViewGo()
+    {
+        Hosted(fx =>
+        {
+            var s = fx.Session;
+            Click(fx, "req-two");
+            Click(fx, "send");
+            s.PumpUntil(() => s.Window.FindByAutomationId("response-body") is not null, Wait);
+            s.PumpFrames(3);
+            Click(fx, "url-display");   // the URL field, being edited
+            var (row, body, url) = WeakRequestsView(fx);
+
+            Switch(fx, KeyCode.Digit4);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            Assert.False(row.IsAlive, "a tree row outlived the Requests view");
+            Assert.False(body.IsAlive, "the response body outlived the Requests view");
+            Assert.False(url.IsAlive, "the URL field outlived the Requests view");
+
+            Switch(fx, KeyCode.Digit1);
+            s.PumpUntil(() => s.Window.FindByAutomationId("response-body") is not null, Wait);
+            s.PumpFrames(3);
+            Assert.True(HasText(Part(fx, "response-right"), "✓ 200 OK"));
+            Assert.True(Lit(TreeRow(fx, "req-two")));
+            AssertPartsAreAFullBuild(fx, "back on Requests");
+        });
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static (WeakReference Row, WeakReference Body, WeakReference Url) WeakRequestsView(Fixture fx) =>
+        (new(TreeRow(fx, "req-two")), new(fx.Session.Window.FindByAutomationId("response-body")!.Element),
+         new(fx.Session.Window.FindByAutomationId("url-input")!.Element));
+
     /// <summary>A response: it reaches the panel when the send ends, its body when the worker has
     /// formatted it, and the panel's own controls — the find bar, the tabs, pretty and raw —
     /// rebuild the panel alone, never the window; a find step not even the panel.</summary>
@@ -568,6 +609,35 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    /// <summary>A toast that comes builds the parts too, as the change it reports may be theirs; one
+    /// that goes builds the view alone, as the toast is the window's (plan 17 round 10: 271.3 →
+    /// 213.0 KB, flash to gone, at 25 requests).</summary>
+    [Fact]
+    public void AToastGoing_BuildsTheViewAndNoPart()
+    {
+        Hosted(fx =>
+        {
+            var s = fx.Session;
+            bool Shown() => Descendants(Root(s)).Any(e => e.Key == "toast");
+            int parts = fx.App.PartBuilds;
+            typeof(MeridianApp).GetMethod("Flash", BindingFlags.NonPublic | BindingFlags.Instance, [typeof(string)])!
+                .Invoke(fx.App, ["Saved get-ok.req"]);
+            s.PumpFrames(2);
+            Assert.True(Shown());
+            Assert.True(fx.App.PartBuilds > parts, "a toast that came built no part");
+
+            int builds = fx.App.Builds;
+            parts = fx.App.PartBuilds;
+            s.PumpFrame(TimeSpan.FromSeconds(2.7));     // the hold ran out; fading
+            s.PumpFrame(TimeSpan.FromMilliseconds(300)); // gone
+            s.PumpFrames(2);
+            Assert.False(Shown());
+            Assert.True(fx.App.Builds > builds, "the toast went without a build");
+            Assert.Equal(0, fx.App.PartBuilds - parts);
+            AssertPartsAreAFullBuild(fx, "after the toast");
+        });
+    }
+
     /// <summary>The environment: the title bar's chip follows a switch.</summary>
     [Fact]
     public void TheEnvironmentChip_FollowsASwitch()
@@ -707,7 +777,7 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
 
     /// <summary>What a subtree shows: element kinds, keys, text, field and body text, the body's
     /// spans, colours, tooltips, names, opacity and enabled state, in tree order.</summary>
-    private static string Sig(Element e)
+    internal static string Sig(Element e)
     {
         var sb = new StringBuilder();
         void Walk(Element el, int depth)
@@ -787,7 +857,7 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
         Assert.Equal((root.X, root.Y, root.Width, root.Height), (host.X, host.Y, host.Width, host.Height));
     }
 
-    private static Element Root(HeadlessSession session) =>
+    internal static Element Root(HeadlessSession session) =>
         (Element)typeof(HultUI.Window).GetField("_root", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(session.Window.Window)!;
 

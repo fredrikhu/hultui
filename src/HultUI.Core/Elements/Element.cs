@@ -861,6 +861,17 @@ public abstract class Element
         return this;
     }
 
+    /// <summary>Registers a ref of the framework's own, as <see cref="WithRef{T}"/> does a
+    /// <see cref="Ref{T}"/>: it points at this element now and at the live one after a patch.
+    /// <c>KeptElements</c>' weak refs.</summary>
+    internal Element WithRef(IRef r)
+    {
+        _refs ??= [];
+        _refs.Add(r);
+        r.SetTarget(this);
+        return this;
+    }
+
     // ──── Events ────
     /// <summary>
     /// This element's handlers for every kind of event, in one array, in the order they were

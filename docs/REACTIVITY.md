@@ -218,6 +218,14 @@ which write the toast on screen. It ran on every step until plan 17: one toast r
 23 times, 4.5 MB of garbage (Meridian 1.5 MB, Aperture 3.1 MB); now twice, 0.39 MB (0.13,
 0.27; headless, JIT, the real loop).
 
+An app that keeps parts (below) hands it a callback that builds them only when a toast comes:
+`new ToastHost(() => { if (_toasts!.IsShowing) MarkDirty(); else MarkViewDirty(); })`. A
+toast that comes may report a change a part shows, and the code that flashed it may count on that
+build; one that goes takes away only the window's own strip, which the view's build places.
+Junction, Meridian and Aperture do this (plan 17 round 10, step 5): a toast from flash to gone
+over Junction's Changes 365 → 227 KB, part builds 8 → 4; Meridian 271 → 212 KB; Aperture's Home
+149 → 90 KB (headless, JIT).
+
 ### A drag rebuilds once per frame
 
 A pointer moves far more often than a window draws: a 1,000 Hz mouse sends about sixteen
@@ -235,6 +243,54 @@ Every other pointer-move handler still hears every move, an app's own on the sam
 included. A handler of yours that calls `MarkDirty()` from a `PointerMoveEvent` rebuilds on
 every move: build a drag on these controls where you can, or keep it out of `Build()` (write
 the live element through a `Ref<T>`).
+
+### A splitter's drag can move the pane and build nothing
+
+Once a frame is still a build a frame, and the build is the view or the part the pane is in:
+Meridian's response pane with a 2,000-line body was built again on every move of its handle,
+and Junction's view beside its file list. What a move changes is the pane's size, which is
+layout's business. While `IsDragging`, give the pane on screen the size through a `Ref` and call
+`MarkLayoutDirty()`; let the press and the release build as before (ELEMENTS.md, "PaneSplitter",
+has the code). Plan 17 round 10 step 13, headless, a move and two frames, JIT (NativeAOT within
+2 %): Meridian 38.8 → 2.5 KB a move with the body (10.9 → 0.1 with none, 36.4 → 0.1 at the
+bottom), Junction's Changes 42.0 → 2.4 and Commit view 65.2 → 5.5; part or view builds a move
+1 → 0, elements made 32–51 → 0.
+
+What to look at before doing it:
+
+- **Everything a build reads from the size.** Junction's diff read its pan's viewport in the
+  build, and a build reads the layout of the frame before it (next section). Meridian's room for
+  the pane (`PaneSplitter.SetMax`) is worked out the build's way on each move.
+- **The press.** It builds: its handler holds the handle element it was built with, which a patch
+  left behind, so the lit handle comes from a build. It moves nothing, which tells it from a move:
+  the pane on screen already has the size.
+- **What is measured at the size.** Junction's wrapped diff lines, and a review's cards, are
+  measured at the code column's width; while they are on, a move builds as it did.
+- **An offset held at an edge.** Junction's diff panned to the end of its longest line keeps the
+  end at the column's edge, so a move that widens the column clamps the offset and the rows are
+  built at it: those moves still build (14 of the 31 that moved the size in the scenes, which
+  start panned to the end).
+- **Test it against a full build at every move,** in the same process (Meridian shows the
+  response's time, which differs between runs): pixels, the reader's tree, elements, focus and the
+  sizes, then a forced full build, then the same again. 157 steps of drags (Changes, Commit,
+  Meridian beside and under the editor; panned, split, wrapped, arrow keys) and resizes: none
+  differ, with a reader or without. With the full build only at the releases and keys, so that
+  moves add up, two releases in the Commit view differ in the handle's hover tint, and they do
+  the same when every move builds, as before.
+
+### What a build reads from layout is a frame old
+
+A build runs before the layout of its frame. A `Layout` box read in `Build()` is the frame
+before's (a new element's is empty), and a window resize, or a size written on the live tree,
+lays out again with no build at all. A number a build keeps from such a box goes stale until
+something builds: Junction's diff pan took its viewport from the window at the first build
+(1,298 px for a 696 px column) and from the old width after each resize, so the sideways wheel
+stopped short of the end of the longest line (361 of 963 px at the start) and the scrollbar's
+thumb kept its size. Read the width after the frame (`Window.RequestPostFrameCallback`, asked
+for after a build and on `Window.Resized`) and give it to whatever shows it in place:
+`HorizontalPan.ViewportWidth` assigned then moves the thumb on screen with no build. Build only
+when the answer changes what the build makes (the scrollbar coming or going, an offset the
+cells were built at). Junction's scenes, 125 steps: 67 differed from a full build, none now.
 
 ### A background callback that fires once per item posts one build at a time
 
@@ -471,6 +527,12 @@ Three things decide whether it stays right and stays cheap:
   change nothing the parts show — selection moves, cursors, typing in a field of the view, search
   boxes — call `MarkViewDirty()` or `RerenderView()`, which do not. Forgetting to opt out costs a
   build; forgetting to opt in shows a stale toolbar, so make the safe one the default.
+  A dialog splits in two (Junction, round 10 step 8): opening it and closing it without acting
+  (Escape, Cancel, a click beside it) change only the view, but a confirm runs whatever the card
+  was for, which may be the chrome's (a branch checked out, an account signed out), so the confirm
+  keeps the full build whatever its action marks. The view-only clicks there — opening and
+  cancelling a dialog, closing a popover with Escape, the search keys, lines picked for staging,
+  folders opened and closed — each saved the three chrome parts, 123–137 KB a click.
 - **The host takes the root's place in the layout.** `Place()` returns the `ComponentHost`, an
   element between the parent and the part's root. Give it what the root had as a flex item
   (`FlexShrink(0)` for a fixed bar, so a crowded row cannot squeeze it), and give a root that
@@ -543,6 +605,21 @@ builds only when it makes its environment unsaved, the one thing the view shows 
 cell. That table had cost one `TextInput` per cell and a keyring read per secret on every
 character: 312 KB at 3 environments × 12 keys, 1.2 MB at 5 × 40, then 2.3–5.4 KB (round 9,
 step 8).
+
+The other apps follow the same rule (round 10, step 5). What reads a field decides what a
+character builds:
+- **Only the action that takes the value.** Junction's prompts (`OpenDialog`) and its rebase
+  reword are read on Enter, by the validator and the confirm, and on Save: a character writes the
+  field's value and builds nothing. It had built the window, chrome too: 194 KB a character over
+  Changes, 155 over History, 333 under the rebase card; now 0.6–1.4 KB.
+- **Whether the field holds anything.** Aperture's issue reply and problem report turn Send on
+  when they do (and Resolve says "Reply and resolve"): compare before and after, and build the
+  view when it flips. 135 → 2.3 KB a character in the reply, 100 → 0.9 KB in the report.
+- **The view, on every character.** Junction's add-repository folder (its hint, preview and
+  button, and the folder check that lands after) and the merge requests' filter (the rows kept)
+  still build the view, with `MarkViewDirty`: the chrome shows nothing of a form. The folder went
+  from 472 to 195 KB a character (the check's landing had built the chrome a second time), the
+  filter from 222 to 92.
 
 **A selection a list and one panel show needs neither the window nor the view.** History's list
 draws its own selection, and the only other thing that shows it is the archived send beside the
@@ -850,9 +927,11 @@ is equal, and whether it is selected; the click captures that endpoint, so a kep
 row made now would. The order, the headings, the keys and the counts are worked out once a map, since a
 map is never changed (a send makes a new one). Two lessons:
 
-- **Let the kept elements go when the view is not built.** `KeptElements` holds the live elements, so a
-  map of 2,000 rows left for another view would stay alive behind it, which a test already guarded
-  against (a still pointer had done the same). The app's build forgets the rows when it made none.
+- **Let the kept elements go when the view is not built.** `KeptElements` held the live elements, so a
+  map of 2,000 rows left for another view would have stayed alive behind it, which a test already guarded
+  against (a still pointer had done the same). The app's build forgets the rows when it made none. Since
+  round 10 the helper holds its elements weakly anyway (see "A ref into a view keeps the whole view",
+  below); forgetting still lets go of the states.
 - **What is left is the list itself.** The build still walks every line, asks for each row and hands
   the list its children: about 35 B an endpoint a click, against 4.5 KB.
 
@@ -865,6 +944,64 @@ over another row, a scrolled map, sends folded in, an observed row, the observed
 and back) the pixels, the reader tree and focus match a build that keeps nothing. Each row now tells a
 reader whether it is the selected one (`AccessibleSelected`).
 
+What was left went in round 10, step 11: the map is now a virtual list of its lines (item rows, ELEMENTS.md
+"A scroll view of rows becomes a list"), so a build patches the list rather than a column of every row,
+and a hover move, a wheel notch and a drawn frame hit-test and cull the rows on screen. At 600 / 2,000
+endpoints a click allocates 77.3 / 124.0 → 51.5 / 59.9 KB and visits 1,847 / 6,131 → 116 elements in
+hit tests, a hover move 618 / 2,046 → 41, and the map holds 2,488 / 8,230 → 168 / 183 KB of the heap.
+Then the click stopped building the view: only the list and the detail beside it show the selection,
+so the detail became a part of its own (as History's archived send is, "Keep what a key does not
+change in a child component"), and a click sets the list's `SelectedIndex` through its ref and writes
+the detail's revision. The first selection still builds the view, which places the detail. A click:
+51.5 / 59.9 → 22.2 / 30.6 KB, no build.
+
+**A list that grows a row at a time keeps the rows it has, and builds alone** (Meridian's Runner,
+round 10 step 4). A run adds a result row as each request answers, and built the whole window for it
+with every row again: a run of n results made about n²/2 rows, 7.3 KB each, the list 1,467 KB of a
+build at 200 requests. Each row now comes back by its request's path (a run runs a request once), its
+state the result (a record nothing changes), its place and the scale; a run that starts over lets them
+all go. That left about 90 KB a result for the rest of the window — the scope rail, the title bar and
+the rail of views — none of which shows a result. The progress line, the list and the summary are now
+a part with a revision of their own (see "Keep what a key does not change in a child component"),
+which a result writes: about 20 KB a result, and a run going on behind another view builds nothing
+there. **Number the builds of a part's kept rows by the part's own builds**: numbered by the window's,
+every build the part made alone would have looked like a gap, and nothing would be handed back. A run
+of 200 (headless, the server waiting 20 ms a send, JIT; the rail's counts, taken from the scan since,
+took most of it: "What a build shows of files comes from what was read already", below): 1,799,085 → 24,302 KB a run, GCs 107/19/2 → 1/0/0, MeridianApp builds 202 → 2; what is left is
+the run's own sends. At every checkpoint of a run of 50 and of 200 the pixels and the reader tree match
+a build that keeps no row, and the trees the old build's.
+
+**A plain list the window builds keeps its rows, and a cursor key moves the ring on them** (Vesper's
+Synchronize, round 10 step 7). Synchronize puts every row in a plain scroll view, and each Up or Down
+built the window, both parts and every row; each row also found its place for its click in a fresh
+filtered copy of the rows shown, so a key was O(rows²) in bytes. The build now passes the place from its
+loop and keeps each row by its path (its state the pair, its direction and whether the cursor is on it;
+the shape the row height and the theme), and a cursor key moves the ring on the two live rows with no
+build, as Brief does, and scrolls the cursor's row into view by its place (`ScrollRangeIntoView(index ×
+row height)`: every row is one height, so nothing is read back). Three lessons:
+
+- **The cursor's look can reach into the row.** An Equal row draws its texts at 55 % unless the cursor
+  is on it, so the move sets its seven texts' colours too. `TextColor` is an inherited style, which a
+  write on a live element does not mark (`MarkStyleDirty`), and the ring's 1 px border moves the cells
+  (`MarkLayoutDirty`). One function draws the look for the build and for the move.
+- **Set the role to tell the selected state with no tree.** A clickable row is read as a button by
+  inference, and the window marks a selected state on its node in place only for a role the app set. The
+  row sets `Button` and says selected or not on every row, so a key tells a reader the row left and the
+  row reached, with no tree; the reader's tree is what it was, with the selected state added.
+- **A handler looks up the place when it runs.** A kept row may stand elsewhere at its next click
+  ("Show equal" moves the rows after an Equal one), so the click captures the pair and finds its place
+  then.
+
+Headless, 1240×820, 80 Down/Up keys at a 60 ms pace with their frames, UI-thread KB a key, NativeAOT
+(JIT): 60 files (40 rows) 453.7 → 0.4 (422.6 → 0.4); 300 files (200 rows, 1,886 elements) 2,568.5 → 0.4
+(2,054.2 → 0.4); 3,000 files (2,000 rows) 81,102 → 0.4 (47,962 → 0.4), GCs per 80 keys 451/262/66 →
+0/0/0; a window and two parts built a key → none; with a reader 0.9–1.0 KB, 0 trees. The place from the
+loop alone took 300 files to 1,715.9 KB and 3,000 to 16,444. The reveal costs at 3,000 files 1.2 → 1.7 ms
+a key (min; the screen of rows a scroll brings in), against 87 ms before. At every step the window, the
+reader's tree and the pixels match a build that keeps no row. The suite pins it: `component/cursor key
+over a plain 200-row list built through the root, every row made` against `…, rows kept` (1,605 → 50 KB
+a key, 200 → 2 rows made).
+
 A column whose cells are all kept is left with no children by the time the reconciler reaches
 it, since the build moved every one into its new tree. Until round 5 those came back one by one,
 each marking the column's structure, so with a reader listening every key built the whole
@@ -872,6 +1009,75 @@ accessibility tree; now they come back as they were and mark nothing (Brief with
 files: 300.6 → 230.2 KB a key, 1.00 → 0 trees; Reel's player, alone in its container, 5.8 → 2.0
 KB a build). The same elements in the same order is the rule: a column handed back in another
 order, or with a new cell, marks its structure as any change does.
+
+### A ref into a view keeps the whole view
+
+An element knows its parent, and a subtree the reconciler removes keeps its links inside, so whatever
+holds one element of a view that left the window holds all of it: every row, every text, the pictures.
+Nothing on screen shows it; only the heap does. A `Ref<T>` field is the usual holder, since it keeps the
+element it last pointed at until something sets it again; a list a build fills and keeps is the other.
+Plan 17 round 10 found five behind the view that replaced theirs, each from a change that kept elements
+for speed:
+
+- **Empty a ref in the builds that do not show its element.** Meridian's build empties the response
+  panel's refs (the open tab, the body) when it placed no panel, as it already did the send's elapsed
+  readout, and the URL field's at its start, since only that build makes the field and sets it again.
+  Aperture's build lets go of the library grid's ref when it shows another view. Before, each of them kept
+  the Requests view or the library behind History, Environments or Settings.
+- **Where views share a ref, let go once the build is done.** Vesper's cursor ref is the row, cell or tile
+  of whichever view draws the cursor, so no one view can empty it. `OnAfterBuild` lets go of it, and of
+  Brief's scroll view's, when its element is no longer in the window (`Element.IsHosted`), after the
+  build's own reads; the build or key that next draws the cursor sets it again.
+- **Keep the value a later build reads, not the element, and give it to the new element.** Aperture's
+  library build sized what it asks for from the old grid's viewport height; that is kept as a number now,
+  so what the next build makes is what it was. Vesper's Brief kept its old scroll view's offset the same
+  way and made its columns for it, but the build that brings Brief back makes a new scroll view, which
+  opened at the start, and every column in view was blank (round 10). The build now sets the kept offset
+  on the new scroll view, which keeps an offset set before its first layout (ELEMENTS.md, section 6),
+  and makes the columns for it: Brief comes back where it was left. Before emptying a ref, look for
+  what reads it between builds (a handler, a post-frame callback, a timer, the next build).
+- **Empty a scratch list when you are done with it.** Aperture's Home reused one list of a shelf's cards
+  from shelf to shelf. Full after the build, it held the last shelf's cards, and through them the whole
+  Home that build made, while Home was on screen (a twin tree of 250 KB at five shelves) and behind every
+  other view after it.
+- **`KeptElements` holds its elements weakly** (round 10). An element is handed back only while the window
+  holds it, so `TryKeep` and `Live` return what they did. Held strongly, Meridian's request tree, which only
+  the Requests view builds, kept that view alive behind every other view from the day its rows were kept
+  (round 9): 1,350 KB of a 5,770 KB heap at 200 requests. The weak ref is the same 24 B object a `Ref` is,
+  made once per key, and one weak GC handle; no build allocates more.
+- **The window lets go of the scroll view a wheel gesture latched to** (round 10). A gesture stays with its
+  scroll view until the next wheel event (LAYOUT.md, "Nesting scroll views"), and that reference kept a view
+  that was wheeled and then left alive until the wheel next turned, anywhere in the window: Meridian's
+  Discovery map behind the Requests view, 8 MB at 2,000 endpoints. Now the frame that removes the scroll
+  view lets go of it, as do an overlay that closes with it and a new root. An app has nothing to do; a
+  retention check that wheels before it switches views measured the latch before this, not the app.
+
+To find a holder: take a weak reference to an element of the view, switch views, collect
+(`GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();`), and if it is alive, walk the app's fields
+breadth-first for a path into the old view's tree. To pin a fix, assert the weak reference is dead, and
+take it, and any read of the view, in a `[MethodImpl(MethodImplOptions.NoInlining)]` helper: a value read in
+the test's own frame can keep the element alive (Aperture's grid test did, until its reads moved out).
+
+Headless, full GC and `GC.GetTotalMemory(true)`, the heap after the switch, JIT / NativeAOT:
+
+| View left | Before | After |
+|---|---|---|
+| Meridian Requests, 200 requests, none open → History | 2,364 / 2,161 KB | 1,027 / 874 KB |
+| Meridian Requests, 25 requests, none open → History | 933 / 773 KB | 733 / 585 KB |
+| Meridian Requests, 200 requests, a 239 KB JSON response → History | 12,461 / 12,263 KB | 10,623 / 10,476 KB |
+| Aperture Home, 5 libraries × 20 films → Settings | 1,528 / 1,386 KB | 1,013 / 867 KB |
+| Aperture Home, 8 × 40 → Settings | 1,994 / 1,850 KB | 1,180 / 1,025 KB |
+| Aperture library grid, 600 films → Settings | 1,666 / 1,539 KB | 1,292 / 1,163 KB |
+| Vesper Brief, 400 files → Detail | 1,825 / 1,664 KB | 1,406 / 1,253 KB |
+| Vesper Brief, 3,000 files → Detail | 2,646 / 2,472 KB | 2,214 / 2,062 KB |
+| Meridian Discovery map, 2,000 endpoints, wheeled → Requests (the latch) | 14,283 / 14,037 KB | 6,052 / 5,901 KB |
+| Meridian Discovery map, 600 endpoints, wheeled → Requests (the latch) | 4,314 / 4,127 KB | 1,815 / 1,657 KB |
+| Meridian Discovery map, 60 endpoints, wheeled → Requests (the latch) | 1,122 / 948 KB | 841 / 670 KB |
+| Aperture library grid, 600 films, wheeled → Settings (the latch) | 1,566 / 1,430 KB | 1,300 / 1,164 KB |
+| Aperture Home, 5 × 20, wheeled → Settings (the latch) | 1,295 / 1,158 KB | 1,030 / 894 KB |
+
+The old view was alive before and is collected after in every row. The bytes of a build or a key did not
+move (Meridian's full build at 200 requests 59.4 KB, Home and the grid's keys, Brief's Down and Insert).
 
 ### Keep the index out of a list's item
 
@@ -896,6 +1102,18 @@ moved the rows it shifted, 4–8 made of the ~20 on screen, where it made them a
 view while what it is derived from is the same: Changes made its view (git's answer with the
 stagings in flight applied) again on every call, new lists each time, so each build while git had
 not answered flattened the rows again.
+
+The other half of the rule: keep out of what makes the rows again (`InvalidateRows`) what no row
+reads. A width the rows are laid out at is layout's, and layout follows it without a new row.
+Junction's diff kept the code column's width in the shape it compares, so a split drag or a window
+resize made every diff row on screen again, though only wrapped rows (and the review's cards) are
+measured at it; an unwrapped row shows the width only through the sideways offset, which is in the
+rows' shape by itself and moves when a wider column clamps it. Leaving the width out unless rows wrap
+or the review is on (round 10 step 8; headless, 1440×900, a move or step and two frames, JIT) took a
+split-drag move 159.3 → 42.0 KB (−74 %; NativeAOT 157.2 → 41.2): the 127 rows the move replaced and
+their first layout, render 119.5 → 2.2 KB. A 4 px resize step went 32.1 → 20.3 KB (−37 %). Pixels,
+reader tree and focus are the same at every step of a walk through widths, the pan scrolled and
+clamped, split, wrap, a split drag and a review.
 
 ---
 
@@ -1279,6 +1497,38 @@ The discipline in one line: **`Refresh()` bumps the generation (data changed →
 ### Stable content across reloads
 
 Because `Build()` renders from the cached `Value`, you can keep the previous result on screen while the next one loads instead of blanking to a spinner — gate the placeholder on "have we ever loaded anything" rather than "is a load in flight." Since the result is applied in a single batch, the view swaps from old to new in one frame with no empty state in between.
+
+### What a build shows of files comes from what was read already
+
+A small read in `Build()` does not freeze anything a person would notice; it allocates on every
+build, and a busy view builds often. Meridian's Runner counted the requests of the collection, of
+each folder and of the chosen scope on every build of the view by reading and parsing every request
+file, as a run does: 7.9 MB a build at 200 requests, and a run built the view once a result, 1.8 GB
+a run of 200. The collection's scan had read every file already, and its tree holds each request;
+the counts now come from the tree (36 KB a build). When the snapshot cannot give the old count
+exactly, say what the new one counts: a request file that cannot be read is counted now, and the run
+still leaves it out.
+
+What must be read can be read once a snapshot. The Chain sub-tab read and parsed every request on
+each build of the editor, a key in the URL too: 2.9 MB a key at 200 requests, where the Headers
+sub-tab's key is 8.6 KB. It now keeps each request's node with the scan it was read for, compared by
+reference, and lets them all go when a new scan takes its place. A snapshot that is a new object on
+every change makes the check one comparison, and nothing kept is older than the tree beside it:
+every change to a request file scans the collection again (the watcher, a save, a rename).
+
+```csharp
+private CollectionTree? _nodesOf;   // the scan the nodes were read for
+private readonly Dictionary<string, Chain.Node> _nodes = new(StringComparer.OrdinalIgnoreCase);
+
+private List<Chain.Node> AnalyzeAllRequests()
+{
+    if (!ReferenceEquals(_nodesOf, _tree)) { _nodes.Clear(); _nodesOf = _tree; }
+    // each request: its open tab's document, else _nodes[path], else read, parse and keep
+}
+```
+
+A key in the URL with the Chain sub-tab shown, 200 requests in one chain (headless, NativeAOT):
+3,293 → 117 KB, 8.4 → 1.4 ms, the same pixels.
 
 ---
 

@@ -45,14 +45,17 @@ public class DiscoveryViewTests : IClassFixture<TestHttpServer>, IDisposable
         """;
 
 
+    private MeridianApp _app = null!;
+    private Element _mounted = null!;
+
     private void Hosted(Action<HeadlessSession, MeridianApp> body)
     {
         using var session = HeadlessSession.Create(1600, 900);
         MeridianApp? app = null;
         try
         {
-            app = new MeridianApp(session.Application, session.Window.Window);
-            session.Application.SetRoot(app.Mount());
+            app = _app = new MeridianApp(session.Application, session.Window.Window);
+            session.Application.SetRoot(_mounted = app.Mount());
             app.OpenWorkspace(_root);
             session.PumpFrame();
             session.Window.PressKey(KeyCode.Digit3);
@@ -84,6 +87,35 @@ public class DiscoveryViewTests : IClassFixture<TestHttpServer>, IDisposable
         Assert.True(el != null, $"#{automationId} not found");
         el!.Click();
         session.PumpFrames(2);
+    }
+
+    /// <summary>An element of the map's rows the list has made: only the rows on screen are elements,
+    /// and a reader reads the list's items, not them, so they are found among the elements.</summary>
+    private Element? RowElement(string automationId)
+    {
+        static Element? Find(Element element, string id)
+        {
+            if (element.AutomationId == id) return element;
+            var children = element.Children;
+            for (int i = 0; i < children.Count; i++)
+                if (Find(children[i], id) is { } found) return found;
+            return null;
+        }
+        return Find(_mounted, automationId);
+    }
+
+    /// <summary>The elements of the map's rows the list has made.</summary>
+    private List<Element> RowElements()
+    {
+        var rows = new List<Element>();
+        void Walk(Element element)
+        {
+            if (element.AutomationId?.StartsWith("ep-", StringComparison.Ordinal) == true) { rows.Add(element); return; }
+            var children = element.Children;
+            for (int i = 0; i < children.Count; i++) Walk(children[i]);
+        }
+        Walk(_mounted);
+        return rows;
     }
 
     private string ImportSpec(HeadlessSession session, MeridianApp app)
@@ -160,7 +192,8 @@ public class DiscoveryViewTests : IClassFixture<TestHttpServer>, IDisposable
             session.PumpFrames(2);
 
             Assert.Equal(1, app.Map!.ObservedCount);
-            Assert.NotNull(session.Window.FindByAutomationId("disc-observed-header"));
+            Assert.NotNull(RowElement("disc-observed-header"));
+            Assert.True(Contains(session, "OBSERVED — NOT IN SPEC"), "a reader hears the observed heading");
             Assert.True(Contains(session, "seen 1×"), "observed rows carry their evidence");
         });
     }
@@ -207,8 +240,8 @@ public class DiscoveryViewTests : IClassFixture<TestHttpServer>, IDisposable
         Hosted((session, app) =>
         {
             ImportSpec(session, app);
-            Click(session, "ep-GET-v1-charges-id");
-            var row = Weak(session, "ep-GET-v1-charges-id");
+            ClickRow(session, "ep-GET-v1-charges-id");
+            var row = Weak("ep-GET-v1-charges-id");
 
             session.Window.PressKey(KeyCode.Digit1);
             session.PumpFrames(3);
@@ -221,8 +254,7 @@ public class DiscoveryViewTests : IClassFixture<TestHttpServer>, IDisposable
     }
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private static WeakReference Weak(HeadlessSession session, string automationId) =>
-        new(session.Window.FindByAutomationId(automationId)!.Element);
+    private WeakReference Weak(string automationId) => new(RowElement(automationId)!);
 
     [Fact]
     public void SelectingAnEndpointShowsItsDetail()
@@ -230,7 +262,7 @@ public class DiscoveryViewTests : IClassFixture<TestHttpServer>, IDisposable
         Hosted((session, app) =>
         {
             ImportSpec(session, app);
-            Click(session, "ep-GET-v1-charges-id");
+            ClickRow(session, "ep-GET-v1-charges-id");
 
             Assert.NotNull(session.Window.FindByAutomationId("disc-detail"));
             Assert.True(Contains(session, "Retrieve a charge"));
@@ -238,27 +270,31 @@ public class DiscoveryViewTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
-    /// <summary>A reader is told which row the detail shows: the selected row says so, and the
-    /// rest say they are not, so a click moves "selected" from one row to the other.</summary>
+    /// <summary>A reader is told which row the detail shows: the list's item of the selected row says
+    /// so, and the rest say they are not, so a click moves "selected" from one item to the other. The
+    /// items are named as the rows are, a heading by its text.</summary>
     [Fact]
     public void TheSelectedRowIsToldToAReader()
     {
         Hosted((session, app) =>
         {
             ImportSpec(session, app);
-            Assert.All(EndpointNodes(session), n => Assert.False(n.IsSelected));
+            Assert.Equal(["CHARGES", "GET /v1/charges, spec-declared", "GET /v1/charges/{id}, spec-declared",
+                "LEGACY", "GET /v1/legacy, spec-declared, deprecated"], MapItems(session).Select(n => n.Name));
+            Assert.All(MapItems(session), n => Assert.False(n.IsSelected));
 
-            Click(session, "ep-GET-v1-charges-id");
-            Assert.Equal(["ep-GET-v1-charges-id"], EndpointNodes(session).Where(n => n.IsSelected == true).Select(n => n.AutomationId));
-            Assert.All(EndpointNodes(session), n => Assert.NotNull(n.IsSelected));
+            ClickRow(session, "ep-GET-v1-charges-id");
+            Assert.Equal(["GET /v1/charges/{id}, spec-declared"], MapItems(session).Where(n => n.IsSelected == true).Select(n => n.Name));
+            Assert.All(MapItems(session), n => Assert.NotNull(n.IsSelected));
 
-            Click(session, "ep-GET-v1-legacy");
-            Assert.Equal(["ep-GET-v1-legacy"], EndpointNodes(session).Where(n => n.IsSelected == true).Select(n => n.AutomationId));
+            ClickRow(session, "ep-GET-v1-legacy");
+            Assert.Equal(["GET /v1/legacy, spec-declared, deprecated"], MapItems(session).Where(n => n.IsSelected == true).Select(n => n.Name));
         });
     }
 
-    private static List<AccessibilityNode> EndpointNodes(HeadlessSession session) =>
-        Walk(session.Window.AccessibilityTree).Where(n => n.AutomationId?.StartsWith("ep-", StringComparison.Ordinal) == true).ToList();
+    /// <summary>The map's items as a reader has them: the children of the map's list node.</summary>
+    private static List<AccessibilityNode> MapItems(HeadlessSession session) =>
+        Walk(session.Window.AccessibilityTree).Single(n => n.Role == AccessibilityRole.List).Children.ToList();
 
     [Fact]
     public void GenerateWritesARealRequestFileIntoTheCollection()
@@ -266,7 +302,7 @@ public class DiscoveryViewTests : IClassFixture<TestHttpServer>, IDisposable
         Hosted((session, app) =>
         {
             ImportSpec(session, app);
-            Click(session, "ep-GET-v1-charges-id");
+            ClickRow(session, "ep-GET-v1-charges-id");
             Click(session, "disc-generate");
 
             var all = Directory.GetFiles(_root, "*.req", SearchOption.AllDirectories);
@@ -338,12 +374,14 @@ public class DiscoveryViewTests : IClassFixture<TestHttpServer>, IDisposable
 
     // ── A click at scale ─────────────────────────────────────────────────
     //
-    // A click moves the selection, which only the map and the detail show: it builds the view, and
-    // the map hands back every row but the two it moves between (MeridianApp.Discovery.cs). The
+    // The map is a virtual list of its lines: only the rows on screen are elements. A click moves the
+    // selection, which only the list and the detail beside it show: it tells the list, which makes
+    // the two rows it moves between, and the detail builds alone (MeridianApp.Discovery.cs). The
     // oracle is a build that keeps nothing.
 
-    /// <summary>A click builds the view alone and makes the row it leaves and the row it reaches:
-    /// the same elements at 30 endpoints as at 300. It made every row again, 2.8 MB a click at 600.</summary>
+    /// <summary>A click makes the row it leaves and the row it reaches and builds the detail, not the
+    /// window: the same elements at 30 endpoints as at 300. It made every row again, 2.8 MB a click at
+    /// 600; then it built the view.</summary>
     [Fact]
     public void AClickMakesTheTwoRowsItMovesBetween_HoweverLongTheMap()
     {
@@ -353,23 +391,117 @@ public class DiscoveryViewTests : IClassFixture<TestHttpServer>, IDisposable
             {
                 ImportWalkSpec(session, app, paths);
                 Assert.Equal(paths * 2, app.Map!.DeclaredCount);
-                var first = session.Window.FindByAutomationId("ep-GET-v1-group00-items000-id")!;
-                var second = session.Window.FindByAutomationId("ep-PUT-v1-group00-items000-id")!;
-                first.Click();
+                var first = RowElement("ep-GET-v1-group00-items000-id")!;
+                var second = RowElement("ep-PUT-v1-group00-items000-id")!;
+                session.Window.Click(first);
                 session.PumpFrames(2);
 
-                int rows = app.EndpointRowsMade, builds = app.Builds, parts = app.PartBuilds;
+                int rows = app.EndpointRowsMade, builds = app.Builds, parts = app.PartBuilds, details = app.MapDetailBuilds;
                 ulong before = ElementId.New().Value;
-                second.Click();
+                session.Window.Click(second);
                 session.PumpFrames(2);
                 made.Add(ElementId.New().Value - before - 1);
 
                 Assert.Equal(2, app.EndpointRowsMade - rows);   // the row it left and the row it reached
-                Assert.Equal(1, app.Builds - builds);
+                Assert.Equal(0, app.Builds - builds);
                 Assert.Equal(0, app.PartBuilds - parts);         // the title bar and the rail show no selection
+                Assert.Equal(1, app.MapDetailBuilds - details);
                 Assert.True(Selected(session, "ep-PUT-v1-group00-items000-id"));
             });
         Assert.True(made[0] == made[1], $"a click made {made[0]} elements at 30 endpoints and {made[1]} at 300");
+    }
+
+    /// <summary>A click moves the selection with no build: the first builds the view (it places the
+    /// detail), then a click, the same row again and a reader's invoke of an item each tell the list and
+    /// build the detail alone, and the detail and the reader follow.</summary>
+    [Fact]
+    public void AClickMovesTheSelectionWithNoBuild()
+    {
+        Hosted((session, app) =>
+        {
+            var reader = session.Window.InstallActionRouter();
+            ImportSpec(session, app);
+            int builds = app.Builds;
+            ClickRow(session, "ep-GET-v1-charges");
+            Assert.Equal(1, app.Builds - builds);   // the first: the detail joins the view
+
+            builds = app.Builds;
+            int details = app.MapDetailBuilds;
+            ClickRow(session, "ep-GET-v1-charges-id");
+            Assert.Equal(0, app.Builds - builds);
+            Assert.Equal(1, app.MapDetailBuilds - details);
+            Assert.True(Contains(session, "Retrieve a charge"), "the detail does not show the endpoint clicked");
+            Assert.False(Selected(session, "ep-GET-v1-charges"));
+
+            ClickRow(session, "ep-GET-v1-charges-id");   // the same row: the detail is what it was
+            Assert.Equal(1, app.MapDetailBuilds - details);
+
+            reader.InvokeElement(MapItems(session).Single(n => n.Name == "GET /v1/legacy, spec-declared, deprecated").ElementId);
+            session.PumpFrames(2);
+            Assert.Equal(0, app.Builds - builds);
+            Assert.True(Selected(session, "ep-GET-v1-legacy"), "a reader's invoke did not move the selection");
+            Assert.True(Contains(session, "/v1/legacy"));
+            Assert.Equal(2, app.MapDetailBuilds - details);
+        });
+    }
+
+    /// <summary>At 2,000 endpoints the map is the rows on screen: the list made about a screen of
+    /// rows, and a reader is still told every line, the list's items served as a reader asks. As a
+    /// scroll view over a column the map made every row, 8,109 elements.</summary>
+    [Fact]
+    public void TheMapMakesTheRowsOnScreen_HoweverLongTheMap()
+    {
+        Hosted((session, app) =>
+        {
+            ImportWalkSpec(session, app, 1000);
+            Assert.Equal(2000, app.Map!.DeclaredCount);
+            int rows = RowElements().Count;
+            Assert.True(rows is > 20 and < 60, $"the map made {rows} rows of 2,000 endpoints");
+            Assert.True(app.EndpointRowsMade < 60, $"the map has made {app.EndpointRowsMade} rows");
+
+            // 2,000 rows and 12 headings: past what the tree builds eagerly, so the list's node serves them.
+            var list = Walk(session.Window.AccessibilityTree).Single(n => n.Role == AccessibilityRole.List);
+            var items = list.ItemSource!;
+            Assert.Equal(2012, items.ItemCount);
+            Assert.Equal("GROUP00", items.GetItemLabel(0));
+            Assert.Equal("PUT /v1/group11/items995/{id}, spec-declared", items.GetItemLabel(2011));
+        });
+    }
+
+    /// <summary>A reader reaches a row off screen: the list's last item is in the reader's tree, told
+    /// off screen; the reader's scroll brings its row onto the screen where its item stands, and its
+    /// invoke selects it as a click would. The map has no keys of its own (its rows are not Tab
+    /// stops), so a reader's route is how a row off screen is reached without the pointer.</summary>
+    [Fact]
+    public void AReaderReachesARowOffScreen()
+    {
+        Hosted((session, app) =>
+        {
+            var reader = session.Window.InstallActionRouter();
+            ImportWalkSpec(session, app, 150);
+            const string Last = "PUT /v1/group11/items143/{id}, spec-declared";
+            var item = MapItems(session)[^1];
+            Assert.Equal(Last, item.Name);
+            Assert.True(item.IsOffscreen, "the last row is on screen already");
+            Assert.Null(RowElement("ep-PUT-v1-group11-items143-id"));
+
+            reader.ScrollElementIntoView(item.ElementId);
+            session.PumpFrames(3);
+            var row = RowElement("ep-PUT-v1-group11-items143-id");
+            Assert.NotNull(row);
+            Element? map = row;
+            while (map is not null and not ScrollViewElement) map = map.Parent;
+            var list = map!.ScreenBorderBox;
+            var box = row!.ScreenBorderBox;
+            Assert.True(box.Y >= list.Y && box.Y + box.Height <= list.Y + list.Height, $"the row is at {box}, the map at {list}");
+            item = MapItems(session)[^1];
+            Assert.False(item.IsOffscreen);
+
+            reader.InvokeElement(item.ElementId);
+            session.PumpFrames(3);
+            Assert.True(Selected(session, "ep-PUT-v1-group11-items143-id"), "the reader's invoke did not select the row");
+            Assert.True(Contains(session, "Write item 143"), "the detail does not show the endpoint the reader invoked");
+        });
     }
 
     /// <summary>Over a walk of clicks (the same row twice, one with the pointer moved over another row
@@ -395,14 +527,14 @@ public class DiscoveryViewTests : IClassFixture<TestHttpServer>, IDisposable
             ClickRow(session, "ep-PUT-v1-group01-items001-id");
             AssertAFullBuildShowsTheSame(session, app, "the same row again");
 
-            var over = session.Window.FindByAutomationId("ep-GET-v1-group01-items013-id")!.Element;
+            var over = RowElement("ep-GET-v1-group01-items013-id")!;
             var at = CenterOf(over);
             session.Window.MoveMouse(at.X, at.Y);
             session.PumpFrames(2);
             ClickRow(session, "ep-GET-v1-group00-items012-id");
             AssertAFullBuildShowsTheSame(session, app, "a click after the pointer was over another row");
 
-            Element? up = session.Window.FindByAutomationId("ep-GET-v1-group00-items000-id")!.Element;
+            Element? up = RowElement("ep-GET-v1-group00-items000-id");
             while (up is not null and not ScrollViewElement) up = up.Parent;
             var map = (ScrollViewElement)up!;
             var mapAt = CenterOf(map);
@@ -535,17 +667,21 @@ public class DiscoveryViewTests : IClassFixture<TestHttpServer>, IDisposable
         session.PumpFrames(2);
     }
 
-    private static void ClickRow(HeadlessSession session, string automationId)
+    private void ClickRow(HeadlessSession session, string automationId)
     {
-        var row = session.Window.FindByAutomationId(automationId);
+        var row = RowElement(automationId);
         Assert.True(row != null, $"#{automationId} not found");
-        row!.Click();
+        session.Window.Click(row!);
         session.PumpFrames(2);
         Assert.True(Selected(session, automationId), $"#{automationId} is not selected after its click");
     }
 
-    private static bool Selected(HeadlessSession session, string automationId) =>
-        Walk(session.Window.AccessibilityTree).Single(n => n.AutomationId == automationId).IsSelected == true;
+    /// <summary>Whether a reader is told the row is selected: its item, by the row's name.</summary>
+    private bool Selected(HeadlessSession session, string automationId)
+    {
+        string name = RowElement(automationId)!.AccessibleName!;
+        return MapItems(session).Single(n => n.Name == name).IsSelected == true;
+    }
 
     private static HultUI.Core.Primitives.Point CenterOf(Element element)
     {

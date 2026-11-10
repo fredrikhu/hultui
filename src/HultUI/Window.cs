@@ -135,8 +135,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     private IAccessibilityBridge _accessibilityBridge = NullAccessibilityBridge.Instance;
     private AccessibilityNode? _previousA11yTree;
     // The element whose node _previousA11yTree marks focused: the focused one when the tree
-    // was built, then each focus move's (see MoveA11yFocus). Null for none.
-    private ElementId? _a11yFocusId;
+    // was built, then each focus move's (see MoveA11yFocus). Null for none. The element, not its
+    // id, so the next move finds its node down its ancestors (FindA11yNode).
+    private Element? _a11yFocusElement;
     // The element the focus moved onto while it had no node in the applied tree — mounted in the
     // same handler, as Ctrl+F mounts a find bar and focuses its field. The bridge was told the
     // focus went nowhere; it is told where once the next rebuild has the node.
@@ -175,6 +176,14 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// <summary>How many layout refreshes built a tree without a walk, after others in a row could
     /// not be made in place (<see cref="_a11yRefreshSkips"/>). For tests. UI thread.</summary>
     internal int AccessibilityLayoutRefreshesSkipped { get; private set; }
+
+    /// <summary>How many nodes of the applied tree the focus's lookups looked at (<see cref="FindA11yNode"/>):
+    /// the children compared on the way down an element's ancestors, and each node a walk of the whole
+    /// tree went past where that found none. For a focus move's two nodes, a focus that waited for its
+    /// node, and an announcement's. For tests. UI thread.</summary>
+    internal long AccessibilityFocusNodesVisited { get; private set; }
+    // The children FindNodeDown compared, for the count above.
+    private int _a11yNodesScanned;
     // Set when an element reports an a11y-visible property change that cannot be patched in
     // (a role, an enabled state, a radio's selection, anything of an element with children, …).
     // Such changes aren't structural, so they force the next frame to rebuild+diff the tree —
@@ -199,6 +208,12 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     // anyway; whatever cannot be told that way rebuilds it, as every such change did: a keystroke in a
     // text input beside 200 rows built and diffed 603 nodes for one value.
     private readonly List<Element> _a11yLeafChanged = [];
+    // An element with children told a change of its own name or description since the last frame,
+    // while a client listened (Vesper's pane, named after its folder). The frame walks the elements
+    // against the applied tree in place (TryRefreshA11yInPlace), as for a change of their children: the
+    // walk makes the node again with its children carried over, and tells the change. Every such
+    // change built the whole tree.
+    private bool _a11yWalkDue;
 
     // One of a set in the main tree changed its selected state: a menu's entry under the pointer. The
     // frame marks it on the applied tree and tells it (TryPatchA11y), unless the frame rebuilds the
@@ -841,17 +856,18 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// <summary>
     /// A focus move rebuilds no accessibility tree, so the applied one still marks the element
     /// that had the focus when it was built. Marks the move on it in place instead: the node
-    /// that had the focus and the one that has it now, found in one walk. A reader asking
-    /// either is then answered as of now, and the next rebuild's diff, which compares against
-    /// this tree, does not report the move again, late. Returns both nodes; null where the
-    /// element has none, or the tree marked no node. An element with no node yet is remembered
-    /// (<see cref="NotifyPendingA11yFocus"/>).
+    /// that had the focus and the one that has it now, each found down its element's ancestors,
+    /// and by one walk of the whole tree where that finds none (<see cref="FindA11yNode"/>). A
+    /// reader asking either is then answered as of now, and the next rebuild's diff, which
+    /// compares against this tree, does not report the move again, late. Returns both nodes; null
+    /// where the element has none, or the tree marked no node. An element with no node yet is
+    /// remembered (<see cref="NotifyPendingA11yFocus"/>).
     /// </summary>
     private (AccessibilityNode? Previous, AccessibilityNode? Focused) MoveA11yFocus(Element? element)
     {
         var tree = _previousA11yTree;
-        var previousId = _a11yFocusId;
-        _a11yFocusId = element?.Id;
+        var had = _a11yFocusElement;
+        _a11yFocusElement = element;
         _a11yPendingFocusId = null;
         if (tree is null)
         {
@@ -859,8 +875,13 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             return (null, null);
         }
 
-        AccessibilityNode? previous = null, focused = null;
-        FindNodes(tree, previousId, element?.Id, ref previous, ref focused);
+        // A walk of the whole tree was all there was: with the focused controls after a long list in
+        // the tree's order (Meridian's request pane after its map of 2,000 endpoints) it went past
+        // 6,072 of 6,073 nodes, where the way down looks at 55.
+        var previous = FindA11yNodeDown(tree, had);
+        var focused = FindA11yNodeDown(tree, element);
+        if ((previous is null && had is not null) || (focused is null && element is not null))
+            FindNodes(tree, previous is null ? had?.Id : null, focused is null ? element?.Id : null, ref previous, ref focused);
         // A row of a list whose items stand for its rows is read through its elements while it holds
         // the focus (AccessibilityTreeBuilder.OpenRow), so a move into one needs the tree that has
         // the element's node, and a move out of one the tree that does not.
@@ -894,8 +915,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     {
         if (_a11yPendingFocusId is not { } id) return;
         _a11yPendingFocusId = null;
-        if (id != _a11yFocusId) return;
-        if (FindById(tree, id) is { IsFocused: true } node)
+        if (_a11yFocusElement is not { } element || id != element.Id) return;
+        if (FindA11yNode(tree, element) is { IsFocused: true } node)
             _accessibilityBridge.NotifyFocusChanged(node, previous: null);
     }
 
@@ -1058,6 +1079,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             {
                 int at = OverlayNodeIndex(tree, top);
                 if (at < 0) return null;
+                _a11yNodesScanned += tree.Children.Count - at;
                 _a11yPaths.Add(at);
                 node = tree.Children[at];
             }
@@ -1068,6 +1090,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 {
                     int item = list.ItemOfRow(step);
                     if ((uint)item >= (uint)node.Children.Count) return null;
+                    _a11yNodesScanned++;
                     _a11yPaths.Add(item);
                     node = node.Children[item];
                 }
@@ -1081,6 +1104,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     found = c;
                     break;
                 }
+                _a11yNodesScanned += found < 0 ? children.Count : found + 1;
                 if (found < 0) return null;
                 _a11yPaths.Add(found);
                 node = children[found];
@@ -1173,7 +1197,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             }
         }
         if (diff is not null) _accessibilityBridge.ApplyChanges(diff, tree);
-        _a11yFocusId = _focusManager.FocusedElement?.Id;
+        _a11yFocusElement = _focusManager.FocusedElement;
         NotifyPendingA11yFocus(tree);
         return true;
     }
@@ -1183,17 +1207,18 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// elements are walked against the applied tree by the builder's rules
     /// (<see cref="AccessibilityTreeBuilder.TryRefreshInPlace"/>), and what a build would make otherwise
     /// is written in place — a box moved in its scroll views' content, a node gone out of view or come
-    /// into it, a scroll view's offset and geometry, a leaf whose own properties changed (made again, as
-    /// a leaf's patch makes it), a node's children added, gone or in another order (only the new ones
-    /// built) — and the bridge is handed the changes the build's diff would have reported, in its
-    /// order: as patched properties, or, with nodes added or removed, as that diff. A pure scroll writes
-    /// one offset and the offscreen states: each wheel turn over a 1,000-row list built and diffed 3,001
-    /// nodes, and a reader walking a list at its own pace one tree per key; a row a key made again in a
-    /// composite list built and diffed the whole window's tree. Whatever a list's selection, a caret or
-    /// a leaf told since is in that, as it is in a build's diff. False, writing nothing, when a build
-    /// would make another tree than that (a node with children whose own properties changed, a list
-    /// whose items cross the number served on demand, a change no diff tells), and the tree is built
-    /// then, as it always was.
+    /// into it, a scroll view's offset and geometry, a node whose own properties changed (made again, as
+    /// a leaf's patch makes it, with its children carried over when it has them), a node's children
+    /// added, gone or in another order (only the new ones built) — and the bridge is handed the changes
+    /// the build's diff would have reported, in its order: as patched properties, or, with nodes added
+    /// or removed, as that diff. A pure scroll writes one offset and the offscreen states: each wheel
+    /// turn over a 1,000-row list built and diffed 3,001 nodes, and a reader walking a list at its own
+    /// pace one tree per key; a row a key made again in a composite list built and diffed the whole
+    /// window's tree, and so did a pane renamed after its folder. Whatever a list's selection, a caret
+    /// or a leaf told since is in that, as it is in a build's diff. False, writing nothing, when a build
+    /// would make another tree than that (a described node or a list's item with children whose own
+    /// properties changed, a list whose items cross the number served on demand, a change no diff
+    /// tells), and the tree is built then, as it always was.
     /// </summary>
     private bool TryRefreshA11yInPlace()
     {
@@ -1237,7 +1262,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 patch.PropertyChanged.AddRange(refresh.Changes);
                 _accessibilityBridge.ApplyPatchedProperties(patch, tree);
             }
-            _a11yFocusId = _focusManager.FocusedElement?.Id; // what the walk compared against
+            _a11yFocusElement = _focusManager.FocusedElement; // what the walk compared against
             NotifyPendingA11yFocus(tree);
             return true;
         }
@@ -1309,10 +1334,12 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         return a.PathLength - b.PathLength;
     }
 
-    /// <summary>Finds the nodes of two elements in one walk, which stops once it has both.</summary>
-    private static bool FindNodes(AccessibilityNode node, ElementId? a, ElementId? b,
+    /// <summary>Finds the nodes of two elements in one walk of the whole tree, which stops once it
+    /// has both. For what <see cref="FindA11yNodeDown"/> does not find.</summary>
+    private bool FindNodes(AccessibilityNode node, ElementId? a, ElementId? b,
         ref AccessibilityNode? foundA, ref AccessibilityNode? foundB)
     {
+        AccessibilityFocusNodesVisited++;
         if (a is { } ia && node.ElementId == ia) foundA = node;
         if (b is { } ib && node.ElementId == ib) foundB = node;
         if ((a is null || foundA is not null) && (b is null || foundB is not null)) return true;
@@ -1324,29 +1351,37 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     }
 
     /// <summary>
-    /// Locates the AccessibilityNode matching the given element in the last
-    /// applied tree snapshot. Returns null if the element isn't represented
-    /// (e.g. it was flattened out as a decorative container) or no snapshot
-    /// has been built yet.
+    /// The node of <paramref name="element"/> in <paramref name="tree"/> (the applied tree, or the
+    /// one just built): found down its ancestors, or, where that finds none, by a walk of the whole
+    /// tree. Null when the element has none there (flattened out as a decorative container, not in
+    /// the tree yet) or there is no tree.
     /// </summary>
-    private AccessibilityNode? FindA11yNode(Element? element)
+    private AccessibilityNode? FindA11yNode(AccessibilityNode? tree, Element? element)
     {
-        if (element is null || _previousA11yTree is null) return null;
-        return FindById(_previousA11yTree, element.Id);
+        if (tree is null || element is null) return null;
+        AccessibilityNode? node = FindA11yNodeDown(tree, element), none = null;
+        if (node is null) FindNodes(tree, element.Id, null, ref node, ref none);
+        return node;
     }
 
-    private static AccessibilityNode? FindById(AccessibilityNode node, ElementId id)
+    /// <summary>
+    /// The node of <paramref name="element"/> in <paramref name="tree"/>, found down its ancestors
+    /// from the root as a patch finds its nodes (<see cref="FindNodeDown"/>): only the children of
+    /// the nodes on the way are looked at, not the whole tree. Null when the element is null, or that
+    /// way finds no node of it: it has none, or the tree was built otherwise than its ancestors say
+    /// now (one taken out, moved, or semantic since, an overlay closed or opened since), which a walk
+    /// of the whole tree is left to find. Leaves <see cref="_a11yPaths"/> as it found it.
+    /// </summary>
+    private AccessibilityNode? FindA11yNodeDown(AccessibilityNode tree, Element? element)
     {
-        if (node.ElementId == id) return node;
-        // By index: this walks the whole accessibility tree on every focus move while a
-        // client listens, and foreach over the interface boxes an enumerator per node.
-        var children = node.Children;
-        for (int i = 0; i < children.Count; i++)
-        {
-            var found = FindById(children[i], id);
-            if (found is not null) return found;
-        }
-        return null;
+        if (element is null) return null;
+        int paths = _a11yPaths.Count;
+        _a11yNodesScanned = 0;
+        var node = FindNodeDown(tree, element);
+        AccessibilityFocusNodesVisited += _a11yNodesScanned;
+        _a11yPaths.RemoveRange(paths, _a11yPaths.Count - paths);
+        // The root's own node is found without a look at it.
+        return node is not null && node.ElementId == element.Id ? node : null;
     }
 
     public void SetRoot(Element root)
@@ -1359,11 +1394,14 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         _root = root;
         _maxButtonCache = null;
         _hoverMayBeStale = true;   // hover may be on the old tree: settled after the next frame
+        // A wheel gesture latched to a scroller of the old tree lets go of it, and so of the tree.
+        if (_wheelGesture.Latched is { } latched && !IsShownInWindow(latched)) _wheelGesture.Release();
         SetScrollbarHover(null, default);
         root.OverlayHost = this;
         root.FocusManager = _focusManager;
         root.AccessibilityObserver = _a11yObserver;
         _previousA11yTree = null;
+        _a11yFocusElement = null;   // of the old tree: the next one's build marks what it marks
     }
 
     internal Element? Root => _root;
@@ -1484,6 +1522,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         || _a11yTextChanged.Count > 0
         || _a11yLeafChanged.Count > 0
         || _a11yOwnSelection.Count > 0
+        || _a11yWalkDue
         // A coalesced layout-driven a11y refresh is due — force the trailing frame
         // so the last resize/scroll position reaches the tree once the drag stops
         // (during the drag, layout dirty already keeps frames coming).
@@ -1752,7 +1791,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // immediately. Layout-only changes are coalesced (see A11yCoalesceMs): a
         // continuous resize/scroll otherwise rebuilds the whole tree every frame.
         bool a11yChildren = (_root.DirtyFlags & DirtyFlags.Children) != 0;
-        bool a11yImmediate = a11yActive && (!_a11yWasActive || _a11yPropertyDirty || a11yChildren);
+        // The elements' children changed, or a node with children its own name: walked in place below.
+        bool a11yWalk = a11yChildren || _a11yWalkDue;
+        bool a11yImmediate = a11yActive && (!_a11yWasActive || _a11yPropertyDirty || a11yWalk);
         if (a11yActive && layoutWasDirty)
             _a11yLayoutRefreshPending = true;
         // An open overlay's part of the tree, a child of the root node, is built again on its own:
@@ -1766,12 +1807,13 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             && nowMs - _lastA11yRangeMs >= A11yRangeCoalesceMs;
         bool a11yRebuild = a11yImmediate;
         // A layout refresh came due and nothing else asks for a tree, or the elements' children changed
-        // (rows made again, a row scrolled in) and nothing but that asks for one: the applied tree is
-        // brought up to date in place, with nodes built only for what is new, where the walk finds what
-        // a build would make, and built where it does not. Either tells what the patches below would, so
-        // they do not run then. A row a key made again in a composite list built the whole window's tree.
+        // (rows made again, a row scrolled in) or a node with children was renamed, and nothing but that
+        // asks for one: the applied tree is brought up to date in place, with nodes built only for what
+        // is new, where the walk finds what a build would make, and built where it does not. Either tells
+        // what the patches below would, so they do not run then. A row a key made again in a composite
+        // list built the whole window's tree, and so did a pane renamed after the folder it went into.
         bool a11yRefreshed = false;
-        bool a11yStructure = a11yImmediate && a11yChildren && _a11yWasActive && !_a11yPropertyDirty;
+        bool a11yStructure = a11yImmediate && a11yWalk && _a11yWasActive && !_a11yPropertyDirty;
         if ((a11yLayoutDue && !a11yImmediate) || a11yStructure)
         {
             using (_tracer.Begin("Phase", "A11y"))
@@ -1828,7 +1870,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 if (!diff.IsEmpty)
                     _accessibilityBridge.ApplyChanges(diff, newTree);
                 _previousA11yTree = newTree;
-                _a11yFocusId = _focusManager.FocusedElement?.Id; // what the builder marked
+                _a11yFocusElement = _focusManager.FocusedElement; // what the builder marked
                 NotifyPendingA11yFocus(newTree);
             }
         }
@@ -1836,6 +1878,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         {
             // Client detached — drop the snapshot so the next attach rebuilds fresh.
             _previousA11yTree = null;
+            _a11yFocusElement = null;   // and the element, which may leave the tree while no one listens
             _a11yPendingFocusId = null;
             _a11yLayoutRefreshPending = false;
             _a11yOverlayRefreshPending = false;
@@ -1847,10 +1890,11 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             // After the rebuild, so an element that announces as it appears has its node.
             if (a11yActive)
                 foreach (var (source, text, politeness) in _announcements)
-                    _accessibilityBridge.Announce(FindA11yNode(source), text, politeness);
+                    _accessibilityBridge.Announce(FindA11yNode(_previousA11yTree, source), text, politeness);
             _announcements.Clear();
         }
         _a11yPropertyDirty = false;
+        _a11yWalkDue = false;
         _a11ySelectionMoved.Clear();
         _a11yTextChanged.Clear();
         _a11yLeafChanged.Clear();
@@ -1896,7 +1940,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             if (layoutWasDirty || styleWasDirty || (_root.DirtyFlags & DirtyFlags.Children) != 0
                 || (overlayChanges & OverlayChanges.Work) != 0)
                 _root.MarkPaintDirty();
-            NoteStructureForHover();
+            NoteStructureChange();
             ClearFlags(_root, DirtyFlags.Children);
             // The overlays' too: they are styled and laid out in such a frame now, and left set,
             // an overlay's structural flag would rebuild the tree on every pass.
@@ -1963,7 +2007,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
         // Clear remaining dirty flags after full render. Read first whether some tree's children
         // changed in this frame: a build before it, or a list that realized rows as it was drawn.
-        NoteStructureForHover();
+        NoteStructureChange();
         ClearAllFlags(_root);
         foreach (var overlay in _overlays)
             ClearAllFlags(overlay.Content);
@@ -2864,7 +2908,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // Replaced by a rebuild rather than patched: scrolling it would move nothing on screen.
         if (!IsAttachedToRoot(view)) { _selectionScroll = null; return; }
 
-        if (!view.ScrollBy(0f, SelectionEdgeDistance(view) * SelectionEdgeScrollGain * dt))
+        if (!view.ScrollByUser(0f, SelectionEdgeDistance(view) * SelectionEdgeScrollGain * dt))
         {
             _selectionScrollStalled = true;   // at its end: nothing more until the pointer moves
             return;
@@ -3005,7 +3049,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         float vy = Ramp(_autoScrollPointer.Y - _autoScrollOrigin.Y);
         if (vx == 0f && vy == 0f) return;   // back inside the dead zone: parked, not finished
 
-        _autoScrollTarget.ScrollBy(vx * dt, vy * dt);
+        // A scroll view hears it as the user's (UserScrolled); a text area has no listener to tell.
+        if (_autoScrollTarget is ScrollViewElement view) view.ScrollByUser(vx * dt, vy * dt);
+        else _autoScrollTarget.ScrollBy(vx * dt, vy * dt);
 
         // Speed in layout units per second from the pointer's displacement on one axis,
         // measured past the dead zone so the first unit of movement outside it crawls
@@ -3145,20 +3191,31 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     }
 
     /// <summary>Before a frame's flags are cleared: a change of some tree's children in it (a build
-    /// before it, or a list that realized its rows as it was drawn) may have taken the hovered
-    /// element away. A flag read, and one per open overlay.</summary>
-    private void NoteStructureForHover()
+    /// before it, or a list that realized its rows as it was drawn) may have taken away the hovered
+    /// element, or the scroller the last wheel gesture latched to. Nothing when neither is held;
+    /// otherwise a flag read, one per open overlay, and the walk up from a latched scroller only
+    /// in a frame that changed some tree.</summary>
+    private void NoteStructureChange()
     {
-        if (_lastHoveredElement is null) return;
-        if ((_root!.DirtyFlags & DirtyFlags.Children) != 0) { _hoverMayBeStale = true; return; }
+        if (_lastHoveredElement is null && _wheelGesture.Latched is null) return;
+        if (!SomeTreeChangedChildren()) return;
+        if (_lastHoveredElement is not null) _hoverMayBeStale = true;
+        // A latched scroller the build removed: held until the next wheel event — which may be
+        // minutes away, or never — it kept the whole view it was in alive (Meridian's Discovery
+        // map behind the Requests view, 8 MB at 2,000 endpoints). Checked whether or not anything
+        // is hovered: the pointer may have left the window.
+        if (_wheelGesture.Latched is { } latched && !IsShownInWindow(latched))
+            _wheelGesture.Release();
+    }
+
+    /// <summary>Whether the children of the window's tree or an open overlay's changed in this
+    /// frame (<see cref="DirtyFlags.Children"/> reaches the top of its tree).</summary>
+    private bool SomeTreeChangedChildren()
+    {
+        if ((_root!.DirtyFlags & DirtyFlags.Children) != 0) return true;
         for (int i = 0; i < _overlays.Count; i++)
-        {
-            if ((_overlays[i].Content.DirtyFlags & DirtyFlags.Children) != 0)
-            {
-                _hoverMayBeStale = true;
-                return;
-            }
-        }
+            if ((_overlays[i].Content.DirtyFlags & DirtyFlags.Children) != 0) return true;
+        return false;
     }
 
     /// <summary>Whether <paramref name="element"/> is in this window's tree or an open overlay's: what
@@ -3755,6 +3812,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // The pointer may have been over it (a menu closed by its own item): hover is settled
         // after the next frame. A tooltip is never hovered.
         if (entry.IsHitTestable) _hoverMayBeStale = true;
+        // A wheel gesture latched to a scroller in it lets go: nothing can be over that now, and
+        // the latch would keep the overlay's whole tree alive until the next wheel event.
+        if (_wheelGesture.Latched is { } latched && TopOf(latched) == entry.Content) _wheelGesture.Release();
         // What changes in it from now on is nothing a reader sees.
         if (ReferenceEquals(entry.Content.AccessibilityObserver, _a11yObserver))
             entry.Content.AccessibilityObserver = null;
@@ -4575,7 +4635,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// description, its expanded state, its value, its toggle, its range) are the exceptions: the
     /// list's two items' selected state, the text's new version and the leaf's node made again are
     /// marked on the applied tree in place (<see cref="TryPatchA11y"/>), as a focus move's is. So is
-    /// a change of text made on request, a keystroke in a rich text editor or a text area.
+    /// a change of text made on request, a keystroke in a rich text editor or a text area. A change of
+    /// the name or the description of an element with children is walked in place
+    /// (<see cref="TryRefreshA11yInPlace"/>), as a change of the elements' children is.
     /// </summary>
     void IAccessibilityAnnouncer.Announce(Element source, string text, AnnouncementPoliteness politeness)
     {
@@ -4633,6 +4695,15 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 if (leaves.Count >= MaxPatchedLeaves) window._a11yPropertyDirty = true;
                 else if (!leaves.Contains(element)) leaves.Add(element);
             }
+            // An element with children, its own name or description (Vesper's pane, a group named
+            // after its folder): the frame walks the elements against the applied tree in place, as
+            // for a change of their children, and the walk makes the node again with its children
+            // carried over (AccessibilityTreeBuilder.TryRefreshInPlace). What else the frame changes
+            // (the pane's new rows) the same walk takes. A rebuild for it built the whole tree on every
+            // navigation with a reader: 1,000 files in Detail, 453 → 322 KB a navigation with the tree.
+            else if (propertyName is AccessibilityProperties.Name or AccessibilityProperties.Description
+                && element.Children.Count != 0 && element.AccessibleTextSource is null)
+                window._a11yWalkDue = true;
             // A list's selection moved: two items' selected state, which the frame marks on the
             // applied tree and tells without a rebuild (TryPatchA11y). A rebuild for it
             // built and diffed the whole tree on every key of a walk: Junction's History list, a
@@ -4661,13 +4732,18 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             // (Vesper's Brief), a tile in a composite list's row (its Thumbnails). The layout says
             // nothing of a grid, so the role is what tells one of a set: an item's selected state
             // goes on its own node, and nothing else in a tree is made from it. A rebuild for it
-            // built the whole tree on every cursor key: 60 files, 2.2 → 36 KB a key with UIA. Any
-            // other element's selected state (a tab, a button that is one of a set) still builds a
-            // tree, which tells what came with it.
+            // built the whole tree on every cursor key: 60 files, 2.2 → 36 KB a key with UIA. And a
+            // button that is one of a set (the Button role, set by the app), the same way: a row of a
+            // set the user picks from, which a click moves the selection between on the same elements
+            // (Meridian's endpoints). What else the click changes (the pane that follows) is told on
+            // its own path, in tree order with the mark when it comes in the same frame. A rebuild
+            // for it built the whole tree on every click: 2,000 endpoints, 121 → 974 KB a click with
+            // UIA. Any other element's selected state (a tab, whose panel follows; a role the app did
+            // not set) still builds a tree, which tells what came with it.
             else if (propertyName == AccessibilityProperties.IsSelected
                 && (element.IsMenuEntry || element.AccessibleSelected is not null
                     && (element.Parent is IAccessibleItemSource { PublishesItemNodes: false }
-                        || element.Role == AccessibilityRole.ListItem)))
+                        || element.Role is AccessibilityRole.ListItem or AccessibilityRole.Button)))
             {
                 if (!window._a11yOwnSelection.Contains(element)) window._a11yOwnSelection.Add(element);
             }

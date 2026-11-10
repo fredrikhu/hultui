@@ -129,12 +129,14 @@ public class PartTests
         ViewOnly("Tab with a filter", () => { t.Press(KeyCode.Digit3); t.Press(KeyCode.Tab); },
             "left trail", "right trail", "left footer", "command line");
 
-        // The grids: a key, and Brief scrolled sideways (its columns are realized per scroll).
+        // The grids: a key, and Brief scrolled sideways. Its columns are made for the scroll, and a
+        // scroll builds only when it brings a column not made into view (round 10 step 15,
+        // BriefScrollColumnsTests); this folder's four columns are all made, so it builds nothing.
         t.Press(KeyCode.Tab);
         t.Press(KeyCode.F2, KeyModifiers.Ctrl);
         s.PumpFrames(2);
         NoBuild("Brief Right", () => t.Press(KeyCode.Right));
-        ViewOnly("Brief scrolled", () =>
+        NoBuild("Brief scrolled", () =>
         {
             var scroll = t.Field<Ref<ScrollViewElement>>("_briefScrollL").Current!;
             var b = scroll.Layout.AbsoluteBorderBox;

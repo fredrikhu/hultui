@@ -22,6 +22,21 @@ public sealed partial class ApertureApp
 {
     private readonly Ref<VirtualListElement<GridRowItem>> _gridList = new();
 
+    /// <summary>The grid's viewport height as its last layout left it, kept when a build that shows
+    /// another view lets go of the grid (<see cref="LetGoOfGrid"/>): the next library build sizes what it
+    /// asks for from it, as it did from the old grid.</summary>
+    private float? _gridViewportHeight;
+
+    /// <summary>For a build that shows no library grid: the ref to the last one held the whole library
+    /// view through its parents, behind Settings, a film's page or any other view. The one thing a later
+    /// build read from it, its viewport's height, is kept.</summary>
+    private void LetGoOfGrid()
+    {
+        if (_gridList.Current is not { } grid) return;
+        _gridViewportHeight = grid.Layout.AbsoluteContentBox.Height;
+        _gridList.Current = null;
+    }
+
     private Element BuildLibraryView(Route route)
     {
         EnsureLibraries();
@@ -42,7 +57,7 @@ public sealed partial class ApertureApp
         float rowStride = asList
             ? ListRowHeight + Halide.S2
             : Halide.PosterHeight + (_settings.Data.ShowCardTitles ? Halide.PosterCaption : 0f) + Halide.PosterGap;
-        float viewportHeight = _gridList.Current?.Layout.AbsoluteContentBox.Height
+        float viewportHeight = _gridList.Current?.Layout.AbsoluteContentBox.Height ?? _gridViewportHeight
             ?? Math.Max(200f, _window.LayoutHeight - Halide.TitleBarHeight - 110f);
         int visibleRows = Math.Max(1, (int)Math.Ceiling(viewportHeight / rowStride));
         _fitGridStride = rowStride;

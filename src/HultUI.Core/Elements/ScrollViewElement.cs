@@ -13,35 +13,106 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     protected float _contentWidth;
     protected float _contentHeight;
 
+    /// <summary>An offset set from code while this view had nothing to clamp it against on that
+    /// axis (no size yet, or no content), kept as given for the layout pass to apply
+    /// (<see cref="ApplyHeldOffsets"/>). NaN when none is held.</summary>
+    private float _heldOffsetX = float.NaN, _heldOffsetY = float.NaN;
+
+    /// <summary>
+    /// How far the content is scrolled sideways, from its left edge. Setting it clamps it to the
+    /// content: between 0 and how far the content reaches past the view.
+    ///
+    /// <para>Set before the view has a size or content to clamp against (before its first layout,
+    /// say, on the build that makes it), the offset is kept as given, and the layout pass applies
+    /// it, clamped to the content as laid out then. It used to clamp to 0 at once, so a view made
+    /// with an offset opened at the start. Reading it back meanwhile gives the offset kept. A later
+    /// setting replaces it, the user's scroll (the wheel, the scrollbar, the autoscroll) drops it,
+    /// and applying it calls no <see cref="UserScrolled"/>: it is a scroll from code.</para>
+    /// </summary>
     public float ScrollOffsetX
     {
-        get => _scrollOffsetX;
+        get => float.IsNaN(_heldOffsetX) ? _scrollOffsetX : _heldOffsetX;
         set
         {
             ThrowIfDetached(nameof(ScrollOffsetX));
-            float clamped = ClampX(value);
-            if (clamped == _scrollOffsetX) return;
-            _scrollOffsetX = clamped;
-            MarkPaintDirty();
-            // Children's on-screen positions shifted, so every descendant node's
-            // accessibility bounds changed — refresh the a11y tree.
-            NotifyAccessibilityPropertyChanged(AccessibilityProperties.BoundingRect);
+            if (!CanClampX) { _heldOffsetX = Math.Max(0f, value); return; }
+            MoveOffsetX(value);
         }
     }
 
+    /// <summary>
+    /// How far the content is scrolled down, from its top. Setting it clamps it to the content, and
+    /// an offset set before the view has a size or content to clamp against is kept for the layout
+    /// pass, as <see cref="ScrollOffsetX"/>'s is. A reveal asked for after it
+    /// (<see cref="ScrollRangeIntoView"/>) is applied from it.
+    /// </summary>
     public float ScrollOffsetY
     {
-        get => _scrollOffsetY;
+        get => float.IsNaN(_heldOffsetY) ? _scrollOffsetY : _heldOffsetY;
         set
         {
             // Scrolling a discarded element is the shape this guard exists for: an overlay
             // that captured the list during a build keeps setting an offset nothing reads.
             ThrowIfDetached(nameof(ScrollOffsetY));
-            float clamped = ClampY(value);
-            if (clamped == _scrollOffsetY) return;
-            _scrollOffsetY = clamped;
-            MarkPaintDirty();
-            NotifyAccessibilityPropertyChanged(AccessibilityProperties.BoundingRect);
+            if (!CanClampY) { _heldOffsetY = Math.Max(0f, value); return; }
+            MoveOffsetY(value);
+        }
+    }
+
+    /// <summary>Moves the view sideways now, clamped to the content, and drops an offset held for
+    /// a layout to come: the setter once the view can clamp, and the user's input, which moves what
+    /// is on screen or nothing.</summary>
+    private protected void MoveOffsetX(float value)
+    {
+        _heldOffsetX = float.NaN;
+        float clamped = ClampX(value);
+        if (clamped == _scrollOffsetX) return;
+        _scrollOffsetX = clamped;
+        MarkPaintDirty();
+        // Children's on-screen positions shifted, so every descendant node's
+        // accessibility bounds changed — refresh the a11y tree.
+        NotifyAccessibilityPropertyChanged(AccessibilityProperties.BoundingRect);
+    }
+
+    /// <summary><see cref="MoveOffsetX"/> down the view.</summary>
+    private protected void MoveOffsetY(float value)
+    {
+        _heldOffsetY = float.NaN;
+        float clamped = ClampY(value);
+        if (clamped == _scrollOffsetY) return;
+        _scrollOffsetY = clamped;
+        MarkPaintDirty();
+        NotifyAccessibilityPropertyChanged(AccessibilityProperties.BoundingRect);
+    }
+
+    /// <summary>Whether an offset set now can be clamped to the content: the view has a width and
+    /// its content reaches somewhere. Before the first layout neither is known.</summary>
+    private bool CanClampX => Layout.AbsoluteContentBox.Width > 0 && _contentWidth > 0;
+
+    /// <summary><see cref="CanClampX"/> down the view, against <see cref="ScrollExtentY"/>.</summary>
+    private bool CanClampY => Layout.AbsoluteContentBox.Height > 0 && ScrollExtentY > 0;
+
+    /// <summary>How far down the content reaches, as <see cref="ClampY"/> clamps against it: the
+    /// children's extent as last laid out. <see cref="VirtualListElement{T}"/> knows its rows'.</summary>
+    private protected virtual float ScrollExtentY => _contentHeight;
+
+    /// <summary>
+    /// Applies an offset held since before this view could clamp it, once it can: clamped to the
+    /// content as just laid out. Called from the layout pass, before a held reveal (which is applied
+    /// from it), so it writes the offset fields, as <see cref="ApplyPendingReveal"/> does; and it
+    /// calls no <see cref="UserScrolled"/>.
+    /// </summary>
+    private protected void ApplyHeldOffsets()
+    {
+        if (!float.IsNaN(_heldOffsetX) && CanClampX)
+        {
+            _scrollOffsetX = ClampX(_heldOffsetX);
+            _heldOffsetX = float.NaN;
+        }
+        if (!float.IsNaN(_heldOffsetY) && CanClampY)
+        {
+            _scrollOffsetY = ClampY(_heldOffsetY);
+            _heldOffsetY = float.NaN;
         }
     }
 
@@ -92,6 +163,36 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     /// </summary>
     public ISidewaysScroller? SidewaysScroller { get; set; }
 
+    /// <summary>
+    /// Called after the user moves this view's offset: the wheel, the scrollbar (a track click,
+    /// each move of a thumb drag), the autoscroll (the middle button held, a selection held past
+    /// the view's edge) and a <see cref="VirtualListElement{T}"/>'s own scroll keys. Read
+    /// <see cref="ScrollOffsetX"/> and <see cref="ScrollOffsetY"/> for where it went.
+    ///
+    /// <para>It is what a view that makes only what is in view, picked from the offset, listens
+    /// to (Vesper's Brief columns). The scrollbar and the autoscroll raise no
+    /// <see cref="ScrollEvent"/>, so such a view that built again only on the wheel's event showed
+    /// blank columns after a track click or a drag. Called once per move that changed the offset,
+    /// and last, after the view has moved, so the listener may build its owner again from inside
+    /// the call.</para>
+    ///
+    /// <para>A scroll from code calls nothing: setting the offsets, <see cref="ScrollBy"/>, a
+    /// reveal (<see cref="ScrollRangeIntoView"/>, including one assistive technology asks for).
+    /// Nor does sideways motion handed to a <see cref="SidewaysScroller"/>, which moves the
+    /// app's own pan and not this offset. The wheel's <see cref="ScrollEvent"/> is unchanged: its
+    /// handlers run as before, and this comes after the view's own handler has moved it.</para>
+    /// </summary>
+    public Action? UserScrolled { get; set; }
+
+    /// <summary>Calls <see cref="UserScrolled"/> when the user's input moved the offset from
+    /// (<paramref name="beforeX"/>, <paramref name="beforeY"/>). The last thing each path does: the
+    /// listener may build the view's owner again.</summary>
+    private protected void NotifyUserScrolled(float beforeX, float beforeY)
+    {
+        if (UserScrolled is { } scrolled && (_scrollOffsetX != beforeX || _scrollOffsetY != beforeY))
+            scrolled();
+    }
+
     public ScrollViewElement()
     {
         // Default: vertical scroll. OverflowY=Scroll gives children unlimited
@@ -119,8 +220,8 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         float dy = evt.RemainingDeltaY * ScrollSpeed;
         if (dx == 0 && dy == 0) return;
 
-        float beforeY = _scrollOffsetY;
-        if (dy != 0) ScrollOffsetY = beforeY - dy;
+        float beforeX = _scrollOffsetX, beforeY = _scrollOffsetY;
+        if (dy != 0) MoveOffsetY(beforeY - dy);
         bool movedY = _scrollOffsetY != beforeY;
 
         // A vertical wheel this view had no use for goes sideways, when it is that kind of
@@ -137,6 +238,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         bool movedX = dx != 0 && ScrollSideways(dx);
 
         evt.Consume(this, movedX, movedY);
+        NotifyUserScrolled(beforeX, beforeY);
     }
 
     /// <summary>Moves the content sideways by a wheel's <paramref name="delta"/> (positive is
@@ -147,7 +249,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         if (SidewaysScroller is { } sideways)
             return sideways.ScrollSidewaysBy(-delta);
         float before = _scrollOffsetX;
-        ScrollOffsetX = before - delta;
+        MoveOffsetX(before - delta);
         return _scrollOffsetX != before;
     }
 
@@ -198,6 +300,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         // Re-clamp offsets after content size change
         _scrollOffsetX = ClampX(_scrollOffsetX);
         _scrollOffsetY = ClampY(_scrollOffsetY);
+        ApplyHeldOffsets();
         ApplyPendingReveal();
     }
 
@@ -273,10 +376,30 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     /// horizontal part goes to the <see cref="SidewaysScroller"/> when there is one.</summary>
     /// <returns>True when something actually moved, so a caller can tell a scroll that ran
     /// from one already pinned against its end.</returns>
-    public bool ScrollBy(float dx, float dy)
+    public bool ScrollBy(float dx, float dy) => ScrollBy(dx, dy, user: false);
+
+    /// <summary><see cref="ScrollBy"/> for the window's autoscroll (the middle button held, a
+    /// selection held past the edge), which is the user's and so tells <see cref="UserScrolled"/>.
+    /// <see cref="ScrollBy"/> itself is a scroll from code.</summary>
+    internal bool ScrollByUser(float dx, float dy)
     {
         float beforeX = _scrollOffsetX, beforeY = _scrollOffsetY;
-        ScrollOffsetY = beforeY + dy;
+        bool moved = ScrollBy(dx, dy, user: true);
+        NotifyUserScrolled(beforeX, beforeY);
+        return moved;
+    }
+
+    /// <summary>From the offset as set, a held one included (<see cref="ScrollOffsetY"/>); an axis
+    /// with no motion is left alone. The <paramref name="user"/>'s moves the view now, as the
+    /// wheel does: it holds nothing for a layout to come.</summary>
+    private bool ScrollBy(float dx, float dy, bool user)
+    {
+        float beforeX = _scrollOffsetX, beforeY = _scrollOffsetY;
+        if (dy != 0)
+        {
+            if (user) MoveOffsetY(_scrollOffsetY + dy);
+            else ScrollOffsetY += dy;
+        }
         bool moved = _scrollOffsetY != beforeY;
         // The delegate goes last: a pan is app state, and moving it rebuilds the owner from
         // inside this call. Writing this view's own offset after that would be writing it on
@@ -286,7 +409,11 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
             if (dx != 0 && sideways.ScrollSidewaysBy(dx)) moved = true;
             return moved;
         }
-        ScrollOffsetX = beforeX + dx;
+        if (dx != 0)
+        {
+            if (user) MoveOffsetX(_scrollOffsetX + dx);
+            else ScrollOffsetX += dx;
+        }
         return moved || _scrollOffsetX != beforeX;
     }
 
@@ -315,7 +442,8 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
             return;
         }
         _pendingReveal = null;
-        float cur = _scrollOffsetY;
+        // From the offset as set: one held for the layout (no content laid out yet) counts.
+        float cur = ScrollOffsetY;
         float bottom = top + height;
         // Layout is unscrolled, so the band's coordinates don't move as we scroll;
         // only the [cur, cur + viewportHeight] window does. Reveal the nearer edge.
@@ -325,8 +453,8 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
 
         // A sticky header held at the top would now cover the band's top — a row revealed by
         // arrowing up would land under its own section's header. Scroll back by as much.
-        float covered = StuckHeaderReach(top) - (top - _scrollOffsetY);
-        if (covered > 0.5f) ScrollOffsetY = _scrollOffsetY - covered;
+        float covered = StuckHeaderReach(top) - (top - ScrollOffsetY);
+        if (covered > 0.5f) ScrollOffsetY -= covered;
     }
 
     /// <summary>
@@ -390,7 +518,11 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     public void ScrollRangeIntoViewHorizontal(float left, float width)
     {
         var viewportWidth = Layout.AbsoluteContentBox.Width;
-        float cur = _scrollOffsetX;
+        // With no width there is no least distance to scroll, and an offset set now would be kept
+        // for the layout (ScrollOffsetX): the band's right edge, which scrolls the band out of view.
+        // Left as it is, as a reveal before layout always was.
+        if (viewportWidth <= 0) return;
+        float cur = ScrollOffsetX;
         float right = left + width;
         if (left < cur) ScrollOffsetX = left;
         else if (right > cur + viewportWidth) ScrollOffsetX = right - viewportWidth;
@@ -447,6 +579,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
             MiddleClickAutoScroll = sv.MiddleClickAutoScroll;
             VerticalWheelScrollsSideways = sv.VerticalWheelScrollsSideways;
             SidewaysScroller = sv.SidewaysScroller;
+            UserScrolled = sv.UserScrolled;
             ShowScrollbarX = sv.ShowScrollbarX;
             ShowScrollbarY = sv.ShowScrollbarY;
             CopyScrollbarsFrom(sv);

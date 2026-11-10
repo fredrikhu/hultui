@@ -122,6 +122,7 @@ public partial class ScrollViewElement
     public bool TryStartScrollbarDrag(Point position)
     {
         var box = Layout.AbsoluteContentBox;
+        float beforeX = _scrollOffsetX, beforeY = _scrollOffsetY;
 
         if (ShowScrollbarY)
         {
@@ -137,8 +138,9 @@ public partial class ScrollViewElement
                 }
                 else
                 {
-                    ScrollOffsetY = trackOffset;
+                    MoveOffsetY(trackOffset);
                     MarkPaintDirty();
+                    NotifyUserScrolled(beforeX, beforeY);
                 }
                 return true;
             }
@@ -158,8 +160,9 @@ public partial class ScrollViewElement
                 }
                 else
                 {
-                    ScrollOffsetX = trackOffset;
+                    MoveOffsetX(trackOffset);
                     MarkPaintDirty();
+                    NotifyUserScrolled(beforeX, beforeY);
                 }
                 return true;
             }
@@ -183,13 +186,15 @@ public partial class ScrollViewElement
     {
         if (!IsDraggingScrollbar) return;
         var box = Layout.AbsoluteContentBox;
+        float beforeX = _scrollOffsetX, beforeY = _scrollOffsetY;
 
         if (_dragAxis == DragAxis.Vertical)
-            ScrollOffsetY = _vBar.OffsetFromDrag(box, _contentHeight, position, _dragGrabOffset, vertical: true);
+            MoveOffsetY(_vBar.OffsetFromDrag(box, _contentHeight, position, _dragGrabOffset, vertical: true));
         else if (_dragAxis == DragAxis.Horizontal)
-            ScrollOffsetX = _hBar.OffsetFromDrag(box, _contentWidth, position, _dragGrabOffset, vertical: false);
+            MoveOffsetX(_hBar.OffsetFromDrag(box, _contentWidth, position, _dragGrabOffset, vertical: false));
 
         MarkPaintDirty();
+        NotifyUserScrolled(beforeX, beforeY);
     }
 
     /// <summary>

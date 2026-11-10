@@ -736,6 +736,35 @@ entity.other.attribute-name.id". No fork. After it, Dark+ and Light+ change 2,33
 tokens, exactly step 14b's less the 61 PowerShell member tokens; a PowerShell fence in Markdown has
 no source.powershell scope and its members stay light blue, as in VS Code.
 
+### A long label tests each of its lines against the clip: a binary search measured and declined (round 10)
+
+`DrawText` (both overloads) and `DrawParagraph` test every line of a text against the clip each
+frame (`LineOutsideClip`, round 9), and draw only the lines it reaches. Plan 17's round 10, step 14
+built a binary search on the line tops for texts of 32 lines or more. It starts at the first line
+whose top is at least clip.Top − 2 × the tallest line, and stops at the first top past the clip's
+bottom plus the tallest line. The tallest line and a flag saying the tops are sorted were worked
+out on the first draw and kept on `TextLayout` and `PipelineTextParagraph` (+8 B each). It was exact by
+`LineOutsideClip`'s own sums, and `HultUI.Rendering.Skia.Tests` passed 387/387 with it, including
+the 27 cases of `LabelLinesCullTests` (40-line labels). The survey's prototype counted line visits
+a step on `text/wheel over a 2,000-line plain label in a ScrollView`: 1,999 → 60, plus 11 probes;
+`richtext/type in a paragraph of 600 spans` 77 → 41 + 7; Meridian's Request tab with an 89k body
+about 1,906 → 200 a frame.
+
+Measured with `scripts/perf/step-ab.ps1` against 71dd7d27, the whole suite, two alternated
+idle-gated pairs, i7-14700K on its P-cores (min / median ms, before → after):
+
+| Row | JIT pair 1 | JIT pair 2 | AOT pair 1 | AOT pair 2 |
+|---|---|---|---|---|
+| wheel, 2,000-line label, min | 0.231 → 0.225 (−2.9 %) | 0.237 → 0.227 (−4.4 %) | 0.234 → 0.226 (−3.7 %) | 0.232 → 0.225 (−3.1 %) |
+| wheel, 2,000-line label, median | 0.255 → 0.247 | 0.262 → 0.248 | 0.255 → 0.244 | 0.274 → 0.259 |
+| rich text, 600 spans, min | 2.383 → 2.395 (+0.5 %) | 2.373 → 2.388 (+0.6 %) | 2.625 → 2.639 (+0.5 %) | 2.698 → 2.593 (−3.9 %) |
+
+No row moved past 10 % either way and no row's allocation moved (3.1 and 325.6–325.7 KB an op
+stayed). The A/A line moved the wheel row 2.4 % (JIT) and 0.8 % (AOT). The win is real but 3–4 %,
+under the 5 % bar: the step got 7–10 µs faster for 1,939 lines not tested, about 4–5 ns a line.
+Declined. Revisit if a text of tens of thousands of lines is drawn every frame: at that cost a
+20,000-line body would spend about 0.1 ms a frame on the scan.
+
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
 BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction

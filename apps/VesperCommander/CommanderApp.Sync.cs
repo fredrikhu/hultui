@@ -1,9 +1,11 @@
 using HultUI;
 using HultUI.Core.Builders;
+using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Core.Styling;
 using VesperCommander.Theme;
 
@@ -67,6 +69,7 @@ public partial class CommanderApp
     {
         _syncCts?.Cancel();
         _syncRows.Clear();
+        _syncCells.Clear();   // the rows are new: nothing to hand back, and no state to hold
         _syncSel = 0; _syncScanned = 0; _syncCurrent = "";
         _syncComparing = true;
         var cts = new System.Threading.CancellationTokenSource();
@@ -88,8 +91,15 @@ public partial class CommanderApp
         }));
     }
 
-    private List<SyncRow> VisibleSyncRows() =>
-        _syncShowEqual ? _syncRows : _syncRows.Where(r => r.Data.Rel != SyncEngine.Rel.Equal).ToList();
+    /// <summary>Calls of <see cref="VisibleSyncRows"/> on this thread. With "Show equal" off each
+    /// makes a filtered copy of the rows, so a build asks once, never once a row; a test counts.</summary>
+    [ThreadStatic] internal static int VisibleSyncRowsCalls;
+
+    private List<SyncRow> VisibleSyncRows()
+    {
+        VisibleSyncRowsCalls++;
+        return _syncShowEqual ? _syncRows : _syncRows.Where(r => r.Data.Rel != SyncEngine.Rel.Equal).ToList();
+    }
 
     /// <summary>Cycle a row's direction through the sensible options for its relationship
     /// (one-sided rows can only go one way or skip).</summary>
@@ -105,26 +115,127 @@ public partial class CommanderApp
         MarkDirty();
     }
 
+    /// <summary>How many rows are shown, counted without a list of them.</summary>
+    private int VisibleSyncCount()
+    {
+        if (_syncShowEqual) return _syncRows.Count;
+        int n = 0;
+        foreach (var r in _syncRows) if (r.Data.Rel != SyncEngine.Rel.Equal) n++;
+        return n;
+    }
+
+    /// <summary>The row shown at <paramref name="index"/>, found without a list of the rows shown;
+    /// null past the end.</summary>
+    private SyncRow? SyncRowAt(int index)
+    {
+        if (index < 0) return null;
+        if (_syncShowEqual) return index < _syncRows.Count ? _syncRows[index] : null;
+        foreach (var r in _syncRows)
+            if (r.Data.Rel != SyncEngine.Rel.Equal && index-- == 0) return r;
+        return null;
+    }
+
     private void HandleSyncKey(KeyDownEvent e)
     {
-        var vis = VisibleSyncRows();
         // The diff key compares the selected pair, as it does in a pane.
         if (Pressed(Cmd.Diff, e))
         {
-            if (_syncSel >= 0 && _syncSel < vis.Count) DiffSyncRow(vis[_syncSel]);
+            if (SyncRowAt(_syncSel) is { } pair) DiffSyncRow(pair);
             e.StopPropagation = true; return;
         }
         switch (e.Key)
         {
             case KeyCode.Escape: CloseSync(); e.StopPropagation = true; break;
-            case KeyCode.Up: _syncSel = Math.Max(0, _syncSel - 1); MarkDirty(); e.StopPropagation = true; break;
-            case KeyCode.Down: _syncSel = Math.Min(Math.Max(0, vis.Count - 1), _syncSel + 1); MarkDirty(); e.StopPropagation = true; break;
+            case KeyCode.Up: MoveSyncCursor(Math.Max(0, _syncSel - 1), reveal: true); e.StopPropagation = true; break;
+            case KeyCode.Down: MoveSyncCursor(Math.Min(Math.Max(0, VisibleSyncCount() - 1), _syncSel + 1), reveal: true); e.StopPropagation = true; break;
             case KeyCode.Space:
-                if (_syncSel >= 0 && _syncSel < vis.Count) CycleSyncDir(vis[_syncSel]);
+                if (SyncRowAt(_syncSel) is { } row) CycleSyncDir(row);
                 e.StopPropagation = true; break;
             case KeyCode.Enter: OpenSyncPreflight(); e.StopPropagation = true; break;
         }
     }
+
+    // ── The cursor a key moves with no build ─────────────────────────────
+    // The rows are kept between builds (BuildSyncBody), and nothing on screen but the two rows
+    // the cursor moves between shows it. So a cursor key takes the ring off the live row it leaves
+    // and puts it on the one it reaches (KeptElements.Live), with the row's fade and the selected
+    // state a reader is told, as Brief and Thumbnails do, and builds nothing. Those two then show
+    // what no build made them with, so each build of the rows first puts them back as they were
+    // made (SettleSyncRing), and compares each row's state as always.
+
+    /// <summary>The cursor to the row shown at <paramref name="to"/>: on the live rows with no build
+    /// when the latest build made them (<see cref="MoveSyncRingLive"/>); otherwise the view builds
+    /// and the parts stay. Each key built the window, both parts and every row. With
+    /// <paramref name="reveal"/> (a key) the row is scrolled into view, after the build when there is
+    /// one (<see cref="OnAfterBuild"/>): the cursor left the view after a screen of rows, and nothing
+    /// brought it back. A click leaves the scroll, as in a pane.</summary>
+    private void MoveSyncCursor(int to, bool reveal)
+    {
+        int from = _syncSel;
+        if (to == from) return;   // at an end of the list: nothing moves, nothing builds
+        _syncSel = to;
+        if (MoveSyncRingLive(from, to))
+        {
+            if (reveal) RevealSyncCursor();
+            return;
+        }
+        _pendingSyncReveal = reveal;
+        MarkViewDirty();
+    }
+
+    /// <summary>The ring off the live row at <paramref name="from"/> and onto the one at
+    /// <paramref name="to"/>, with no build. False, for a build, when an overlay is open, the latest
+    /// build did not make the rows (another view, the comparison's progress, no rows), or the row
+    /// reached has no live element (past the end).</summary>
+    private bool MoveSyncRingLive(int from, int to)
+    {
+        if (AnyOverlayOpen || !_syncOpen || _syncRowsBuild != _builds) return false;
+        if (SyncRowAt(to) is not { } reached || _syncCells.Live(reached.Data.RelPath) is not BoxElement reachedEl) return false;
+        if (SyncRowAt(from) is { } left && _syncCells.Live(left.Data.RelPath) is BoxElement leftEl) MoveSyncRing(leftEl, left, on: false);
+        MoveSyncRing(reachedEl, reached, on: true);
+        return true;
+    }
+
+    /// <summary>Each row a key moved the ring on or off with no build since the rows' last build,
+    /// and whether it was made with the ring. One that is back as it was made is dropped, so a long
+    /// walk holds the two it is between.</summary>
+    private readonly List<(BoxElement Element, SyncRow Row, bool MadeSelected)> _syncRingMoved = [];
+
+    private void MoveSyncRing(BoxElement el, SyncRow r, bool on)
+    {
+        bool shows = el.BorderColor == Nocturne.Accent600;
+        if (shows == on) return;
+        int i = 0;
+        while (i < _syncRingMoved.Count && !ReferenceEquals(_syncRingMoved[i].Element, el)) i++;
+        if (i == _syncRingMoved.Count) _syncRingMoved.Add((el, r, shows));
+        else if (_syncRingMoved[i].MadeSelected == on) _syncRingMoved.RemoveAt(i);
+        ShowSyncCursor(el, r, on);
+    }
+
+    /// <summary>At the start of a build of the rows: each row a key moved the ring on or off goes
+    /// back as it was made, so a row handed back shows its state (the cursor can move with a build
+    /// too: a rescan, "Show equal").</summary>
+    private void SettleSyncRing()
+    {
+        foreach (var (el, r, madeSelected) in _syncRingMoved)
+            if (el.IsHosted) ShowSyncCursor(el, r, madeSelected);
+        _syncRingMoved.Clear();
+    }
+
+    /// <summary>Sync's scroll view of rows, for the reveal; let go once Sync left the window
+    /// (<see cref="LetGoOfLeftViews"/>).</summary>
+    private readonly Ref<ScrollViewElement> _syncScroll = new();
+
+    /// <summary>The cursor's row in view, by its place: every row is <see cref="RowHeight"/> high,
+    /// the column has no gap, so no row is read back.</summary>
+    private void RevealSyncCursor()
+    {
+        if (_syncScroll.Current is { IsHosted: true } sv && _syncSel >= 0 && _syncSel < VisibleSyncCount())
+            sv.ScrollRangeIntoView(_syncSel * RowHeight, RowHeight);
+    }
+
+    /// <summary>A cursor key that built asks for the reveal once its build is in the window.</summary>
+    private bool _pendingSyncReveal;
 
     private void DiffSyncRow(SyncRow row)
     {
@@ -281,17 +392,47 @@ public partial class CommanderApp
         return box;
     }
 
+    // ── The rows a build keeps ───────────────────────────────────────────
+    // A row shows its pair (the SyncRow, whose data never changes), its direction and whether the
+    // cursor is on it; besides those only what every row shows, the row height and the theme. A
+    // build hands back each row whose state is what it was made with (KeptElements, keyed by the
+    // path), so a Space makes the row it turned and "Show equal" the Equal rows it brings in; a
+    // cursor key makes none (MoveSyncCursor). The row's handlers capture the SyncRow, and look up
+    // its place when they run.
+
+    /// <summary>What a Sync row shows and acts on besides the shape.</summary>
+    private readonly record struct SyncRowState(SyncRow Row, SyncDir Dir, bool Selected);
+
+    /// <summary>What every Sync row shows.</summary>
+    private readonly record struct SyncRowShape(float RowH, object? Theme);
+
+    private readonly KeptElements<SyncRowState> _syncCells = new();
+    private readonly ShapeState<SyncRowShape> _syncCellsShape = new();
+    /// <summary>The build that made the rows on screen: a cursor key moves the ring on them only
+    /// while it is the latest.</summary>
+    private int _syncRowsBuild = -1;
+
     private Element BuildSyncBody()
     {
+        SettleSyncRing();
         var vis = VisibleSyncRows();
         if (vis.Count == 0)
             return Flex.Column(gap: 8).FlexGrow(1).AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
                 .Children(Ui.Icon(Glyphs.Check, 22f, Nocturne.DiffGreen),
                           Text.New("Folders are in sync").FontSize(13f).TextColor(Nocturne.Text));
 
-        var scroll = ScrollView.Vertical().FlexGrow(1).Padding(new Thickness(4, 4, 4, 4));
+        if (_syncCellsShape.Changed(new SyncRowShape(RowHeight, _app.Theme))) _syncCells.Clear();
+        _syncCells.Begin(_builds);
+        _syncRowsBuild = _builds;
+        var scroll = ScrollView.Vertical().WithRef(_syncScroll).FlexGrow(1).Padding(new Thickness(4, 4, 4, 4));
         var colb = Flex.Column(gap: 0);
-        for (int i = 0; i < vis.Count; i++) colb.AddChild(SyncRowView(vis[i], i == _syncSel));
+        for (int i = 0; i < vis.Count; i++)
+        {
+            var r = vis[i];
+            var state = new SyncRowState(r, r.Dir, i == _syncSel);
+            colb.AddChild(_syncCells.TryKeep(r.Data.RelPath, state, out var kept) ? kept
+                : _syncCells.Made(r.Data.RelPath, state, SyncRowView(r, state.Selected)));
+        }
         scroll.AddChild(colb);
         return scroll;
     }
@@ -305,50 +446,114 @@ public partial class CommanderApp
     /// <summary>A Sync row's colour at the row's <paramref name="opacity"/>.</summary>
     private static Color Faded(Color c, float opacity) => opacity < 1f ? Nocturne.Fade(c, opacity) : c;
 
-    private Element SyncRowView(SyncRow r, bool selected)
+    /// <summary>What a Sync row draws its texts in: an Equal row reads dimmer, every colour it draws
+    /// at 55 % (see <see cref="EqualRowOpacity"/>), unless it is the cursor's.</summary>
+    private readonly record struct SyncInk(Color Left, Color Meta, Color Rail, Color Right);
+
+    private SyncInk InkOf(SyncRow r, bool selected)
     {
         var d = r.Data;
-        bool conflict = d.Rel == SyncEngine.Rel.Conflict;
+        float fade = !selected && d.Rel == SyncEngine.Rel.Equal ? EqualRowOpacity : 1f;
+        return new SyncInk(
+            Faded(d.LeftExists ? Nocturne.Text : Nocturne.On(0.30), fade),
+            Faded(Nocturne.On(0.45), fade),
+            Faded(SyncRail(r).color, fade),
+            Faded(d.RightExists ? Nocturne.Text : Nocturne.On(0.30), fade));
+    }
+
+    /// <summary>A Sync row. Its handlers capture the pair and look up its place when they run: a
+    /// kept row may stand elsewhere by then ("Show equal" moves the rows after an Equal one). Each
+    /// row looked itself up in a fresh list of the rows shown as it was made, O(rows²) a build (plan
+    /// 17 round 10 step 7).</summary>
+    private BoxElement SyncRowView(SyncRow r, bool selected)
+    {
+        var d = r.Data;
         // One 1fr track, so the cells centre in the whole row — the default auto track hugs
         // the tallest cell and leaves them along the row's top (docs/GRID.md §6).
         var row = Grid.Of(SyncCols, rows: "1fr", gap: 8).Height(RowHeight).AlignItems(AlignItems.Center)
             .Padding(new Thickness(0, 8, 0, 8)).CornerRadius(Nocturne.RadiusSm)
             .Cursor(CursorType.Pointer);
-        if (selected)
-            row.Background(Nocturne.Alpha(Nocturne.Accent500, 0.13)).BorderColor(Nocturne.Accent600).BorderWidth(1f);
-        else if (conflict)
-            row.Background(Nocturne.Alpha(Nocturne.MarkRed, 0.08));
-        // An Equal row reads dimmer: every colour it draws at 55 % (see EqualRowOpacity).
-        float fade = !selected && !conflict && d.Rel == SyncEngine.Rel.Equal ? EqualRowOpacity : 1f;
+        // A button to a reader, as a clickable row is, named by what it shows; set here so that
+        // whether it is the cursor's is told on its node with no tree (SyncRowLook).
+        row.Role = HultUI.Core.Accessibility.AccessibilityRole.Button;
+        SyncRowLook(row, selected, d.Rel == SyncEngine.Rel.Conflict);
+        var ink = InkOf(r, selected);
 
-        Color leftFg = Faded(d.LeftExists ? Nocturne.Text : Nocturne.On(0.30), fade);
-        Color rightFg = Faded(d.RightExists ? Nocturne.Text : Nocturne.On(0.30), fade);
-        Color metaFg = Faded(Nocturne.On(0.45), fade);
-
-        row.AddChild(Ui.Mono(d.LeftExists ? d.RelPath : "— missing —", 11.5f, leftFg)
+        row.AddChild(Ui.Mono(d.LeftExists ? d.RelPath : "— missing —", 11.5f, ink.Left)
             .MaxLines(1).TextOverflow(TextOverflow.Ellipsis).GridColumn(0));
-        row.AddChild(Ui.Mono(d.LeftExists ? FileSystem.ByteCount(d.LeftSize) : "", 10.5f, metaFg)
+        row.AddChild(Ui.Mono(d.LeftExists ? FileSystem.ByteCount(d.LeftSize) : "", 10.5f, ink.Meta)
             .TextAlign(TextAlign.Right).GridColumn(1));
-        row.AddChild(Ui.Mono(d.LeftExists ? $"{d.LeftTime:MM-dd HH:mm}" : "", 10.5f, metaFg).GridColumn(2));
+        row.AddChild(Ui.Mono(d.LeftExists ? $"{d.LeftTime:MM-dd HH:mm}" : "", 10.5f, ink.Meta).GridColumn(2));
 
         // Center rail — glyph + color; clicking cycles the direction. It spans the row's
         // height, so the whole cell is the click target, not just the glyph.
-        var (glyph, color) = SyncRail(r);
         var rail = Box.New().AlignSelf(AlignSelf.Stretch)
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
-            .Cursor(CursorType.Pointer).Children(Ui.Mono(glyph, 12f, Faded(color, fade)));
+            .Cursor(CursorType.Pointer).Children(Ui.Mono(SyncRail(r).glyph, 12f, ink.Rail));
         rail.OnClick(ev => { ev.StopPropagation = true; CycleSyncDir(r); });
         row.AddChild(rail.GridColumn(3));
 
-        row.AddChild(Ui.Mono(d.RightExists ? $"{d.RightTime:MM-dd HH:mm}" : "", 10.5f, metaFg).GridColumn(4));
-        row.AddChild(Ui.Mono(d.RightExists ? FileSystem.ByteCount(d.RightSize) : "", 10.5f, metaFg)
+        row.AddChild(Ui.Mono(d.RightExists ? $"{d.RightTime:MM-dd HH:mm}" : "", 10.5f, ink.Meta).GridColumn(4));
+        row.AddChild(Ui.Mono(d.RightExists ? FileSystem.ByteCount(d.RightSize) : "", 10.5f, ink.Meta)
             .TextAlign(TextAlign.Right).GridColumn(5));
-        row.AddChild(Ui.Mono(d.RightExists ? d.RelPath : "— missing —", 11.5f, rightFg)
+        row.AddChild(Ui.Mono(d.RightExists ? d.RelPath : "— missing —", 11.5f, ink.Right)
             .TextAlign(TextAlign.Right).MaxLines(1).TextOverflow(TextOverflow.Ellipsis).GridColumn(6));
 
-        int idx = VisibleSyncRows().IndexOf(r);
-        row.OnClick(_ => { _syncSel = idx; MarkDirty(); });
+        row.OnClick(_ =>
+        {
+            int at = VisibleSyncRows().IndexOf(r);
+            if (at >= 0) MoveSyncCursor(at, reveal: false);
+        });
         return row;
+    }
+
+    /// <summary>The cursor on a Sync row or not, as a build makes it and as a key moves it with no
+    /// build: the accent fill and the 1 px ring (a conflict's red tint without it), and to a reader
+    /// the row selected or not, which the window tells on the row's node with no tree (its role is
+    /// the app's Button). The ring's width moves the row's cells by a pixel, so a live row is laid
+    /// out again.</summary>
+    private static void SyncRowLook(BoxElement row, bool selected, bool conflict)
+    {
+        row.BackgroundColor = selected ? Nocturne.Alpha(Nocturne.Accent500, 0.13)
+            : conflict ? Nocturne.Alpha(Nocturne.MarkRed, 0.08) : Color.Transparent;
+        row.BorderColor = selected ? Nocturne.Accent600 : Color.Transparent;
+        var width = selected ? new Thickness(1f) : default;
+        if (row.Box.BorderWidth != width)
+        {
+            row.Box.BorderWidth = width;
+            row.MarkLayoutDirty();
+        }
+        row.AccessibleSelected = selected;
+    }
+
+    private static readonly Action<Element> SyncRowOn = static e => SyncRowLook((BoxElement)e, selected: true, conflict: false);
+    private static readonly Action<Element> SyncRowOff = static e => SyncRowLook((BoxElement)e, selected: false, conflict: false);
+    private static readonly Action<Element> SyncConflictOff = static e => SyncRowLook((BoxElement)e, selected: false, conflict: true);
+
+    /// <summary>The cursor onto or off a live row, with no build: its look (through
+    /// <see cref="Element.Restyle"/>) and, for an Equal row, its texts' fade.</summary>
+    private void ShowSyncCursor(BoxElement row, SyncRow r, bool selected)
+    {
+        row.Restyle(selected ? SyncRowOn : r.Data.Rel == SyncEngine.Rel.Conflict ? SyncConflictOff : SyncRowOff);
+        if (r.Data.Rel != SyncEngine.Rel.Equal || row.Children.Count != 7) return;
+        var ink = InkOf(r, selected);
+        InkText(row.Children[0], ink.Left);
+        InkText(row.Children[1], ink.Meta);
+        InkText(row.Children[2], ink.Meta);
+        if (row.Children[3].Children is [var glyph]) InkText(glyph, ink.Rail);
+        InkText(row.Children[4], ink.Meta);
+        InkText(row.Children[5], ink.Meta);
+        InkText(row.Children[6], ink.Right);
+    }
+
+    /// <summary>A live text's colour, as <c>.TextColor</c> sets it in a build (an inherited style,
+    /// which a direct write does not mark).</summary>
+    private static void InkText(Element text, Color color)
+    {
+        if (text.Inherited.TextColor == color) return;
+        text.Inherited.TextColor = color;
+        text.MarkStyleDirty();
+        text.MarkPaintDirty();
     }
 
     /// <summary>Rail glyph + color: always a glyph, never color alone (a11y).</summary>

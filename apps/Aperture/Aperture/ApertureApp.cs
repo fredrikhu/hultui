@@ -103,7 +103,9 @@ public sealed partial class ApertureApp : Component, IDisposable
         _app.Theme = Halide.ToHultTheme();
 
         _settings = settings ?? new ApertureSettings(CredentialStore.Default);
-        _toasts = new ToastHost(MarkDirty) { Seconds = 2.6f };
+        // A toast that comes builds the parts too, as the change it reports may be theirs; one
+        // that goes builds the view alone: the toast is the window's, not a part's.
+        _toasts = new ToastHost(() => { if (_toasts!.IsShowing) MarkDirty(); else MarkViewDirty(); }) { Seconds = 2.6f };
         _posters = new PosterCache(PostArtworkLanded, http: posterHttp);
 
         if (library is not null)
@@ -202,6 +204,9 @@ public sealed partial class ApertureApp : Component, IDisposable
         var body = _stage == ApertureStage.Connect ? BuildConnectView() : BuildBrowsing();
         body.Key = "body";
         root.AddChild(body);
+        // A ref into a view holds the whole view through its parents (REACTIVITY.md, "A ref into a
+        // view keeps the whole view"): a build that shows no library grid lets go of the last one.
+        if (_stage == ApertureStage.Connect || Current.View != ApertureView.Library) LetGoOfGrid();
 
         // The player is a sheet over everything, so the view underneath keeps its state
         // (and its scroll position) while a film plays. It goes up the moment Play is
@@ -554,6 +559,9 @@ public sealed partial class ApertureApp : Component, IDisposable
         switch (Shortcuts.Find(e, "Browse")?.Id)
         {
             case "browse.back":
+                // Backspace in a text field is the field's: it erased a character and went back
+                // as well, out of Search or away from a half-written reply. Escape still goes back.
+                if (e.Key == KeyCode.Backspace && e.Target is TextInputElement or TextAreaElement) return;
                 if (GoBack()) e.Handled = true;
                 return;
             case "browse.search":

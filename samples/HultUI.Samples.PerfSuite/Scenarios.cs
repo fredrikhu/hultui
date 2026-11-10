@@ -16,6 +16,8 @@ static partial class Scenarios
             .Concat(MovingRows())
             .Concat(Components())
             .Concat(Shelves())
+            .Concat(AppendRows())
+            .Concat(CursorRows())
             .Concat(Input())
             .Concat(RichTextScenarios())
             .Concat(Overlays())

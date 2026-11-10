@@ -1,9 +1,11 @@
 using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
+using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Core.Styling;
 using Meridian.Core;
 using Meridian.Theme;
@@ -49,12 +51,19 @@ public partial class MeridianApp
                         EffectiveAuth(request.Path, doc).Spec));
             }
         }
-        CollectionFolder? Scoped(CollectionFolder folder) =>
-            folder.Path.Equals(_runScopePath, StringComparison.OrdinalIgnoreCase) ? folder
-            : folder.Folders.Select(Scoped).FirstOrDefault(f => f != null);
         if (_tree is { } tree)
-            Walk(_runScopePath == null ? tree.Root : Scoped(tree.Root) ?? tree.Root);
+            Walk(ScopeFolder(tree.Root, _runScopePath));
         return list;
+    }
+
+    /// <summary>The folder a scope covers: the collection's root for null, or for a folder no
+    /// longer in the tree.</summary>
+    private static CollectionFolder ScopeFolder(CollectionFolder root, string? path)
+    {
+        CollectionFolder? Scoped(CollectionFolder folder) =>
+            folder.Path.Equals(path, StringComparison.OrdinalIgnoreCase) ? folder
+            : folder.Folders.Select(Scoped).FirstOrDefault(f => f != null);
+        return path == null ? root : Scoped(root) ?? root;
     }
 
     internal void StartRun() => StartRun(ScopeRequests(), keepExisting: false);
@@ -63,7 +72,11 @@ public partial class MeridianApp
     {
         if (_runState == RunState.Running || scope.Count == 0) return;
         _runState = RunState.Running;
-        if (!keepExisting) _runResults.Clear();
+        if (!keepExisting)
+        {
+            _runResults.Clear();
+            _runRows.Clear();
+        }
         _runSummary = null;
         _runExpanded = -1;
         _lastScope = scope;
@@ -74,7 +87,7 @@ public partial class MeridianApp
         // Awaits resume on the UI thread, so the stream callback mutates state
         // exactly where Build reads it.
         var summary = await runner.RunAsync(scope, EnvironmentValues(), _runBail,
-            result => { _runResults.Add(result); MarkDirty(); }, cts.Token);
+            result => { _runResults.Add(result); RunResultsDirty(); }, cts.Token);
 
         _runSummary = keepExisting
             ? new RunSummary(_runResults.ToList(), summary.Wall, summary.Aborted)
@@ -136,11 +149,40 @@ public partial class MeridianApp
 
         var row = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
         var rail = BuildRunnerRail(); rail.Key = "runner-rail";
-        var main = BuildRunnerMain(); main.Key = "runner-main";
         row.AddChild(rail);
-        row.AddChild(main);
+        row.AddChild(RunResultsPart.Mount().FlexGrow(1));
         return row;
     }
+
+    // ── The results: a part of their own ─────────────────────────────────
+    //
+    // A result changes the progress line and the list beside the rail, and nothing else: the rail
+    // moves when a run starts or ends (its Run turns to Abort and back), and neither the title bar
+    // nor the rail of views shows a run. A result built the whole window for it, the rail with its
+    // counts and those two parts too, about 90 KB a result at 200 requests with the rows kept. The
+    // progress line, the list and the summary are now a part (see Part) with a revision of its own:
+    // a result writes it (RunResultsDirty), so they build alone, and every full rebuild builds them
+    // too (_partRevision, safe by default). Shown in another view, a result builds nothing; the
+    // Runner builds them when it is shown again.
+
+    private readonly PartGroup _runnerParts = new();
+    private readonly Signal<int> _runResultsRevision = new(0);
+    private Part? _runResultsPart;
+    private int _runResultsBuilds;
+
+    /// <summary>Builds of the Runner's results so far, for tests: a result builds them alone.</summary>
+    internal int RunResultsBuilds => _runnerParts.Builds;
+
+    private Part RunResultsPart => _runResultsPart ??= new(_runnerParts, () =>
+    {
+        _ = _runResultsRevision.Value;
+        var main = BuildRunnerMain();
+        main.Key = "runner-main";
+        return main;
+    }, own: _partRevision);
+
+    /// <summary>A result landed: the Runner's results build alone.</summary>
+    private void RunResultsDirty() => _runResultsRevision.Value++;
 
     private Element BuildRunnerRail()
     {
@@ -231,13 +273,21 @@ public partial class MeridianApp
         return row;
     }
 
+    /// <summary>The requests in a scope, as the rail counts them: from the collection as it was
+    /// scanned, with no file read. The rail builds with every build of the app in this view, a
+    /// run's results included, and counts the collection, each folder and the scope; read and
+    /// parsed for the count, as <see cref="ScopeRequests"/> does for a run, they were 7,926 KB a
+    /// build at 200 requests. A file that cannot be read is counted, and left out of the run as
+    /// before: the progress line counts the requests the run has.</summary>
     private int ScopeRequestsCountFor(string? path)
     {
-        var keep = _runScopePath;
-        _runScopePath = path;
-        int count = ScopeRequests().Count;
-        _runScopePath = keep;
-        return count;
+        static int Count(CollectionFolder folder)
+        {
+            int n = folder.Requests.Count;
+            foreach (var sub in folder.Folders) n += Count(sub);
+            return n;
+        }
+        return _tree is { } tree ? Count(ScopeFolder(tree.Root, path)) : 0;
     }
 
     private Element BuildRunnerMain()
@@ -265,16 +315,21 @@ public partial class MeridianApp
 
         var scroll = ScrollView.New();
         var list = Flex.Column(gap: 1).Padding(new Thickness(Azimuth.S1, Azimuth.S2, Azimuth.S2, Azimuth.S2));
+        // Every child of the list is keyed, the rows by their requests' paths (KeptElements keys them).
         if (_runState == RunState.Idle)
         {
-            list.AddChild(Flex.Column(gap: Azimuth.S2).Padding(new Thickness(Azimuth.S4))
+            var idle = Flex.Column(gap: Azimuth.S2).Padding(new Thickness(Azimuth.S4))
                 .Children(
                     Text.New("nothing has run yet").FontSize(12f).TextColor(Azimuth.TextMuted),
                     Text.New("Pick a scope and Run — results stream in here, exactly as CI sees them.")
-                        .FontSize(11.5f).TextColor(Azimuth.TextFaint)));
+                        .FontSize(11.5f).TextColor(Azimuth.TextFaint));
+            idle.Key = "run-idle";
+            list.AddChild(idle);
         }
+        _runRows.Begin(++_runResultsBuilds);
+        float scale = Ui.DisplayScale;
         for (int i = 0; i < _runResults.Count; i++)
-            AddRunRow(list, i);
+            AddRunRow(list, i, scale);
         scroll.AddChild(list);
         var scrollBox = Box.New().FlexGrow(1).FlexBasis(Dimension.Px(0));
         scrollBox.AddChild(scroll);
@@ -289,9 +344,46 @@ public partial class MeridianApp
         return col;
     }
 
-    private void AddRunRow(BoxElement list, int index)
+    // ── The result rows, kept ────────────────────────────────────────────
+    //
+    // A row comes back from the build before when nothing it shows or does moved (KeptElements;
+    // REACTIVITY.md, "Hand back the elements a key does not change"). A run builds the results once
+    // a result, and made every row again: at 200 requests the list was 1,467 KB of a build, 7.3 KB a
+    // row, so a run made n²/2 rows. A row is keyed by its request's path, which a run runs once,
+    // and a run that starts over lets every row go. Its state is its result, a record nothing
+    // changes; its place, which its id names and its click expands; and the scale. The builds it
+    // counts are the results part's own: a row made before the Runner was left
+    // for another view is out of the window, and is never handed back.
+    private readonly record struct RunRowState(RunRequestResult Result, int Index, float Scale);
+    private readonly KeptElements<RunRowState> _runRows = new();
+
+    /// <summary>Result rows the Runner has made so far, for tests: a result makes one.</summary>
+    internal int RunRowsMade { get; private set; }
+
+    /// <summary>Lets every kept result row go, so the next build makes them all: for tests, whose
+    /// oracle is a build that keeps nothing.</summary>
+    internal void ForgetRunRows() => _runRows.Clear();
+
+    private void AddRunRow(BoxElement list, int index, float scale)
     {
         var result = _runResults[index];
+        var state = new RunRowState(result, index, scale);
+        list.AddChild(_runRows.TryKeep(result.Path, state, out var kept)
+            ? kept
+            : _runRows.Made(result.Path, state, RunRow(state)));
+
+        if (_runExpanded == index)
+        {
+            var detail = BuildRunRowDetail(result);
+            detail.Key = "run-detail";
+            list.AddChild(detail);
+        }
+    }
+
+    private Element RunRow(RunRowState state)
+    {
+        RunRowsMade++;
+        var (result, index) = (state.Result, state.Index);
         var (glyphColor, codeText) = result.Verdict switch
         {
             RunVerdict.Pass => (Azimuth.StatusPass, StatusOf(result)),
@@ -321,10 +413,7 @@ public partial class MeridianApp
         int rowIndex = index;
         row.OnClick(_ => { _runExpanded = _runExpanded == rowIndex ? -1 : rowIndex; MarkDirty(); });
         row.HoverBg(Azimuth.Raised, Color.Transparent);
-        list.AddChild(row);
-
-        if (_runExpanded == index)
-            list.AddChild(BuildRunRowDetail(result));
+        return row;
     }
 
     private static string StatusOf(RunRequestResult result) =>

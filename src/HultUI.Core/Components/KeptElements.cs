@@ -30,6 +30,10 @@ namespace HultUI.Core.Components;
 /// }
 /// </code>
 /// </summary>
+/// <remarks>The elements are held weakly: the window holds what it shows, and an element is handed
+/// back only while it is there. Held strongly, the elements of a view another view replaced kept the
+/// whole old view alive through their parents, as Meridian's request tree kept its Requests view
+/// behind every other view (1,350 KB of 5,770 at 200 requests).</remarks>
 /// <typeparam name="TState">What an element shows and does besides what never changes. Equal
 /// states must make equal elements: a record struct of the inputs the element is made from.</typeparam>
 public sealed class KeptElements<TState> where TState : IEquatable<TState>
@@ -37,7 +41,7 @@ public sealed class KeptElements<TState> where TState : IEquatable<TState>
     private struct Entry
     {
         public TState State;
-        public Ref<Element> Live;
+        public WeakElementRef Live;
         /// <summary>The build that last made or handed back the element.</summary>
         public int Build;
     }
@@ -92,14 +96,15 @@ public sealed class KeptElements<TState> where TState : IEquatable<TState>
     /// <summary>
     /// Remembers <paramref name="element"/>, just made for <paramref name="key"/> from
     /// <paramref name="state"/>, and returns it to add. It takes the key, so the reconcile matches it
-    /// with the element it replaces, and a ref that follows it to the live element it is patched into.
+    /// with the element it replaces, and a ref that follows it to the live element it is patched into
+    /// (a weak one: see the remarks on the class).
     /// </summary>
     public T Made<T>(string key, in TState state, T element) where T : Element
     {
         element.Key = key;
         if (_entries.Count >= _pruneAt && !_entries.ContainsKey(key)) Prune();
         ref var entry = ref CollectionsMarshal.GetValueRefOrAddDefault(_entries, key, out bool known);
-        if (!known) entry.Live = new Ref<Element>();
+        if (!known) entry.Live = new WeakElementRef();
         entry.State = state;
         entry.Build = _build;
         element.WithRef(entry.Live);
@@ -138,4 +143,18 @@ public sealed class KeptElements<TState> where TState : IEquatable<TState>
         _gone.Clear();
         _pruneAt = Math.Max(64, _entries.Count * 2);
     }
+}
+
+/// <summary>
+/// A ref that does not keep its element alive, for <see cref="KeptElements{TState}"/>: the patch repoints
+/// it at the live element as it does a <see cref="Ref{T}"/> (<see cref="Element.WithRef(IRef)"/>). The
+/// non-generic <see cref="WeakReference"/> underneath, which can be derived from, so it is one object of
+/// 24 B, as a <c>Ref&lt;Element&gt;</c> is, and one weak GC handle, made once per key.
+/// </summary>
+internal sealed class WeakElementRef() : WeakReference(null), IRef
+{
+    /// <summary>The element, while something else (the window) holds it; null once it is collected.</summary>
+    public Element? Current => (Element?)Target;
+
+    void IRef.SetTarget(object target) => Target = target;
 }

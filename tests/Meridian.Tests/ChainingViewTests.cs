@@ -259,6 +259,38 @@ public class ChainingViewTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    /// <summary>The Chain sub-tab reads each request file once a scan of the collection
+    /// (MeridianApp.Chaining.cs): typing in the URL with it shown reads none, and a request
+    /// changed on disk is read again once the collection is scanned again, the chain showing
+    /// the change.</summary>
+    [Fact]
+    public void TheChainTabReadsEachRequestOnceAScan()
+    {
+        Write("third.req", $"GET {_server.Origin}/ok\nname Third\nheader X-Other: {{{{other}}}}\n");
+        Hosted((session, app) =>
+        {
+            Click(session, "req-consumer");
+            Click(session, "subtab-chain");
+            Assert.Equal(2, app.ChainFilesRead);   // Login and Third: Consumer is open in its tab
+            Assert.True(Contains(session, "← Login"), "the producer is missing");
+
+            Click(session, "url-display");
+            for (int i = 0; i < 5; i++)
+            {
+                session.Window.TypeText("x");
+                session.PumpFrames(2);
+            }
+            Assert.EndsWith("xxxxx", app.ActiveTab!.Doc.Url);
+            Assert.Equal(2, app.ChainFilesRead);
+
+            // Login stops extracting the flag; the watcher's scan brings the change in.
+            Write("login.req", $"GET {_server.Origin}/ok\nname Login\n");
+            session.PumpUntil(() => Contains(session, "unresolved — nothing produces it"), TimeSpan.FromSeconds(10));
+            Assert.False(Contains(session, "← Login"), "the producer is still shown");
+            Assert.InRange(app.ChainFilesRead, 4, 8);   // the two again, once a scan
+        });
+    }
+
     [Fact]
     public void TheProducerSideListsItsConsumers()
     {

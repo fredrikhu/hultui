@@ -121,6 +121,15 @@ internal sealed class TempRepo : IDisposable
         // git's object files are read-only and stay so in the copy; ForceDelete copes.
         foreach (var file in Directory.EnumerateFiles(from, "*", SearchOption.AllDirectories))
             File.Copy(file, System.IO.Path.Combine(to, System.IO.Path.GetRelativePath(from, file)));
+        // On Windows a copied folder reports a change the first time anything lists it, so the
+        // app's first `git for-each-ref` on a fresh copy set off "refs\heads changed" (25 copies
+        // of 25; git's own writes report theirs as they happen, and a listing after them reports
+        // nothing). The app's watcher took it for another program's change and reloaded the
+        // repository 300 ms later, rebuilding the window and the chrome inside whatever a test
+        // counted (a ChromePartTests count failed 5 runs in 40 under load). Listing every folder
+        // of the copy here spends those reports before any watcher exists (0 copies of 19 after).
+        // FixtureQuietTests holds it.
+        foreach (var _ in Directory.EnumerateFileSystemEntries(to, "*", SearchOption.AllDirectories)) { }
     }
 
     /// <summary>Runs git in the repo and fails loudly — arranging a fixture must not

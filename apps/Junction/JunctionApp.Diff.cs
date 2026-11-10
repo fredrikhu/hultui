@@ -504,9 +504,9 @@ public partial class JunctionApp
         _diffBarBuilt = _diffPan.CanPan;
 
         // What a row looks like depends on three things the list cannot see: whether lines
-        // wrap, which layout is showing, and how wide the code column is. When any of them
-        // moves the rows have to be measured again and rebuilt, because a realized row is
-        // otherwise reused exactly as it was.
+        // wrap, which layout is showing, and — when lines wrap or the review's cards are among
+        // the rows — how wide the code column is. When any of them moves the rows have to be
+        // measured again and rebuilt, because a realized row is otherwise reused exactly as it was.
         float codeWidth = _diffCodeWidth;
         // Switching mode or file re-arms the width settle: the first build of a shape is the
         // one that has to guess, so each shape is allowed its one corrective rebuild. A width
@@ -516,7 +516,13 @@ public partial class JunctionApp
         if (_diffWidthSettleKey != settleKey) { _diffWidthSettleKey = settleKey; _diffSettledWidth = float.NaN; }
 
         bool perRow = _diffWrap || review is not null;
-        var shape = (_diffWrap, _diffSplit, codeWidth, rows.Count, review?.HeightKey ?? -1);
+        // The width is part of the shape only when the rows are measured at it. Unwrapped and
+        // with no review every row is one line high, and the width reaches only the pan's
+        // viewport: its offset, clamped when the column widens, is in the rows' own shape
+        // below. A split drag or a window resize then makes no row again (plan 17 round 10 step
+        // 8: a drag move 159.3 → 42.0 KB, a 4 px resize step 32.1 → 20.3). -1 is no width a
+        // column has.
+        var shape = (_diffWrap, _diffSplit, perRow ? codeWidth : -1f, rows.Count, review?.HeightKey ?? -1);
         if (_diffHeightShape != shape)
         {
             if (perRow) RebuildDiffHeights(rows, codeWidth); else _diffHeights = [];
@@ -676,8 +682,7 @@ public partial class JunctionApp
         _window.RequestPostFrameCallback(() =>
         {
             if (_diffBodyRef.Current is not { Layout.AbsoluteContentBox.Width: > 0 } body) return;
-            _diffLaidOutWidth = body.Layout.AbsoluteContentBox.Width;
-            if (_diffBarBuilt != _diffPan.CanPan) { MarkDirty(); return; }
+            if (FollowDiffWidth()) return;
             if (!_diffWrap && !ReviewRowsActive) return;
 
             // _diffHeightShape.Width is the width the heights on screen were measured at.
@@ -686,6 +691,44 @@ public partial class JunctionApp
             if (Math.Abs(observed - _diffSettledWidth) <= 0.5f) return;   // already asked, at this width
             _diffSettledWidth = observed;
             MarkDirty();
+        });
+    }
+
+    /// <summary>
+    /// Gives the pan the viewport of the diff list as it was laid out, after a frame: the
+    /// sideways wheel, the keys and the scrollbar then reach the end of the longest line, and
+    /// the thumb on screen takes its size and place with no build (HorizontalPan.ViewportWidth).
+    /// A build reads the width of the frame before it, and a window resize or a drag of the file
+    /// list beside the diff lays out again without one, so the width the build gave the pan is
+    /// a frame old at best, and at the start, before the list was ever laid out, the window's.
+    /// Asks for a build only when the scrollbar comes or goes, or when the offset the rows were
+    /// built at is clamped by a wider viewport. True when it asked.
+    /// </summary>
+    private bool FollowDiffWidth()
+    {
+        if (_diffBodyRef.Current is not { IsHosted: true, Layout.AbsoluteContentBox.Width: > 0 } body) return false;
+        _diffLaidOutWidth = body.Layout.AbsoluteContentBox.Width;
+        // Wrapped, the viewport is unbounded and nothing pans (UpdateDiffPan).
+        if (_diffWrap) return false;
+        _diffPan.ViewportWidth = CodeWidthFor(_diffLaidOutWidth);
+        if (_diffBarBuilt != _diffPan.CanPan) { MarkDirty(); return true; }
+        if (_diffPan.Offset != _diffRowShape.PanOffset) { MarkViewDirty(); return true; }
+        return false;
+    }
+
+    // Whether a FollowDiffWidth is waiting for the frame to end.
+    private bool _diffWidthFollowQueued;
+
+    /// <summary><see cref="FollowDiffWidth"/> after the next frame, once however often it is
+    /// asked for before then: for what moves the diff's width without a build.</summary>
+    private void FollowDiffWidthAfterFrame()
+    {
+        if (_diffWidthFollowQueued || _diffBodyRef.Current is not { IsHosted: true }) return;
+        _diffWidthFollowQueued = true;
+        _window.RequestPostFrameCallback(() =>
+        {
+            _diffWidthFollowQueued = false;
+            FollowDiffWidth();
         });
     }
 

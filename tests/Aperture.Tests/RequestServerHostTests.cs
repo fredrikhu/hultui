@@ -1416,4 +1416,144 @@ public class RequestServerHostTests
             Assert.Equal("0123456789abcdef0123456789abcdef", app.Current.Id);
         });
     }
+
+    // ── Typing ───────────────────────────────────────────────────────────
+
+    /// <summary>The builds a burst of keys makes, after they and two frames have run.</summary>
+    private static int Builds(HeadlessSession session, ApertureApp app, Action keys)
+    {
+        int before = app.Builds;
+        keys();
+        Pump(session, 2);
+        return app.Builds - before;
+    }
+
+    private static bool Enabled(HeadlessSession session, string automationId) =>
+        session.Window.FindByAutomationId(automationId)?.Element is HultUI.Core.Elements.ButtonElement { IsEnabled: true };
+
+    /// <summary>The reply box reads only whether the reply holds anything: Reply turns on, Resolve
+    /// says "Reply and resolve". A character builds the view when that flips and nothing otherwise;
+    /// each one built the window, 135 KB (plan 17 round 10). What is sent is what was typed.</summary>
+    [Fact]
+    public void AReplyCharacter_BuildsOnlyWhenTheReplyStartsOrStopsHoldingAnything()
+    {
+        var requests = Requests(RequestPermission.Request | RequestPermission.ManageIssues);
+        var blocky = requests.AddIssue("movie:603", IssueType.Video, "Blocky picture", byId: 2, by: "anna");
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Issues");
+            app.Navigate(new Route(ApertureView.Issue, blocky.Id.ToString(), "The Matrix"));
+            PumpUntilShown(session, "Blocky picture");
+            session.Window.FindByAutomationId("issue-reply")!.Element.Focus();
+            Pump(session);
+            Assert.False(Enabled(session, "issue-send"));
+
+            Assert.Equal(1, Builds(session, app, () => session.Window.TypeText("O")));
+            Assert.True(Enabled(session, "issue-send"));
+            Assert.True(Shows(session, "Reply and resolve"));
+            Assert.Equal(0, Builds(session, app, () => session.Window.TypeText("nly at nightx")));
+            Assert.Equal(0, Builds(session, app, () => session.Window.PressKey(HultUI.Core.Events.KeyCode.Backspace)));
+            Assert.Equal(1, Builds(session, app, () =>
+            {
+                session.Window.PressKey(HultUI.Core.Events.KeyCode.A, HultUI.Core.Events.KeyModifiers.Ctrl);
+                session.Window.PressKey(HultUI.Core.Events.KeyCode.Delete);
+            }));
+            Assert.False(Enabled(session, "issue-send"));
+            Assert.False(Shows(session, "Reply and resolve"));
+            Assert.Equal(0, Builds(session, app, () => session.Window.TypeText("  ")));   // blank says nothing
+            Assert.False(Enabled(session, "issue-send"));
+            Assert.Equal(1, Builds(session, app, () => session.Window.TypeText("Only at night")));
+            Assert.True(Enabled(session, "issue-send"));
+
+            Click(session, "issue-send");
+            Assert.Contains($"CommentOnIssue({blocky.Id},Only at night)", requests.Calls);
+        });
+    }
+
+    /// <summary>The report's message is the reply's case: Send reads whether it holds anything (and
+    /// a kind is picked), so a character builds the view only when that flips.</summary>
+    [Fact]
+    public void AReportCharacter_BuildsOnlyWhenTheMessageStartsOrStopsHoldingAnything()
+    {
+        var library = Library();
+        library.Update(library.Item("0123456789abcdef0123456789abcdef")! with { TmdbId = 1398 });
+        var requests = Requests(RequestPermission.Request | RequestPermission.CreateIssues);
+        var backend = new HultUI.Media.Testing.FakeMediaBackend { Duration = TimeSpan.FromMinutes(162) };
+        Host(library, requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Play(library.Item("0123456789abcdef0123456789abcdef")!, TimeSpan.Zero);
+            Pump(session, 10);
+            app.ToggleReport();
+            PumpUntilShown(session, "What's wrong with Stalker?");
+            Click(session, "report-type-audio");
+            session.Window.FindByAutomationId("report-message")!.Element.Focus();
+            Pump(session);
+            Assert.False(Enabled(session, "report-send"));
+
+            Assert.Equal(1, Builds(session, app, () => session.Window.TypeText("N")));
+            Assert.True(Enabled(session, "report-send"));
+            Assert.Equal(0, Builds(session, app, () => session.Window.TypeText("o sound")));
+            // Backspace erases here, and neither goes back nor stops the film.
+            Assert.Equal(0, Builds(session, app, () => session.Window.PressKey(HultUI.Core.Events.KeyCode.Backspace)));
+            Assert.Equal("No soun", session.Window.FindByAutomationId("report-message")!.Value);
+            Assert.NotNull(app.PlayingItem);
+            Assert.Equal(1, Builds(session, app, () =>
+            {
+                session.Window.PressKey(HultUI.Core.Events.KeyCode.A, HultUI.Core.Events.KeyModifiers.Ctrl);
+                session.Window.PressKey(HultUI.Core.Events.KeyCode.Delete);
+            }));
+            Assert.False(Enabled(session, "report-send"));
+            Assert.Equal(1, Builds(session, app, () => session.Window.TypeText("No sound after the first reel")));
+
+            Click(session, "report-send");
+            Assert.Equal("No sound after the first reel", Assert.Single(requests.Reports).Message);
+        }, () => backend);
+    }
+
+    /// <summary>Backspace in a text field erases and stays on the page: it went back as well, out of
+    /// Search or away from a half-written reply (question 27 (a); since da0676d0). Outside a field
+    /// it still goes back, and so does Escape from a field.</summary>
+    [Fact]
+    public void BackspaceInAField_ErasesAndStays_AndOnThePageGoesBack()
+    {
+        var requests = Requests(RequestPermission.Request | RequestPermission.ManageIssues);
+        var blocky = requests.AddIssue("movie:603", IssueType.Video, "Blocky picture", byId: 2, by: "anna");
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Issues");
+            app.Navigate(new Route(ApertureView.Search));
+            Pump(session);
+            var search = session.Window.FindByAutomationId("search-input")!;
+            search.Element.Focus();
+            session.Window.TypeText("ab");
+            Pump(session, 2);
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Backspace);
+            Pump(session, 3);
+            Assert.Equal(ApertureView.Search, app.Current.View);
+            Assert.Equal("a", session.Window.FindByAutomationId("search-input")!.Value);
+
+            app.Navigate(new Route(ApertureView.Issue, blocky.Id.ToString(), "The Matrix"));
+            PumpUntilShown(session, "Blocky picture");
+            session.Window.FindByAutomationId("issue-reply")!.Element.Focus();
+            session.Window.TypeText("ab");
+            Pump(session, 2);
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Backspace);
+            Pump(session, 3);
+            Assert.Equal(ApertureView.Issue, app.Current.View);
+            Assert.Equal("a", session.Window.FindByAutomationId("issue-reply")!.Value);
+
+            // Escape from the reply goes back, to Search.
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Escape);
+            Pump(session, 3);
+            Assert.Equal(ApertureView.Search, app.Current.View);
+
+            // Backspace with no field focused goes back, to Home.
+            session.Window.Window.ClearFocus();
+            Pump(session, 2);
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Backspace);
+            Pump(session, 3);
+            Assert.Equal(ApertureView.Home, app.Current.View);
+        });
+    }
 }

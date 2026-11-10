@@ -4,26 +4,28 @@ State of [the performance team](17-performance-team.md). The orchestrator update
 file after every step and commits it with the step's work. Full survey reports are in
 [`17-reports/`](17-reports/).
 
-- **Round:** 9
-- **Phase:** release — round 9: the full suite passed on 2370eea5 (Windows 30 projects, Fedora 22, docfx 0); merge into
-  main (detached origin/main merge in this worktree, gated), push, CI incl. the meridian-keyring jobs (step 8 touched
-  the Linux/macOS keyring stores). Question 26 for later. Build
-  agents run one at a time in this worktree; their briefs go in session c484f5ac's scratchpad as `brief-r9b<N>.md`.
-  Questions 14–19 answered. Open for the user: question 10 (`TokenizeDiff` public), the live screen-reader check of
-  menus and disabled menu items (ACCESSIBILITY-PLAN.md). Weekly usage 17 % after the survey
-  (reset 2026-11-15 03:00 UTC; extra usage off); the 90 % pause applies to build steps (user, 2026-10-27). Older rounds are in [the archive](17-performance-team-ledger-archive.md)
-  (search it, don't read it whole). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a
-  pre-push hook refuses pushes built on the old history). To resume in a fresh context, run in this worktree: `/loop
-  Run the next step of the performance team: follow docs/plans/17-performance-team.md, with state in
-  docs/plans/17-performance-team-ledger.md. Read both once per session (afterwards only the ledger's Phase and the part
-  the step needs), do the step the ledger's Phase calls for, record it in the ledger, and commit.` Before resuming,
-  `git fetch` and merge main if it moved.
+- **Round:** 10
+- **Phase:** release — round 10's full suite passed (Windows 30 projects, Fedora 22, docfx 0 warnings) on 776838cb's
+  source; merging into main, then CI; **after green CI, cut new releases of all five apps (user, 2026-11-11)**. Round 11
+  starts with Waiting dotnet-11-upgrade (the user is installing the .NET 11 SDK on 2026-11-11). To resume in a fresh
+  context, run in this worktree: `/loop Run the next step of the performance team: follow
+  docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md. Read both once per session
+  (afterwards only the ledger's Phase and the part the step needs), do the step the ledger's Phase calls for, record it
+  in the ledger, and commit.` Before resuming, `git fetch` and merge main if it moved. Build steps use
+  `scripts/perf/step-ab.ps1`. Open for the user, none blocking: question 26 (a merged syntax theme to match VS Code),
+  question 10 (`TokenizeDiff` public), question 33 (an unreadable request counted in the Runner's rail), the live
+  screen-reader check of menus. Older rounds are in [the archive](17-performance-team-ledger-archive.md) (search it,
+  don't read it whole). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a pre-push hook
+  refuses pushes built on the old history).
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`)
-- **Review commits since:** round 8's survey reviewed 17d4220a..df45b4a2 (round 7's build); round 9's survey reviews
-  round 8's build, eaa1ec29..10acc8c0 (the last survey report to the round 8 release), which also brings main's merge
-  3a15b5b1 (32 commits from other sessions: Meridian discovery and runner auth, text selection in scrolled views) —
-  review it like the rest.
-- **Probe code:** round 9 surveys in session c484f5ac's scratchpad
+- **Review commits since:** round 10's survey reviews round 9's build, 4919ac40..facced69 (the last survey report
+  to the round 9 release; 82 commits, 81 not merges; no merge from main this round). Round 9's survey reviewed
+  eaa1ec29..10acc8c0 (round 8's build, with main's merge 3a15b5b1); round 8's survey reviewed 17d4220a..df45b4a2.
+- **Probe code:** round 10 surveys in session 3484c586's scratchpad
+  `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\3484c586-c631-4af0-957d-95e7a03cac41\scratchpad\r10-<area>\`
+  (the common brief `brief-r10-survey.md` beside them); round 9's build-step probes `r9b<N>\` in session c484f5ac's
+  scratchpad `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\c484f5ac-8f22-48dd-b669-13c24b1e7889\scratchpad\`;
+  round 9 surveys in session c484f5ac's scratchpad
   `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\c484f5ac-8f22-48dd-b669-13c24b1e7889\scratchpad\r9-<area>\`
   (the common brief `brief-r9-survey.md` beside them); round 8's build-step probes in
   `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\64e7e0e2-bc1c-4069-9d42-9311fee04c9e\scratchpad\`; round 8 surveys in session 64e7e0e2's old scratchpad
@@ -56,139 +58,132 @@ memory `release-tagging` (≤3 tags per push).
 
 | Expert | Round | Satisfied | Review objections |
 |---|---|---|---|
-| 1. Layout | 9 | no | **d366505b**: a column change in Aperture's grid remakes every visible card (`TryKeep(..., place: key)`, ApertureApp.Library.cs:396): resize walk 6.1 → 14.1 KB a step (+131 %) → step 1; **e7d10c63** (main): the new edge-scroll tick runs `RepaintGroup`'s whole-tree walk and new `List` every frame → step 4. 213 shared suite rows: no layout counter rose |
-| 2. SkiaSharp: painting | 9 | no | **967ce1ac** (main): the Request tab's sent body is one plain label, and `DrawText` draws every line every frame (1,903 runs a frame, 1,706 lines off the clip, at 89k characters) → step 2. f3302209 and 307ee07c hold |
-| 3. GL and Vulkan | 9 | no | none (steady frame 0 B and idle 0 wakes on GL, Vulkan 8-bit and F16, JIT and AOT; the drag clip holds within +1.3 px; 30 guarded windows at 1.5× on the 4K monitor, 0 foreground takes, no new `nvlddmkm` events) |
-| 4. .NET runtime | 9 | no | **f276bb38 + 417ef713 + 967ce1ac** (main): Windows' keyring has no memo, so every build asks `CredReadW` per secret (22–66 a key) → step 8; **12d0392e** (main): a large spec read as a string leaves up to 8 MB pooled → step 11. Suite 0 of 214 rows rose, JIT and AOT |
-| 5. Text pipeline | 9 | no | none (48,000-layout hash 7A18AF8DE8E05271 and both 240,000-layout corpora unchanged; rich text rows as landed) |
-| 6. Reactivity and reconcile | 9 | no | **41f48bd3** (main): each request row's actions button and menu make Meridian's tree part +42…+51 % a full build → step 9 |
-| 7. Accessibility bridges | 9 | no | none (audit: 0 STALE in 3,138; 5,914 in-place walks, 0 mismatches; fallbacks 126; round 8's no-build cursor keys 0 trees with every reader) |
-| 8. App workloads | 9 | no | **d366505b** (bisected): a grid column change 79/92 → 243/256 KB → step 1. Round 8 helped the apps: 49 walks 4,901 → 4,035 KB/key (−18 %, geometric mean 0.78), round 6's 33 walks 2,029 → 1,760 (−13 %); Meridian find typing +8.5 % (under the bar) |
+| 1. Layout | 10 | no | none (214 shared suite rows: no layout counter rose; app walks equal to round 9 apart from the landed drops; ff6125a6 at most 2 settles a step, 0 B). New: the wheel latch keeps a removed view alive → step 3 |
+| 2. SkiaSharp: painting | 10 | no | none (every paint counter on 214 shared rows within 5 % of round 9; the line cull skips 1,836 lines a step unread; faded images and Sync rows 0 layers) |
+| 3. GL and Vulkan | 10 | yes | none (steady 0 B and idle 0 wakes on GL, Vulkan 8-bit and F16, JIT and AOT; held resize with a post 1 frame a second; hidden page −15…−34 % GPU; 29 guarded windows at 1.5× on the 4K, 0 foreground takes, no new `nvlddmkm`) |
+| 4. .NET runtime | 10 | no | **c940c643**: Meridian's kept tree rows keep the whole Requests view alive behind every other view (1,350 KB of 5,770 at 200 requests) → step 2. Suite 0 rows rose JIT or AOT; steady 0 B; idle unchanged |
+| 5. Text pipeline | 10 | no | none (48,000-layout hash 7A18AF8DE8E05271 and both 240,000-layout corpora unchanged; 43 text rows flat or lower) |
+| 6. Reactivity and reconcile | 10 | no | none (c940c643 flat with collection size; 25a96234 amortized O(1); reader-focus commits add no build) |
+| 7. Accessibility bridges | 10 | no | **cb1df8c0 with ea42f45b**: Meridian's map rows are Buttons, so a selected-state change builds the whole tree with a reader (974 KB a click at 2,000 endpoints, ×8.1 the bridge-off cost) → step 1. Audit 0 STALE in 3,374, 0 WALK-VALUE/EVENT, fallbacks 126 → 82 |
+| 8. App workloads | 10 | no | none (Junction diff find Enter +1.0 % bisected: bimodal noise). Round 9 helped the apps: 65 walks geometric mean 0.852, sum 20,186 → 11,239 KB a key (−44 %); Discovery click −97 %, Environments typing −99.4 %, 89k body typing −24 %, Aperture resize −49 %; Junction flat (no Junction commit) |
 
 ## Queued candidates
 
-Rounds 1–8's build orders all landed but round 6's step 8, declined (rounds 5–8 are in [the archive](17-performance-team-ledger-archive.md#round-8-build-order),
-with the round 8 survey's closed-from-Waiting note).
+Rounds 1–9's build orders all landed but round 6's step 8, declined (rounds 5–9 are in [the archive](17-performance-team-ledger-archive.md#round-9-build-order),
+with the round 9 survey's closed-from-Waiting note). Round 10's build order comes from its survey.
 A build step may bundle one expert's related small candidates as separate commits. Items marked **(user)** wait for a
 decision in Needs the user; the rest of their step goes ahead.
 
-### Round 9 build order
+### Round 10 build order
 
-Ranked by expected win over cost: the review objections first, framework before apps. Each step names the report
-lines its brief quotes (`r9-k` = `17-reports/r9-k-<area>.md`).
+Ranked by expected win over cost: the review objections first, then retention, then the biggest app wins. Each step
+names the report lines its brief quotes (`r10-k` = `17-reports/r10-k-<area>.md`).
 
-1. **apps-aperture-grid-columns-keep-cards** (6; r9-1 Review and Candidate 1, r9-8 Review and Candidate 3) — the
-   objection to d366505b: `GridRow` hands a card back only into the row with its old key (`TryKeep(..., place: key)`,
-   ApertureApp.Library.cs:396); round 7's `GridCards.TakeBack` handed it into any row while its old row was still under
-   the list. Prototype `place: null` (r9-1 `probe-r9.patch`, `PROBE_GRIDPLACE`): resize walk 14.1 → 5.4 KB a step
-   (round 8: 6.1), a step across a column change 236.1 → 63.0 KB (−73 %), elements 249 → 58, text measures 110 →
-   14.5; expert 8's AOT walk `library-resize-4px` 6.5 → ~3.7 KB (bisect 40c2c554 3.6, d366505b 6.9). Check ring, focus
-   and pixels across a column change plus d366505b's 7 scenes; add a suite row (kept grid, column change). Small, app.
-2. **paint-label-lines-cull** (2; r9-2 Review and Candidate 1) — `SkiaRenderContext.DrawText` (both overloads,
-   SkiaRenderContext.cs:815/861) skips lines wholly outside `Canvas.LocalClipBounds` with `DrawParagraph`'s line-height
-   slack (:924-935), reading the clip only for labels of more than one line. Meridian Request tab, 89k-character body
-   (prototype `PROBE_TEXTCULL`): wheel runs a frame 1,903 → 194 (−90 %); opening the tab render 538.5 → 13.8 KB, step
-   3,783 → 3,258 KB (−14 %); pixels identical (A/A control); suite unchanged. Add a suite row (wheel over a 2,000-line
-   plain label in a ScrollView). Small, framework, no API or pixel change.
-3. **dotnet-hover-holds-removed-view** (4 with 1/6; r9-4 Candidate 2; **question 14: re-hit-test**) —
-   `Window._lastHoveredElement` (Window.cs:27/2168) and `PointerState._hoveredElement` (PointerState.cs:16) keep a view
-   a build removed alive until the pointer moves: Meridian with an imported spec, pointer at rest, 471 KB of 4.9 MB (50
-   endpoints), 4.0 of 12.3 MB (500), 15.5 of 38.3 MB (2,000). After a frame's reconcile, when the hovered element is no
-   longer hosted, re-hit-test at the last pointer position (as the drop fix does), firing leave/enter, so the element
-   now under a still pointer shows its hover style. Test retention (weak reference) and the hover events. Small, Core.
-4. **layout-group-drag-label-list** (1; r9-1 Review e7d10c63 and Candidate 2) — `CollectGroupLabels` (Window.cs:2869)
-   reuses one scratch list; optionally walks from the drag's scroll view, not the root. Vesper viewer, 20,000-line log
-   (290 elements, 37 labels): a drag move 1.2 → 0.0 KB (`PROBE_GROUPLIST`), a frame held past the edge 3.7 → 2.6 KB
-   (−30 %); callers `UpdateGroupDrag:2781`, `TickSelectionEdgeScroll:2852`. Add suite row `text/selectable viewer drag
-   select`. Small, framework.
-5. **a11y-patch-diff-lent** (7; r9-7 Candidate 1) — the window keeps one `TreeDiff` and lends it for patches
-   (`TryPatchA11y`, Window.cs:963; the walk's patch and structural diff, :1204/1213) to bridges that let go of it when
-   the call returns (UIA and AT-SPI, an internal marker); `HeadlessAccessibilityBridge` keeps `Diffs`, so it and any
-   other bridge still get fresh ones. Prototype (`apply-proto-patchdiff.py`, ~280 B a patch): suite `a11y/type in
-   TextInput` UIA/AT-SPI 1.3 → 1.0 (−23 %), `click checkbox in 500 rows` UIA 0.8 → 0.5 (−38 %), AT-SPI 0.7 → 0.4
-   (−43 %); Meridian prompt typing −15 %, Backspace −26…−28 %, Vesper Detail cursor −9…−12 %; trees 0, staleness equal.
-   Rerun the audit. Small, no API or reader change.
-6. **text-textarea-mono-ascii-breaks-by-count** (5; r9-5 Candidate 1; **question 16: covered by round 4's approval**) —
-   a wrapped row of printable ASCII in a proven monospace face breaks at n = floor(width / advance), then walks back to
-   the last space as the search does; falls back to the search within the proof's rounding of a multiple of the
-   advance; per row, the first n + 1 characters must be printable ASCII (`WrapLine` → `FindLineBreak`,
-   TextAreaElement.cs:814-1139; prototype `proto-wrap-by-count.patch`). Cold open, KB: Meridian 1 MB HTML 8,271.6 →
-   330.2 (−96 %), pretty −94 %, 1 MB JSON −74 % (warm −97 %), Junction 1 MB minified bundle 63,637.5 → 360.5
-   (−99.4 %), TODO.md −25 %; rows identical to the measured path at every width (13 corpora, up to 7.0 M rows). Guard
-   n ≥ 1 and a finite width (the prototype throws on NaN). Add suite row `text/open a minified file in a monospace
-   TextArea`. Small, internal.
-7. **GL and Vulkan: resize posts and the interop check** (3; r9-3 Candidates 1 and 2) — (a)
-   **gl-vk-live-resize-stuck-post**: `RenderLiveResizeFrame` draws a clean frame on every live-resize event while the
-   main-thread queue is non-empty (Application.cs:573, :583-586), so a post that can't run until the drag ends (the
-   web view's placement flush, WebViewElement.cs:198-202, or any continuation) redraws the same picture every SDL tick:
-   a held edge 64–65 frames a second → 0–1, a drag step 2 frames → 1; draw for posted work only when something was
-   posted since the last such frame. (b) **vk-interop-check-allocates**: `SdlVulkanHost.TryEnableInterop`
-   (SdlVulkanHost.Interop.cs:143-188) makes its lambda's closure (24 B) on every call, the cached return included, and
-   `SupportsExternalGL` calls it on every GPU-source draw (SkiaRenderContext.cs:1484, :1693; Window.cs:1580): Vulkan
-   8-bit and F16 24 B → 0 a frame with a web view or a video on screen. Guarded real windows (probe host `r9-gl-vulkan\host`).
-   Small, no API or pixel change; each its own commit.
-8. **Meridian typing builds nothing + Windows keyring memo** (6 with 4; r9-6 Candidate 1, r9-4 Candidates 1 and 4,
-   r9-8 Candidate 2; **question 15: yes**) — (a) an Environments value cell (MeridianApp.Environments.cs:341:
-   `doc.SetValue(key, v); MarkViewDirty()`) builds only when `doc.Edited` flips: 3 × 12 312.3 → 2.3 KB a key, 3 × 40
-   842.9 → 5.4, 5 × 40 1,167.2 → 5.4, keyring reads 10–36 → 0; a header value (Requests.cs:573-578) and the body
-   (:678-683) with the URL box's check (e0ace9c9): 65.4 → 2.2, 59.4 → 3.9. (b) `WindowsCredentialKeyring`
-   (Keyring.cs:119-133) gets the `KeyringMemo` Linux and macOS have (SecretServiceKeyring.cs:106): 22–66 `CredReadW` a
-   key and ~59 a frame dragging the response pane with the Request tab → 0 after the first build. Prototype
-   `r9-reactivity\final9.patch` (`R9_ENVFIX`). Small, app; each its own commit.
-9. **apps-meridian-tree-rows-kept** (6; r9-6 Review 41f48bd3 and Candidate 2) — the tree part hands back unchanged
-   request rows with `KeptElements`, keyed by path; state: method, display name, active, dirty, first produces entry,
-   uses count, depth, display scale. A full build at 25 requests 321.1 → 153.6 KB (−52 %), 200 requests 1,579.2 → 236.1
-   (−85 %), elements 1,399 → 199; a toast 654.5 → 315.8 KB; removes the 41f48bd3 cost (+42…+51 %). Prototype
-   `R9_TREEKEEP`. Medium, app.
-10. **vesper-brief-scroll-before-build** (6/1; r9-1 Waiting re-rank, r9-6 Candidate 3; was brief-columns-lag-a-key) — a
-    Brief key that scrolls sets the scroll before its build (`ScrollBriefToCursor` in `MoveCursor` before
-    `MarkViewDirty`; `BriefGeometry` reads `ScrollOffsetX`, Views.cs:612; `OnAfterBuild` scrolls, CommanderApp.cs:842).
-    Down ×402: builds 29 → 18 (−38 %), 14.0 → 11.2 KB a key (−20 %); PageDown: blank columns in view after 5 of 6 keys
-    → 0. Prototypes `PROBE_BRIEFSCROLL` (r9-1), `R9_BRIEFFIX` (r9-6). Small, app; bug fix.
-11. **Meridian discovery at scale** (6 with 4; r9-6 Candidate 4, r9-8 Candidate 1, r9-4 Candidate 3 (a)–(c)) — (a) a map
-    row's click (`MarkDirty`, MeridianApp.Discovery.cs:412; every row in a ScrollView, :344-364) moves the selection
-    and builds the view only, handing back unchanged rows (`KeptElements` by `endpoint.Key`, or a VirtualList): 600
-    endpoints 2,903 KB a click, 60 → ~340 KB (~4.4 KB a row); expected ≥ −80…−95 %. (b) the spill file is parsed from
-    bytes (`JsonDocument.Parse(ReadOnlyMemory<byte>)`, no `File.ReadAllText`): 2.0 / 8.0 MB left in `ArrayPool.Shared`
-    at 500 / 2,000 operations → 0. (c) `ApiMap.Record`/`SaveMap` per send (97–396 KB, 272–1,106 KB) only if (a) lands.
-    Medium, app.
-12. **webview-hidden-keeps-interop** (3; r9-3 Candidate 3) — a hidden web view releases its D3D11 interop texture, its
-    `WGL_NV_DX_interop2` registration (VisualCapture.cs:343-398) and the sink's GL texture in a frame with the context
-    current, and restarts the capture when shown: hidden 90.7 → 68.4 MB GPU (−25 %; Vulkan 146.5 → 124.2), ~−29 MB with
-    the sink's texture. Medium. Question 17 answered: Meridian also disposes a preview hidden for about 60 s (all 45.4
-    MB and the 6 `msedgewebview2` processes), as its own commit; the release covers that minute.
-13. **Faded images and rows in Vesper** (2; r9-2 Candidates 2 and 3) — measure first, as round 8 step 9: Vesper's cut
-    icons (`icon.Opacity = 0.45f`, CommanderApp.Pane.cs:991, Views.cs:666) are 26.6 (Detail) / 61 (Brief) / 29.5
-    (Thumbnails, whole tiles, Views.cs:419) layers a frame, Sync's Equal rows (Sync.cs:313, `row.Opacity = 0.55f`)
-    20–26 with "Show equal" on. Time real GL and Vulkan frames with and without the layers (prototype `PROBE_IMGFADE`:
-    an `ImageElement` fades itself, ≤2/255 on icons). If ≥ 5 % of the frame, ask the user about the pixels (framework
-    image fade; Vesper fading row and tile colours); otherwise record it as examined. **(user, only if it clears 5 %)**
-14. **apps-tokenize-per-line-bytes** (5; r9-8 Candidate 5) — profile first: `SyntaxHighlighter.TokenizeLines` allocates
-    ~5 KB a line (JSON 1,993 lines 9,863 KB a call, XML 5.05 KB a line) and 14.6 KB a line for HTML (3,641 lines 53,182
-    KB; one line 2,680 KB); a pretty toggle on that HTML is 56,145 KB all threads, 34 gen-0 and 4 gen-1 GCs over 20
-    toggles. Keep a change only if the bytes are in HultUI.Syntax (not TextMateSharp) and fall ≥ 10 %; else record it.
-15. **Reader focus in Vesper and Meridian** (7; r9-7 Needs the user; **question 19: in the app**) — not perf. (a)
-    vesper-reader-focus: Vesper's focused pane is a Box with no role or name, so `IsSemantic` drops it
-    (AccessibilityTreeBuilder.cs:717; CommanderApp.Pane.cs:177) and every focus move tells a reader "focus on nothing";
-    give the pane a role and name, and the cursor's Brief cell or thumbnail tile `AccessibleSelected` set with the
-    `Restyle` call (a patch, 0 trees a key). (b) meridian-focus-lost (from Waiting): the new-request prompt's Escape
-    puts focus back on "New request"; the Request tab's "reveal" keeps focus where a keyboard user expects it; History
-    walks with an element focused. Check 0 trees a key and the audit. Small, app.
-16. **frame-restore-keeps-no-sysmenu** (3, correctness; found by the user's Snap Layouts hover, 2026-11-08; **taken
-    next, ahead of step 3**) — a custom-frame window **restored from maximized gets `WS_SYSMENU` back** (style 16C70000
-    → 16CF0000) and nothing strips it again: our code only clears it in `Install` (WindowsCustomFrame.cs:188-190) and
-    lends it in `ShowSystemMenu` (:581-591), so SDL's restore path rewrites the style. With `WS_SYSMENU`, Windows
-    validates the Snap Layouts flyout against the standard caption band (memory `snap-layouts-caption-band`: 45 px at
-    150 %, ~31 at 100 %), so a pointer entering the maximize button from below misses on both monitors (button 60 / 40
-    px) and stays broken for the window's life. Found with the user's hand checks in Meridian and Vesper: a fresh
-    window works and keeps working across monitors (read: no `WS_SYSMENU`, `HTMAXBUTTON` over the whole button, probe
-    `r9-snap\hitcol.ps1`); maximize alone is fine; restore breaks it. Clearing `WS_SYSMENU` from outside
-    (`r9-snap\strip.ps1`: SetWindowLongPtr + SWP_FRAMECHANGED) made the whole button arm the flyout again (the user).
-    Fix: the frame's WndProc answers `WM_STYLECHANGING` (GWL_STYLE) by clearing `WS_SYSMENU` from `styleNew` unless
-    `ShowSystemMenu` has lent it. Test (UiTests, guarded real window): after maximize, restore, full screen and back,
-    and a monitor move, the style has no `WS_SYSMENU` (fails under a reverse edit); Alt+Space still opens the system
-    menu. Synthetic cursor moves don't open the flyout on an inactive window (probes `r9-snap\flyout.ps1`,
-    `diff3.ps1`), so the user hovers by hand at the end. Small, framework.
+1. **a11y-selected-button-patch** (7; r10-7 Review and Candidate 1) — the objection to cb1df8c0 with ea42f45b: mark a
+   selected state in place for a Button that says selected or not before and after, as for a ListItem (the clause at
+   the observer, Window.cs:4711; prototype `element.Role is ListItem or Button`, `apply-buttonsel.py`). Meridian map
+   click KB (off / tree / UIA / AT-SPI): 60 endpoints 58.1 / 92.3 / 92.7 / 92.8 → 58.1 / 58.3 / 58.4 / 58.6; 600
+   81.5 / 343.6 / … → 81.5 / 81.8 / …; 2,000 120.8 / 973.5 / 973.9 / 974.0 → 120.8 / 121.0 / 121.1 / 121.3; trees 1
+   → 0; events identical. Update `A11yLeafPatchTests` "selected, not an item" (they pin today's rule). Small, no API.
+2. **Views held after they leave** (4; r10-4 Review c940c643 and Candidates 1–2) — (a)
+   **dotnet-kept-elements-hold-weakly**: `KeptElements` holds live elements weakly (an internal `IRef` over
+   `WeakReference<Element>` that PatchFrom retargets, internal `WithRef(IRef)`): Meridian Requests → History at 200
+   requests 1,350 of 5,770 KB freed (−23.4 %), 25 requests −5.2 %. (b) **apps-refs-hold-last-view**: apps empty their
+   `Ref` fields and scratch lists in builds that don't show that view — Meridian `_respTabRef`/`_responseBodyRef`/
+   `_urlRef` (+118…+141 KB), Aperture Home `_homeShelfCards`/`_homeShelfRows`/`_homeCards` (−11…−17 %), Vesper
+   `_cursorRowL`/`_briefScrollL`/`_briefCellsL` (−6 %), Aperture `_gridList` (−6 %, keep its height as a float). Weak
+   reference tests; a guideline (a `Ref` into a view keeps the whole view). Small; each its own commit. **Question 31
+   (recommended no) leaves `Ref<T>` as it is.**
+3. **layout-wheel-latch-holds-removed-view** (1; r10-1 Candidate 1) — `WheelGesture._latched` (PointerEvents.cs:197)
+   holds the last latched scroller until the next wheel anywhere; release it at the end of a frame that changed the
+   tree when the scroller is no longer shown (`NoteStructureForHover`, Window.cs:3150, before its no-hover early
+   return; also an overlay closing with the latched scroller). Meridian map wheeled then left, heap after full GCs: 60
+   endpoints 1,125 → 844 KB, 600 4,317 → 1,819 (−58 %), 2,000 14,287 → 6,056 (−58 %); prototype
+   `proto-wheel-latch-gesture.patch`. Weak-reference test; latching tests still pass. Small, framework, no API.
+4. **apps-meridian-runner-rail-reads-every-request** (6/8; r10-8 Candidate 2) — the Runner rail counts from the
+   scanned tree instead of reading and parsing every `.req` file three times a build (`ScopeRequestsCountFor`,
+   Runner.cs:156/160/181/234-241): rail 7,926 → 36 KB a build; a run of 50 121,536 → 18,969 KB (−84 %), 200 1,783,390
+   → 189,255 KB (−89 %), GCs 107/17/2 → 11–12/1–2/1. Then keep result rows (one new row a result; ~−99 % estimated).
+   Measure the Chain subtab's `AnalyzeAllRequests` (Chaining.cs:239, 316-333) and fix it the same way if it clears a
+   bar. Edge: an unreadable request file is counted but still not run. Small–medium, app.
+5. **App typing and toasts that build nothing** (6; r10-6 Candidate 1, Waiting re-rank apps-toast-gone-view-only) —
+   (a) Junction's prompt (`JunctionApp.Dialog.cs:153/205`) and rebase reword (`Rebase.cs:548`), Aperture's issue reply
+   (`ApertureApp.Issues.cs:416`, builds only when "empty" flips) and report message (`Report.cs:187`) build nothing a
+   character; Junction's repo modal path (`RepoModalView.cs:187`) and MR list filter (`MergeRequests.cs:385`) build
+   the view only. Junction prompt over Changes 194.4 → 1.4 KB a character, History 154.8 → 0.6; Aperture reply 135.1 →
+   2.3. (b) a toast's going-away build is view-only (`ToastHost(() => IsShowing ? MarkDirty() : MarkViewDirty())`,
+   Junction, Aperture, Meridian): Junction 366.3 → 227.4 KB (−38 %), Aperture −39 %, Meridian −21…−23 %. (c) **bug,
+   question 27 (a)**: Aperture's `browse.back` skips Backspace when the target is a `TextInput` or `TextArea`
+   (ApertureApp.cs:554; Search and the issue reply went back a page on Backspace since da0676d0). Small, app; each its
+   own commit.
+6. **text-textarea-cluster-walk-whole-line** (5; r10-5 Candidate 1) — `WrapLine` finds cluster ends only for rows that
+   fall to `FindLineBreak`, from a known boundary before the row, not the whole hard line (`ClusterEnds`,
+   TextAreaElement.cs:818, :646). Typing into a one-line 89k body with one emoji 1,216.8 → ~191 KB a key (−84 %);
+   opening a 1 MB one-line bundle with an emoji 16,724.9 → ~327 KB (−98 %); docfx index.json ~−50 %. Rows identical
+   (the `rows` corpora with an emoji or mark inserted, current walk as reference). Add a suite row ("input/type in a
+   one-line JSON body with an emoji"). Small–medium, internal.
+7. **apps-vesper-sync-cursor-rebuilds-rows** (6; r10-8 Candidate 1; **question 29: yes, reveal**) — Sync's rows get their
+   index from the loop, not `VisibleSyncRows().IndexOf(r)` (CommanderApp.Sync.cs:349, :92: O(rows²)): 300 files 2,568.6
+   → 1,715.9 KB a key (−33 %); then rows kept (`KeptElements` by path; state selected and direction) and Down/Up without
+   a build: ~−95 %. Then the cursor reveal (approved): Sync scrolls to keep the cursor in view. Add the suite row "a cursor key over a plain 200-row list
+   rebuilt through the root" with a kept-rows twin. Small + medium, app.
+8. **Junction builds less** (6; r10-6 Candidates 2 and 4) — (a) **apps-junction-diff-rows-keep-width**: leave
+   `codeWidth` out of the diff's height shape when it neither wraps nor shows a review (`JunctionApp.Diff.cs:519`,
+   `InvalidateRows` :525): split drag 159.7 → 42.4 KB a move (−73 %), resize 32.8 → 21.0 KB a step (−36 %); pixel A/B
+   at several widths. (b) **apps-junction-view-only-clicks**: `MarkViewDirty` where the chrome reads nothing changed
+   (Staging.cs:56/69/72, Dialog.cs:68/82, JunctionApp.cs:1262, :1549–1589, :438/441; also the Escape that clears the MR
+   filter, MergeRequests.cs:872, left by step 5): −118.6 KB a click by the part buckets; only sites shown view-only. Small, app; each its own commit.
+9. **a11y-focus-find-down** (7; r10-7 Candidate 3) — `MoveA11yFocus` (Window.cs:864) finds the old and new focused
+   nodes with `FindNodeDown` (:1046) instead of `FindNodes` over the whole tree (:1318), the whole-tree walk kept as a
+   fallback; also `NotifyPendingA11yFocus` and `Announce`'s `FindA11yNode`. Meridian Tab at 2,000 endpoints 6,072 →
+   ~58 visits. Scaling only; time it on a reader-on suite row. Small, no behaviour change.
+10. **a11y-container-name-in-place** (7; r10-7 Candidate 2) — a node with children takes its own Name/Description
+    change in place (the observer, Window.cs:4672; the walk, AccessibilityTreeBuilder.Refresh.cs:237; UIA `UpdateFrom`,
+    AT-SPI `Refresh` keyed by ElementId). Vesper navigation with a reader, KB tree/UIA/AT-SPI: Detail 1,000 files 453.2
+    / 541.4 / 674.8 → ~322.4 / 410.7 / 544.0 (−19…−29 %), Brief 60 −10…−12 %; also 60 of Junction's 61 audit
+    fallbacks. Rerun the audit. Medium, no API or reader change.
+11. **apps-meridian-map-virtual-list** (6 with 7; r10-1 Candidate 2) — Discovery's map as a `VirtualList` instead of a
+    ScrollView over every row (MeridianApp.Discovery.cs:524–525): at 600 endpoints hit visits a hover move 617.5 → ~30,
+    culls a frame 579 → ~30, the map's elements 2,498 → ~100 KB (−58 % of the heap with the map shown). Kept rows move
+    into the row template; headings need `RowHeights`; a reader must still hear every row (item nodes; check with the
+    audit). Medium, app.
+12. **syntax-markdown-loads-every-grammar** (5; r10-5 Candidate 2; **question 30: route (c)**) — the first Markdown,
+    Ruby, shell or F# file keeps ~29 MB of every embedded grammar until `SetTheme` (.md +29,444 KB, first call 82,868 KB
+    allocated). Route (c), approved: load per text only the fence languages it names (scan fence info strings and
+    HTML blocks); tokens equal on round 7 step 12's corpus. No TextMateSharp fork. Medium–large, no API.
+13. **apps-pane-drag-sets-size** (6; r10-6 Candidate 3; absorbs Waiting apps-meridian-response-drag-build) — while a
+    `PaneSplitter` drag runs, set the live pane's size through a `Ref` and `MarkLayoutDirty()`, build once on release:
+    Meridian 2,000-line body 38.9 → 2.5 KB a move (−94 %), Junction Changes split 42.4 → 2.3 (after step 8). Mid-drag
+    full-build equality check (Junction's `_diffPan.ViewportWidth`, Meridian's `SetMax`). **Question 32 (no) keeps it
+    app-only.** Also (bug, pre-existing, found in step 8): the diff pan's viewport and scrollbar thumb update only on a
+    build, and a resize often builds nothing; at start the viewport is the 1298 px window guess against ~700 px on screen,
+    so the wheel stops at 361 of ~960 px sideways. Have the pan's viewport follow layout. Small–medium, a drag: rank low
+    (the pan bug is worth it alone).
+13b. **junction-view-only-tests-settle** (6, tests; found in step 13) — this round's new Junction tests
+    `ChromePartTests.AFolderOrFilterCharacter…` (step 5) and `ChromePartTests.ViewOnlyClicks_BuildTheViewAndNoChrome`
+    (step 8) fail about 1 run in 4 (also on 4eeb23ac): a file-watcher rebuild (`OnExternalChange` → `Rerender`) lands inside
+    the test's "view only" window because `HostedOnGitLab` (ChromePartTests.cs:1022) waits only for the GitLab mark. Add a
+    settle step (wait until the watcher's initial change is drained, or count only builds the test caused) so the counts
+    are exact under load; 20 runs under a loaded machine with 0 failures. Also look at the known flake
+    `ReviewTests.TheKeyboardReachesTheCommentAgain` (memory ci-red-findings) if the same cause. Small, tests only.
+15b. **vesper-brief-return-offset** (1 with 6; question 36 (b), 2026-11-11) — Brief comes back from Detail, Thumbnails
+    or the viewer/diff/sync at the position it was left at, with its columns made for that offset: a ScrollView applies
+    an offset set before its first layout once it has laid out (a fix to the existing setter, no new API), and Brief
+    builds its columns for the restored offset (no blank column, no extra build where none is needed). Small, framework +
+    app.
+14. **paint-text-lines-seek** (2; r10-2 Candidate 1; r10-5 Examined says under the time bar) — measure first: binary
+    search for the first line the clip reaches in `DrawText` and `DrawParagraph`, only for labels of ~32 lines or more
+    (prototype `PROBE_LINESEEK`): the 2,000-line row 1,999 → 60 line visits a step. Keep only if `step-ab.ps1` shows
+    ≥ 5 % on `text/wheel over a 2,000-line plain label in a ScrollView`; else record it as examined. Small, no API.
+15. **vesper-brief-scrollbar-columns** (1 with 6; r10-1 Waiting re-rank; **question 28 (a): public API approved**) —
+    bug: Brief shows blank columns when scrolled with its scrollbar (the bar sets the offset with no `ScrollEvent`,
+    Scrollbar.cs:161/190; Brief makes columns only on one, CommanderApp.Views.cs:586). ScrollView tells listeners when
+    the user scrolls with the bar or by autoscroll (a new public callback or event; a scroll set from code still raises
+    nothing; existing `ScrollEvent` listeners unchanged); Brief listens beside `ScrollEvent`. Test: a track click and a
+    thumb drag over 400 files leave 0 blank columns (r10-1's `vbar` walk: 4 of 4 and 7 of 8 today). Docs (ELEMENTS.md,
+    the scroll section); docfx 0 warnings. Also (found in step 2, pre-existing at 755512aa): going back to Brief from
+    Detail is blank until a key — the new scroll view opens at offset 0 while its columns are made at the old offset.
+    Small, framework + app.
 
 ### Waiting
 
@@ -208,73 +203,96 @@ Re-ranked by the next survey.
   (not perf).
 - **vesper-brief-filter-clear-reveal** (6/1, not perf; round 9 step 10) — clearing a filter with Backspace leaves
   Brief's cursor column out of view (the scroll is clamped to the narrower filtered layout; the sideways reveal has
-  no apply-after-layout form like the vertical one); a full build does the same, no column goes blank. Unverified:
-  `ScrollEvent` comes only from the wheel (Window.cs:2496), so a scrollbar drag in Brief likely makes no new columns.
-- **apps-toast-gone-view-only** (6, low; r9-6 Candidate 5) — a toast's going-away build rebuilds every part
-  (`new ToastHost(MarkDirty)`, ApertureApp.cs:106, MeridianApp.cs:177): Aperture Home 128.3 KB flash to gone (73 %
-  parts), Meridian at 25 requests 654.5 KB; view-only on the hide −36…−37 %. A one-off event.
-- **apps-meridian-response-drag-build** (6/8, low; r9-8 Candidate 4) — each pointer move on the response pane's edge
-  (8f7f8fa5) rebuilds the response Part: 39.5 KB a move, 86 % build; −86 % with the width set through a ref. A drag.
+  no apply-after-layout form like the vertical one); a full build does the same, no column goes blank. **Round 10
+  verified the scrollbar half, worse than noted → question 28:** the scrollbar sets the offset with no `ScrollEvent`
+  (Scrollbar.cs:161 track click, :190 thumb drag) and Brief makes columns only on one (CommanderApp.Views.cs:586): 400
+  files, a track click to offset 2,197 shows 4 of 4 columns blank, a thumb drag 7 of 8 moves with a blank column, 0
+  builds (r10-1).
 - **uitests-workareas-before-dpi-aware** (tests, small; found running f9bceb6d's checks) — the placement UiTests read
   `WorkAreas()` before SDL makes the process per-monitor aware, so the first Borderless pass sees the 4K at 96 dpi
   (2560×1392 at 0,0); and every UiTests window is made on the 96 dpi monitor first (`scale=1` at creation), so the
   high-dpi cases are brief moves. Set the test thread per-monitor aware first (`SetThreadDpiAwarenessContext(-4)`, as
-  the scratch check `r9-4k\ZzR9FourKVisibleTests.cs` did).
+  the scratch check `r9-4k\ZzR9FourKVisibleTests.cs` did). Round 10: still true; a third file reads it early
+  (CustomFrameSystemMenuTests.cs:47, b44b4db5); do it with the next UiTests change.
 - **findbar-countonscreen-foreach** (4, nit) — `CountOnScreen` loops `foreach` over `bar.Children` (32 B on AOT, 0.4 %
   of an 8 KB Enter); fix when FindBar is next touched.
 - **terminal-noop-scrollback-wheel** + **terminal-row-strings-by-content** (2/Terminal, low) — a no-op notch draws a
   whole terminal frame (5,440–5,682 glyphs); 10,276 B a streamed line. Only the terminal sample uses HultUI.Terminal.
 - **layout-ordered-children** (1, low) — suite rows only (wheel over 5,000 rows 4,954 hit visits); apps at most 33.5 hit
-  visits a move and 13 culls a frame.
-- **Suite scenarios** (8): document-switch (Junction Files 84.2 KB a key: 62 % view build, 1.23 builds a key — the
-  file's text lands and builds again — 149 measure misses a key). (The kept-grid column change goes with step 1.)
+  visits a move and 13 culls a frame. Round 10: Meridian's map is the first app case (618 hit visits a move, 579 culls
+  a frame at 600 endpoints); step 11's VirtualList fixes more, so still not a framework change.
+- **Suite scenarios** (8): document-switch (Junction Files 86.2 KB a key, 1.23 builds a key — the file's text lands
+  and builds again — 149.1 measure misses a key, render 78 % of cycles). Round 10 adds two patterns, each with a
+  kept-rows twin: a cursor key over a plain 200-row list rebuilt through the root (with step 7) and one row a frame
+  appended to a 200-row list rebuilt through the root (with step 4).
 - **textarea-chunked-document** (5/4; the user chose option B on 2026-10-25) — parked: Meridian's 89k body typing is
   ~238–241 KB/key, most of it the TextArea's new string; the user's 256k-character condition is unmet.
 - **a11y-served-items-followups** — a live Orca check only (no desktop Orca here; optional).
 - **F16 kept drag targets** (3) — deferred since round 5's `nvlddmkm` errors; never repeat blind. Round 9: an F16 drag
   frame allocates 2,136 B JIT / 2,040 AOT against 8-bit's 136/40 (the per-size wrap kept targets would remove), drag only.
+  Round 10: unchanged (~168 KB an 84-frame drag; the target's key includes the size, SkiaVulkanRenderSurface.cs:677–691).
 - **gl-threaded-optimization-profile** (3; the user's driver setting, information only) — the walk lands while the
   window rests; the setting would remove only the per-frame spin (round 9: mean 357 JIT / 344 AOT, max 456/578
-  `SwitchToThread` a paced frame; round 8: mean 340–387, max ≤ 986).
+  `SwitchToThread` a paced frame; round 8: mean 340–387, max ≤ 986; round 10: mean 378/376, max 723/644).
 - **layout-audit-padding-border** (1, tooling) — compare `LayoutResult` padding and border too; with the next audit change.
 - **text-open-measures-every-line (full)** (5; user: not now, 2026-10-13).
 - **controls-menu-max-height-scroll** (1; not perf: no maximum height or scrolling; the Vulkan-drag half is gone since
   f3302209, round 9 expert 2), **layout-virtuallist-spacer-stale** (1; invisible; with an audit).
 - **aperture-poster-as-hero**, **aperture-tmdb-size-fallback**, **junction-narrow-gitlab-glyphs**,
   **meridian-pane-choice-not-persisted**, **meridian-min-width-wraps** (apps; not perf; round 9: the Meridian two and
-  junction-review-old-path still reproduce, the others' code is unchanged and was not exercised).
+  junction-review-old-path still reproduce, the others' code is unchanged and was not exercised). Round 10: the same;
+  min-width wraps only after a send (760×540: "Headers 6" wraps, Send's keycap and the response bar's end cut off;
+  shots `r10-apps\drv\shots\min760*.png`).
 
-Closed from Waiting by the round 9 survey: brief-columns-lag-a-key (→ step 10), aperture-leads (toasts measured →
-apps-toast-gone-view-only; grid Down is the row of cards scrolling in, 26–29 KB a key, which has to be made; Discover's
-Down walking a shelf's pages is a UX note), junction-leads' old-side state convergence (Examined).
+- **apps-refs-hold-last-view (unmeasured holders)** (4; found in round 10 step 2) — Aperture `_cursorCard`, Vesper
+  `_thumbVListL/R` (the next build reads its height), Meridian `_historyListRef`: measure at the next survey.
+
+- **aperture-cursor-guard-textarea** (6, low; found in round 10 step 5) — Aperture's cursor-key guard tests only
+  `TextInputElement`, not `TextArea`; no harm seen in the issue reply. Check with the next Aperture keyboard change.
+
+- **a11y-label-under-named-button** (7, lead; found in round 10 step 10) — a label under a name-from-content button,
+  changed with no structure change, still builds a tree through the leaf patch (`NamedFromContentAbove`); it could fall
+  back to the walk now that a renamed node with children walks in place. Measure at the next survey.
+
+- **virtuallist-selection-relayout** (1/6, framework; found in round 10 step 11) — a selection move in an item-row
+  `VirtualList` lays out every realized row again (869 measure calls against 113 for the old column at 60 endpoints): a
+  JIT click in Meridian's map +14 % at 60 endpoints (AOT within 1.5 %). Measure at the next survey.
+
+- **syntax-shared-registry-rest** (5; found in round 10 step 12) — Typst (`.typ`/`.typc` reach 57 grammars), Julia
+  (9.2 MB), PHP, Razor (`.cshtml`) and HTML files still use the shared registry with a fixed set of grammars. Measure at
+  the next survey if an app opens them.
+- **junction-chromeparttests-load** (tests; round 10 step 12) — two `ChromePartTests` failed once in a full run while a
+  four-way corpus scan loaded the machine; passed alone and on a quiet machine. Their build counts are load-sensitive:
+  watch at the full suite and in CI.
+
+- **ondafterbuild-markdirty-dropped** (6, framework; found in round 10 step 15) — `MarkDirty` called from
+  `OnAfterBuild` is silently dropped, so Vesper's `RestorePaneScroll` retry never runs (Detail and Thumbnails restore on
+  the first build, so harmless today). A trap for app authors: document or make it work; measure at the next survey.
+
+- **dotnet-11-upgrade** (4, all; the user, 2026-11-11: ".NET 11 has just been released, we should consider picking it
+  up for the next round") — round 11 takes it up first, as its own step before the survey, so the survey profiles the
+  runtime the apps will ship on and the upgrade's own effect is measured alone. State on 2026-11-11: this machine has
+  only the .NET 10 SDK (10.0.300); no `global.json`; 102 project files set `net10.0` each (consider one
+  `TargetFramework` in Directory.Build.props); every workflow pins `actions/setup-dotnet` to `10.0.x`. Needs: the .NET 11
+  SDK here and in WSL Fedora (the user installs it, or approves the download); retarget projects, CI and docs
+  (NATIVE-AOT.md, ENVIRONMENT.md, CI.md); check every dependency (SkiaSharp/HarfBuzzSharp, TextMateSharp, Kiota and
+  Aperture's `--probe`, XTerm.NET, WebView2, CEF, mpv interop, source generators and analyzers) and NativeAOT/trim
+  warnings; measure with `step-ab.ps1` (base the last .NET 10 commit, `-Pairs 2 -Runtime Jit,Aot`) plus the AOT app
+  walks (KB/key, start-up, working set); run every suite on Windows and Fedora and CI's macOS keyring job.
+
+Closed from Waiting by the round 10 survey: apps-toast-gone-view-only (→ step 5), apps-meridian-response-drag-build
+(→ step 13, now 38.9–39.2 KB a move), vesper-brief-filter-clear-reveal's scrollbar half (→ question 28; the
+filter-clear half stays).
 
 ## Landed
 
-Rounds 8 and 9 (round 8 is the round round 9's survey reviewed; it moves to the archive at round 10's survey). Rounds 1–7 are in
+Round 9 (the round round 10's survey reviews; it moves to the archive at round 11's survey) and round 10. Rounds 1–8 are in
 [the archive](17-performance-team-ledger-archive.md#landed-rounds-14) ([round 5](17-performance-team-ledger-archive.md#landed-round-5),
-[round 6](17-performance-team-ledger-archive.md#landed-round-6), [round 7](17-performance-team-ledger-archive.md#landed-round-7)).
+[round 6](17-performance-team-ledger-archive.md#landed-round-6), [round 7](17-performance-team-ledger-archive.md#landed-round-7),
+[round 8](17-performance-team-ledger-archive.md#landed-round-8)).
 
 | Round | Commit | Candidate | Before → after |
 |---|---|---|---|
-| 8 | f3302209, bda4dad3 | paint-beginframe-keeps-surface-clip | Correctness, the objection to d04464f6: `SkiaRenderContext.SetCanvas(canvas, baseSaveCount = 1)` and `BeginFrame` restores to that count; the Vulkan surface records `SaveCount` after its 8-bit kept-target and F16 offscreen clips (`WrappedImage.BaseSaveCount`, `_offscreenBaseSaveCount`, reset on `Hold` and a new offscreen); GL and raster still restore to 1. 2400×1600 canvas at 1.5× clipped to 1200×800: after `BeginFrame` save count 1 → 2, device clip 2400×1600 → 1200×800, `ClipBounds` 1601×1068 → 801×535. In-process saves over a 16-step Vulkan drag: a clip 64 px too narrow differs in exactly 64 columns with the fix (142–176k channels 8-bit, 139–173k F16) and in 0 without; shown pixels identical. Suite 0/0 ×2 alternated, allocKB flat, steady frame 0 B; goldens identical. `SurfaceClipThroughBeginFrameTests` (3 cases, reverse edits fail 2 each). Skia 360, Core 5,054, Headless 1,443, VulkanProbe 38 (`HULTUI_UITESTS=1`) pass. |
-| 8 | 61a82eba, e0530518 | a11y-walk-name-without-string | The in-place walk's `Compare` checks a name from content with `NameIs` (the same rules as `ResolveName`, nothing built); folds a11y-walk-unchanged-bytes. Junction Changes at 300 files, KB a step, alternated ×2 (identical), same trees, diffs and events: caret Down tree/UIA/AT-SPI 92.0/94.7/96.8 → 81.6/84.3/86.4 (−11 %), wheel a notch every 120 ms 22.8/25.4/27.4 → 16.2/18.8/20.7 (−24…−29 %), bridge off flat (78.5, 16.6); a walk of the unchanged tree 6.86 → 0.02 KB. New suite row `a11y/selection walk 1,000 composite item rows named by their texts, UIA`: JIT 40.0 → 27.4 KB (−32 %), AOT 39.9 → 27.3, time flat. Suite JIT 0 slower ×2; AOT 1 then 0 (selection-walk rows +6–10 % in render only, rows without a reader too: AOT code layout). Audit 0 STALE, 0 WALK-VALUE/EVENT, fallbacks 125. |
-| 8 | f35c3df9 | a11y-disabled-menu-item (API) | Approved (question 11). **Public default member `IAccessibleItemSource.ItemIsEnabled(int) => true`**; `ContextMenuElement` answers it; `MatchItems` compares it (enabling an entry in an open menu patches, no tree); items served past 2,000 read it. A dimmed context-menu or menu-bar entry was read as enabled; now UIA IsEnabled false, AT-SPI without enabled/sensitive (not yet heard with a live reader). Menu suite rows bytes flat, times within 3 %. ACCESSIBILITY-PLAN.md, ELEMENTS.md; docfx 0 warnings. Core 5,060, Headless 1,456, Linux bridge 104, Junction a11y 131 pass; Fedora 104 + 297; 11 reverse-edit failures. |
-| 8 | bc007ae8 | text-richtext-paragraph-shares-lines | A rich text paragraph shares the layout's exact `TextLine[]`, makes its `TextLineBox[]` when `Lines` is first read, `SpansOf` returns an exact array, `RichTable.Normalize` makes no closure per block (`TextLines` documented read-only). KB a step JIT, idle-gated, alternated ×2: richtext/open 5,000 blocks 3,264.6 → 2,596.2 (−20.5 %), resize 1,000 654.7 → 544.1 (−16.9 %); retained with the document open 7.94 → 7.41 MB (−6.7 %). Tests: `AParagraph_SharesItsLayoutsLines_AndMakesTheirBoxesWhenRead` (0 B a line cached, boxes 20 B a line on first read), `Normalize_OfADocumentWithNoTable_AllocatesNothingABlock` (2,160 B without). |
-| 8 | a10f21b1 | text-richtext-block-layout-slim | `BlockLayout` 152 → 72 B: cell and picture fields in a side object, a text block's style from its paragraph. On top of bc007ae8: open 2,600.9 → 2,245.7 (−13.7 %), resize 544.1 → 473.8 (−12.9 %), retained 7.41 → 7.06 MB. `RichTextLayoutCostTests` width change 328 → 248 B a block. |
-| 8 | 7aaae4c8 | text-richtext-block-list-no-copy | Block layouts in a `List` shifted in place when an edit changes their count: richtext/enter in 5,000 blocks 81.5 → 42.4 (−48.0 %), resize −1.6 %; an Enter test 16 → 8 B a block (the rest is `RichDocument.Blocks`' own copy, declined). Wheel through 5,000 blocks +2.7 / +0.7 % min, inside its base's spread. |
-| 8 | 48ed3a35, 734a6cd7 | richtext-short-viewport-jitter | Bug fix: a caret at least as tall as the view scrolls to its top (was 18.6 px off, key after key). Step 3 overall ec5d1275 → 48ed3a35: JIT open −31.1 % (min −5.7 %), resize −28.8 %, enter −48.2 %; AOT open 3,267.2 → 2,250.2, resize 654.7 → 466.0, enter 81.8 → 42.4, times within 3 %. Suite 214 rows 0/0 ×2 and base/base. 902 in-process frames A/A = A/B, goldens pass; 147 reader trees (2.24 M character bounds) identical. Text 293, Core Rich 135, Skia 360, Headless 492, Junction MR/review 40 pass. |
-| 8 | ad8e6fbd, 4960997d, 561c5659 | apps-coalesce-landing-builds | Aperture's `PosterCache` and Vesper's `ThumbnailCache` callbacks post at most one build at a time (an `Interlocked` flag cleared before the build reads the cache, so a later landing still builds); framework unchanged; REACTIVITY.md rule. Pictures served after 15–30 ms, idle-gated, alternated ×2 JIT + one AOT pair: Aperture Home 36 posters builds 41 → 15–16, most in a frame 8–10 → 4, 3,614 → 1,825–1,896 KB (−48…−50 %; AOT −51 %); grid 42 posters 46 → 14–15, 10–13 → 3, −39…−42 % (AOT −36 %); Vesper Thumbnails 44 decodes 45 → 2–3, 42–44 → 1–2, −45…−49 % (AOT −42 %). At 60–120 ms: Home 41 → 26 builds, grid 46 → 25. Same pictures at the end (55/58/97), settled frames identical. Tests `PicturesThatLandTogether_BuildTheViewOnce` (42 builds without), `ThumbnailsThatLandTogether_BuildTheViewOnce` (8 without); `PartTests.APictureLanding_BuildsNoPart` waits for every poster. Aperture 333, Vesper 879, Headless 1,459 pass. No suite scenario opens these views (no captures). |
-| 8 | d366505b | aperture-grid-cursor-no-build | The library grid's cards on `KeptElements`; `MoveRingWithoutBuild` handles the grid; a move that falls back to a build moves the live ring first (else PageDown twice left two rings: the list keeps an unchanged row); a card made the frame after a build takes focus in a post-frame callback. 600 films, idle-gated JIT ×2 + AOT: Right 49.20 → 0.29 KB a key (AOT 48.70 → 0.29), Down 81.93 → 29.07 (AOT 81.28 → 28.96; rows scrolling in); headless reader Right 49.23 → 0.32, Down 85.54 → 32.69, 0 trees; builds a key 1 → 0; min −3…−8 % JIT, −5…−16 % AOT. Pixels, ring and tree (focus aside) match the base in 7 scenes; focus now lands on the cursor's card (before: nowhere). |
-| 8 | 24d63eb5 | apps-aperture-discover-cursor-no-build | Discover's cursor key moves the ring on live cards: along a page 340.2 → 0.35 KB (AOT 337.5 → 0.35), builds 1 → 0, gen-0 GCs 8 → 0, min −9 % JIT, −12 % AOT. Pixels and tree (focus included) match the base. |
-| 8 | fa10f889, f20b045f | aperture-home-cursor-turns-page | Bug fix, Home and Discover (same row code): the cursor turns its shelf's page. Home at 1000 px across a page 0.23 → 13.77 KB (0.125 builds a key, one a page turned; new cards fetch pictures); ring and focus on the cursor's card in every scene (cursors 5–7 had none). Discover: Right onto page 2 16.1 KB, 0.10 builds; Down (a shelf's next page) 105 KB, 0.67 builds (was 340). Also fixed: with a watchlist, moving onto a title card left two rings. Home Right/Down stays 0.26 KB. `component/shelf walk` rows within 2 %, bytes equal. `GridCursorTests`, `DiscoverCursorTests`, `ShelfPageTests` (reverse edits fail); Aperture 342 + 21 skipped, Headless 1,459 pass. REACTIVITY.md: "A key that still builds moves the live ring first". |
-| 8 | 7a12f5a9 | aperture-home-build-diet (a) | A Home shelf comes back whole (by row key) when every card on its page came back live and its `HomeShelfState` matches: title, count, page, cards per page, See all, scale, and the row's place among all rows and their number (the prototype missed the place: a row moved below a hidden row kept a stale menu); every child of Home's page keyed. Headless 1440×900, 6 shelves, 36 cards, idle-gated JIT ×2 + AOT: Home build 66.02 → 26.29 KB (−60 %), elements 46 → 4, time flat (AOT 65.61 → 26.44); Home open, posters released one per build 3,368–3,433 → 2,281–2,312 KB (−32 %; AOT −34 %), six per build 1,547 → 1,371 (−11 %); page-turn walk at 1000 px 13.77 → 6.80 KB a key; Right/Down 0.26 KB, no build. |
-| 8 | 2e10b549, 07e5b3f9 | aperture-home-build-diet (b) | A card's picture address is memoized by item id, kind, pixel size and sizing side, checked against the item's 3 picture tags, cleared on a new data generation or at 1,024 entries. Home build 26.29 → 11.10 KB (−58 %; −83 % for the step; AOT 26.44 → 11.21); Home open one poster a build 2,260–2,265 → 1,721–1,730 (−24 %), six a build −6.5 %; page-turn walk 6.80 → 5.72. 18 scenes (landings, page turns, Move up, Hide then Move down, Combine, rename, watched, resize, watchlist) identical to a forget-all build and to HEAD: pixels, tree, every row menu, ring, focus. `component/shelf walk` rows flat. `HomeShelfKeepTests` (4: a build with nothing changed makes exactly 4 elements), `CardArtworkUrlTests` (3); reverse edits fail; Aperture 349 + 21 skipped, Headless 1,459 pass. REACTIVITY.md two paragraphs. |
-| 8 | 081921c7 | vesper-cursor-no-build (Detail) | A plain cursor key sets the mounted list's `SelectedIndex` and scrolls; the F3 partner is checked by name first (`DiffTargetPath` only when the other pane's cursor can pair, still no build); Insert builds through a new `marked` flag. Detail 17.09 → 1.74 KB a key (−90 %; AOT 16.54 → 1.64), headless reader 17.45 → 2.09, 0 trees, builds 1 → 0; with a pairing partner 17.32 → 2.78. |
-| 8 | 80f31170 | element-restyle (API) | Approved (question 12, 2026-11-08). **Public `Element.Restyle(Action<Element> change)`** (not in the brief): changes a live element's look past its hover, press and focus styles (internal `InteractionStyles.Restyle`); without it a ring set directly on a once-hovered tile vanished when the pointer left (hover restores the look it first captured). `KeptElements` and REACTIVITY.md use it. Three `InteractionStyleTests`. |
-| 8 | 4048e35b, 74739a89 | vesper-cursor-no-build (Brief, Thumbnails) | Both grids on `KeptElements`; a cursor key restyles the two live cells or tiles; every pane build first puts restyled cells back and has the thumbnail list remake its rows (Tab, a click or a filter build after keys that built nothing); Brief still builds when a key scrolls and on the key after a page jump. KB a key JIT: Brief Down/Up 31.88 → 1.79, Right/Left 32.20 → 1.74; Thumbnails Right/Left 27.68 → 1.22, Down/Up on screen 31.25 → 1.41, a 30-key scrolling walk 57.51 → 26.33 (the tiles scrolled in); builds 1 → 0, 0 trees with the reader, time −3…−9 %, AOT within 1 KB. 47 scenes × dark/light identical to the base and a full build (three pre-existing or harness differences: an idle hover tooltip, a 0.0005 px tree rect after End, Brief's columns lagging a key after a scroll — in the base too). Insert then Up 21.55 → 13.88; Tab, type-to-find, partner flat; suite shelf and image-grid rows within 4 %. `CursorNoBuildTests` (5), `GridCursorNoBuildTests` (12); 19 reverse edits fail; Vesper 896 + 4 skipped, Core 5,064, Headless 1,459 pass. |
-| 8 | 62a67257 | apps-meridian-history-archive-part | The archived-send panel is its own `Part` (own group and signal); Down/Up/Enter set the live list's `SelectedIndex` and highlight through its ref and write the part's signal; the view rebuilds the panel only when the send, the day or `_partRevision.Peek()` changed; falls back to a view build when no panel is on screen or the list was built from other rows or another day. Headless, 300 sends, idle-gated, base 43f7e106, JIT ×2 / AOT pair: History Down/Up 52.05 → 21.64 KB (−58 %; AOT 51.44 → 21.55), with the reader 53.12 → 22.71 (−57 %); search keeping the selection 56.55 → 40.88 (−28 %; AOT −26 %), dropping it 63.66 → 47.98 (−25 %); nothing selected 47.97 flat. A key: window builds 1 → 0, plus 1 panel build; time flat (render dominates). Send, find, method pick flat. 31 scenes with the reader identical to the base and a full build (pixels, tree, focus, texts, list index/scroll/highlight); restore by `r` and the button act on the selected send. No public API. |
-| 8 | 66e31aa7 | meridian-history-up-after-search (bug) | Pre-existing crash on 43f7e106: walk 30 rows down, search down to 20 rows, press Up → `ArgumentOutOfRangeException`. Up clamps the cursor to the rows. HistoryTests `UpAfterASearchThatShortenedTheRows_SelectsTheLastRow`, `AKeyBuildsTheArchiveAlone_AndASearchCharacterBuildsNoArchive`; PartTests check History keys as panel-only builds; 9 reverse edits fail; Meridian 586 + 4 skipped, Headless 1,459 pass. REACTIVITY.md, ELEMENTS.md. |
-| 8 | 307ee07c | paint-meridian-history-faded-row-layers | Approved (question 13; pixels). An older send's row has no `Opacity`: its 5 texts, the method chip's tint and label and its hover tint draw at 60 % of their alpha (`Azimuth.Fade`, `MethodChip` `opacity`); app code only. Real window 1440×900 at 150 %, AOT, idle-gated, one ABAB launch a renderer, medians: layers 29.0–29.4 → 0 a frame; GL wheel 0.912 → 0.614 ms (GPU 0.954 → 0.261), Down 0.971 → 0.702 (GPU 0.902 → 0.269); Vulkan 8-bit wheel 0.898 → 0.681 (GPU 0.607 → 0.084), Down 1.063 → 0.829 (GPU 0.573 → 0.091); F16 wheel 1.063 → 0.816 (GPU 2.208 → 0.494), Down 1.105 → 0.893 (GPU 2.19 → 0.498, one segment; another process on the GPU in the second). Pixels: at rest 18–50k at 1/255, chips ≤ 8/255 (8-bit) / 6 (F16); hovered older row ≤ 5/255 outside its chip, **its chip label up to 13/255 in 55 pixels** (label over tint and faded hover fill); selected ≤ 1/255, selected and hovered ≤ 3, chips ≤ 10; hover and selection fills unchanged. Headless bytes flat JIT + AOT, CPU per step −57…−73 %; 25 History scenes' tree, focus, texts identical. `AnOlderSendFadesItsColours_NotItsRow` (3 reverse edits fail); Meridian 587 + 4 skipped, Headless 1,459 (goldens) pass. 4 guarded launches, 0 foreground takes, no `nvlddmkm` events. |
 | 9 | 4142ee85, 0a9a9c64, 71f95ff1, 96dbc917 | apps-aperture-grid-columns-keep-cards | The objection to d366505b. A card goes back while its own row is still a child of the list (`CanTakeCard`, `place: null`, as round 7's `GridCards.TakeBack`); a hovered or pressed card only into its own row. d366505b's `place: key` remade every card on a change of columns, though a place moves to another row only then, and that invalidates every row first. Follow-up: across a change of columns the keyboard goes back to the cursor's card after the frame (that card and the first row's last card on a narrowing are still made again). Headless, 600 films, JIT idle-gated ×2: a column change each step 235.6 → 62.5 KB, elements 249 → 58, leaf/text measures 369 → 60 / 110 → 14.5; resize over 40 widths 13.6 → 4.9 KB (round 8 base 6.1); cursor keys unchanged (Right 0.3, Down 21.5, no build); AOT walk `library-resize-4px` 6.4 → 3.2 KB (below round 8's 3.6), CPU within noise. New suite rows (kept image grid across a change of columns: own-row 194 KB / 32.4 cards, kept 32 KB / 3.0); shared rows 0/0 ×2 (captures 96dbc917). d366505b's 7 scenes + a last-column scene, 96 checkpoints: pixels and tree as HEAD, 32 column changes as a forget-all grid, one ring on the cursor's card, the keyboard on it at all 48 (HEAD 4 of 16). Aperture 356, Headless 1,459 pass; GridRowKeepTests +4, GridCursorTests +3. REACTIVITY.md "A grid whose columns change passes no place". |
 | 9 | 3a08f828, b4f182b5, 01f0886d | paint-label-lines-cull | The objection to 967ce1ac. Both `DrawText` overloads skip lines wholly outside `Canvas.LocalClipBounds` with `DrawParagraph`'s line-height slack (one helper, `LineOutsideClip`, now shared), checked before a line's runs are read; one-line labels read no clip; internal `CullsTextLines` (on) is the tests' pixel reference. Meridian Request tab, 89k-character body, JIT idle-gated ×2: open runs 1,911 → 192, blobs 1,771 → 61, render 538.5 → 13.8 KB (−97 %), step 3,797 → 3,277 KB (−14 %); wheel runs a frame 1,903 → 194 (−90 %), render 0 → 0.61 KB a frame (lines scrolling in, once each); AOT the same counts. New suite row `text/wheel over a 2,000-line plain label in a ScrollView`: min 0.361 → 0.238 ms JIT (−34 %), 0.383 → 0.227 AOT (−41 %), 0.10 → 3.10 KB a step; full suite 217 rows JIT + AOT ×2: 0 slower, 1 faster, allocations identical elsewhere (captures 01f0886d). Pixels: 14 in-process dumps, before/after differ only in the elapsed-time label, as A/A. `LabelLinesCullTests` 27 cases (plain/spanned, translated, 1.5×, rotated, in a layer, cut lines, stacked marks); 4 reverse edits fail; Skia 387, Core 5,064, Headless 1,459 (goldens) pass. |
 | 9 | b44b4db5 | frame-restore-keeps-no-sysmenu | Correctness, found by the user's Snap Layouts hover. SDL's WM_WINDOWPOSCHANGED handler calls `WIN_SetWindowResizable` whenever a window leaves maximized or minimized, which rebuilds the style with `STYLE_NORMAL` (includes `WS_SYSMENU`): restore from maximized or minimized, full screen from maximized, a placement moving a maximized window turned 16C70000 into 16CF0000, and Windows then validated the flyout against the standard caption band (a bottom entry missed on both monitors for the window's life). The frame's WndProc answers `WM_STYLECHANGING` (GWL_STYLE) by clearing `WS_SYSMENU` from `styleNew` unless `ShowSystemMenu` is lending it (`_lendingSysMenu`); the lend strips from the current style afterwards. `CustomFrameSystemMenuTests` ([UiTheory], both frames, guarded): after every transition and monitor moves the custom frame has no `WS_SYSMENU` (the default frame keeps it), HTMAXBUTTON at the button's middle and 2 dip above its bottom, HTCAPTION on the title bar, Alt+Space and a caption right-click open the menu; 2 reverse edits fail. UiTests 21/21 (handedBack 0), Platform.SDL3 53, Core 5,064 pass. The user hovered by hand on the 4K and the 1440p after maximize, restore, minimize and monitor moves: "works now in every case". |
@@ -293,8 +311,60 @@ Rounds 8 and 9 (round 8 is the round round 9's survey reviewed; it moves to the 
 | 9 | 6c518629, f9a7cc74, 8a6d7bb7, 0e6bc590 | paint-image-fades-itself + vesper-sync-equal-rows-fade-colours | Approved (questions 20 and 21; pixels). (a) A faded image draws its picture at its alpha with no offscreen group (internal `IFadingImageContext` on SkiaRenderContext and RecordingRenderContext; IVT to HultUI.Rendering.Skia; GPU and pixel-stream sources keep their layer). (b) Sync's Equal rows fade their colours, not the row. Real windows, AOT, ABAB+BABA GL and Vulkan 8-bit, F16 ABAB, guarded: Detail layers 26.6 → 0, Down/Up GL 1.147 → 0.827 ms (−28 %), GPU −72 %, Vulkan 8-bit −17 % / −84 %, F16 −18 % / −64 %; Brief 61 → 0, GL 1.458 → 0.824 (−43 %), GPU −84 %, Vulkan −29 % / −91 %, F16 −29 % / −78 %; Sync 26.3 → 0, Down/Up GL 0.833 → 0.516 (−38 %), GPU −77 %, Vulkan −20 % / −82 %, F16 −26 % / −62 %, wheel/hover GL −37/−38 %. Pixels as approved: Detail icons 611/431/8 of 6,976 px ≤ 2/255; Brief 0/0/360 at 1/255; Sync 13.7k/14.1k/8.8k at 1/255 + 3 px at 9/255 on 8-bit; A/A 0; goldens unchanged. New suite row `paint/400 faded icons` 2.971 → 2.283 ms JIT, 2.737 → 2.088 AOT; suite `-Pairs 2` JIT + AOT 0 slower, no allocation moved (captures 0e6bc590). `OpacityLayerTests` 3, `SyncEqualRowTests` (reverse edits fail); Skia 387, Core 5,067, Headless 1,495, Vesper 901, Aperture 356, Meridian 653 pass; 0 guard firings, 0 `nvlddmkm`. DECISIONS.md (Rendering), ELEMENTS.md (Opacity). |
 | 9 | ea42f45b, 9f83f755, 8cea790c | a11y-selected-patch-for-cells | Approved (question 25). A selected state is marked in place for a menu entry, a row directly in a composite list, and now any element whose `Role` is `ListItem` that says selected or not both before and after; anything else (a tab, a radio, a button in a set) still builds a tree (narrower than step 15's prototype, which took every element). Vesper: Brief cells and thumbnail tiles are named `ListItem`s (the entry's name, without the mark: a renamed node with children builds a tree), `ShowCursor` sets `AccessibleSelected` with the ring's `Restyle`, the thumbnail list `RowsAreComposite`, dead `ThumbRowLabel`s gone. A reader now hears the item left and the item reached on every Brief/Thumbnails cursor key (before: nothing), and on Tab the pane then its item in all views; 0 trees a key, a Tab or a mark with tree/UIA/AT-SPI; KB a key Brief 2.21–2.33 → 2.49, Thumbnails 1.81–2.06 → 1.96; a navigation with a reader +34/+95 nodes (Brief UIA 237 → 250 KB, Thumbnails 262 → 294), without within 0.5 KB. Audit 0 STALE/WALK-VALUE/WALK-EVENT, fallbacks 10; Aperture grid and Discover, Meridian History/prompt/Request tab event streams identical. Suite `-Pairs 2` JIT + AOT 0/0, all 67 a11y rows' bytes equal (captures 8cea790c). A11yLeafPatchTests + Vesper tests (reverse edits fail 4 / 2 / 1); Core 5,067, Linux bridge 104, Headless 1,501, Vesper 903, Meridian 653, Aperture 356, Junction 1,082 pass. ACCESSIBILITY-PLAN.md, ELEMENTS.md. |
 | 9 | ae32c9d8, bf74fbca, d9f55f21 | syntax-encoded-tokens-colours | Approved (question 23; colours). Colours from TextMateSharp's encoded tokens (`TokenizeLine2`), a colour id straight to a colour (step 14's per-scope-list cache gone); bold/italic still not from the theme (they would change widths). bf74fbca: TextMateSharp 2.0.4 never applies a theme rule naming a parent scope (it looks for the rule's own scope among the parents too); a grammar whose root scope is a rule's one parent gets its own registry with that parent dropped and the rule last (PowerShell, Less) — no fork, no API. KB a call JIT (AOT): JSON 7,240 → 5,112 (−29.4 %; −28.3 %), XML 10,803 → 8,765 (−18.9 %; −18.2 %), HTML 49,895 → 47,675 (−4.4 %); min JIT JSON 10.3 → 7.2 ms, XML ~11.9 → 10.4, HTML flat; Meridian pretty toggle 20× 53.4 → 51.1 MB JIT, gen-0 34–35 → 32–33. Corpus (3,094 files, 1.75 M lines, per token against the base): Dark+/Light+ change exactly step 14b's 2,388 lines / 9,128 tokens, then bf74fbca takes back the 61 PowerShell member tokens (2,335 lines, 9,067 tokens; one `$script:` line stays); other themes 0; no JSON/XML/HTML line; states equal. Suite `-Pairs 2` JIT + AOT no regression, no allocation moved (captures d9f55f21). `ThemeColourTests` (Dark+ for TS/JS keys, `new`, a C member, PowerShell members in .ps1 and a Markdown fence), `TokenizeBytesTests` 20–32 B a token; reverse edits fail; Syntax 94, Meridian 653, Junction 1,082, Vesper 903, Headless 1,501 pass; no golden changed. DECISIONS.md. |
+| 10 | f451a9ef, 8c02c5a2 | a11y-selected-button-patch | The objection to cb1df8c0 with ea42f45b. A selected state is marked in place also for an element whose app-set `Role` is `Button` and that says selected or not both before and after (`element.Role is ListItem or Button`); an inferred button (`ButtonElement`, a clickable box), a button that starts or stops saying selected, tabs, radios and every other role still build a tree. Meridian map click, KB off / tree / UIA / AT-SPI, JIT: 60 endpoints 58.1 / 92.3 / 92.7 / 92.8 → 58.1 / 58.3 / 58.4 / 58.6; 600 81.5 / 343.6 / 343.9 / 344.1 → 81.5 / 81.8 / 81.8 / 82.0; 2,000 120.8 / 973.5 / 973.9 / 974.0 → 120.8 / 121.0 / 121.1 / 121.3; trees a click 1 → 0. A reader hears the same: ordered UIA raises and AT-SPI signals identical in all 90 reader-mode scenarios (Vesper 48, Meridian 30, Aperture 12); only the 9 map-click rows of 121 moved. Audit 0 STALE in 3,367, 0 WALK-VALUE/EVENT, fallbacks 83 (Junction 62 vs 61 with the rule reverse-edited: run-to-run; no Junction element reaches the clause). Suite `-Pairs 2` JIT + AOT 0/0, no allocation moved, all 67 a11y rows identical (captures 8c02c5a2). `A11yLeafPatchTests` +3 per bridge (a selected button patches; a Tab still builds; a button that starts saying selected builds; reverse edits fail 2/2); Core 5,067, Headless 1,505, Linux bridge 104, Meridian 653, Vesper 903, Aperture 356, Junction 1,082 pass. ACCESSIBILITY-PLAN.md, ELEMENTS.md. |
+| 10 | b2fdcf52, c3cb789a, b837de41, 3194c830, 35102eb4, b6204f39 | dotnet-kept-elements-hold-weakly + apps-refs-hold-last-view | The objection to c940c643. (a) `KeptElements` entries are an internal `WeakElementRef` (a non-generic `WeakReference` implementing IRef, registered by an internal `Element.WithRef(IRef)`, repointed by PatchFrom): 0 managed bytes added a key (same 24 B object as `Ref<Element>`, plus one weak GC handle); `Made` 243.2 B a new key, 88.0 a known one, before and after. (b) Meridian empties `_respTabRef`/`_responseBodyRef` in a build with no response panel and `_urlRef` at each build's start; Aperture empties `_homeShelfCards` after Home's shelves and lets `_gridList` go in another view's build (height kept as `float? _gridViewportHeight`); Vesper's `OnAfterBuild` lets go of the cursor row and Brief's scroll view once unhosted (`_cursorRowL/R` is shared by all three modes; the offset is kept). Retained heap after the switch, full GC, KB JIT (AOT): Meridian 200 requests → History 2,364 → 1,027 (2,161 → 874); 25 requests 933 → 733 (773 → 585); a 239 KB response open → History 12,461 → 10,623 (12,263 → 10,476), held by the old view 1,852 → 5; Aperture Home 5×20 → Settings 1,528 → 1,013 (1,386 → 867), 8×40 1,994 → 1,180 (1,850 → 1,025); grid 600 → Settings 1,666 → 1,292 (1,539 → 1,163); Vesper Brief 400 files → Detail 1,825 → 1,406 (1,664 → 1,253), 3,000 2,646 → 2,214 (2,472 → 2,062); the old view dead after in every row. Bytes a key/build unchanged JIT + AOT. Suite `-Pairs 2` JIT + AOT 0/0, no allocation moved, A/A clean (captures b6204f39). Retention tests per change (reverse edits fail; Vesper/Aperture also without the kept offset/height); Core 5,067, Headless 1,507, Meridian 654, Aperture 358, Vesper 904, Junction 1,082 pass. REACTIVITY.md "A ref into a view keeps the whole view", ELEMENTS.md §28. |
+| 10 | 1c3cf5c5, ef42ca03 | layout-wheel-latch-holds-removed-view | `WheelGesture` gets internal `Latched` and `Release()`; `NoteStructureForHover` → `NoteStructureChange`: at the end of a frame that changed the root's or an open overlay's children it releases a latched scroller `IsShownInWindow` rejects (before the hover early return); `RemoveOverlayAt` releases a latch inside the closed overlay and `SetRoot` one on the old root (a reused root has no Children flag). Retained KB after a switch, map wheeled, JIT (AOT): Meridian map 60 endpoints 1,122 → 841 (948 → 670), 600 4,314 → 1,815 (4,127 → 1,657), 2,000 14,283 → 6,052 (14,037 → 5,901), equal to the no-wheel walk; Aperture → Settings, grid 600 films 1,566 → 1,300 (1,430 → 1,164), Home 5×20 1,295 → 1,030 (1,158 → 894). Per frame: two null checks when nothing is hovered or latched; one O(depth) walk only in a frame that changed a tree while latched; 0 B. Suite `-Pairs 2` JIT + AOT: no allocation moved; AOT 0/0 both pairs, JIT pair 2 0/0, pair 1's 4 slower rows also in its A/A line (noise in the before run); 16 wheel rows within ~1 % (captures ef42ca03). ScrollChainingTests +5 (each release reversed alone fails its test; the check after the early return fails the pointer-gone case); Core 5,067, Headless 1,512, Meridian 654, Vesper 904, Aperture 358, Junction 1,082 pass. REACTIVITY.md. |
+| 10 | 150d08bc, 47ea53fb, 96a54d45, 2ccde148, cf68adeb, 70025cb3, 5c73087d | apps-meridian-runner-rail-reads-every-request | (a) The Runner's rail counts its scopes from the scanned collection (no file read): KB a run JIT (AOT) 200 requests 1,799,085 → 189,878 (1,783,386 → 189,251), 50 123,095 → 19,258 (121,536 → 18,970); GCs at 200 107/19–22/2 → 11/1/1; rail 8,001 → 36.8 KB a build. An unreadable request file is now counted in "N req" / "Run · N req" but still left out of the run ("49 / 49" beside "Run · 50 req"; question 33). (b) Result rows on `KeptElements` keyed by request path, let go on a new run: 200 189,871 → 39,283 (−79 %; AOT 39,729), 50 −50 %, GCs 2/0/0; ~19 MB a run is the sends themselves. (b2) A result builds the Runner's results part alone (own revision): 200 39,286 → 24,302 (AOT 24,975), MeridianApp builds 202 → 2, part builds 404 → 4 plus 202 results-only builds; a run behind another view builds nothing there. All three: **1,799,085 → 24,302 KB a run at 200 (−98.6 %)**, GCs 1/0/0. (c) Chain sub-tab keeps chain nodes per scan, compared by reference: 80 URL keys at 200 requests 3,278 → 117 KB a key chained (−96 %), 2,919 → 74 unchained; CPU 13.5 → 1.3 ms JIT, 8.4 → 1.4 AOT; GCs 15/1 → 0; pixels and trees identical. Checkpoint walks (idle, start, results 1, n/4, n/2, n−1, end, a row expanded/collapsed; 50, 200, 50 with an unreadable file): element and a11y trees as d4551a06 and as a keep-nothing build; unreadable case differs only in the three counts. New suite rows `component/append a row to 200 rows built through the root, every row made` (0.921 ms, 1,494 KB/op) and `…, rows kept` (0.652 ms, 36 KB/op). Suite `-Pairs 2` JIT + AOT 0/0, no allocation moved (captures 5c73087d). Tests (reverse edits fail): counts vs files incl. unreadable, n results n rows (135 without), window builds only at start and end (17 without), Chain reads once a scan (14 without); Meridian 658 + 4 skipped, Headless 1,512, Core 5,067 pass. REACTIVITY.md. |
+| 10 | 3e2b9c3c, b03e7b16, 45441b1a, f8d952c3, bce29c46, a7d3c7bf | apps-typing-builds-nothing-junction-aperture + apps-toast-gone-view-only + aperture-backspace-goes-back | KB a character JIT (AOT), elements, builds: Junction prompt over Changes 194.3 → 1.4 (192.9 → 1.4), 172 → 0, 5 → 0; over History 154.7 → 0.6; reword 332.8 → 1.0 (330.7 → 1.0), 320 → 0; add-repo folder 472.4 → 195.0 (468.9 → 192.6), builds 10 → 2, part builds 8 → 0 (the folder check's landing also `MarkViewDirty`: it had built the chrome a second time a character); MR filter 221.8 → 92.3, builds 4 → 1; Aperture issue reply 135.1 → 2.3 (134.5 → 2.3), 137 → 0; report message 99.9 → 0.9 (98.9 → 0.5); with a reader 1.1–2.9 KB, no tree. Toast flash to gone: Junction Changes 365.3 → 226.7 (369.8 → 231.7), part builds 8 → 4; Meridian 25 requests 270.4 → 212.2, 200 279.0 → 215.9; Aperture Home 148.5 → 90.1 (150.4 → 92.4). Bug (question 27 (a)): Backspace in an Aperture text field erases and stays; Escape and Backspace on the page still go back. 10 scenes (161 steps) identical as built, rebuilt and with a forced full build after each step, with and without a reader; equal to ae9b68ec but for the Backspace fix. Suite `-Pairs 2` JIT + AOT 0/0, no allocation moved (captures a7d3c7bf). Tests (reverse edits fail); Junction 1,085, Aperture 362, Meridian 659, Headless 1,512, Core 5,067, Vesper 904 pass. REACTIVITY.md (toast callback; three typing cases). |
+| 10 | 38317590, c542faac, 91158ec4 | text-textarea-cluster-walk-whole-line | A searched row finds cluster ends only after its own start and only as far as its search reads, starting from the last end found or the nearest earlier spot between two chars below U+0300 (not CR LF); the search caps each probe lazily (no cluster count up front); one-char clusters skip the call; internal `ClustersByRow = false` keeps the whole-line walk as the reference. KB a key typing into a one-line 89k body, JIT ×2 identical (AOT within 0.4): Consolas emoji 1,216.8 → 192.4, mark 1,215.7 → 191.3; Segoe UI emoji 1,223.3 → 199.0, mark 1,221.1 → 196.7; ASCII/é unchanged. Open cold: 1 MB bundle one line + emoji 16,724.9 → 341.6, + mark 16,711.8 → 328.6, the bundle as is with one emoji 8,560.4 → 369.1; toc.html one line + emoji 16,686.7 → 304.5; index.json 6,179.8 → 4,132.5 (−33 %; warm 4,172.6 → 2,124.2). Rows: r9b6 corpora with 124,437 joiners (emoji, mark, ZWJ family, surrogate pair, space + mark, flags, Hangul, Devanagari, skin tone, keycap, lone surrogate, 40-emoji run), 3 faces/modes, 3,240 widths incl. 196 near-multiples, 42,599,160 rows: base hash = change in 20 of 20 runs, 0 widths differ from the in-build reference; layout hashes 7A18AF8DE8E05271 and F09E9038726E4BD6 unchanged. New suite row `input/type in a one-line JSON body with an emoji`: JIT 2.173 → 0.917 ms (−58 %), AOT 2.256 → 0.910 (−60 %), 1,216.1 → 191.7 KB/op; nothing else moved ×2, A/A clean (captures 91158ec4). TextAreaClustersTests Core 4 + Headless 3 (4 reverse edits fail); Text 293, Core TextArea 80, Headless 1,515, Meridian 659, Vesper 904, Junction 1,085; Fedora Headless 1,354, Core TextArea 80 pass. |
+| 10 | 1c8d7a77, a3e89cc3, 00539fd2, 525f45e5, 819c6c58, 7143a2d1 | apps-vesper-sync-cursor-rebuilds-rows + vesper-sync-cursor-reveal | (a) Sync's rows take their place from the build's loop; (b) Sync keeps its rows (`KeptElements`) and a cursor key moves the ring on live rows, no build; (c) approved (question 29): a cursor key scrolls its row into view. KB a key AOT (JIT), 80 Down/Up keys: 60 files (40 rows) 453.7 → 0.4 (422.6 → 0.4); 300 files (200 rows) 2,568.5 → 0.4 (2,054.2 → 0.4); 3,000 files (2,000 rows, 18,086 elements) 81,102 → 0.4 (47,962 → 0.4); (a) alone 300 → 1,716, 3,000 → 16,444. Builds a key 1 app + 2 parts → 0; GCs per 80 keys at 3,000 files 451/262/66 → 0/0/0 (AOT); min a key at 3,000 32.2 → 1.7 ms JIT ((b) alone 1.22; the reveal draws the rows a scroll brings in). With a reader 0.9–1.0 KB a key, 0 trees; the cursor row's selected state is now told (the row's Button role set by the app). Reveal: after 40 Downs the ringed row is inside the view (719–743 of 111.9–743, scroll 352.9; before 1047.9–1071.9 at scroll 0, off screen). New suite rows `component/cursor key over a plain 200-row list built through the root, every row made` / `…, rows kept`: 1,607 → 50 KB/op, 1.08 → 0.80 ms JIT, AOT within 1 %. Suite `-Pairs 2` JIT + AOT 0/0, no allocation moved, A/A clean (captures 7143a2d1). SyncCursorTests 8 (pixels, tree, colours, rings, reader tree vs a keep-nothing build; Show equal on/off, Space, rail and row clicks, rescan, a fallback build; 5 reverse edits fail); Vesper 911 + 4 skipped, Headless 1,515, Core 5,071 pass. REACTIVITY.md, ACCESSIBILITY-PLAN.md. |
+| 10 | 5af78ecf, 2337e73f, b9a716aa | apps-junction-diff-rows-keep-width + apps-junction-view-only-clicks | (a) The width stays in the diff's height shape only while rows wrap or the review is on: split drag 159.3 → 42.0 KB a move (AOT 157.2 → 41.2), elements unmounted 127 → 0, rows made 14 → 0, render 119.5 → 2.2; 4 px resize 32.1 → 20.3 (AOT 32.0 → 20.4); History unchanged. (b) `MarkViewDirty` at every listed site plus the MR search key; part builds a click 4 → 0 in Changes, 3 → 0 elsewhere; KB a click JIT (AOT within 3): staging line 306 → 169, hunk 306 → 170, Clear 296 → 159; dialog open 208 → 71, Escape/Cancel 177 → 40 (a confirm keeps the full build); popover Escape 177 → 40; search keys History 138 → 14, Branches 163 → 40, Tags 157 → 34, Files 168 → 44, MRs 255 → 126; folders Files 187/305 → 63/181, Commit tab 192/200 → 68/76; MR filter Escape 256 → 126. 150 scene steps (widths, pan scrolled and clamped, split, wrap on/off, drag, review, every site, a confirmed new-branch prompt, the MR filter): pixels, reader tree, focus, caret, pan, dialog/popover state identical base = a = b with and without a reader (each side differs from its own forced full build in the same 67 steps on base too: the pan's stale viewport and a tooltip). Suite `-Pairs 2`: no allocation moved; AOT clean; JIT one different slower row per pair with a clean A/A: noise (captures b9a716aa). `DiffRowKeepTests` +2 (186 / 5 rows made under a reverse edit), `ChromePartTests.ViewOnlyClicks_BuildTheViewAndNoChrome` (each of nine site groups reverted fails); Junction 1,088, Headless 1,515, Core 5,071 pass. REACTIVITY.md. |
+| 10 | acaac297, bb2958de, ea1971ec | a11y-focus-find-down | `MoveA11yFocus`, `NotifyPendingA11yFocus` and `Announce`'s lookup find the node with `FindNodeDown` (the element's ancestors), the whole-tree walk only when the path finds nothing; the window keeps the focused element by reference (dropped on `SetRoot` and client detach); internal counter `AccessibilityFocusNodesVisited`. Nodes looked at a focus move: Meridian Tab at 2,000 endpoints (6,073 nodes) 6,072 → 55, 60 endpoints 252 → 55; Vesper Tab 118 / 233 / 225 → 23; Aperture cursor keys 56–115 → 49–76; Junction Tab 93 → 47; a move into an overlay opened in the same handler still falls back (~607 → 248–306). Meridian at 2,000, real UIA, key handling, JIT ×2: min 128.0 / 128.8 → 109.7 / 111.5 µs. New suite rows `a11y/tab among 10 fields after 2,000 rows, UIA` / `AT-SPI`: JIT UIA 0.497 → 0.490 ms min (build 0.168 → 0.148), AOT 0.557 → 0.534 (0.188 → 0.157); AT-SPI build 0.121 → 0.106 JIT, 0.144 → 0.134 AOT. Suite `-Pairs 2` JIT + AOT: none slower in both pairs, no allocation moved (captures ea1971ec, timings in its body). Event streams identical in all 129 scenario-modes (Meridian, Vesper, Aperture, Junction; dialog, context menu, popover mounted and focused in one handler, removed row, an ancestor turning semantic (the fallback), list rows, an announcement); KB a step unchanged (one-time ~0.2 KB chain list growth). Audit 0 STALE/WALK-VALUE/WALK-EVENT, fallbacks 83 → 80. `A11yFocusMoveTests` +2 (≤ 22 nodes a move, 4,004 reverted; the fallback tells the bridge); Core 5,071, Headless 1,517, Linux bridge 104, Meridian 659, Vesper 911, Aperture 362, Junction 1,088 pass. ACCESSIBILITY-PLAN.md. |
+| 10 | b5f5828c, b7e6bda2, d4c46da8, e17ae14b, 15e32c20 | a11y-container-name-in-place | A renamed node with children is walked in place, its children carried over (`CarryChildrenOf`, `AdoptChildren`; the observer routes the change to the walk with `_a11yWalkDue`); a node made again is walked like any node (a leaf that gains children gets them, one that now takes its text loses them; `mustBeLeaf`/`MayChange` gone). Vesper navigation KB tree / UIA / AT-SPI: Detail 1,000 453.0 / 542.0 / 675.7 → 322.6 / 411.6 / 556.9; Brief 1,000 453.1 / 492.5 / 537.0 → 336.2 / 375.6 / 420.3; Thumbnails 1,000 356.7 / 374.4 / 393.1 → 249.9 / 267.6 / 286.2; at 60 files −8…−11 %; trees a navigation 1 → 0; bridge-off within the probe's spread. Junction's Commit count (stage/unstage a file) 670.4 / 675.4 / 678.9 → 622.5 / 627.6 / 631.1, trees 2 → 0 a step. Event streams identical in all 135 scenario-modes; stale checks 0. Audit, all seven suites: fallbacks 80 → 10 (Junction 58 → 1, Vesper 11 → 0, Headless 11 → 9; b7e6bda2 alone left 73, Vesper archive path buttons gaining an icon); 0 STALE/WALK-VALUE/WALK-EVENT. New suite rows `a11y/rename a pane over 1,000 rows, UIA` / `AT-SPI` (e17ae14b: each step also sets the title the pane shows, since a step that draws nothing makes the suite exit 1): 259 → 0.2 KB, JIT UIA min 0.575 → 0.520 ms, AOT AT-SPI 0.770 → 0.604; suite `-Pairs 2` JIT + AOT 0 slower, only these rows' bytes moved (base 375146d0, b5f5828c's tree with the fixed rows; captures 15e32c20). In-place scenes (group renamed, renamed with rows changed, nested groups, named scroll view, overlay panel, a tab named by its label, a button gaining/losing an icon) tell what a build tells with 0 trees through the recording bridge, AT-SPI and UIA; AT-SPI keeps its objects, UIA leaves no wrapper on the old node; reverse edits fail. Core 5,072, Headless 1,539, Linux bridge 104, Meridian 659, Vesper 911, Aperture 362, Junction 1,088 pass. ACCESSIBILITY-PLAN.md. |
+| 10 | 5e93a4fe, bf536526, 03783526 | apps-meridian-map-virtual-list | The Discovery map is a `VirtualList` of item rows (the column's padding and gaps became row margins; `RowHeights` takes heading heights from `TextMeasure`); a click sets the list's `SelectedIndex` through its ref and the endpoint detail is a `Part` of its own (no window build). 60 / 600 / 2,000 endpoints, before → after: elements 321 / 2,481 / 8,109 → 203 / 210 / 210; hit visits a hover move 77.5 / 617.5 / 2,046 → 42.5 / 40.5 / 40.5; a wheel notch 64.6 / 602 / 2,030 → 33.7 / 29 / 29 hit visits, culls 36.5 / 579 / 2,007 → 4.9 / 5.1 / 5.1; culls a drawn frame → 3–4 (0 B); a click JIT 54.8 / 77.3 / 124.0 → 22.2 / 22.2 / 30.6 KB (AOT the same within 0.3), hit visits 226 / 1,847 / 6,131 → 121 / 116 / 116, `ZScans` 76 / 616 / 2,048 → 0 / 0 / 3.7, layout marks 123 / 663 / 2,098 → 24 / 24 / 31, builds 1 → 0; the map's elements 271 / 2,488 / 8,230 → 163 / 169 / 185 KB; AOT heap with the map shown 981 / 4,167 / 14,315 → 890 / 1,220 / 3,982 KB, after leaving 713 / 1,707 / 6,109 → 711 / 1,046 / 3,766; AOT click min 0.710 / 0.849 / 1.577 → 0.721 / 0.720 / 0.732 ms. Worse: JIT click at 60 endpoints ~+14 % (1.17 → 1.33 ms: a selection move in an item-row list lays out every realized row again, 869 measure calls vs 113; AOT within 1.5 %; → Waiting); a wheel notch 0.1 → 7.4 KB (the 1.5 rows it scrolls in; time flat). Reader: every line a ListItem named as the row was (**was a Button: question 34**); items served on demand at 2,000; an off-screen row reached by the reader's scroll, invoke/select selects it; a click with a reader 56.6 / 80.1 / 119.3 → 19.4 / 19.4 / 19.5 KB, no tree; event streams the same but for the role (and served ids at 2,000). Pixels identical but one hover tint (after a long wheel the row under a still pointer is tinted at once: the hover re-hit); two endpoints with the same method and path ("get"/"GET") no longer both show selected. Suite `-Pairs 2` JIT + AOT: no allocation moved, JIT pair 1's one slower row also in A/A, AOT clean (captures 03783526). New tests (reverse edits fail): rows on screen however long the map, a reader reaches a row off screen, a click moves the selection with no build; Meridian 662 (HttpEngineTests' stalled-server timeout failed once under load, passed 3× alone), Core 5,072, Headless 1,539, Linux bridge 104 pass. ELEMENTS.md "A scroll view of rows becomes a list", REACTIVITY.md. |
+| 10 | 7b7a486c, a86b208f, a0ef7841, ea957e38 | syntax-markdown-loads-every-grammar | Approved route (question 30 (c)). A Markdown text gets a registry holding only the grammars it can reach (fence info strings: 52 fence rules, 193 terms mirrored from the grammar; '<' or '&' for HTML; `---` for YAML; up to 4 registries kept, cleared on `SetTheme`); shell heredocs, Ruby heredocs and `__END__`, F# `///` and `(**`, HTML `<style>`/`<script>`/on-event attributes scanned the same way; the grammar walk no longer boxes enumerators (3,590 → 37 KB over 78 grammars). Kept KB after the first file, full GC, JIT (AOT within 10): 3-line .md 29,446 → 1,310 (−95.6 %; allocated 82,873 → 3,345); no fences 29,499 → 1,340; 1 fence 29,485 → 1,658; 3 fences 29,605 → 3,930; 18 fences 30,513 → 21,372; repo README.md 29,742 → 4,014; a fence in every language 31,560 → 31,604 (allocated +0.4 %); .rb 29,315 → 1,030, .sh 29,179 → 600, .fs 29,227 → 559. First call README 155 → 58 ms JIT, 121 → 38 AOT; 3-line .md 119 → 9 JIT, 91 → 2.7 AOT; worst case (every language) +0.5 % AOT, +3.7 % JIT (first-use compile). Apps, retained after a full GC: Junction Files showing README.md 31,889 → 6,138 KB JIT (31,745 → 5,992 AOT); Vesper preview of README.md +30,612 → +4,868 KB. Colours: round 9's corpus (3,110 files tokenized, 1,758,209 lines + edge texts) on all 21 themes, 0 lines differ; TokenizeDiff equal on 81,086 lines, SpansForLanguage on 534 fences. Suite `-Pairs 2` JIT + AOT 0/0, no allocation moved (captures ea957e38). EmbeddedLanguageTests 10 (tables pinned to the grammar files, scan = each fence rule's expression on 255,024 lines; reverse edits fail); Syntax 104, Junction 1,088, Vesper 911, Meridian 662, Headless 1,539 (goldens) pass. Still shared: Typst (57 grammars), Julia (9.2 MB), PHP, Razor, HTML files. |
+| 10 | 7ca2b3db, 956194e7, bfcba907, 05d03300, c7f7e6ba, f5549b05, e4e99925 | junction-diff-pan-viewport + apps-pane-drag-sets-size | (a) Bug: after a build or a resize Junction reads the laid-out diff list after the frame and gives the pan its viewport; HorizontalPan's thumb follows a viewport assigned while the bar is shown (no API, no extra build a resize): one sideways wheel turn at start reaches 361 → 963 of 963 px; after resizes 967/1103, 1103/1203, 1203/1303, 963/1403 → all reached; thumb at start 655.7 → 351.6 px; a 4 px resize 20.3 → 20.4 KB, one extra layout-and-paint frame while the bar shows. (b) A splitter drag sizes the live pane through a `Ref` + `MarkLayoutDirty()` and builds on press and release only (and on a move while the diff wraps, a review is open, or an offset clamps). KB a move JIT (AOT): Meridian 2,000-line body 38.8 → 2.5 (38.6 → 2.5), no response 10.9 → 0.1, pane at the bottom 36.4 → 0.1; Junction Changes split 42.0 → 2.4 (41.2 → 2.4), Commit split 65.2 → 5.5 (64.1 → 5.5); part/window builds a move 1 → 0; the pane follows the pointer exactly. Vesper and Aperture have no splitter. 157 steps compared in-process with a forced full build (every diff row remade): pixels, reader tree, elements, focus, sizes, pan, 0 differ with and without a reader (before (a), 67 of 125 Junction steps differed). Follow-ups: the new refs let go in builds that don't show them (c7f7e6ba, f5549b05). Suite `-Pairs 2` JIT + AOT 0/0, no allocation moved, A/A clean (captures e4e99925). New tests (DiffScrollTests, HorizontalPanFollowTests ×2, Junction PaneSplitterTests, Meridian ResponseViewerTests; reverse edits fail); Core 5,072, Headless 1,541, Meridian 664, Vesper 911, Aperture 362 pass; Junction 1,089–1,090 of 1,091 (flakes on base too: → step 13b). REACTIVITY.md, ELEMENTS.md, LAYOUT.md. |
+| 10 | 0b276fec | junction-view-only-tests-settle (tests) | Cause: on Windows a folder made by TempRepo's copy reports a change the first time anything lists it, so the app's first `git for-each-ref` set off "refs\heads changed" in 25 of 25 fresh copies and the watcher reloaded ~300 ms later inside the counted window (chrome 14 → 21, data generation 0 → 1). `CopyTree` lists every folder of a copy before any watcher exists (0 of 19 copies report after; `FixtureQuietTests` fails 3 of 3 without it); `HostedOnGitLab` settles after the GitLab mark; `ViewOnlyClicks` waits for the watcher's report of its own write. 20 fresh runs each with 28 busy threads: `AFolderOrFilterCharacter` 3/20 (+2/20 instrumented) → 0/20; `ViewOnlyClicks` 0/20 → 0/20 (step 13's ~1 in 4 not reproduced here). Reverse edits of steps 5/8 still fail. `ReviewTests.TheKeyboardReachesTheCommentAgain` left (a different flake: nothing focused after a Tab). Junction 1,092 ×2 (one earlier run 1,091 + that flake), Headless 1,541, Core 5,082 pass. Tests only. |
+| 10 | 2f7ab168, 81b6d84e, b63f8ceb, ab8c714d, 495f1e85, 4cb55b86 | vesper-brief-scrollbar-columns | Approved (question 28 (a); public API). **Public `ScrollViewElement.UserScrolled` (`Action?`)**: "Called after the user moves this view's offset: the wheel, the scrollbar (a track click, each move of a thumb drag), the autoscroll (the middle button held, a selection held past the view's edge) and a VirtualListElement's own scroll keys"; once per move that changed the offset, last in each path; code scrolls (setters, `ScrollBy`, reveals) and moves handed to a `SidewaysScroller` raise nothing; `PatchFrom` carries it; the window's autoscroll goes through an internal `ScrollByUser`; `ScrollEvent` unchanged (scope wider than the brief: question 35). Vesper: Brief listens to `UserScrolled` and makes the columns it scrolls to; returns from another view at the start with columns made for the start (question 36); a folder that fits its pane has nothing to scroll (`FlexGrow` on the content made it ~1.7e38 px wide at 60 files). Blank columns in view, headless 1240×820: track click 400 files 4 of 4 → 0 (0 → 1 build); bar walk 400 / 3,000 / 60 files 15 / 22 / 22 → 0; autoscroll 182 frames 139 / 139 / 111 → 0; return from Detail, Thumbnails, viewer 17 / 17 / 0 → 0; wheel builds 25 → 4; steps not matching a full build 30 → 0 at 400 and 3,000. Brief KB a key Down 5.0 → 4.9, Up 5.2, 12 builds; 3,000 files 6.07, 105 builds. step-ab `-Pairs 1` JIT 0/0, no allocation moved (captures 4cb55b86). UserScrolledTests 9, BriefScrollColumnsTests 4, BriefReturnTests 4 (reverse edits fail); Core 5,072, Headless 1,550, Vesper 919, Junction 1,092, Meridian 664, Aperture 362 pass; docfx `--warningsAsErrors` 0. ELEMENTS.md. |
+| 10 | 00b8fc79, d85c6ff6, f0106c63 | vesper-brief-return-offset | Approved (question 36 (b)). Framework, no new API: while a view has no viewport or no content on an axis, setting `ScrollOffsetX`/`Y` keeps the value (≥ 0) and reads it back; the layout pass applies it once both have a size, clamped, before any held reveal, raising no `UserScrolled`; a later set replaces it, `ScrollBy` adds to it; user input never holds an offset (private `MoveOffsetX/Y`: wheel, bar, autoscrolls, VirtualList keys); `ScrollRangeIntoView` reveals from the held offset, `ScrollRangeIntoViewHorizontal` does nothing before a width; VirtualList's content is its row height. Callers checked (every reveal in Junction, Meridian, Aperture, CommandPalette, Inspector, Vesper; autoscroll carry-over; UIA scroll; a11y horizontal reveal; Locator; PerfSuite); one needed a guard (`ScrollBriefToCursor` before layout). Vesper: leaving Brief stores offset, cursor and result set (`PaneTab.BriefLeft`); the build that makes the new scroll view sets it and builds those columns (`BriefOpenAt`); a cursor moved while away is revealed with the least move; `NavigateTo` clears it. Return walk at 60/400/3,000 files × mid/end × cursor/bar × Detail, Thumbnails, viewer, diff, sync: back at the offset and cursor left 20 → 60 of 60, cursor shown as left 40 → 60 of 60, blank-column steps 0 → 0 of 138, steps differing from a full build 0 → 0; the return build at 400/end 596 → 459 KB. step-ab `-Pairs 1` JIT 0 slower, no allocation moved (captures f0106c63). ScrollViewElementTests +6 (replaces `ScrollOffset_ClampsToZeroWhenNoContent`), ScrollOffsetBeforeLayoutTests 3, BriefReturnTests 14; reverse edits fail; Core 5,088, Headless 1,553, Vesper 929, Junction 1,092, Meridian 664, Aperture 362 pass; docfx 0 warnings. ELEMENTS.md §6, REACTIVITY.md. |
 
 ## Examined, not worth it
+
+From the round 10 surveys (details in `17-reports/r10-*`):
+
+- **paint-text-lines-seek** (2; round 10 step 14, built and measured, 9f76ecb6 DECISIONS.md): binary search for a long
+  label's first visible line (≥ 32 lines, tallest line and sorted flag on the layout, +8 B, exact): `text/wheel over a
+  2,000-line plain label` min JIT −2.9 / −4.4 %, AOT −3.7 / −3.1 % (A/A 2.4 % JIT, 0.8 % AOT), rich-text row ±0.5 % / −3.9 %;
+  no allocation moved. Real but under the 5 % bar (7–10 µs a step, ~4–5 ns a line); revisit for 20k+-line texts drawn
+  every frame. Patch kept in the session scratchpad `r10b14\text-lines-seek.patch`.
+
+- **Steady-state render bytes in the suite** (2): all VirtualList realization in the render pass by design (`TableView
+  10k sort` 234 KB, typing beside a 150-line diff 249 KB, `list 100k replace` 143 KB). **Effects** (2): shadow and
+  gradient tiles 0 cache misses, 0 B; layers only in scenarios built for them. **Image memory** (2): Vesper decodes at
+  target size; `SkiaImageSource` shares pixels. **TextArea draws visible rows only** (2, 5).
+- **Bytes per video frame** (3): 14.6 B JIT / 12.2 AOT on the UI thread, all from mpv's 9 `time-pos` changes a second
+  (`MediaPlayer.Apply`'s Batch closure, MediaPlayer.cs:276); render 0 B; under the 0.1 KB target. **GPU memory left after
+  a web view is disposed** (3): GL +16.3 then +7.5 MB, Vulkan +21.3, flat after; NVIDIA's GL driver pool (reused, not
+  Skia's cache, predates 58aeb965); no framework lever. **F16 vs 8-bit GPU memory** (3): decided in round 3.
+- **`Secrets.Resolve`'s variable name** (4): ~1.4 KB of a 47.1 KB drag frame (3 %); goes with step 13. **Hover settle
+  under a wheel** (4): 0 B added. **The lent `TreeDiff`'s kept capacity** (4, 7): bounded, holds no node after `Clear`.
+  **`SaveMap` writer's int-to-string** (4): off the UI thread.
+- **The label cull loop's O(lines) checks** (5): a few µs of a 0.24 ms frame, 0 B; expert 2 proposes the seek (step 14,
+  measure first). **HultUI.Syntax's per-line share** (5): 2.0–8.2 %, the span arrays it returns; TextMateSharp 92–98 %.
+  **`TextPaintBounds`** (5): stops at scroll views. **bf74fbca's second registries** (5): +378 / +680 KB once per theme.
+- **Vesper name prompt, Meridian dialogs, Junction MR title and composer** (6): already build only when something shown
+  moves. **Discovery map at 2,000 endpoints** (6): ~35 B an endpoint a click, accepted in round 9 (step 11 removes the
+  rest). **Junction History resize** (6): 33.6 KB a step, rows remade only at layout breakpoints. **Reel** (6): no
+  typing or full build per key.
+- **Bridges' whole-tree walks per structural apply** (7): 0 B, the window's walk is O(n) too. **History with a reader**
+  (7): the 300 eager item nodes (on-demand items declined in round 2). **View switch at 600 endpoints with a reader**
+  (7): UIA ~175 B a node, the lazy-wrapper lever declined in rounds 1–2. **Probe trap** (7):
+  `HeadlessWindow.FindByAutomationId` builds a whole accessibility tree per call (+850 KB a click at 6,073 nodes inside a
+  step); find elements once, outside the step — a guideline note.
+- **Junction Files search Down's 96 TextArea measure misses** (1): O(1) each, 0 B. **ff6125a6 per frame** (1): one flag
+  read, one ~7-parent walk after a change of children.
+- **Junction diff find Enter +1.0 %** (8): bimodal noise over 13 runs in 6 trees. **Vesper Tab 92.2 KB**, **Meridian
+  method pick 149.5 KB** (8): once per action, unchanged. **Reel playback 0.8 KB a frame** (8): the fake backend.
 
 From the round 9 surveys (details in `17-reports/r9-*`):
 
@@ -512,106 +582,75 @@ From the round 1 surveys (details in `17-reports/`):
 
 ## Needs the user
 
-Round 9 questions (asked 2026-11-08; 14–16 from the survey reports as they came in, 17–19 with the merged survey;
-20–22 from step 13's measurement, 2026-11-09).
-Recommendations in brackets. Asked only if step 13 clears 5 %: faded images (≤ 2/255) and Vesper's faded rows and tiles.
+Round 10 questions (from the survey, 2026-11-09). Recommendations in brackets.
 
-14. **dotnet-hover-holds-removed-view** (r9-4): `Window._lastHoveredElement` and `PointerState._hoveredElement` keep a
-    view a build removed alive until the pointer moves (Meridian, imported spec, pointer at rest: 471 KB of 4.9 MB at 50
-    endpoints, 15.5 MB of 38.3 MB at 2,000). Should a rebuild under a still pointer re-hit-test hover, so the new element
-    under it shows its hover style without a move (as browsers do), or only release the removed elements (no pixel
-    change)? [Release only.] → **yes, re-hit-test** (2026-11-08).
-15. **dotnet-meridian-windows-keyring-memo** (r9-4, r9-6): give Windows' `WindowsCredentialKeyring` the `KeyringMemo`
-    Linux and macOS have (22–66 `CredReadW` calls a key in the Environments table, ~59 a frame dragging the response
-    pane with the Request tab). A secret changed outside the app (the CLI, Credential Manager) is then seen only after a
-    restart, as on Linux and macOS today. Acceptable? [Yes.] → **yes** (2026-11-08).
-16. **text-textarea-mono-ascii-breaks-by-count** (r9-5): break a wrapped row of printable ASCII in a proven monospace
-    face by its character count, with the proof round 4 approved for fits by count (a476866c: 95 characters, every
-    ordered pair within 1/4096 of one advance). Same risk: a face that kerned ASCII past the proof would clip instead of
-    wrap. Does that approval cover it? [Yes: same proof, rows identical on every width tested.] → **yes, covered**
-    (2026-11-08).
-17. **meridian-dispose-hidden-preview** (r9-3; with step 12): Meridian keeps its web preview controller for the app's
-    life (`_preview ??=`). Disposing it when it leaves the screen frees all 45.4 MB of the process's GPU memory (90.7 →
-    45.3) and the 6 `msedgewebview2` processes (283–315 MB working set, 140–198 MB private); the next "web" toggle then
-    starts the browser again (first page frame 395–673 ms after `NavigateToString`, 5 runs). Dispose after a while
-    hidden? [Yes, after about 60 s hidden, so a quick toggle back stays instant; step 12 covers that minute.] →
-    **yes, after 60 s** (2026-11-08).
-18. **f9bceb6d's window checks** (Open; r9-3): the 4K monitor at 150 % is now attached and primary. `WindowPlacementTests`
-    and the Borderless `WindowStateActivationTests` (`HULTUI_UITESTS=1`) show maximized and full-screen windows over the
-    desktop, so they need the desk to themselves. Run them now, or at a time you name (while you are away)? The Snap
-    Layouts hover stays by hand. [While you are away.] → "later", then **"run the window tests now"** (2026-11-08):
-    see Open and the log.
-19. **vesper-reader-focus** (r9-7; reader behaviour, not perf, not new in round 8): Vesper's focused pane is a Box with
-    no role or name, so `IsSemantic` drops it (AccessibilityTreeBuilder.cs:717; CommanderApp.Pane.cs:177) and every
-    focus move tells a reader "focus on nothing"; in Brief and Thumbnails a reader hears nothing as the cursor moves.
-    Fix in the app (a role and name on the pane, `AccessibleSelected` on the cursor's cell or tile set with the `Restyle`
-    call: a patch, 0 trees), or in the framework (a focusable element is always semantic: trees change in every app)?
-    [In the app, as a step after the perf steps, with meridian-focus-lost (Waiting).] → **in the app** (2026-11-08):
-    step 15.
-20. **paint-image-fades-itself** (step 13 measured, 2026-11-09; framework): a lone `ImageElement` with `Opacity` < 1
-    draws its still image once at that alpha instead of in an offscreen layer (as a plain Box already does). Vesper's
-    cut icons today: 26.6 (Detail) / 61 (Brief) layers a frame. Real window, AOT, 1240×820 at 100 %, ABAB+BABA: Detail
-    GL frame 1.136 → 0.835 ms (−27 %), GPU 0.753 → 0.211 (−72 %); Vulkan 8-bit −16…−18 % / −83…−84 %; F16 −19…−20 % /
-    −64 %; Brief GL 1.425 → 0.818 (−43 %), GPU 1.323 → 0.216 (−84 %), Vulkan −29 % / −91 %. Pixels: Detail icons 611 / 431
-    / 8 of 6,976 px differ, at most 2/255 (GL / Vulkan / F16); Brief icons 0 / 0 / 360 px, at most 1/255. May faded images
-    change by ≤ 2/255? [Yes: invisible, and a sixth to two fifths of those frames.] → **yes** (2026-11-09; step 13b).
-21. **apps-vesper-faded-rows: Sync's Equal rows** (step 13): Sync with "Show equal" on fades each Equal row with
-    `row.Opacity = 0.55f` (21–26 layers a frame). Fading the row's text and fills to 55 % instead (as Meridian History,
-    question 13): Down/Up GL 0.824 → 0.511 ms (−38 %), GPU −77 %; Vulkan 8-bit −21 % / −82 %; wheel and hover GL −36…−37 %,
-    Vulkan −18…−22 %, F16 −20…−27 % (GPU −56…−81 %). Pixels: 13.7k–15.4k glyph-edge pixels at 1/255, one pixel at 9/255
-    (F16 at most 4/255). May they change? [Yes: as question 13.] → **yes** (2026-11-09; step 13b).
-22. **apps-vesper-faded-rows: cut thumbnail tiles** (step 13): a cut tile fades as a whole (`Opacity 0.45`, 29.5–33
-    layers a frame). Fading each part instead: GL −26…−27 % frame, GPU −71…−73 %; Vulkan −20 % / −83…−84 %; F16 −15…−17 %
-    / −68…−69 %. But the pixels move more: 99.7 % of a cut thumbnail's pixels by a mean of 5/255 (at most 6, F16 9) because
-    the tile's dark backing shows through the faded picture; a badge over its kind icon by up to 24/255; kind icons and
-    the cursor tile's ring and fill up to 7/255 (19 on F16); names up to 3/255. Leaving the backing out under the picture
-    should avoid most of the thumbnail shift (not built or measured). [Build that variant first and measure; if every
-    part stays within ~2/255 but the badge, ask again with its numbers.] → **as recommended** (2026-11-09): step 13b
-    builds the backing-free variant, uncommitted, with new comparison images; then ask again.
-    Step 13b's backing-free variant (`r9b13b	iles-variant.patch`, uncommitted; images
-    `artifacts/r9-fade-compare/tiles-variant-{gl,vk16}.png`, sent 2026-11-09): layers 29.8/32.3 → 0, GL frame −27…−28 %,
-    GPU −73…−74 %, Vulkan 8-bit −20 % / −84…−85 %, F16 −19…−20 % / −71 %. Pixels against today (GL / Vulkan 8-bit / F16):
-    pictures 37k/37k/4k of 159k px (33k at 1/255), max 7/7/10 only in the half-pixel letterbox rows; badge max 24/24/19;
-    kind icon max 7/7/19 (the backing still under it); the cursor tile's fill through the backing 6/6/19, ring max 4;
-    names max 3; Vulkan only 17–30 px at 13/255 at the letterbox bars' rounded ends. It does not stay within ~2/255
-    apart from the badge. Asked again with these images: commit this variant? [The user's eye: the zooms; my lean is
-    yes for the pictures, the kind icons and cursor tile changes are small and only on cut tiles.] → **no: it changes too much**
-    (2026-11-09). Cut tiles keep their layer; examined.
+27. **aperture-backspace-goes-back** (r10-6; bug, not perf, since da0676d0 on 2026-10-05): Backspace in a text field
+    also goes back: typing "ab" in Search and pressing Backspace leaves "a" and goes to Home; the issue reply does the
+    same (`browse.back` = Escape or Backspace, ApertureApp.cs:554; only the cursor keys check for a text field). (a)
+    Aperture skips `browse.back`'s Backspace when the target is a `TextInput` or `TextArea` (small, app), or (b) text
+    fields mark the keys they consume as handled (changes key routing in every app)? [(a).] → **(a)** (2026-11-09;
+    step 5).
+28. **vesper-brief-scrollbar-blank-columns** (r10-1; bug): scrolling Brief with its scrollbar shows blank columns (a
+    track click 4 of 4 blank, a thumb drag 7 of 8 moves with a blank column, 0 builds). (a) Framework: ScrollView tells
+    listeners when the user scrolls with the bar or by autoscroll (a new public callback or event; Brief listens beside
+    `ScrollEvent`; a scroll set from code still raises nothing), (b) Brief hides its horizontal scrollbar, or (c) Brief
+    makes every column (400 files: 15 columns, ~400 cells a build against 5 columns)? [(a): public API.] → **(a),
+    the framework callback** (2026-11-09; step 15).
+29. **vesper-sync-cursor-reveal** (r10-8; bug): Sync's cursor leaves the view and nothing scrolls it back (after 40
+    Downs in a 26-row view no highlighted row is on screen, `r10-apps\drv\shots\sync40.png`). Reveal the cursor
+    (scrolling the user will see)? [Yes, with step 7's kept rows.] → **yes** (2026-11-09; step 7).
+30. **syntax-markdown-grammars-route** (r10-5; step 12): the first Markdown/Ruby/shell/F# file keeps ~29 MB of grammars.
+    (a) drop the registry after an idle minute (colours kept, the next file pays ~83 MB allocated and colour arrives
+    later), (b) limit Markdown's fence languages (other fences uncoloured: a colour change; the 18 common ones still keep
+    17 MB), or (c) load per text only the fence languages it names (no colour change, medium–large)? [(c).] →
+    **(c)** (2026-11-09; step 12).
+31. **ref-lets-go-when-removed** (r10-4; optional, framework): should the public `Ref<T>` let go of its element when the
+    element leaves the window? It would fix every app holder at once but changes what `Current` returns to code that
+    reads a removed element (Aperture's Library.cs:45 does). [No: fix the apps (step 2) and write the guideline.] → **no**
+    (2026-11-09; the user left it to the recommendation).
+32. **panesplitter-sizes-pane** (r10-6; optional, public API): should `PaneSplitter` take the pane's element and size it
+    during a drag, calling `onChanged` only on press and release? [No: step 13's app refs need no API.] → **no**
+    (2026-11-09; the user left it to the recommendation).
+
+33. **meridian-runner-unreadable-count** (step 4, 2026-11-10; behaviour, minor): the Runner's rail now counts from the
+    scanned collection, so a request file that can't be read is counted in "N req" and "Run · N req" but still left out
+    of the run ("49 / 49" beside "Run · 50 req"); before, the count read every file and left it out. Keep, or mark
+    unreadable files apart in the rail (a small follow-up)? [Keep: rare, and the run still reports what it ran.]
+
+34. **meridian-map-rows-list-items** (step 11, 2026-11-10; reader behaviour): the Discovery map is now a virtual list,
+    so a screen reader hears each endpoint as a "list item" (selected / not selected) in a list, where before it was a
+    "button" among buttons; names are the same, every endpoint is still reachable (items served on demand at 2,000), and
+    invoke or select on an item selects it like a click. Round 10's survey had flagged an app-only switch to list items as
+    the user's call. Keep the list items, or keep the rows as buttons (a list of Buttons is possible but loses the served
+    items and the selected-state patch)? [Keep: a selectable list read as a list is the standard pattern, as Vesper's
+    Brief cells were approved as list items in question 25.] → **keep list items** (2026-11-10).
+
+35. **scrollview-userscrolled-scope** (step 15, 2026-11-11; public API): question 28 approved a callback for "the
+    scrollbar or autoscroll"; step 15 made `ScrollViewElement.UserScrolled` fire for every user move — the wheel, the
+    scrollbar, autoscroll and a VirtualList's scroll keys — so one callback means "the user moved it" (`ScrollEvent` is
+    unchanged; Brief listens to `UserScrolled` alone). Keep the wider scope, or narrow it to bar + autoscroll (a small
+    change; Brief would listen beside `ScrollEvent`)? [Keep: one meaning, and a listener needn't combine two signals.]
+    → **keep it wide** (2026-11-11).
+36. **vesper-brief-return-offset** (step 15, 2026-11-11; behaviour): Brief now comes back from Detail, Thumbnails or the
+    viewer/diff/sync at the start (offset 0) with its columns made for the start; before, it tried to restore its old
+    offset, but the restore landed only after a build and left the pane blank until a key (17 of 21 return steps
+    blank). The old position is no longer kept. (a) Keep returning at the start, or (b) restore the old position
+    properly as a step 15b (a ScrollView applies an offset set before its first layout once it has laid out — a fix to
+    how the existing setter behaves before layout, no new API — and Brief makes the columns for it)? [(b): returning
+    where you were is what a file manager should do; small.] → **(b)** (2026-11-11; step 15b).
+
+Round 9 question 26 (from step 14b, 2026-11-09), still open. Round 9's answered questions 14–25 are in
+[the archive](17-performance-team-ledger-archive.md#needs-the-user-round-9). Recommendations in brackets.
+
 26. **syntax-merged-theme** (from step 14b; not perf, not blocking): today and the encoded path both differ from VS Code
     on ~974k corpus lines because TextMateSharp keeps an included theme in a second lookup and the main theme's broader
     rule wins: JSON keys are teal where VS Code shows #9CDCFE (every key in Meridian's JSON bodies), `this` is #9CDCFE
     where VS Code shows #569CD6. Giving it one merged theme would match VS Code. Wanted? [Later, its own step with
     images: it recolours every JSON key.]
-23. **syntax-encoded-tokens-colours** (step 14, 2026-11-09): colouring from TextMateSharp's encoded tokens
-    (`TokenizeLine2`) would save a further 28 % of the tokenizer's bytes on JSON, 18 % on XML, 4 % on HTML. It matches
-    theme rules by parent scope, as VS Code does, so it changes colours on 2,388 of 1,752,346 corpus lines (mostly
-    TypeScript/JavaScript, then PowerShell, shell, C++ and Markdown; nothing in Meridian's JSON/XML/HTML response bodies).
-    May colours change to VS Code's parent-scope matching? [Show before/after examples of the changed lines first.] →
-    **as recommended** (2026-11-09): step 14b makes before/after images; then ask again.
-    Step 14b (no commit; switch kept in `r9b14b\switch.patch`; images `artifacts/r9-syntax-compare/01–10`, sent
-    2026-11-09): only Dark+ and Light+ change (the themes that include a second theme file); Solarized, Kimbie, One Dark,
-    Dracula, Tomorrow Night Blue change 0 lines. Dark+ groups: TS/JS quoted object key 950 lines #9CDCFE → #CE9178
-    (the most noticeable: whole key tables), `new` 863 #C586C0 → #569CD6, TSX JSX braces 310 (light blue → each token's
-    colour), TS/JS numeric key 103, PowerShell `$x.Member` 54 #DCDCAA → #9CDCFE (away from VS Code: TextMateSharp never
-    counts the root scope as a parent), C/C++ `.`/`->` member 52, shell `${…}` 33, smaller JSDoc/Markdown groups. 2,334 of
-    2,388 move to VS Code's colour. No JSON/XML/HTML line changes (an HTML body's inline `<script>` changes like TS/JS).
-    The agent recommends adopting at least for JSON, XML and HTML (where the bytes are: −28 / −18 / −4 % of the
-    tokenizer's bytes) or for every language (cost: the 54 PowerShell lines). Asked again with the images. → **yes, "an
-    improvement in my eyes"** (2026-11-09): step 14c adopts it for every language.
-24. **vesper-pane-name-folder** (step 15): Vesper's pane is now read as "Left pane, <folder>". Because the walk can't
-    patch a name on a node with children, a folder change with a reader on costs one tree (~+20 KB, UIA 209 → 229 KB a
-    navigation). A fixed "Left pane" name costs nothing. Keep the folder in the name? [Yes: a reader learns where it
-    is; the cost is once per navigation, only with a reader.] → **yes, keep it** (2026-11-09).
-25. **a11y-selected-patch-for-cells** (step 15; framework, internal): to tell a reader Vesper's cursor in Brief and
-    Thumbnails with 0 trees, the window's selected-state patch (today only for a menu entry or a row directly inside a
-    composite list, Window.cs:4659) must also take a cell or tile, and the thumbnail list must publish its rows as
-    composite (`RowsAreComposite`). Prototype: the cursor item told by name and selected state, 0 trees, flat KB; +~100
-    nodes a navigation with a reader (261 → 280 KB). Question 19 said "in the app"; this needs the framework. Allow it?
-    [Yes: internal, no API, and without it Brief and Thumbnails stay silent to a reader.] → **yes** (2026-11-09; step
-    15b).
 
-Round 8 questions 11–13, round 7 questions 1–4, round 6 questions 1–9 and round 5's question 5, all answered, are in
-the archive ([round 8](17-performance-team-ledger-archive.md#needs-the-user-round-8),
+Round 9 questions 14–25, round 8 questions 11–13, round 7 questions 1–4, round 6 questions 1–9 and round 5's question 5,
+all answered, are in the archive ([round 9](17-performance-team-ledger-archive.md#needs-the-user-round-9),
+[round 8](17-performance-team-ledger-archive.md#needs-the-user-round-8),
 [round 7](17-performance-team-ledger-archive.md#needs-the-user-round-7), [round 6](17-performance-team-ledger-archive.md#needs-the-user-round-6)).
 Recommendations in brackets.
 
@@ -636,117 +675,20 @@ Standing notes (from earlier rounds):
 - **8a38ef4 on Linux/KWin and on AMD/Intel Windows:** not measured. Linux keeps the chained
   path. If AMD/Intel do not stall, destroy-first may cost them 21–24 ms per resize, as it
   cost NVIDIA's IMMEDIATE and FIFO. A real Aperture resize run is also still to do.
-- **4315c4b on AMD, Intel and Linux (GLX/EGL):** not measured (WSL Fedora has no GL
-  stack; installing one needs sudo). Depth is a minimum in WGL/GLX/EGL, so 0 cannot fail
-  where 16 succeeded.
+- **4315c4b on AMD, Intel and Linux (GLX/EGL):** Linux answered in round 10 (r10-3): WSL Fedora has Mesa 26.2.3
+  (EGL/DRI with llvmpipe and d3d12) since 2026-10-09, and there depth 0 plus stencil 8 resolves to 24/8: nothing
+  fails and nothing is saved (Mesa has no stencil-only config; the gfx line, SDL3Window.cs:1675–1679, reports it). AMD
+  and Intel on Linux use the same Mesa lists (inferred). AMD and Intel on Windows (WGL) still not measured. Depth is a
+  minimum in WGL/GLX/EGL, so 0 cannot fail where 16 succeeded.
 
 ## Log
 
-From 2026-11-03 (round 8's survey); earlier entries are in the archive ([to 2026-10-25](17-performance-team-ledger-archive.md#log-2026-10-07-to-2026-10-25),
+From 2026-11-08 (round 9's survey); earlier entries are in the archive ([to 2026-10-25](17-performance-team-ledger-archive.md#log-2026-10-07-to-2026-10-25),
 [2026-10-26 to 2026-10-27](17-performance-team-ledger-archive.md#log-2026-10-26-to-2026-10-27),
 [2026-10-27 to 2026-11-02](17-performance-team-ledger-archive.md#log-2026-10-27-to-2026-11-02),
-[2026-11-02 to 2026-11-03](17-performance-team-ledger-archive.md#log-2026-11-02-to-2026-11-03)).
+[2026-11-02 to 2026-11-03](17-performance-team-ledger-archive.md#log-2026-11-02-to-2026-11-03),
+[2026-11-03 to 2026-11-08](17-performance-team-ledger-archive.md#log-2026-11-03-to-2026-11-08)).
 
-- 2026-11-03: round 8 survey started in a fresh context (main had not moved: origin/main df45b4a2 is in the branch).
-  Moved to the archive (counts checked before and after, no line lost): round 6's 51 Landed rows, round 7's build
-  order with the survey's closed-from-Waiting note, round 7's answered questions 1–4, and round 6's 34 log entries
-  (2026-10-27 to 2026-11-02). Weekly usage 81 %; asked the user, who chose to run the survey now though it may pass
-  the 90 % line. The eight experts run in their own worktrees on 27020cdb, reviewing 17d4220a..df45b4a2 (101 commits,
-  main's app-support merge f64e4674 included).
-- 2026-11-03: round 8 survey done (reports 8748c603..eaa1ec29, `17-reports/r8-*`). Layout and GL/Vulkan satisfied;
-  the other six not. One review objection: d04464f6 (main's app-support) drops the Vulkan surface's drag clip at every
-  `BeginFrame` (step 1). Experts 4 and 7 found the same lead independently: the in-place a11y walk builds
-  name-from-content strings to compare them (step 2; it was a11y-walk-unchanged-bytes). Round 7 helped the apps: 47
-  walks −14 % KB/key (geometric mean 0.60), none worse by more than 2 %; Aperture's walk processes now exit cleanly.
-  9 build steps (rich text blocks, picture landings coalesced, cursor keys that build nothing in Aperture and Vesper,
-  Aperture Home's build, Meridian History's archive part, a measure-first faded-rows step); one question for the user
-  (11: an additive `IAccessibleItemSource.ItemIsEnabled`). Bug found: Aperture Home's cursor walks onto a hidden shelf
-  page (step 5). Survey agents 235–375k tokens each; weekly usage 81 → 86 %. Phase → build.
-- 2026-11-03: the user answered question 11 yes: disabled menu items get `IAccessibleItemSource.ItemIsEnabled` with
-  step 2.
-- 2026-11-03: round 8 step 1 landed (f3302209; captures bda4dad3): `BeginFrame` restores to the save count the surface
-  handed over, so the Vulkan drag clip (6c627f27, 1b11aeda) holds again (`ClipBounds` 1601×1068 → 801×535; a 64 px
-  too-narrow clip shows in in-process saves again); suite flat, pixels identical. Guideline notes: a surface that puts
-  state on the canvas before the context's `BeginFrame` hands over its base save count, and resets restore to it; to
-  prove a clip, compare two in-process saves with a deliberately wrong clip (`--frame-counter` cannot see it);
-  VulkanProbeTests skip without `HULTUI_UITESTS=1` and an all-skipped run exits 0. Usage 87 % weekly (~1 % a small step).
-- 2026-11-03: the user paused step 2 while its agent was adding tests; the agent was stopped (no commit, 5 files of
-  uncommitted work kept in the worktree) and the loop stopped. Usage 87 % weekly.
-- 2026-11-08: the weekly limit reset (0 %); the loop resumed at 04:07 local as the user asked. Main had moved 32
-  commits (12d0392e: Meridian discovery and runner auth, text selection in scrolled views; none in step 2's files):
-  merged as 3a15b5b1. Step 2 resumes from the first agent's uncommitted edits.
-- 2026-11-08: round 8 step 2 landed (61a82eba, f35c3df9; captures e0530518): the in-place a11y walk compares a name
-  from content without building it (Junction Changes with a reader: caret −11 %, wheel −24…−29 %; new suite row −32 %
-  JIT and AOT; audit clean), and disabled menu items are read as disabled through the new default member
-  `IAccessibleItemSource.ItemIsEnabled` (question 11). The first agent's diff was complete; the resumed agent measured
-  it. Guideline notes: an AOT before/after can move render time on rows the change never runs — split the timing by
-  phase before calling a row slower; for a probe, put the old code behind a temporary switch in the same build so old
-  and new share one binary. Usage 2 % weekly (~2 % for the step).
-- 2026-11-08: round 8 step 3 landed (bc007ae8, a10f21b1, 7aaae4c8, 48ed3a35; captures 734a6cd7): rich text paragraphs
-  share their layout's lines and make line boxes when read, a block layout keeps no cell/picture fields or second
-  style, block layouts shift in place, and a caret taller than the view shows its top. Rich open −31 %, resize −29 %,
-  Enter −48 % (JIT and AOT), retained −11 %; pixels and reader trees identical. Guideline notes: a collection
-  expression `[x]` passed as `IReadOnlyList<T>` is a compiler single-element list, not an array, so `is T[]` fast paths
-  miss it; the AOT publish needs the VS Installer folder on PATH (vswhere). Flake seen: Junction
-  `ReviewTests.TheKeyboardReachesTheCommentAgain` once under load (passed 5 reruns). Usage 2 % weekly.
-- 2026-11-08: round 8 step 4 landed (ad8e6fbd, 4960997d, 561c5659): pictures that land together share one build in
-  Aperture and Vesper (−36…−51 % of the bytes from opening a view until its pictures are in; at most 1–4 builds a
-  frame instead of up to 44). Guideline notes: coalescing breaks tests that count one build per landing — wait for the
-  landed state; an out-of-repo AOT probe sets `PublishAot` in its own project (`-p` reaches the source generator:
-  NETSDK1207); hash a tightly packed `ReadPixels` buffer with varying text (pid paths, free space) removed — Pillow's
-  `getbbox()` on RGBA checks alpha only.
-- 2026-11-08: round 8 step 5 landed (d366505b, 24d63eb5, fa10f889; captures f20b045f): Aperture's library grid and
-  Discover cursor keys build nothing (−99 % a key; grid Down −65 %, the rest rows scrolling in), the grid's cursor card
-  takes focus, and the cursor turns its shelf's page on Home and Discover (a ring and focus where none showed; a
-  watchlist double ring fixed too). Guideline notes: a key that still builds moves the live ring first (a kept row
-  keeps its old ring); a headless session runs async loads in its pump, so a fake library that waits on a gate hangs
-  it — use a failing page. For later (UX): on Discover, Down walks a shelf's own pages, not to the next shelf.
-- 2026-11-08: round 8 step 6 landed (7a12f5a9, 2e10b549; captures 07e5b3f9): Aperture Home hands back whole shelves
-  whose cards all came back and memoizes picture addresses: a Home build 66.0 → 11.1 KB (−83 %), Home open −32…−49 %
-  with posters one a build; 18 scenes identical. Guideline notes: hand a container back whole only after asking for
-  each child every build and only when all came back live; the kept state covers what the handlers read, not only
-  what is drawn (the row menu's captured list and the row's place). Measuring tip: landings at random times move the
-  build count ~10 % run to run — release held pictures in fixed batches (driver mode `openb`).
-- 2026-11-08: round 8 step 7 landed (081921c7, 80f31170, 4048e35b; captures 74739a89): a plain cursor key in Vesper's
-  Detail, Brief and Thumbnails builds nothing (−90…−96 % a key; a scrolling Thumbnails walk −54 %), 47 scenes
-  identical. The agent added a public `Element.Restyle(Action<Element>)` the brief did not ask for (a ring set directly
-  on a once-hovered tile was lost when the pointer left): question 12 for the user. Guideline notes: change a live
-  element's look with `Restyle`, never by setting it directly; every build resets live restyles first, not only the
-  key's own build; rows a list makes in a frame read the live cursor, not their stale item. Lead (Waiting): Brief's
-  columns lag one key because a programmatic scroll fires no `ScrollEvent`.
-- 2026-11-08: round 8 step 8 landed (62a67257, 66e31aa7): a Meridian History key builds the archived-send panel alone,
-  not the window (−58 % a key, −25…−28 % a search character), and a pre-existing crash is fixed (Up after a search
-  that shortened the rows threw). Guideline notes: when a list draws its own selection and one panel beside it shows
-  it too, make the panel a `Part` rebuilt when the view places it and what it shows changed, and move the list by ref;
-  before skipping a build on a key, check the rows on screen are the rows the key walked; clamp a kept cursor at both
-  ends after a filter shortens the rows.
-- 2026-11-08: round 8 step 9 measured (no commit): Meridian History's faded rows are 29 offscreen layers a frame and
-  cost 20–32 % of a real frame on GL, Vulkan 8-bit and F16 (GPU 70–86 %; ~8–10 µs CPU and 18–61 µs GPU a layer).
-  Fading the colours changes pixels by 1–8/255, so it is question 13 for the user. 8 guarded launches: guard 0,
-  foreground 0, no device-lost, no new `nvlddmkm` event. Guideline notes: `Opacity` on an element with children costs
-  one offscreen layer per element — for list rows fade the colours, not the row; a GL timestamp query issued after
-  SwapBuffers needs a `glFlush` (else it waits for the next frame's submit: ~49 ms read for ~0.9 ms). The headless
-  suite cannot pin GPU or flush costs, so no suite row.
-- 2026-11-08: the user answered questions 12 and 13 yes: `Element.Restyle` stays public; Meridian History fades its
-  older sends' colours instead of the rows (step 9b).
-- 2026-11-08: round 8 step 9b landed (307ee07c): Meridian History fades an older send's colours, not its row — 29
-  layers → 0 a frame, a frame −21…−33 % on GL, Vulkan 8-bit and F16 (GPU −74…−86 %). Pixels change by 1–8/255 as
-  approved, except the hovered older row's chip label, up to 13/255 in 55 pixels (told to the user). Every build step
-  is done; Phase → full suite. Usage ~11 % weekly.
-- 2026-11-08: the user saw before/after crops of the hovered older row (the GET chip's label 47,93,138 → 51,101,150 at
-  worst; 68 pixels over 8/255) and kept step 9b as it is.
-- 2026-11-08: round 8 full suite on 1b75f86e (src as eec55e8d): Windows `dotnet test HultUI.slnx -c Release` 30 projects
-  0 failures (Core 5,064, Headless 1,459, Junction 1,082 in 7 m 40 s, Vesper 896, Meridian 587, Aperture 349), Fedora
-  `wsl-test.sh` 22 projects 0 failures, docfx `--warningsAsErrors` 0 warnings. origin/main 12d0392e is in the branch.
-  Phase → release.
-- 2026-11-08: round 8 merged into main as 10acc8c0 (detached origin/main merge in this worktree, tree identical to the
-  tested branch; origin/main 12d0392e was in the branch, so the push gate held). Primary checkout fast-forwarded behind
-  the guard; branch pushed. CI run 42497326336 queued.
-- 2026-11-08: CI run 42497326336 on 10acc8c0 green: test 18 min, test-linux 4 min, docs 2 min, meridian-keyring
-  (ubuntu-24.04, macos-15) 1 min each. Round 8 landed 9 steps (17 kept changes, 2 bugs fixed in passing: a Meridian
-  History crash after a search, an Aperture Home double ring) and 3 public additions the user approved
-  (`IAccessibleItemSource.ItemIsEnabled`, `Element.Restyle`; pixel change in Meridian History). Round → 9, Phase →
-  survey; the loop stops, and round 9 starts in a fresh context.
 - 2026-11-08: round 9 survey started in a fresh context (session c484f5ac). Main held only round 8's own merge
   10acc8c0, merged into the branch as 85400e17 (tree unchanged). Moved to the archive by a checked script (every moved
   line found there, no line lost): round 7's 30 Landed rows, round 8's build order with the survey's closed-from-Waiting
@@ -942,3 +884,148 @@ From 2026-11-03 (round 8's survey); earlier entries are in the archive ([to 2026
   5,067, Headless 1,501, Junction 1,082 in 8 m 24 s, Vesper 903, Meridian 653, Aperture 356, Syntax 94), Fedora
   `wsl-test.sh` 22 projects 0 failures, docfx `--warningsAsErrors` 0 warnings. origin/main 10acc8c0 is in the branch.
   Phase → release.
+- 2026-11-09: round 9 merged into main as facced69 (detached origin/main merge in this worktree; origin/main 10acc8c0 was
+  in the branch and the merged tree is identical to the tested one, so the push gate held). Primary checkout
+  fast-forwarded behind the guard; branch fast-forwarded to the merge and pushed. CI queued.
+- 2026-11-09: CI run 42675929595 on facced69 green: test ~17 min, test-linux ~5 min, docs, meridian-keyring (ubuntu-24.04,
+  macos-15; step 8's keyring memo change checked there). Round 9 landed 16 steps (1–12, 13b, 14, 14c, 15, 15b, 16; 14b
+  images, 13 measured first) in ~40 commits, fixed bugs on the way (Snap Layouts after a restore, a KeptElements prune,
+  hover after a rebuild, a Meridian folder-menu record, a spec that crashed the parser, reader focus in Vesper and
+  Meridian), added `scripts/perf/step-ab.ps1`, and changed pixels/colours only as the user approved (questions 20, 21,
+  23). Round → 10, Phase → survey; the loop stops, and round 10 starts in a fresh context.
+- 2026-11-09: round 10 survey started in a fresh context (session 3484c586). Main had not moved (origin/main
+  facced69 is in the branch). Moved to the archive by a checked script (every moved line found there, nothing lost):
+  round 8's 19 Landed rows, round 9's build order with the survey's closed-from-Waiting note, round 9's answered
+  questions 14–25 (26 stays), and round 8's 100 log lines (2026-11-03 to its release). Weekly usage 42 %. The eight
+  experts run in their own worktrees on the archive commit, reviewing 4919ac40..facced69 (81 commits, no main merge).
+- 2026-11-09: round 10 survey done (reports b6c20c17..f4d6050d, `17-reports/r10-*`, ~2.5 h). GL/Vulkan satisfied;
+  the other seven not. Two review objections: c940c643's kept tree rows keep the whole Requests view alive (expert 4,
+  step 2) and cb1df8c0 + ea42f45b: Meridian's map rows are Buttons, so a click with a reader builds the whole tree
+  (expert 7, step 1). Round 9 helped the apps (65 walks, geometric mean 0.852, −44 % summed). 14 build steps; questions
+  27–32 to the user (none blocks a step's start; 29 and 30 shape steps 7 and 12). 4315c4b's Linux half answered (Open).
+- 2026-11-09: the user asked for new app releases before the round's build work. Cut on main facced69 (round 9's
+  release, CI run 42675929595 green): junction-v1.24.0, vesper-v1.24.0, meridian-v1.7.0, aperture-v1.22.0,
+  reel-v1.8.0, annotated (`git tag -a -F`), pushed 3 + 2; installer runs 42692675116 (Vesper), 42692675510 (Junction),
+  42692676124 (Meridian), 42692706680 (Reel), 42692710316 (Aperture) started. Step 1 waits for them.
+- 2026-11-09: the user answered questions 27–30 as recommended: (27) Aperture skips Backspace as "back" in a text field
+  (step 5c); (28) the framework scroll callback, public API (new step 15); (29) Sync reveals its cursor (step 7); (30)
+  Markdown loads only the fence languages a text names (step 12). Questions 31 and 32 stay open (recommended no; steps
+  2 and 13 go app-only).
+- 2026-11-09: installer runs: junction-v1.24.0, vesper-v1.24.0, aperture-v1.22.0 and reel-v1.8.0 green and released;
+  meridian-v1.7.0 failed its Windows test job on `Junction.Tests.ComposerPartTests.WhatTheComposerShows_FollowsEveryWayItChanges`
+  (the test's own `git commit --amend` hit an `index.lock` held by the app's background git; the same test passed in
+  Junction's own installer run on the same commit): a flake; `gh run rerun --failed` once.
+- 2026-11-09: the user left questions 31 and 32 to the recommendation: both no (`Ref<T>` unchanged; `PaneSplitter`
+  gains no API). Steps 2 and 13 stay app-only.
+- 2026-11-09: meridian-v1.7.0 green on the re-run (test, test-linux, installer) and released (Meridian-Setup-1.7.0.exe);
+  all five releases published. Round 10 step 1 spawned.
+- 2026-11-10: round 10 step 1 landed (f451a9ef; captures 8c02c5a2): a Button with an app-set role that says selected
+  before and after is patched in place; Meridian map click with a reader 974 → 121 KB at 2,000 endpoints, 0 trees;
+  reader streams identical. Guideline notes: commit before splicing an audit (a reverse `git diff` patch takes
+  uncommitted work too); `FindByAutomationId` builds a whole tree per call; to tell a set's selection with no tree, set
+  the role (`ListItem` or `Button`) and `AccessibleSelected` on every row from the start. Step 2 spawned.
+- 2026-11-10: round 10 step 2 landed (b2fdcf52, c3cb789a, b837de41, 3194c830, 35102eb4; captures b6204f39):
+  `KeptElements` holds weakly and the apps let go of refs into a left view: Meridian 200 requests → History 2,364 → 1,027
+  KB retained (−57 %), Aperture Home 8×40 → Settings −41 %, Vesper Brief → Detail −23 %, every old view dead after the
+  switch; 0 bytes added a kept key. Guideline note: take a test's weak reference in a NoInlining helper (the JIT kept
+  the grid alive in the test's own frame). Found: going back to Brief from Detail is blank until a key (pre-existing;
+  folded into step 15); three holders left unmeasured (Waiting). Step 3 spawned.
+- 2026-11-10: round 10 step 3 landed (1c3cf5c5; captures ef42ca03): the wheel latch lets go of a scroll view a build
+  removed (end of a changed frame, overlay close, `SetRoot`): Meridian map wheeled then left 4,314 → 1,815 KB retained at
+  600 endpoints (−58 %), 14,283 → 6,052 at 2,000; Aperture grid and Home → Settings −17…−20 %. Guideline notes: before
+  this fix a retention check that wheeled first measured the latch, not the app; a latch-style field must be released at
+  frame end, on overlay close and on `SetRoot` (Children flags miss a reused root). Step 4 spawned.
+- 2026-11-10: round 10 step 4 landed (150d08bc, 47ea53fb, 96a54d45, 2ccde148, cf68adeb, 70025cb3; captures 5c73087d):
+  Meridian's Runner counts from the scanned tree, keeps result rows and builds its results alone: a 200-request run
+  1,799,085 → 24,302 KB (−98.6 %), GCs 107/19–22/2 → 1/0/0; the Chain sub-tab −96…−97 % a URL key. Question 33 (an
+  unreadable file now counted in the rail) asked. Guideline notes: counts from a snapshot the app holds; a growing list
+  keeps its rows and builds alone; number kept rows' builds by the part's own builds, not the window's. Step 5 spawned.
+- 2026-11-10: round 10 step 5 landed (3e2b9c3c, b03e7b16, 45441b1a, f8d952c3, bce29c46; captures a7d3c7bf): typing in
+  Junction's prompt/reword and Aperture's reply/report builds nothing (−98…−99.7 % a character), Junction's folder and
+  MR filter build the view only (−59 %), a toast's hide builds the view only (−21…−39 %), and Backspace in an Aperture
+  text field no longer goes back (question 27 (a)). Leftovers: the MR filter's Escape (→ step 8b), Aperture's cursor
+  guard misses `TextArea` (Waiting). Guideline: a field read only by its action builds nothing, one read for "has text"
+  builds when that flips, one the view reads takes `MarkViewDirty`. Step 6 spawned.
+- 2026-11-10: round 10 step 6 landed (38317590, c542faac; captures 91158ec4): TextArea finds cluster ends only for the
+  rows it searches: typing into a one-line 89k body with an emoji 1,216.8 → 192.4 KB a key (−84 %), opening a one-line
+  1 MB bundle with an emoji 16,724.9 → 341.6 KB (−98 %), index.json −33 %; 42.6 M rows identical. Guideline notes:
+  per-line work before a row loop is a cliff when most rows take a fast path; a search that needs a total up front can
+  often take it lazily. Step 7 spawned.
+- 2026-11-10: round 10 step 7 landed (1c8d7a77, a3e89cc3, 00539fd2, 525f45e5, 819c6c58; captures 7143a2d1): Vesper
+  Sync's cursor key builds nothing and the cursor stays in view (question 29): 2,568.5 → 0.4 KB a key at 300 files,
+  81,102 → 0.4 at 3,000, GCs 451/262/66 → 0/0/0, 32.2 → 1.7 ms. Guideline notes: a cursor's look can reach into the row
+  (an inherited TextColor write needs `MarkStyleDirty`, a ring's border width `MarkLayoutDirty`); a row with an inferred
+  role must set its role for its selected state to be told with no tree; a kept row's handler looks up its place when it
+  runs. Tooling: long batches via Bash `run_in_background` with `pwsh -File` (a PowerShell background task reported
+  exited while running and a second copy overlapped: timings disturbed, bytes not); leftover `tail -f` watchers from
+  agents stopped. Step 8 spawned.
+- 2026-11-10: round 10 step 8 landed (5af78ecf, 2337e73f; captures b9a716aa): Junction diff rows keep their width
+  (split drag 159.3 → 42.0 KB a move, resize −37 %) and view-only clicks build no chrome (part builds 3–4 → 0; e.g.
+  dialog Escape 177 → 40 KB, History search key 138 → 14). Found: the diff pan's viewport updates only on a build, so
+  the sideways wheel stops short (pre-existing; folded into step 13). Guideline: keep out of what makes a list's rows
+  again anything no row reads; a dialog's open and cancel build the view, its confirm builds everything. Step 9
+  spawned.
+- 2026-11-10: round 10 step 9 landed (acaac297, bb2958de; captures ea1971ec): a focus move finds its nodes down the
+  element's ancestors: Meridian Tab at 2,000 endpoints 6,072 → 55 nodes looked at, 128 → 110 µs min; reader streams
+  identical in 129 scenario-modes; audit fallbacks 83 → 80. Notes: the audit's `apply6.py` anchored on `FindById`, now
+  gone (re-anchored on `SetRoot` in the r10b9 copy); take timings before committing a change, since commits are never
+  amended. Step 10 spawned.
+- 2026-11-10: round 10 step 10 landed (b5f5828c, b7e6bda2, d4c46da8, e17ae14b; captures 15e32c20): a renamed node with
+  children is walked in place: Vesper navigation with a reader −18…−29 % at 1,000 files, trees 1 → 0; Junction's Commit
+  count trees 2 → 0; audit fallbacks 80 → 10; streams identical in 135 scenario-modes. Guideline notes: naming a
+  container after what it shows is now cheap; a perf-suite step must draw or the suite exits 1. New lead in Waiting
+  (a label under a name-from-content button). Step 11 spawned.
+- 2026-11-10: round 10 step 11 landed (5e93a4fe, bf536526; captures 03783526): Meridian's Discovery map is a virtual
+  list and a click builds the detail alone: at 2,000 endpoints elements 8,109 → 210, hit visits a move 2,046 → 40.5,
+  culls a frame 2,007 → 4, a click 124.0 → 30.6 KB, AOT 1.577 → 0.732 ms, heap with the map shown 14,315 → 3,982 KB. JIT
+  click at 60 endpoints +14 % (selection relayout of realized rows; → Waiting). Rows now read as list items, not
+  buttons: question 34 asked. Step 12 spawned.
+- 2026-11-10: round 10 step 12 landed (7b7a486c, a86b208f, a0ef7841; captures ea957e38): a Markdown, shell, Ruby, F# or
+  HTML-embedding text loads only the grammars it can reach (question 30 (c)): kept after a first 3-line .md 29,446 →
+  1,310 KB (−95.6 %), Junction Files showing README.md 31,889 → 6,138 KB retained, first call 155 → 58 ms; 0 colour
+  changes on 1.76 M lines × 21 themes. Guideline notes: TextMateSharp loads every grammar a grammar names, transitively,
+  on the first line, so a cache is keyed by the set a text reaches; a reused larger registry can make a colour-equality
+  test pass without testing anything (reset between cases). Step 13 spawned.
+- 2026-11-10: the user answered question 34: keep list items (Meridian's map rows).
+- 2026-11-10: round 10 step 13 landed (7ca2b3db, 956194e7, bfcba907, 05d03300, c7f7e6ba, f5549b05; captures e4e99925):
+  Junction's diff pan reads its width after layout, so the sideways wheel reaches the end of the longest line (361 →
+  963 of 963 px at start); a splitter drag sizes the live pane and builds nothing a move (Meridian 38.8 → 2.5 KB, Junction
+  Changes 42.0 → 2.4, Commit 65.2 → 5.5). Found: this round's ChromePartTests (steps 5 and 8) are flaky under load — a
+  watcher rebuild lands in their view-only window (base too) → step 13b before the full suite. Guideline notes: what a
+  build reads from layout is a frame old (read after the frame, update in place); a `Ref` added for speed is emptied in
+  builds that don't show it; compare against a full build in the same process when text changes between runs. Step 13b
+  spawned.
+- 2026-11-10: round 10 step 13b landed (0b276fec, tests only): a fixture copy gives Junction's watcher nothing to report
+  (a fresh copied folder reported a change on its first listing, so the watcher reloaded inside the tests' counted
+  window); ChromePartTests 3/20 → 0/20 under load. ReviewTests.TheKeyboardReachesTheCommentAgain stays a known flake
+  (memory ci-red-findings updated). Step 14 spawned.
+- 2026-11-10: round 10 step 14 measured and declined (9f76ecb6, DECISIONS.md only): the long-label line seek is a real
+  3–4 % in every pair, under the 5 % bar; patch kept in the scratchpad. Step 15 spawned.
+- 2026-11-11: round 10 step 15 landed (2f7ab168, 81b6d84e, b63f8ceb, ab8c714d, 495f1e85; captures 4cb55b86): public
+  `ScrollViewElement.UserScrolled` (question 28 (a)); Brief shows 0 blank columns after a track click, a thumb drag,
+  autoscroll and a return from another view, at 60/400/3,000 files (before 4 of 4, 15–22 of 23, 111–139 of 182, 17 of
+  21), every step equal to a full build. Questions 35 (the callback's scope is wider than asked: the wheel and list keys
+  too) and 36 (Brief returns at the start, the old offset is not kept) asked. Guideline notes: a view that makes only
+  what its offset shows builds on `UserScrolled`, only when the set in view changes; a new scroll view opens at 0 and
+  can't take an offset before its first layout; `FlexGrow` on a horizontal ScrollView's content makes it ~1.7e38 px wide;
+  `MarkDirty` from `OnAfterBuild` is dropped (Waiting). Every build step done; full suite started.
+- 2026-11-11: the user answered questions 35 (keep `UserScrolled` wide) and 36 ((b): restore Brief's old position, step
+  15b). An early full Windows suite runs first; 15b follows, then the full suite again.
+- 2026-11-11: early full Windows suite on ce839ef3 (src as after step 15): `dotnet test HultUI.slnx -c Release` 30 projects,
+  0 failures (Core 5,072, Headless 1,550, Junction 1,092 in 8 m 35 s, Vesper 919, Meridian 664, Aperture 362, Skia 387, Text
+  293, Syntax 104, Linux bridge 104, Terminal.XTermNet 2,254). Step 15b spawned; the full suite runs again after it.
+- 2026-11-11: round 10 step 15b landed (00b8fc79, d85c6ff6; captures f0106c63): a ScrollView keeps an offset set before
+  its first layout and applies it then (no new API); Brief comes back where it was left (60 of 60 return cases at the
+  offset and cursor left, 0 blank columns, all equal to a full build). Guideline notes: to reopen a view at a position,
+  set the offset on the element the build makes and build its content for it in the same build; never compute a
+  least-distance reveal from a width before layout; user-input paths never hold an offset.
+- 2026-11-11: the user asked for new app releases after this round too (after the merge into main and green CI). The
+  final full suite started.
+- 2026-11-11: the user: .NET 11 has just been released; consider it for the next round. Recorded as Waiting
+  dotnet-11-upgrade, to go first in round 11 (its own measured step before the survey).
+- 2026-11-11: round 10 full suite on 776838cb (src as after step 15b): Windows `dotnet test HultUI.slnx -c Release` 30
+  projects, 0 failures (Core 5,078, Headless 1,553, Junction 1,092 in 8 m, Vesper 929, Meridian 664, Aperture 362);
+  Fedora `wsl-test.sh` 22 projects, 0 failures (Core 5,077 + 1, Headless 1,384 + 83, Vesper 911 + 20); docfx
+  `--warningsAsErrors` 0 warnings, 0 errors. origin/main facced69 is in the branch. The 27 idle MSBuild worker nodes left
+  by the runs blocked the user's .NET 11 SDK install ("Files In Use: .NET Host"); `dotnet build-server shutdown` cleared
+  them. Phase → release.

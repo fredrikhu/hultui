@@ -93,16 +93,15 @@ public partial class MeridianApp
         {
             // 380 (or as dragged) when the window has room for it above the editor's floor;
             // shorter windows shrink the pane, never below its own floor (see EditorMinHeight).
-            float room = _window.LayoutHeight - TitleBarHeight - EditorMinHeight;
-            col.Height(ResponsePaneSize(_responseHeight, room)).FlexShrink(1).MinHeight(BottomPaneMinHeight)
+            col.Height(ResponsePaneSize(_responseHeight, ResponseRoom(bottom))).FlexShrink(1).MinHeight(BottomPaneMinHeight)
                .BorderColor(Azimuth.BorderStrong).BorderWidth(new Thickness(0, 2, 0, 0));
         }
         else
         {
-            float room = _window.LayoutWidth - Azimuth.RailWidth - Azimuth.TreeWidth - EditorMinWidth;
-            col.Width(ResponsePaneSize(_responseWidth, room))
+            col.Width(ResponsePaneSize(_responseWidth, ResponseRoom(bottom)))
                .BorderColor(Azimuth.BorderStrong).BorderWidth(new Thickness(2, 0, 0, 0));
         }
+        col.WithRef(_responsePanelRef);
         col.AddChild(BuildResponseResizeHandle(bottom));
         // A role, so the panel itself lands in the accessibility tree (and is
         // findable by automation id — containers without one are invisible there).
@@ -148,6 +147,40 @@ public partial class MeridianApp
     {
         split.SetMax(room);
         return split.Size;
+    }
+
+    /// <summary>What the editor's floor leaves the pane: of the window's height under the title
+    /// bar, or of its width beside the rail and the tree.</summary>
+    private float ResponseRoom(bool bottom) => bottom
+        ? _window.LayoutHeight - TitleBarHeight - EditorMinHeight
+        : _window.LayoutWidth - Azimuth.RailWidth - Azimuth.TreeWidth - EditorMinWidth;
+
+    // The panel on screen, for a drag of its handle to size.
+    private readonly Ref<BoxElement> _responsePanelRef = new();
+
+    /// <summary>
+    /// The pane's handle moved. While it is dragged the size goes straight onto the panel on
+    /// screen and only layout runs: nothing in the panel reads the size but its own width or
+    /// height, so a move builds nothing, where it built the panel and its body (a 2,000-line
+    /// response, 38.9 KB a move; plan 17 round 10 step 13). The press, which lights the handle,
+    /// the release and the arrow keys build the panel as before, which reads the size again, and
+    /// the room the editor's floor leaves is the build's (<see cref="ResponsePaneSize"/>).
+    /// </summary>
+    private void ResponseSplitMoved(bool bottom)
+    {
+        var split = bottom ? _responseHeight : _responseWidth;
+        if (split.IsDragging && ResponseAtBottom == bottom && _responsePanelRef.Current is { IsHosted: true } panel)
+        {
+            float size = ResponsePaneSize(split, ResponseRoom(bottom));
+            // The press moves nothing, and builds: the handle is lit by the build.
+            if ((bottom ? panel.Box.Height : panel.Box.Width) != Dimension.Px(size))
+            {
+                if (bottom) panel.Height(size); else panel.Width(size);
+                panel.MarkLayoutDirty();
+                return;
+            }
+        }
+        ResponseDirty();
     }
 
     /// <summary>The grip on the pane's inner edge — its left beside the editor, its top under it —

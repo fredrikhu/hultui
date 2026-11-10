@@ -69,6 +69,9 @@ public partial class CommanderApp : Component, IDisposable
         // Fwd holds folders returned-from after a Back. A new forward navigation clears Fwd.
         public readonly List<string> Back = new();
         public readonly List<string> Fwd = new();
+        // Where Brief was when it left the pane for another view, for the build that brings it
+        // back (NoteBriefLeaving, BriefOpenAt); null after a folder change.
+        public BriefSpot? BriefLeft;
     }
 
     /// <summary>The key an entry is held under in a mark set: its full path.
@@ -281,12 +284,19 @@ public partial class CommanderApp : Component, IDisposable
     {
         if (FullShellOpen) return;   // sync → diff: the panes are already gone, and noted
         foreach (char side in "LR")
+        {
+            // Brief puts its own back, on the build that brings it back (BriefOpenAt): the new
+            // scroll view keeps the offset set before its first layout, and that build makes the
+            // columns for it. Put back from OnAfterBuild, the offset landed after the build had
+            // made the start's columns, and every column in view was blank (plan 17, round 10).
+            NoteBriefLeaving(side);
             _paneScroll[Si(side)] = ViewOf(side) switch
             {
-                ViewMode.Brief => BriefScroll(side).Current?.ScrollOffsetX ?? 0f,
+                ViewMode.Brief => 0f,
                 ViewMode.Thumbnails => ThumbVList(side).Current?.ScrollOffsetY ?? 0f,
                 _ => VList(side).Current?.ScrollOffsetY ?? 0f,
             };
+        }
         // A few builds rather than one: the offset clamps against a content size the list
         // may not know on the very first build after the panes come back.
         _pendingPaneScroll = 4;
@@ -302,9 +312,6 @@ public partial class CommanderApp : Component, IDisposable
             float got;
             switch (ViewOf(side))
             {
-                case ViewMode.Brief:
-                    if (BriefScroll(side).Current is not { } bs) { settled = false; continue; }
-                    bs.ScrollOffsetX = want; got = bs.ScrollOffsetX; break;
                 case ViewMode.Thumbnails:
                     if (ThumbVList(side).Current is not { } tv) { settled = false; continue; }
                     tv.ScrollOffsetY = want; got = tv.ScrollOffsetY; break;
@@ -542,6 +549,7 @@ public partial class CommanderApp : Component, IDisposable
     private void SetView(char side, ViewMode mode)
     {
         if (ActiveTab(side).View == mode) return;
+        NoteBriefLeaving(side);   // Brief, if it is the view the pane leaves, comes back there
         ActiveTab(side).View = mode;
         RequestScroll(side);
         MarkDirty();
@@ -867,6 +875,11 @@ public partial class CommanderApp : Component, IDisposable
         }
         _viewerFind.Service();
         _diffFind.Service();
+        if (_pendingSyncReveal)
+        {
+            _pendingSyncReveal = false;
+            if (_syncOpen) RevealSyncCursor();
+        }
         if (_pendingFindScroll)
         {
             _pendingFindScroll = false;
@@ -888,6 +901,8 @@ public partial class CommanderApp : Component, IDisposable
         // views unable to see their own Esc.
         else if (!AnyOverlayOpen && !FullShellOpen && _window.FocusedElement is null)
             PaneRef(_active).Current?.Focus();
+
+        LetGoOfLeftViews();
     }
 
     private void RequestScroll(char side)
@@ -917,6 +932,7 @@ public partial class CommanderApp : Component, IDisposable
         }
         tab.Dir = path;
         tab.Results = null;   // navigating anywhere leaves a fed-in result set behind
+        tab.BriefLeft = null;   // another folder's Brief starts at the start
         BumpGen(side);
         // Cursor reset now; the loader's onLoaded re-clamps once the listing lands.
         // If we ascended, try to land on the folder we came from.
