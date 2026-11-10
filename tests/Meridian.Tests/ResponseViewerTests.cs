@@ -341,6 +341,50 @@ public class ResponseViewerTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    /// <summary>
+    /// A drag's moves give the pane on screen the pointer's size and build nothing (plan 17 round
+    /// 10 step 13: a move built the pane and its body, 38.9 KB with a 2,000-line response); the
+    /// release builds the pane once, at the size it was left at. Beside the editor and under it.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ADragMoveBuildsNothing_AndTheReleaseBuildsThePaneOnce(bool bottom)
+    {
+        Hosted((session, app) =>
+        {
+            SendAndWait(session, app, "ok");
+            if (bottom)
+            {
+                session.Window.PressKey(KeyCode.Backslash, KeyModifiers.Ctrl);
+                session.PumpFrames(2);
+            }
+            string pane = bottom ? "response-bottom" : "response-right";
+            float Size() => bottom ? Box(session, pane).Height : Box(session, pane).Width;
+            float before = Size();
+            var grip = Box(session, "response-resize");
+            float x = grip.X + grip.Width / 2, y = grip.Y + grip.Height / 2;
+            session.Window.MouseDown(x, y);
+            session.PumpFrames(2);
+
+            int builds = app.Builds, parts = app.PartBuilds;
+            foreach (var d in new[] { -10f, -40f, -90f, -60f })   // toward the editor: the pane grows
+            {
+                if (bottom) session.Window.MoveMouse(x, y + d); else session.Window.MoveMouse(x + d, y);
+                session.PumpFrames(2);
+                Assert.Equal(before - d, Size(), 0.5);
+            }
+            Assert.Equal(builds, app.Builds);
+            Assert.Equal(parts, app.PartBuilds);
+
+            if (bottom) session.Window.MouseUp(x, y - 60); else session.Window.MouseUp(x - 60, y);
+            session.PumpFrames(2);
+            Assert.Equal(parts + 1, app.PartBuilds);   // the pane, once
+            Assert.Equal(builds, app.Builds);
+            Assert.Equal(before + 60, Size(), 0.5);
+        });
+    }
+
     [Fact]
     public void ANarrowWindowForcesTheBottomOrientation()
     {

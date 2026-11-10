@@ -127,8 +127,9 @@ public partial class MeridianApp : Component, IDisposable
     private bool _forceResponseBottom;
 
     // The response pane's size, dragged by the handle on its inner edge: its width beside the
-    // editor, its height under it. Session state, as the flip is. Moving it rebuilds the pane
-    // alone (ResponseDirty): the handle and the size are both the pane's.
+    // editor, its height under it. Session state, as the flip is. A drag's moves size the pane
+    // on screen; its press and release and the arrow keys rebuild the pane alone (ResponseDirty):
+    // the handle and the size are both the pane's.
     internal const float ResponseMinWidth = 480f;
     private const float TitleBarHeight = 40f;
     private readonly PaneSplitter _responseWidth;
@@ -188,11 +189,12 @@ public partial class MeridianApp : Component, IDisposable
         // History's search, walk and filters show in the History view alone (see Part).
         _historyFind = new TextSearch(MarkViewDirty);
         // Each pane is after its handle (right of it, under it). The largest is the window's
-        // room less the editor's floor, held at build time (ResponsePaneSize).
-        _responseWidth = new PaneSplitter(ResponseDirty, null, ResponseMinWidth, 10_000f, Azimuth.ResponseRight,
-            SplitterAxis.Horizontal, trailing: true);
-        _responseHeight = new PaneSplitter(ResponseDirty, null, BottomPaneMinHeight, 10_000f, Azimuth.ResponseBottom,
-            SplitterAxis.Vertical, trailing: true);
+        // room less the editor's floor, held at build time (ResponsePaneSize). A drag moves the
+        // pane on screen and builds nothing (ResponseSplitMoved).
+        _responseWidth = new PaneSplitter(() => ResponseSplitMoved(bottom: false), null, ResponseMinWidth, 10_000f,
+            Azimuth.ResponseRight, SplitterAxis.Horizontal, trailing: true);
+        _responseHeight = new PaneSplitter(() => ResponseSplitMoved(bottom: true), null, BottomPaneMinHeight, 10_000f,
+            Azimuth.ResponseBottom, SplitterAxis.Vertical, trailing: true);
 
         View = MeridianView.Requests;
 
