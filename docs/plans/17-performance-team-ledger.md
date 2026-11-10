@@ -273,6 +273,17 @@ Re-ranked by the next survey.
   `OnAfterBuild` is silently dropped, so Vesper's `RestorePaneScroll` retry never runs (Detail and Thumbnails restore on
   the first build, so harmless today). A trap for app authors: document or make it work; measure at the next survey.
 
+- **dotnet-11-upgrade** (4, all; the user, 2026-11-11: ".NET 11 has just been released, we should consider picking it
+  up for the next round") — round 11 takes it up first, as its own step before the survey, so the survey profiles the
+  runtime the apps will ship on and the upgrade's own effect is measured alone. State on 2026-11-11: this machine has
+  only the .NET 10 SDK (10.0.300); no `global.json`; 102 project files set `net10.0` each (consider one
+  `TargetFramework` in Directory.Build.props); every workflow pins `actions/setup-dotnet` to `10.0.x`. Needs: the .NET 11
+  SDK here and in WSL Fedora (the user installs it, or approves the download); retarget projects, CI and docs
+  (NATIVE-AOT.md, ENVIRONMENT.md, CI.md); check every dependency (SkiaSharp/HarfBuzzSharp, TextMateSharp, Kiota and
+  Aperture's `--probe`, XTerm.NET, WebView2, CEF, mpv interop, source generators and analyzers) and NativeAOT/trim
+  warnings; measure with `step-ab.ps1` (base the last .NET 10 commit, `-Pairs 2 -Runtime Jit,Aot`) plus the AOT app
+  walks (KB/key, start-up, working set); run every suite on Windows and Fedora and CI's macOS keyring job.
+
 Closed from Waiting by the round 10 survey: apps-toast-gone-view-only (→ step 5), apps-meridian-response-drag-build
 (→ step 13, now 38.9–39.2 KB a move), vesper-brief-filter-clear-reveal's scrollbar half (→ question 28; the
 filter-clear half stays).
@@ -1014,3 +1025,5 @@ From 2026-11-08 (round 9's survey); earlier entries are in the archive ([to 2026
   least-distance reveal from a width before layout; user-input paths never hold an offset.
 - 2026-11-11: the user asked for new app releases after this round too (after the merge into main and green CI). The
   final full suite started.
+- 2026-11-11: the user: .NET 11 has just been released; consider it for the next round. Recorded as Waiting
+  dotnet-11-upgrade, to go first in round 11 (its own measured step before the survey).
