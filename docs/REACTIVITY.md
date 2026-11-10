@@ -218,6 +218,14 @@ which write the toast on screen. It ran on every step until plan 17: one toast r
 23 times, 4.5 MB of garbage (Meridian 1.5 MB, Aperture 3.1 MB); now twice, 0.39 MB (0.13,
 0.27; headless, JIT, the real loop).
 
+An app that keeps parts (below) hands it a callback that builds them only when a toast comes:
+`new ToastHost(() => { if (_toasts!.IsShowing) MarkDirty(); else MarkViewDirty(); })`. A
+toast that comes may report a change a part shows, and the code that flashed it may count on that
+build; one that goes takes away only the window's own strip, which the view's build places.
+Junction, Meridian and Aperture do this (plan 17 round 10, step 5): a toast from flash to gone
+over Junction's Changes 365 → 227 KB, part builds 8 → 4; Meridian 271 → 212 KB; Aperture's Home
+149 → 90 KB (headless, JIT).
+
 ### A drag rebuilds once per frame
 
 A pointer moves far more often than a window draws: a 1,000 Hz mouse sends about sixteen
@@ -543,6 +551,21 @@ builds only when it makes its environment unsaved, the one thing the view shows 
 cell. That table had cost one `TextInput` per cell and a keyring read per secret on every
 character: 312 KB at 3 environments × 12 keys, 1.2 MB at 5 × 40, then 2.3–5.4 KB (round 9,
 step 8).
+
+The other apps follow the same rule (round 10, step 5). What reads a field decides what a
+character builds:
+- **Only the action that takes the value.** Junction's prompts (`OpenDialog`) and its rebase
+  reword are read on Enter, by the validator and the confirm, and on Save: a character writes the
+  field's value and builds nothing. It had built the window, chrome too: 194 KB a character over
+  Changes, 155 over History, 333 under the rebase card; now 0.6–1.4 KB.
+- **Whether the field holds anything.** Aperture's issue reply and problem report turn Send on
+  when they do (and Resolve says "Reply and resolve"): compare before and after, and build the
+  view when it flips. 135 → 2.3 KB a character in the reply, 100 → 0.9 KB in the report.
+- **The view, on every character.** Junction's add-repository folder (its hint, preview and
+  button, and the folder check that lands after) and the merge requests' filter (the rows kept)
+  still build the view, with `MarkViewDirty`: the chrome shows nothing of a form. The folder went
+  from 472 to 195 KB a character (the check's landing had built the chrome a second time), the
+  filter from 222 to 92.
 
 **A selection a list and one panel show needs neither the window nor the view.** History's list
 draws its own selection, and the only other thing that shows it is the archived send beside the
