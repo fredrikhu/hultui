@@ -5,8 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 10
-- **Phase:** build — round 10, steps 1–13b landed; step 14 SPAWNED 2026-11-10 (brief `brief-r10b14.md`), then step 15,
-  then the full suite. The five app releases cut on facced69
+- **Phase:** build — round 10, steps 1–13b landed, step 14 measured and declined (9f76ecb6); step 15 SPAWNED
+  2026-11-10 (brief `brief-r10b15.md`), then the full suite. The five app releases cut on facced69
   (the user asked for them before the round's work) are all published. The survey is merged
   (reports `17-reports/r10-*`); build briefs `brief-r10b<N>.md` go in session 3484c586's scratchpad. Questions 27–32
   asked 2026-11-09; 27–30 answered as recommended the same day (27 → step 5, 28 → new step 15, 29 → step 7, 30 →
@@ -311,6 +311,12 @@ Round 9 (the round round 10's survey reviews; it moves to the archive at round 1
 ## Examined, not worth it
 
 From the round 10 surveys (details in `17-reports/r10-*`):
+
+- **paint-text-lines-seek** (2; round 10 step 14, built and measured, 9f76ecb6 DECISIONS.md): binary search for a long
+  label's first visible line (≥ 32 lines, tallest line and sorted flag on the layout, +8 B, exact): `text/wheel over a
+  2,000-line plain label` min JIT −2.9 / −4.4 %, AOT −3.7 / −3.1 % (A/A 2.4 % JIT, 0.8 % AOT), rich-text row ±0.5 % / −3.9 %;
+  no allocation moved. Real but under the 5 % bar (7–10 µs a step, ~4–5 ns a line); revisit for 20k+-line texts drawn
+  every frame. Patch kept in the session scratchpad `r10b14\text-lines-seek.patch`.
 
 - **Steady-state render bytes in the suite** (2): all VirtualList realization in the render pass by design (`TableView
   10k sort` 234 KB, typing beside a 150-line diff 249 KB, `list 100k replace` 143 KB). **Effects** (2): shadow and
@@ -959,3 +965,5 @@ From 2026-11-08 (round 9's survey); earlier entries are in the archive ([to 2026
   (a fresh copied folder reported a change on its first listing, so the watcher reloaded inside the tests' counted
   window); ChromePartTests 3/20 → 0/20 under load. ReviewTests.TheKeyboardReachesTheCommentAgain stays a known flake
   (memory ci-red-findings updated). Step 14 spawned.
+- 2026-11-10: round 10 step 14 measured and declined (9f76ecb6, DECISIONS.md only): the long-label line seek is a real
+  3–4 % in every pair, under the 5 % bar; patch kept in the scratchpad. Step 15 spawned.
