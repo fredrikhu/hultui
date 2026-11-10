@@ -423,12 +423,13 @@ public partial class JunctionApp : Component, IDisposable
         // A toast that comes builds everything, as the change it reports may be the chrome's; one
         // that goes builds the view, where the toast was and the chrome is not.
         _toasts = new ToastHost(() => { if (_toasts!.IsShowing) MarkDirty(); else MarkViewDirty(); });
-        // Same for the two file-list widths: the panes are rebuilt at the current width, so
-        // a drag marks dirty rather than writing to an element that the next build replaces.
-        _commitSplit = new PaneSplitter(MarkViewDirty, Persist, MinFileListWidth, MaxFileListWidth,
-            settings.CommitFileListWidth);
-        _changesSplit = new PaneSplitter(MarkViewDirty, Persist, MinFileListWidth, MaxFileListWidth,
-            settings.ChangesFileListWidth);
+        // The two file-list widths: the lists are built at them, and a drag's moves give the
+        // list on screen the width and lay out again (FileListSplitMoved); the release, which
+        // remembers the width, builds the view.
+        _commitSplit = new PaneSplitter(() => FileListSplitMoved(_commitSplit, _fileScrollRef.Current),
+            Persist, MinFileListWidth, MaxFileListWidth, settings.CommitFileListWidth);
+        _changesSplit = new PaneSplitter(() => FileListSplitMoved(_changesSplit, _changesColumnRef.Current),
+            Persist, MinFileListWidth, MaxFileListWidth, settings.ChangesFileListWidth);
         _diffFind = NewFindBar("Find in diff…", () => _diffBodyRef.Current, RevealDiffHit, DiffFindMoved);
         _diffFind.Selection = DiffFindSelection;
         _filesFind = NewFindBar("Find in file…", () => _fileBodyRef.Current, RevealFilesHit, FilesFindMoved);

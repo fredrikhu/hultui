@@ -139,7 +139,7 @@ public class DiffScrollTests
     }
 
     /// <summary>Frames until twenty in a row build nothing, for at most five seconds.</summary>
-    private static void Quiet(HeadlessSession session, JunctionApp app)
+    internal static void Quiet(HeadlessSession session, JunctionApp app)
     {
         var until = DateTime.UtcNow + TimeSpan.FromSeconds(5);
         for (int quiet = 0, last = app.Builds; quiet < 20 && DateTime.UtcNow < until;)
