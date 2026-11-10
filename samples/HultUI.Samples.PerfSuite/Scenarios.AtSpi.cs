@@ -34,7 +34,7 @@ static partial class Scenarios
             ctx => TabPastRows(ctx, AtSpiRig.Install(ctx.Window)));
 
         yield return new Scenario("a11y/rename a pane over 1,000 rows, AT-SPI",
-            "Rename a group named after its folder, as Vesper's pane on a navigation, its 1,000 rows under it, with the AT-SPI bridge: one name signal, in a tree of 3,005 nodes",
+            "Rename a group named after its folder, as Vesper's pane on a navigation, its 1,000 rows under it, with the AT-SPI bridge: the pane's name and its title's, in a tree of 3,005 nodes",
             ctx => RenamePane(ctx, AtSpiRig.Install(ctx.Window)));
 
         yield return new Scenario("a11y/wheel 1,000 rows, AT-SPI",

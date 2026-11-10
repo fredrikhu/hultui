@@ -588,7 +588,7 @@ static partial class Scenarios
             ctx => TabPastRows(ctx, UiaRig.Install(ctx.Window)));
 
         yield return new Scenario("a11y/rename a pane over 1,000 rows, UIA",
-            "Rename a group named after its folder, as Vesper's pane on a navigation, its 1,000 rows under it, with the UIA bridge: one name event, in a tree of 3,005 nodes",
+            "Rename a group named after its folder, as Vesper's pane on a navigation, its 1,000 rows under it, with the UIA bridge: the pane's name and its title's, in a tree of 3,005 nodes",
             ctx => RenamePane(ctx, UiaRig.Install(ctx.Window)));
 
         yield return new Scenario("a11y/wheel 1,000 rows, UIA",
@@ -893,16 +893,23 @@ static partial class Scenarios
     }
 
     /// <summary>A group named after its folder, as Vesper's pane is, over 1,000 rows, under a title:
-    /// renamed on each step, nothing else changed. A node with children whose own name changed built the
-    /// whole tree until plan 17 round 10 step 10.</summary>
+    /// renamed on each step with the folder's name it shows above its rows (a step must draw), the rows
+    /// as they were. A node with children whose own name changed built the whole tree until plan 17
+    /// round 10 step 10.</summary>
     private static Op RenamePane(Ctx ctx, IBridgeRig rig)
     {
-        var pane = Flex.Column().FlexGrow(1).AccessibleRole(AccessibilityRole.Group).AccessibleName("Left pane, docs")
-            .Children(Text.New("docs").FontSize(13f), ScrollView.New().FlexGrow(1).Children(Ui.Rows(ctx.Rng, 1_000)));
+        var folder = Text.New("folder 1").FontSize(13f);
+        var pane = Flex.Column().FlexGrow(1).AccessibleRole(AccessibilityRole.Group).AccessibleName("Left pane, folder 1")
+            .Children(folder, ScrollView.New().FlexGrow(1).Children(Ui.Rows(ctx.Rng, 1_000)));
         ctx.Mount(Flex.Column().FlexGrow(1).Children(Text.New("Files").FontSize(15f), pane));
         return new Op
         {
-            Run = step => pane.AccessibleName = $"Left pane, folder {step % 2}",
+            Run = step =>
+            {
+                string name = step % 2 == 0 ? "folder 0" : "folder 1";
+                pane.AccessibleName = $"Left pane, {name}";
+                folder.Content = name;
+            },
             Check = Applied(rig),
         };
     }
