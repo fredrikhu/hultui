@@ -269,7 +269,7 @@ public class RunnerViewTests : IClassFixture<TestHttpServer>, IDisposable
     }
 
     /// <summary>A run hands back the result rows it made before (MeridianApp.Runner.cs): a run of n
-    /// results builds the view once a result and makes n rows, and the list on screen is what a
+    /// results builds the results once a result and makes n rows, and the list on screen is what a
     /// build that keeps no row makes. Expanding a row makes none; a run that starts over makes its
     /// rows again.</summary>
     [Fact]
@@ -279,11 +279,11 @@ public class RunnerViewTests : IClassFixture<TestHttpServer>, IDisposable
             Write($"bulk/b{i:00}.req", $"GET {_server.Origin}/ok\nname Bulk {i}\n");
         Hosted((session, app) =>
         {
-            int made = app.RunRowsMade, builds = app.Builds;
+            int made = app.RunRowsMade, results = app.RunResultsBuilds;
             RunAndWait(session, app);
             int n = app.LastRunSummaryForTests!.Results.Count;
             Assert.Equal(15, n);
-            Assert.True(app.Builds - builds >= n, $"{app.Builds - builds} builds for {n} results");
+            Assert.True(app.RunResultsBuilds - results >= n, $"{app.RunResultsBuilds - results} builds of the results for {n} results");
             Assert.Equal(n, app.RunRowsMade - made);
             AssertRunListIsAFullBuild(session, app, "after the run");
 
@@ -301,6 +301,47 @@ public class RunnerViewTests : IClassFixture<TestHttpServer>, IDisposable
             session.PumpFrames(2);
             Assert.Equal(n, app.RunRowsMade - made);
             AssertRunListIsAFullBuild(session, app, "after a second run");
+        });
+    }
+
+    /// <summary>A result builds the Runner's results alone (MeridianApp.Runner.cs): the window, the
+    /// title bar and the rail of views build when the run starts and when it ends, not once a
+    /// result; and a run going on behind another view builds nothing there, its results all shown
+    /// when the Runner is shown again.</summary>
+    [Fact]
+    public void AResultBuildsTheResultsAlone_AndNothingBehindAnotherView()
+    {
+        for (int i = 0; i < 12; i++)
+            Write($"bulk/b{i:00}.req", $"GET {_server.Origin}/ok\nname Bulk {i}\n");
+        Hosted((session, app) =>
+        {
+            int builds = app.Builds, parts = app.PartBuilds, results = app.RunResultsBuilds;
+            RunAndWait(session, app);
+            int n = app.LastRunSummaryForTests!.Results.Count;
+            Assert.True(app.RunResultsBuilds - results >= n, $"{app.RunResultsBuilds - results} builds of the results for {n} results");
+            Assert.InRange(app.Builds - builds, 2, 4);      // the run's start and its end (and a click)
+            Assert.InRange(app.PartBuilds - parts, 4, 8);   // the title bar and the rail, as often
+            AssertRunListIsAFullBuild(session, app, "after the run");
+
+            // Another run, and the Requests view at once, before any result lands: the run goes on
+            // behind it.
+            app.StartRun();
+            session.Window.PressKey(KeyCode.Digit1);
+            builds = app.Builds; results = app.RunResultsBuilds;
+            int made = app.RunRowsMade;
+            session.PumpUntil(() => !app.RunnerRunning, TimeSpan.FromSeconds(15));
+            session.PumpFrames(2);
+            Assert.InRange(app.Builds - builds, 1, 3);      // its end (and the run log's rescan)
+            Assert.Equal(0, app.RunResultsBuilds - results);
+            Assert.Equal(0, app.RunRowsMade - made);
+
+            session.Window.PressKey(KeyCode.Digit2);
+            session.PumpFrames(2);
+            Assert.Equal(n, app.RunRowsMade - made);
+            for (int i = 0; i < n; i++)
+                Assert.NotNull(session.Window.FindByAutomationId($"run-row-{i}"));
+            Assert.True(Contains(session, $"{n} / {n}"), "the progress line counts the run");
+            AssertRunListIsAFullBuild(session, app, "shown again after a run behind Requests");
         });
     }
 

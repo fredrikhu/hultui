@@ -5,6 +5,7 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Core.Styling;
 using Meridian.Core;
 using Meridian.Theme;
@@ -86,7 +87,7 @@ public partial class MeridianApp
         // Awaits resume on the UI thread, so the stream callback mutates state
         // exactly where Build reads it.
         var summary = await runner.RunAsync(scope, EnvironmentValues(), _runBail,
-            result => { _runResults.Add(result); MarkDirty(); }, cts.Token);
+            result => { _runResults.Add(result); RunResultsDirty(); }, cts.Token);
 
         _runSummary = keepExisting
             ? new RunSummary(_runResults.ToList(), summary.Wall, summary.Aborted)
@@ -148,11 +149,40 @@ public partial class MeridianApp
 
         var row = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
         var rail = BuildRunnerRail(); rail.Key = "runner-rail";
-        var main = BuildRunnerMain(); main.Key = "runner-main";
         row.AddChild(rail);
-        row.AddChild(main);
+        row.AddChild(RunResultsPart.Mount().FlexGrow(1));
         return row;
     }
+
+    // ── The results: a part of their own ─────────────────────────────────
+    //
+    // A result changes the progress line and the list beside the rail, and nothing else: the rail
+    // moves when a run starts or ends (its Run turns to Abort and back), and neither the title bar
+    // nor the rail of views shows a run. A result built the whole window for it, the rail with its
+    // counts and those two parts too, about 90 KB a result at 200 requests with the rows kept. The
+    // progress line, the list and the summary are now a part (see Part) with a revision of its own:
+    // a result writes it (RunResultsDirty), so they build alone, and every full rebuild builds them
+    // too (_partRevision, safe by default). Shown in another view, a result builds nothing; the
+    // Runner builds them when it is shown again.
+
+    private readonly PartGroup _runnerParts = new();
+    private readonly Signal<int> _runResultsRevision = new(0);
+    private Part? _runResultsPart;
+    private int _runResultsBuilds;
+
+    /// <summary>Builds of the Runner's results so far, for tests: a result builds them alone.</summary>
+    internal int RunResultsBuilds => _runnerParts.Builds;
+
+    private Part RunResultsPart => _runResultsPart ??= new(_runnerParts, () =>
+    {
+        _ = _runResultsRevision.Value;
+        var main = BuildRunnerMain();
+        main.Key = "runner-main";
+        return main;
+    }, own: _partRevision);
+
+    /// <summary>A result landed: the Runner's results build alone.</summary>
+    private void RunResultsDirty() => _runResultsRevision.Value++;
 
     private Element BuildRunnerRail()
     {
@@ -296,7 +326,7 @@ public partial class MeridianApp
             idle.Key = "run-idle";
             list.AddChild(idle);
         }
-        _runRows.Begin(Builds);
+        _runRows.Begin(++_runResultsBuilds);
         float scale = Ui.DisplayScale;
         for (int i = 0; i < _runResults.Count; i++)
             AddRunRow(list, i, scale);
@@ -317,11 +347,13 @@ public partial class MeridianApp
     // ── The result rows, kept ────────────────────────────────────────────
     //
     // A row comes back from the build before when nothing it shows or does moved (KeptElements;
-    // REACTIVITY.md, "Hand back the elements a key does not change"). A run builds the view once a
-    // result, and made every row again: at 200 requests the list was 1,467 KB of a build, 7.3 KB a
+    // REACTIVITY.md, "Hand back the elements a key does not change"). A run builds the results once
+    // a result, and made every row again: at 200 requests the list was 1,467 KB of a build, 7.3 KB a
     // row, so a run made n²/2 rows. A row is keyed by its request's path, which a run runs once,
     // and a run that starts over lets every row go. Its state is its result, a record nothing
-    // changes; its place, which its id names and its click expands; and the scale.
+    // changes; its place, which its id names and its click expands; and the scale. The builds it
+    // counts are the results part's own: a row made before the Runner was left
+    // for another view is out of the window, and is never handed back.
     private readonly record struct RunRowState(RunRequestResult Result, int Index, float Scale);
     private readonly KeptElements<RunRowState> _runRows = new();
 
