@@ -906,6 +906,37 @@ took most of it: "What a build shows of files comes from what was read already",
 the run's own sends. At every checkpoint of a run of 50 and of 200 the pixels and the reader tree match
 a build that keeps no row, and the trees the old build's.
 
+**A plain list the window builds keeps its rows, and a cursor key moves the ring on them** (Vesper's
+Synchronize, round 10 step 7). Synchronize puts every row in a plain scroll view, and each Up or Down
+built the window, both parts and every row; each row also found its place for its click in a fresh
+filtered copy of the rows shown, so a key was O(rows²) in bytes. The build now passes the place from its
+loop and keeps each row by its path (its state the pair, its direction and whether the cursor is on it;
+the shape the row height and the theme), and a cursor key moves the ring on the two live rows with no
+build, as Brief does, and scrolls the cursor's row into view by its place (`ScrollRangeIntoView(index ×
+row height)`: every row is one height, so nothing is read back). Three lessons:
+
+- **The cursor's look can reach into the row.** An Equal row draws its texts at 55 % unless the cursor
+  is on it, so the move sets its seven texts' colours too. `TextColor` is an inherited style, which a
+  write on a live element does not mark (`MarkStyleDirty`), and the ring's 1 px border moves the cells
+  (`MarkLayoutDirty`). One function draws the look for the build and for the move.
+- **Set the role to tell the selected state with no tree.** A clickable row is read as a button by
+  inference, and the window marks a selected state on its node in place only for a role the app set. The
+  row sets `Button` and says selected or not on every row, so a key tells a reader the row left and the
+  row reached, with no tree; the reader's tree is what it was, with the selected state added.
+- **A handler looks up the place when it runs.** A kept row may stand elsewhere at its next click
+  ("Show equal" moves the rows after an Equal one), so the click captures the pair and finds its place
+  then.
+
+Headless, 1240×820, 80 Down/Up keys at a 60 ms pace with their frames, UI-thread KB a key, NativeAOT
+(JIT): 60 files (40 rows) 453.7 → 0.4 (422.6 → 0.4); 300 files (200 rows, 1,886 elements) 2,568.5 → 0.4
+(2,054.2 → 0.4); 3,000 files (2,000 rows) 81,102 → 0.4 (47,962 → 0.4), GCs per 80 keys 451/262/66 →
+0/0/0; a window and two parts built a key → none; with a reader 0.9–1.0 KB, 0 trees. The place from the
+loop alone took 300 files to 1,715.9 KB and 3,000 to 16,444. The reveal costs at 3,000 files 1.2 → 1.7 ms
+a key (min; the screen of rows a scroll brings in), against 87 ms before. At every step the window, the
+reader's tree and the pixels match a build that keeps no row. The suite pins it: `component/cursor key
+over a plain 200-row list built through the root, every row made` against `…, rows kept` (1,605 → 50 KB
+a key, 200 → 2 rows made).
+
 A column whose cells are all kept is left with no children by the time the reconciler reaches
 it, since the build moved every one into its new tree. Until round 5 those came back one by one,
 each marking the column's structure, so with a reader listening every key built the whole

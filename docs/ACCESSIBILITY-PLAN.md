@@ -378,6 +378,15 @@ nodes where a row was one (+34 and +95 nodes a navigation): Brief 237 → 250 KB
 AT-SPI), Thumbnails 262 → 294 (265 → 313); without a reader a navigation is within 0.5 KB. Thumbnail
 rows off screen are not in the tree, as in any composite list; they come in as they realize.
 
+Synchronize (F9) told a reader nothing of its cursor either: each row is a button named by what it
+shows ("f003.txt 11 B 11-10 06:38 → 11-10 04:38 4 B f003.txt"), a role inferred from its click, and the
+cursor was only its fill and ring. Since plan 17 round 10 step 7 a cursor key there builds nothing and
+moves the ring on the live rows, as in Brief; each row sets its role (`Button`, as the window marks a
+selected state in place only for a role the app set) and says whether it is the cursor's
+(`AccessibleSelected`), set with the ring. A reader is told on every cursor key the row left, not
+selected, and the row reached, selected, with no tree; the tree is the one it was, every node and name,
+with the selected state added.
+
 Focus that goes nowhere is the other half: an element holding the focus goes, and nothing takes it.
 Meridian's prompt and question (cards in its own tree, not `Dialog.Show`, which gives the focus back
 itself) took it into their field or button and let it go with the card: Escape out of "New request"
