@@ -110,13 +110,16 @@ public class A11yLeafPatchTests
         "canvas name", "label", "label in an explicitly named button", "two leaves, reverse order",
         "selection and leaves", "in an open overlay", "cursor in a grid of items", "cursor in a composite list's tiles",
         "selected button, one of a set",
+        // Not a patch of the node but the in-place walk, which makes it again with its child carried over
+        // (plan 17 round 10 step 10): told as a patch is, with no tree.
+        "box with a child, named",
     };
 
     /// <summary>Cases the tree is rebuilt for, as before.</summary>
     public static TheoryData<string> Rebuilt => new()
     {
         "label in a button named from its content", "box that gains a name", "box whose name goes",
-        "text a button takes for its name", "radio", "box with a child, named", "masked",
+        "text a button takes for its name", "radio", "masked",
         "selected, not an item or a button", "button that starts or stops saying selected",
     };
 

@@ -348,11 +348,12 @@ public sealed class AccessibilityNode
     public AccessibilityNode? Parent { get; private set; }
 
     /// <summary>The node's children, in order. Never changes once the tree is built, but for a
-    /// leaf whose own properties changed: the window makes its node again and puts it in its
+    /// node whose own properties changed: the window makes its node again and puts it in its
     /// place in the applied tree (<see cref="ReplaceChild"/>), one reference write, so a reader on
-    /// another thread finds the leaf's old node there or its new one, each whole, with the same id
-    /// and parent; and for children added, gone or in another order, which a layout refresh puts in
-    /// place of the old ones all at once (<see cref="ReplaceChildren"/>), one reference write too.</summary>
+    /// another thread finds the old node there or its new one, each whole, with the same id and
+    /// parent (a node with children carries them over, <see cref="CarryChildrenOf"/>); and for
+    /// children added, gone or in another order, which a layout refresh puts in place of the old ones
+    /// all at once (<see cref="ReplaceChildren"/>), one reference write too.</summary>
     public IReadOnlyList<AccessibilityNode> Children => _children;
 
     /// <summary>
@@ -575,14 +576,41 @@ public sealed class AccessibilityNode
     }
 
     /// <summary>Puts <paramref name="child"/> in place of the child at <paramref name="index"/>, in
-    /// a tree that is out (UI thread): a leaf's node made again for a change of its own properties
-    /// (<see cref="AccessibilityTreeBuilder.RemakeLeaf"/>), with the id of the one it replaces and
-    /// no children; or an open overlay's part of the tree built again, under the root node. One
-    /// reference write into the array readers on other threads walk.</summary>
+    /// a tree that is out (UI thread): a node made again for a change of its own properties
+    /// (<see cref="AccessibilityTreeBuilder.RemakeLeaf"/>, a layout refresh's), with the id of the
+    /// one it replaces and no children, or that one's children (<see cref="CarryChildrenOf"/>); or an
+    /// open overlay's part of the tree built again, under the root node. One reference write into the
+    /// array readers on other threads walk.</summary>
     internal void ReplaceChild(int index, AccessibilityNode child)
     {
         child.Parent = this;
         Volatile.Write(ref _children[index], child);
+    }
+
+    /// <summary>
+    /// A node made again for a change of its own properties (a pane named after its folder) while
+    /// its children stay, before it is in any tree (a layout refresh's walk,
+    /// <see cref="AccessibilityTreeBuilder.TryRefreshInPlace"/>): it takes the children of
+    /// <paramref name="applied"/>, the node it replaces, the same array, and <paramref name="parent"/>,
+    /// the node it goes under, so the walk reads the children through it and finds the scroll views
+    /// above it. Nothing of a tree is written: the children take it as their parent as it goes in
+    /// (<see cref="AdoptChildren"/>), and the array is written only as the applied node's would have
+    /// been (<see cref="ReplaceChild"/>), or replaced (<see cref="ReplaceChildren"/>).
+    /// </summary>
+    internal void CarryChildrenOf(AccessibilityNode applied, AccessibilityNode parent)
+    {
+        _children = applied._children;
+        Parent = parent;
+    }
+
+    /// <summary>Makes this node its children's parent: a node made again with the children of the one
+    /// it replaces (<see cref="CarryChildrenOf"/>), just before it is put in that one's place. Its own
+    /// parent is set already, so a reader on another thread that goes up from a child meanwhile reaches
+    /// the old node or this one, each with the nodes above it. Nothing for a leaf.</summary>
+    internal void AdoptChildren()
+    {
+        var children = _children;
+        for (int i = 0; i < children.Length; i++) children[i].Parent = this;
     }
 
     /// <summary>

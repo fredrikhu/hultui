@@ -178,6 +178,43 @@ public class AccessibilityLayoutRefreshTests
         Assert.Equal("row seven", tree.Children[0].Children[7].Name);
     }
 
+    /// <summary>A node with children whose own name changed (plan 17 round 10 step 10): made again in its
+    /// place, with the applied node's children carried over, the same nodes, each now its child; what they
+    /// change is walked under it as under the node it replaces — a row renamed, one gone, one new, the
+    /// view scrolled — and a child gone has the old node for its parent, as a diff has it.</summary>
+    [Fact]
+    public void ANodeWithChildrensOwnName_MakesItAgain_WithItsChildrenCarriedOver()
+    {
+        var (root, view, column, rows) = Fixture();
+        var tree = AccessibilityTreeBuilder.Build(root);
+        var old = tree.Children[0];
+        var kept = old.Children[0];
+
+        view.AccessibleName = "the view, renamed";
+        rows[3].AccessibleName = "row three";
+        column.RemoveChild(rows[5]);
+        var added = Row("new row");
+        column.InsertChild(8, added);
+        Layout(root);
+        view.ScrollOffsetY = 40;
+        var refresh = RefreshLikeABuild(tree, root);
+
+        var made = tree.Children[0];
+        Assert.NotSame(old, made);
+        Assert.Equal("the view, renamed", made.Name);
+        Assert.Same(kept, made.Children[0]);
+        Assert.Same(made, kept.Parent);
+        Assert.Equal(40, made.ScrollOffset.Y);
+        Assert.Contains(refresh.Changes, c => c.PropertyName == AccessibilityProperties.Name && ReferenceEquals(c.Node, made));
+        Assert.Contains(refresh.Changes, c => c.PropertyName == AccessibilityProperties.ScrollPosition && ReferenceEquals(c.Node, made));
+        var gone = Assert.Single(refresh.Removed);
+        Assert.Equal(old.ElementId, gone.Parent!.ElementId);
+        Assert.Equal("view", gone.Parent.Name);
+        var newRow = Assert.Single(refresh.Added);
+        Assert.Same(made, newRow.Parent);
+        Assert.Equal("row three", made.Children[3].Name);
+    }
+
     [Fact]
     public void NothingChanged_FindsNothing()
     {
@@ -208,7 +245,7 @@ public class AccessibilityLayoutRefreshTests
             return refresh.Mismatch!;
         }
 
-        Assert.Equal("a node with children changed", Refuse((_, view, _, _) => view.AccessibleName = "the view"));
+        Assert.Equal("the root's node changed", Refuse((root, _, _, _) => root.AccessibleName = "the app"));
         // Whether a node is focusable no diff compares: only a new tree carries it.
         Assert.Equal("a change no diff tells", Refuse((_, _, _, rows) => rows[2].IsFocusable = true));
     }

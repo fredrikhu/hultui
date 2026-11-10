@@ -436,7 +436,7 @@ public class A11yFocusMoveTests
         // The group takes a name, and so a node of its own, in the handler that moves the focus into it:
         // the applied tree, built before, has the field's node among the root's children, and there is no
         // node of the group on the way down the field's ancestors. A walk of the tree finds the field's,
-        // and the bridge is told before the frame, not by the rebuild the name asks for.
+        // and the bridge is told before the frame, not by the refresh the name asks for.
         using var session = HeadlessSession.Create(800, 600);
         var bridge = session.Window.InstallAccessibilityBridge();
         var fields = new[] { TextInput.New("a"), TextInput.New("b") };
@@ -464,8 +464,11 @@ public class A11yFocusMoveTests
         // The walk went past the 300 labels before the field.
         Assert.True(visited > 300, $"{visited} nodes looked at");
 
+        // The name the frame walks in place (plan 17 round 10 step 10): the group's new node, with the
+        // fields under it, and no tree.
+        int trees = session.Window.AccessibilityTreesBuilt;
         session.PumpFrame();
-        Assert.NotSame(tree, bridge.CurrentTree);
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
         var node = Walk(bridge.CurrentTree!).Single(n => n.ElementId == fields[1].Id);
         Assert.Equal(group.Id, node.Parent?.ElementId);
         Assert.True(node.IsFocused);

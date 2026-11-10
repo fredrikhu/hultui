@@ -359,10 +359,11 @@ round 9, step 15, fixed in the apps). A focusable box with no role or name is no
 Vesper's pane, the Tab stop that holds the focus while the cursor walks, was such a box: every Tab and
 click told nothing. It is a group (UIA Group, AT-SPI panel) named after its side and its folder,
 "Left pane, Downloads", with the pane's content under it. Its name changes with the folder, so a
-navigation with a reader builds the tree where it was walked in place (a node with children whose own
-name changed, which the walk does not take): 60 files, Enter and Backspace, 0 → 1 tree and +20 KB a
+navigation with a reader built the tree where it was walked in place (a node with children whose own
+name changed, which the walk did not take): 60 files, Enter and Backspace, 0 → 1 tree and +20 KB a
 navigation with UIA (209 → 230 KB), the same on AT-SPI; nothing without a reader, and no cursor key
-builds one (0 trees a key in Detail, Brief and Thumbnails, as before). Tab, which Vesper takes to
+builds one (0 trees a key in Detail, Brief and Thumbnails, as before). Since plan 17 round 10 step 10
+the walk takes it (below), and a navigation builds no tree again. Tab, which Vesper takes to
 switch panes, moved the active pane but left the focus on the one it left, so a reader was told
 nothing; the focus goes with it now, and a reader is told the pane it reached, then (in Detail) its
 cursor's item, selected, with no tree built: a Tab without a reader 71.60 → 71.68 KB.
@@ -453,11 +454,25 @@ its wrappers on the same tree, AT-SPI's objects stay and the new ones are cached
 25.9 KB; Aperture's library Down 286.1 → 260.4, the same nodes added and removed and the same AT-SPI
 signals. A test switch, `Window.AccessibilityBuildsEveryRefresh`, makes every refresh build the tree,
 for tests that hold a refresh made in place to a build.
-Where a build would make other nodes than a walk can, it builds the tree, as before: a node with
-children whose own properties changed (a tab named by its label, with a close button in it), a list
-whose items cross the 2,000 served on demand, described content in another number, an overlay opened
-or closed (its own refresh), the root's own node, or a change no diff tells (whether a node is
-focusable, another text source). A node's selected state, selected or not before and after, is no
+Since plan 17 round 10 step 10 the walk also takes a node with children whose own properties changed
+(Vesper's pane, named after its folder; a tab named by its label, with a close button in it): it makes
+the node again and carries the applied node's children over to it, the same nodes
+(`AccessibilityNode.CarryChildrenOf`), walks them under it as under the node it replaces, and puts it in
+that node's place, the children taking it as their parent just before (`AdoptChildren`); a child
+removed has the old node for its parent, as a diff has it. The bridges key their objects by id, so the
+node's UIA wrapper and AT-SPI object take the new node and tell the change a build's diff tells. The
+window's property observer sends a change of the name or the description of an element with children
+to that walk, in the frame (`_a11yWalkDue`), where it built the tree. KB a navigation with a reader
+(Enter into a folder of 5 files, Backspace out), tree / UIA / AT-SPI, 1 → 0 trees, the same events in
+the same order: Detail 1,000 files (2,105 nodes) 453.0 / 542.0 / 675.7 → 322.6 / 411.6 / 556.9, Brief
+453.1 / 492.5 / 537.0 → 336.2 / 375.6 / 420.3, Thumbnails 356.7 / 374.4 / 393.1 → 249.9 / 267.6 /
+286.2; at 60 files 8–12 % less. Junction's Commit button, named by its label with a count of what is
+staged and with its icon a node of its own, 2 → 0 trees a stage or unstage of one file (670 → 623 KB
+with the tree). A rename alone walks the tree and builds nothing: 3,005 nodes, 0 KB.
+Where a build would make other nodes than a walk can, it builds the tree, as before: a described
+node or a list's item with children whose own properties changed, a list whose items cross the 2,000
+served on demand, described content in another number, an overlay opened or closed (its own refresh),
+the root's own node, or a change no diff tells (whether a node is focusable, another text source). A node's selected state, selected or not before and after, is no
 such change: the walk writes it in place and tells it, children or not. A frame something else asks
 a tree of (a property no patch takes, the first frame a reader is there) builds it too. A composite
 list's own selection move was such a property, and a kept composite row whose `AccessibleSelected`

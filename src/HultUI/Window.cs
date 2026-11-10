@@ -208,6 +208,12 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     // anyway; whatever cannot be told that way rebuilds it, as every such change did: a keystroke in a
     // text input beside 200 rows built and diffed 603 nodes for one value.
     private readonly List<Element> _a11yLeafChanged = [];
+    // An element with children told a change of its own name or description since the last frame,
+    // while a client listened (Vesper's pane, named after its folder). The frame walks the elements
+    // against the applied tree in place (TryRefreshA11yInPlace), as for a change of their children: the
+    // walk makes the node again with its children carried over, and tells the change. Every such
+    // change built the whole tree.
+    private bool _a11yWalkDue;
 
     // One of a set in the main tree changed its selected state: a menu's entry under the pointer. The
     // frame marks it on the applied tree and tells it (TryPatchA11y), unless the frame rebuilds the
@@ -1201,17 +1207,18 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// elements are walked against the applied tree by the builder's rules
     /// (<see cref="AccessibilityTreeBuilder.TryRefreshInPlace"/>), and what a build would make otherwise
     /// is written in place — a box moved in its scroll views' content, a node gone out of view or come
-    /// into it, a scroll view's offset and geometry, a leaf whose own properties changed (made again, as
-    /// a leaf's patch makes it), a node's children added, gone or in another order (only the new ones
-    /// built) — and the bridge is handed the changes the build's diff would have reported, in its
-    /// order: as patched properties, or, with nodes added or removed, as that diff. A pure scroll writes
-    /// one offset and the offscreen states: each wheel turn over a 1,000-row list built and diffed 3,001
-    /// nodes, and a reader walking a list at its own pace one tree per key; a row a key made again in a
-    /// composite list built and diffed the whole window's tree. Whatever a list's selection, a caret or
-    /// a leaf told since is in that, as it is in a build's diff. False, writing nothing, when a build
-    /// would make another tree than that (a node with children whose own properties changed, a list
-    /// whose items cross the number served on demand, a change no diff tells), and the tree is built
-    /// then, as it always was.
+    /// into it, a scroll view's offset and geometry, a node whose own properties changed (made again, as
+    /// a leaf's patch makes it, with its children carried over when it has them), a node's children
+    /// added, gone or in another order (only the new ones built) — and the bridge is handed the changes
+    /// the build's diff would have reported, in its order: as patched properties, or, with nodes added
+    /// or removed, as that diff. A pure scroll writes one offset and the offscreen states: each wheel
+    /// turn over a 1,000-row list built and diffed 3,001 nodes, and a reader walking a list at its own
+    /// pace one tree per key; a row a key made again in a composite list built and diffed the whole
+    /// window's tree, and so did a pane renamed after its folder. Whatever a list's selection, a caret
+    /// or a leaf told since is in that, as it is in a build's diff. False, writing nothing, when a build
+    /// would make another tree than that (a described node or a list's item with children whose own
+    /// properties changed, a list whose items cross the number served on demand, a change no diff
+    /// tells), and the tree is built then, as it always was.
     /// </summary>
     private bool TryRefreshA11yInPlace()
     {
@@ -1515,6 +1522,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         || _a11yTextChanged.Count > 0
         || _a11yLeafChanged.Count > 0
         || _a11yOwnSelection.Count > 0
+        || _a11yWalkDue
         // A coalesced layout-driven a11y refresh is due — force the trailing frame
         // so the last resize/scroll position reaches the tree once the drag stops
         // (during the drag, layout dirty already keeps frames coming).
@@ -1783,7 +1791,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // immediately. Layout-only changes are coalesced (see A11yCoalesceMs): a
         // continuous resize/scroll otherwise rebuilds the whole tree every frame.
         bool a11yChildren = (_root.DirtyFlags & DirtyFlags.Children) != 0;
-        bool a11yImmediate = a11yActive && (!_a11yWasActive || _a11yPropertyDirty || a11yChildren);
+        // The elements' children changed, or a node with children its own name: walked in place below.
+        bool a11yWalk = a11yChildren || _a11yWalkDue;
+        bool a11yImmediate = a11yActive && (!_a11yWasActive || _a11yPropertyDirty || a11yWalk);
         if (a11yActive && layoutWasDirty)
             _a11yLayoutRefreshPending = true;
         // An open overlay's part of the tree, a child of the root node, is built again on its own:
@@ -1797,12 +1807,13 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             && nowMs - _lastA11yRangeMs >= A11yRangeCoalesceMs;
         bool a11yRebuild = a11yImmediate;
         // A layout refresh came due and nothing else asks for a tree, or the elements' children changed
-        // (rows made again, a row scrolled in) and nothing but that asks for one: the applied tree is
-        // brought up to date in place, with nodes built only for what is new, where the walk finds what
-        // a build would make, and built where it does not. Either tells what the patches below would, so
-        // they do not run then. A row a key made again in a composite list built the whole window's tree.
+        // (rows made again, a row scrolled in) or a node with children was renamed, and nothing but that
+        // asks for one: the applied tree is brought up to date in place, with nodes built only for what
+        // is new, where the walk finds what a build would make, and built where it does not. Either tells
+        // what the patches below would, so they do not run then. A row a key made again in a composite
+        // list built the whole window's tree, and so did a pane renamed after the folder it went into.
         bool a11yRefreshed = false;
-        bool a11yStructure = a11yImmediate && a11yChildren && _a11yWasActive && !_a11yPropertyDirty;
+        bool a11yStructure = a11yImmediate && a11yWalk && _a11yWasActive && !_a11yPropertyDirty;
         if ((a11yLayoutDue && !a11yImmediate) || a11yStructure)
         {
             using (_tracer.Begin("Phase", "A11y"))
@@ -1883,6 +1894,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             _announcements.Clear();
         }
         _a11yPropertyDirty = false;
+        _a11yWalkDue = false;
         _a11ySelectionMoved.Clear();
         _a11yTextChanged.Clear();
         _a11yLeafChanged.Clear();
@@ -4621,7 +4633,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// description, its expanded state, its value, its toggle, its range) are the exceptions: the
     /// list's two items' selected state, the text's new version and the leaf's node made again are
     /// marked on the applied tree in place (<see cref="TryPatchA11y"/>), as a focus move's is. So is
-    /// a change of text made on request, a keystroke in a rich text editor or a text area.
+    /// a change of text made on request, a keystroke in a rich text editor or a text area. A change of
+    /// the name or the description of an element with children is walked in place
+    /// (<see cref="TryRefreshA11yInPlace"/>), as a change of the elements' children is.
     /// </summary>
     void IAccessibilityAnnouncer.Announce(Element source, string text, AnnouncementPoliteness politeness)
     {
@@ -4679,6 +4693,15 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 if (leaves.Count >= MaxPatchedLeaves) window._a11yPropertyDirty = true;
                 else if (!leaves.Contains(element)) leaves.Add(element);
             }
+            // An element with children, its own name or description (Vesper's pane, a group named
+            // after its folder): the frame walks the elements against the applied tree in place, as
+            // for a change of their children, and the walk makes the node again with its children
+            // carried over (AccessibilityTreeBuilder.TryRefreshInPlace). What else the frame changes
+            // (the pane's new rows) the same walk takes. A rebuild for it built the whole tree on every
+            // navigation with a reader: 1,000 files in Detail, 453 → 322 KB a navigation with the tree.
+            else if (propertyName is AccessibilityProperties.Name or AccessibilityProperties.Description
+                && element.Children.Count != 0 && element.AccessibleTextSource is null)
+                window._a11yWalkDue = true;
             // A list's selection moved: two items' selected state, which the frame marks on the
             // applied tree and tells without a rebuild (TryPatchA11y). A rebuild for it
             // built and diffed the whole tree on every key of a walk: Junction's History list, a

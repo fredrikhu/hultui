@@ -119,6 +119,11 @@ public class A11yLayoutRefreshInPlaceTests
         "list selection and a ticking label", "items added to a list", "click handler added to a box",
         "rows added and removed", "rows moved", "a row made again", "composite list walk", "composite list wheel",
         "rows changed under an overlay", "composite list selection walk", "composite list told selection",
+        // A node with children whose own name or description changed: made again with its children
+        // carried over (plan 17, round 10, step 10).
+        "a node with children named", "a named group renamed", "a named group renamed, its rows changed",
+        "named groups renamed, one inside the other", "a named scroll view renamed and scrolled",
+        "an overlay's named panel renamed",
     };
 
     /// <summary>The scenes whose steps add or remove nodes: a build's diff has them, and the walk tells
@@ -127,13 +132,13 @@ public class A11yLayoutRefreshInPlaceTests
     [
         "items added to a list", "click handler added to a box", "rows added and removed", "rows moved",
         "a row made again", "composite list walk", "composite list wheel", "rows changed under an overlay",
-        "composite list selection walk", "composite list told selection",
+        "composite list selection walk", "composite list told selection", "a named group renamed, its rows changed",
+        "named groups renamed, one inside the other",
     ];
 
     public static TheoryData<string, string> FallsBack => new()
     {
         { "items past 2,000", "a list's items" },
-        { "a node with children named", "a node with children changed" },
     };
 
     private static BoxElement Rows(int n, string prefix = "row")
@@ -496,6 +501,100 @@ public class A11yLayoutRefreshInPlaceTests
                     s.Step("renamed again", () => label.Content = "Inbox, 12 unread messages");
                 });
             }
+            case "a named group renamed" or "a named group renamed, its rows changed":
+            {
+                // As Vesper's pane: a group named after its folder, its rows under it.
+                var rows = Rows(12);
+                var group = Flex.Column(gap: 2).AccessibleRole(AccessibilityRole.Group).AccessibleName("Left pane, docs")
+                    .Children(TextB.New("docs"), rows);
+                return With(group, s =>
+                {
+                    if (which == "a named group renamed")
+                    {
+                        s.Step("renamed", () => group.AccessibleName = "Left pane, src");
+                        s.Step("described", () => group.AccessibleDescription = "12 files");
+                        s.Step("both", () => { group.AccessibleName = "Left pane, docs"; group.AccessibleDescription = "11 files"; });
+                        return;
+                    }
+                    // A navigation: another folder's rows in place of these, and the name with them.
+                    s.Step("into src", () =>
+                    {
+                        group.AccessibleName = "Left pane, src";
+                        rows.RemoveChild(rows.Children[2]);
+                        rows.RemoveChild(rows.Children[7]);
+                        rows.InsertChild(0, OneRow("n", "new first"));
+                        rows.AddChild(OneRow("m", "new last"));
+                    });
+                    s.Step("back, one more", () =>
+                    {
+                        group.AccessibleName = "Left pane, docs";
+                        rows.InsertChild(4, OneRow("k", "new fourth"));
+                    });
+                    s.Step("emptied", () =>
+                    {
+                        group.AccessibleName = "Left pane, empty";
+                        group.AccessibleDescription = "nothing here";
+                        while (rows.Children.Count > 0) rows.RemoveChild(rows.Children[0]);
+                    });
+                });
+            }
+            case "named groups renamed, one inside the other":
+            {
+                var check = Checkbox.New(false, "Show hidden");
+                var label = TextB.New("3 items");
+                var inner = Flex.Column(gap: 2).AccessibleRole(AccessibilityRole.Group).AccessibleName("Inner").Children(check, Rows(4));
+                var outer = Flex.Column(gap: 2).AccessibleRole(AccessibilityRole.Group).AccessibleName("Outer")
+                    .Children(label, inner, Rows(3, "after"));
+                return With(outer, s =>
+                {
+                    s.Step("both renamed", () => { outer.AccessibleName = "Outer 2"; inner.AccessibleName = "Inner 2"; });
+                    s.Step("both, a toggle, a label", () =>
+                    {
+                        inner.AccessibleDescription = "the inner one";
+                        outer.AccessibleName = "Outer 3";
+                        check.IsChecked = true;
+                        label.Content = "4 items";
+                    });
+                    s.Step("inner only, a row added", () =>
+                    {
+                        inner.AccessibleName = "Inner 3";
+                        ((BoxElement)inner.Children[1]).AddChild(OneRow("x", "added"));
+                    });
+                });
+            }
+            case "a named scroll view renamed and scrolled":
+            {
+                var rows = Rows(40);
+                var label = (TextElement)rows.Children[12].Children[1];
+                var view = ScrollView.New().Height(Dimension.Px(300)).Children(rows);
+                view.AccessibleName = "Files, docs";
+                return With(view, s =>
+                {
+                    s.Step("renamed and scrolled", () => { view.AccessibleName = "Files, src"; view.ScrollOffsetY = 100; });
+                    s.Step("renamed, scrolled back, a label", () =>
+                    {
+                        view.AccessibleName = "Files, docs";
+                        view.ScrollOffsetY = 30;
+                        label.Content = "a longer label than it was";
+                    });
+                });
+            }
+            case "an overlay's named panel renamed":
+            {
+                var root = ScrollView.New().FlexGrow(1).Children(Rows(30));
+                var panel = Flex.Column(gap: 4).Padding(8).AccessibleRole(AccessibilityRole.Group).AccessibleName("Menu, 2 entries")
+                    .Children(TextB.New("Menu"), Button.New("One"), Button.New("Two"));
+                var scene = new Scene { Root = root };
+                scene.Steps.Add(("open, renamed", session =>
+                {
+                    session.Window.Window.ShowOverlay(panel, 300, 40);
+                    session.PumpFrame();
+                    session.PumpFrame(TimeSpan.FromMilliseconds(300));
+                }, _ => panel.AccessibleName = "Menu, 3 entries"));
+                scene.Step("renamed, the root scrolled", () => { panel.AccessibleName = "Menu, 4 entries"; root.ScrollOffsetY = 60; });
+                ((BoxElement)root.Children[0]).AddChild(scene.Forcer);
+                return scene;
+            }
             default:
                 throw new ArgumentException(which);
         }
@@ -743,6 +842,91 @@ public class A11yLayoutRefreshInPlaceTests
         Assert.Contains(objects, acc => acc.Offscreen);
         Assert.Contains(objects, acc => !acc.Offscreen && acc.Name.StartsWith("row 1"));
     }
+
+    /// <summary>A group named after its folder, renamed (plan 17 round 10 step 10): its node is made again
+    /// with its children carried over, and AT-SPI keeps every object — the group's takes the new node and
+    /// name, its children's stay under it — and sends one accessible-name, with no snapshot.</summary>
+    [Fact]
+    public void ATSPI_ARenamedGroup_KeepsItsObjectAndItsChildrens_AndTellsTheName()
+    {
+        using var session = HeadlessSession.Create(800, 600);
+        var signals = new Signals(path => path);
+        using var linux = new LinuxAccessibilityBridge(signals);
+        session.Window.InstallAccessibilityBridge(linux);
+        var group = Flex.Column(gap: 2).AccessibleRole(AccessibilityRole.Group).AccessibleName("Left pane, docs").Children(Rows(20));
+        session.Window.SetRoot(Flex.Column(gap: 4).Padding(8).Children(TextB.New("Header"), group));
+        session.PumpFrames(2);
+        session.PumpFrame(TimeSpan.FromMilliseconds(300));
+        var tree = (IAtSpiTree)linux;
+        var objects = tree.All.ToList();
+        var groupObject = tree.Find(AtSpiAccessible.PathFor(group.Id))!;
+        var oldNode = groupObject.Node;
+        int applies = linux.DebugApplyChangesCalls, trees = session.Window.AccessibilityTreesBuilt;
+        signals.Lines.Clear();
+
+        group.AccessibleName = "Left pane, src";
+        session.PumpFrame(TimeSpan.FromMilliseconds(16));
+
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+        Assert.Equal(applies, linux.DebugApplyChangesCalls);
+        Assert.Equal(objects.Count, tree.All.Count);
+        foreach (var acc in objects) Assert.Same(acc, tree.Find(acc.Path));
+        Assert.Equal("Left pane, src", groupObject.Name);
+        Assert.NotSame(oldNode, groupObject.Node);
+        Assert.Equal(40, groupObject.ChildCount);   // each row's two labels
+        foreach (var child in groupObject.Node!.Children)
+        {
+            Assert.Same(groupObject.Node, child.Parent);
+            Assert.Equal(groupObject.Path, tree.Find(AtSpiAccessible.PathFor(child.ElementId))!.ParentPath);
+        }
+        Assert.Equal($"property-change:accessible-name {groupObject.Path} Left pane, src", Assert.Single(signals.Lines));
+    }
+
+    /// <summary>The same with UI Automation: the group's wrapper takes the new node, raises one Name change,
+    /// and no wrapper is left on the node it replaced, which nothing holds any more.</summary>
+    [WindowsFact]
+    [SupportedOSPlatform("windows")]
+    public void UIA_ARenamedGroup_LeavesNoWrapperOnItsOldNode_AndRaisesTheName()
+    {
+        using var hwnd = TestHwnd.Create();
+        using var session = HeadlessSession.Create(800, 600);
+        using var uia = new WindowsAccessibilityBridge(hwnd.Handle, new NoHost());
+        var raised = new List<string>();
+        uia.Raised = r => raised.Add($"{r.Kind} {r.Id} {(r.Element is { } e ? e.Value.ToString() : "root")}");
+        session.Window.InstallAccessibilityBridge(uia);
+        var group = Flex.Column(gap: 2).AccessibleRole(AccessibilityRole.Group).AccessibleName("Left pane, docs").Children(Rows(20));
+        session.Window.SetRoot(Flex.Column(gap: 4).Padding(8).Children(TextB.New("Header"), group));
+        session.PumpFrames(2);
+        session.PumpFrame(TimeSpan.FromMilliseconds(300));
+        var old = WeakGroupNode(uia, group);
+        int trees = session.Window.AccessibilityTreesBuilt;
+        raised.Clear();
+
+        group.AccessibleName = "Left pane, src";
+        session.PumpFrame(TimeSpan.FromMilliseconds(16));
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+        Assert.False(old.IsAlive, "the replaced node is still held");
+        Assert.Equal($"{UiaRaisedKind.Property} {UiaInterop.UIA_NamePropertyId} {group.Id.Value}", Assert.Single(raised));
+        foreach (var wrapper in uia.Wrappers)
+        {
+            // Each wrapper's node is the one in the tree: its parent's child, under the bridge's root.
+            var node = wrapper.Node;
+            if (node.Parent is { } parent) Assert.Contains(node, parent.Children);
+            var top = node;
+            while (top.Parent is { } p) top = p;
+            Assert.Same(uia.RootNode, top);
+        }
+        Assert.Equal("Left pane, src", uia.Wrappers.Single(w => w.ElementId == group.Id).Node.Name);
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    [SupportedOSPlatform("windows")]
+    private static WeakReference WeakGroupNode(WindowsAccessibilityBridge uia, Element e) =>
+        new(uia.Wrappers.Single(w => w.ElementId == e.Id).Node);
 
     /// <summary>A run with the UIA bridge on a hidden window: the events it raises, with what each
     /// node's wrapper answers for the property raised and for its box.</summary>
