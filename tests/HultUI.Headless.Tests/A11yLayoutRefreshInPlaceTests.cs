@@ -124,6 +124,8 @@ public class A11yLayoutRefreshInPlaceTests
         "a node with children named", "a named group renamed", "a named group renamed, its rows changed",
         "named groups renamed, one inside the other", "a named scroll view renamed and scrolled",
         "an overlay's named panel renamed",
+        // A leaf made again that has children now, and a node whose children its name takes.
+        "a button named by its text gets an icon, and loses it",
     };
 
     /// <summary>The scenes whose steps add or remove nodes: a build's diff has them, and the walk tells
@@ -133,7 +135,7 @@ public class A11yLayoutRefreshInPlaceTests
         "items added to a list", "click handler added to a box", "rows added and removed", "rows moved",
         "a row made again", "composite list walk", "composite list wheel", "rows changed under an overlay",
         "composite list selection walk", "composite list told selection", "a named group renamed, its rows changed",
-        "named groups renamed, one inside the other",
+        "named groups renamed, one inside the other", "a button named by its text gets an icon, and loses it",
     ];
 
     public static TheoryData<string, string> FallsBack => new()
@@ -577,6 +579,35 @@ public class A11yLayoutRefreshInPlaceTests
                         view.ScrollOffsetY = 30;
                         label.Content = "a longer label than it was";
                     });
+                });
+            }
+            case "a button named by its text gets an icon, and loses it":
+            {
+                // As Vesper's path button in an archive: named by the text inside it, which it takes for
+                // its name and has no children in the tree, until an icon of its own (a node) comes in and
+                // its text and icon are its children; in a pane renamed with it.
+                var text = TextB.New("docs").FontSize(12f);
+                var button = Button.New(ButtonVariant.Secondary);
+                button.AddChild(text);
+                var group = Flex.Column(gap: 2).AccessibleRole(AccessibilityRole.Group).AccessibleName("Left pane, docs")
+                    .Children(Flex.Row(gap: 4).Children(button, TextB.New("after")), Rows(6));
+                Element Icon() => Canvas.New().Width(Dimension.Px(16)).Height(Dimension.Px(16)).AccessibleName("archive");
+                return With(group, s =>
+                {
+                    s.Step("into the archive", () =>
+                    {
+                        group.AccessibleName = "Left pane, outer.zip";
+                        button.InsertChild(0, Icon());
+                        text.Content = "outer.zip";
+                    });
+                    s.Step("out", () =>
+                    {
+                        group.AccessibleName = "Left pane, docs";
+                        button.RemoveChild(button.Children[0]);
+                        text.Content = "docs";
+                    });
+                    s.Step("in again, no rename", () => button.InsertChild(0, Icon()));
+                    s.Step("out again", () => button.RemoveChild(button.Children[0]));
                 });
             }
             case "an overlay's named panel renamed":

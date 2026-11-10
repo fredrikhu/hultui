@@ -468,7 +468,12 @@ the same order: Detail 1,000 files (2,105 nodes) 453.0 / 542.0 / 675.7 → 322.6
 453.1 / 492.5 / 537.0 → 336.2 / 375.6 / 420.3, Thumbnails 356.7 / 374.4 / 393.1 → 249.9 / 267.6 /
 286.2; at 60 files 8–12 % less. Junction's Commit button, named by its label with a count of what is
 staged and with its icon a node of its own, 2 → 0 trees a stage or unstage of one file (670 → 623 KB
-with the tree). A rename alone walks the tree and builds nothing: 3,005 nodes, 0 KB.
+with the tree). A rename alone walks the tree and builds nothing: 3,005 nodes, 0 KB. A node made
+again is walked as any node is: a leaf that has children now (Vesper's path button in an archive,
+whose icon is a node there, and so is its text) gets them built as a build builds them, and a node
+whose name now takes the text inside it, with no other node under it, loses its children as a diff
+removes them; each failed the walk, which a renamed pane then reached on every descent into an
+archive.
 Where a build would make other nodes than a walk can, it builds the tree, as before: a described
 node or a list's item with children whose own properties changed, a list whose items cross the 2,000
 served on demand, described content in another number, an overlay opened or closed (its own refresh),
