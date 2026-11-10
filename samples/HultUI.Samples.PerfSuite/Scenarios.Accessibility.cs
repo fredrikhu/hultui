@@ -587,6 +587,10 @@ static partial class Scenarios
             "Press Tab among 10 fields that come after 2,000 rows in the tree, with the UIA bridge: the focus moves, no rebuild, in a tree of 6,000 nodes",
             ctx => TabPastRows(ctx, UiaRig.Install(ctx.Window)));
 
+        yield return new Scenario("a11y/rename a pane over 1,000 rows, UIA",
+            "Rename a group named after its folder, as Vesper's pane on a navigation, its 1,000 rows under it, with the UIA bridge: one name event, in a tree of 3,005 nodes",
+            ctx => RenamePane(ctx, UiaRig.Install(ctx.Window)));
+
         yield return new Scenario("a11y/wheel 1,000 rows, UIA",
             "Wheel 3 notches through 1,000 rows with the UIA bridge, each frame 120 ms apart so each rebuilds: bounds over ~130 rows on screen",
             ctx => WheelRows(ctx, UiaRig.Install(ctx.Window)));
@@ -885,6 +889,21 @@ static partial class Scenarios
                     : Array.IndexOf(fields, ctx.Window.Window.FocusedElement) < 0 ? "the focus left the fields"
                     : null;
             },
+        };
+    }
+
+    /// <summary>A group named after its folder, as Vesper's pane is, over 1,000 rows, under a title:
+    /// renamed on each step, nothing else changed. A node with children whose own name changed built the
+    /// whole tree until plan 17 round 10 step 10.</summary>
+    private static Op RenamePane(Ctx ctx, IBridgeRig rig)
+    {
+        var pane = Flex.Column().FlexGrow(1).AccessibleRole(AccessibilityRole.Group).AccessibleName("Left pane, docs")
+            .Children(Text.New("docs").FontSize(13f), ScrollView.New().FlexGrow(1).Children(Ui.Rows(ctx.Rng, 1_000)));
+        ctx.Mount(Flex.Column().FlexGrow(1).Children(Text.New("Files").FontSize(15f), pane));
+        return new Op
+        {
+            Run = step => pane.AccessibleName = $"Left pane, folder {step % 2}",
+            Check = Applied(rig),
         };
     }
 
