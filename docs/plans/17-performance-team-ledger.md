@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 11
-- **Phase:** build — round 11. The survey is done (reports `17-reports/r11-*`, 2026-11-11): experts 2 and 3 satisfied,
+- **Phase:** release — round 11 (full suite green on 06c701d4, 2026-11-12). The survey is done (reports `17-reports/r11-*`, 2026-11-11): experts 2 and 3 satisfied,
   two review objections (the .NET 11 upgrade's AOT lookups, 207fbe25; Meridian's map item rows, 5e93a4fe). Step 0, the
   .NET 11 upgrade, landed (6403f8fe..868e2ffc; not yet on main: it merges with the round). All 14 steps done; the round's full suite next (Windows, Fedora, docfx), then Phase release
   (questions 37–45 answered 2026-11-11). Round
@@ -931,3 +931,8 @@ From 2026-11-09 (round 10's survey); earlier entries are in the archive ([to 202
 - 2026-11-12: round 11 step 14 (no commit): AT-SPI on NativeAOT in WSL Fedora (clang and lld installed, as approved;
   dnf also upgraded glibc and the gcc runtime libraries to match): AOT allocates 3–15 B less a signal than JIT, the
   bridge works, no warnings, no candidate. All build steps done; the full suite runs next.
+- 2026-11-12: round 11 full suite on 06c701d4 (src as after step 14): Windows `dotnet test HultUI.slnx -c Release` 30
+  projects, 0 failures (Core 5,084, Headless 1,559, Junction 1,093 in 9 m, Vesper 931, Meridian 676, Aperture 363,
+  Syntax 121, Reel 51, Fluent 34; UiTests 25 + 100 skipped, gate off); Fedora `wsl-test.sh` 22 projects, 0 failures
+  (Core 5,083 + 1, Headless 1,390 + 83, Vesper 913 + 20); docfx `--warningsAsErrors` 0 warnings, 0 errors. origin/main
+  cc55bdcc is in the branch. Phase → release.
