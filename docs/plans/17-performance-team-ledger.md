@@ -165,7 +165,13 @@ Re-ranked by the next survey.
 
 - **dotnet11-aot-textarea-long-document** (5/4; found by the upgrade step) — the one place .NET 11 got slower: AOT
   `long TextArea document` +13–15 % (3.466 → 3.984 ms min) and `wrapped TextArea resize` +11 % (2.916 → 3.246), both
-  pairs. **Correction (2026-11-11, from the captures' runtime fields):** the "SDK share" is not ILCompiler 11. The main
+  pairs. **Cause found by the survey (r11-5, profiles): .NET 11's NativeAOT no longer devirtualizes the
+  `IAlternateEqualityComparer` calls in `Dictionary.AlternateLookup`**, so the word shape cache's 38,036 lookups a step
+  each pay an interface dispatch and out-of-line `GetHashCode`/`Equals` (AOT micro-probe 15.3 → 26.6 ns a lookup;
+  12.2 ns × 38,036 = 0.46 ms of the row's +0.52 ms). That is the whole regression; the 10.0.15 side below had a
+  separate artefact of its own (`FontItemizer.Extends` self 3.2 → 6.0–6.8 %, gone on 11), which made .NET 11's share
+  look smaller than it is. → closed into r11-5's text-word-cache-own-table. Earlier note, superseded:
+  **Correction (2026-11-11, from the captures' runtime fields):** the "SDK share" is not ILCompiler 11. The main
   comparison's AOT before side ran .NET **10.0.8** (the runtime pack and ILCompiler SDK 10.0.300 brings); the split's
   before side (net10.0 built by SDK 11.0.100) ran **10.0.15**. So the split is 10.0.15 → 11.0.0 (+6 % and +4 %, under
   the bar: long document 3.686 → 3.912 ms, resize 3.079 → 3.212), and the rest, roughly +6 %, came with the .NET 10
