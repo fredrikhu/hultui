@@ -413,13 +413,15 @@ public partial class MeridianApp
     // The map is a virtual list of its lines: only the rows on screen are elements. As a scroll view
     // over a column of every row and heading, a hover move hit-tested every row (618 elements at 600
     // endpoints, 2,046 at 2,000), every drawn frame culled them, a click's build patched them, and the
-    // map's elements took 2.5 MB of the heap at 600 endpoints. The rows show their line and whether
-    // it is selected, and nothing else (RenderWith((line, selected) => …)), so the list keeps a
-    // realized row while the line at its place is equal: a line holds its endpoint, a record that is
-    // equal when every fact the row shows and the detail a click selects is. A click moves the
-    // selection, which only the list and the detail beside it show, so it tells the list through
-    // its ref and the detail builds alone (SelectEndpoint, PlaceMapDetail); the list makes the two
-    // rows it moves between. The click captures the
+    // map's elements took 2.5 MB of the heap at 600 endpoints. The rows show their line and nothing
+    // else (RenderWith((line, _) => …)), so the list keeps a realized row while the line at its place
+    // is equal: a line holds its endpoint, a record that is equal when every fact the row shows and
+    // the detail a click selects is. The list draws the selection (the Raised fill and the 2 px top
+    // accent the selected row drew, MapSelection) and the hover tint under the other rows, so the
+    // rows are made unselected and never need to know. A click moves the selection, which only the
+    // list and the detail beside it show, so it tells the list through its ref and the detail builds
+    // alone (SelectEndpoint, PlaceMapDetail); the list makes no row, it draws the highlight
+    // elsewhere. It made the two rows the selection moved between. The click captures the
     // row's endpoint, so a kept row selects what a row made now would. The lines (the order, the
     // headings, the keys, the counts) are worked out once a map: a map is never changed, a send or
     // an import makes a new one. The rows are as tall as they were in the column, and the column's
@@ -434,6 +436,20 @@ public partial class MeridianApp
     private Action<MapLine>? _mapActivate;
     private int _mapListBuild = -1;
 
+    /// <summary>The selected row's accent: 2 px on the top edge. Before MapSelection, which reads it
+    /// (static fields are set in the order they are written).</summary>
+    private static readonly Thickness MapAccent = new(2, 0, 0, 0);
+
+    /// <summary>The selected row as the list draws it: what EndpointRow drew on a selected row, the
+    /// Raised fill at its corners and a 2 px accent on its top edge (the row keeps a transparent
+    /// border of that width, so its contents stay where they were).</summary>
+    private static readonly RowHighlight MapSelection =
+        new(Azimuth.Raised, new CornerRadius(Azimuth.Radius1), Azimuth.Accent) { BorderThickness = MapAccent };
+
+    /// <summary>The rows the list tints under the pointer: an endpoint's, as each tinted itself; a
+    /// heading took no tint.</summary>
+    private static readonly Func<MapLine, int, bool> MapRowTakesHover = static (line, _) => line.Endpoint is not null;
+
     /// <summary>A map's lines in the order the map shows them: each declared group's heading and
     /// rows, then the observed endpoints under their own heading, each with the key its row has.</summary>
     private sealed record MapLines(ApiMap Map, MapLine[] Lines, int Declared, int Observed);
@@ -446,8 +462,8 @@ public partial class MeridianApp
 
     private const string ObservedHeading = "OBSERVED — NOT IN SPEC";
 
-    /// <summary>Endpoint rows the map has made so far, for tests: a click makes the two it moves
-    /// between, however long the map, and a list makes the rows on screen.</summary>
+    /// <summary>Endpoint rows the map has made so far, for tests: a click makes none, however long
+    /// the map, and a list makes the rows on screen.</summary>
     internal int EndpointRowsMade { get; private set; }
 
     /// <summary>Has the list on screen make every row again, so the next frame makes them all: for
@@ -588,10 +604,14 @@ public partial class MeridianApp
         var list = VirtualListElement<MapLine>.New()
             .Items(lines.Lines)
             .RowHeights(_mapLineHeight ??= (line, _) => MapLineHeight(line))
-            .RenderWith(_mapRow ??= (line, selected) => MapRow(line, selected))
+            .RenderWith(_mapRow ??= (line, _) => MapRow(line))
             // One delegate from build to build, reading only its line, so the list keeps each label.
             .AccessibleItemLabel(_mapLineLabel ??= static line => line.Endpoint is { } e ? EndpointName(e) : line.Heading)
             .OnActivateItem(_mapActivate ??= line => { if (line.Endpoint is { } e) SelectEndpoint(e); })
+            // The list draws the selection and the hover tint, so a click makes no row. Its items are
+            // what a reader reads (the rows are not composite), and they say which one is selected.
+            .SelectionHighlight(MapSelection)
+            .HoverHighlight(Azimuth.Raised, Azimuth.Radius1, rows: MapRowTakesHover)
             .SelectedIndex(SelectedLine(lines, _mapSelection));
         // The box's height, as the scroll view took it by shrinking to it: a list holds no
         // children to measure until its rows are realized.
@@ -604,14 +624,14 @@ public partial class MeridianApp
     }
 
     /// <summary>A line of the map as the list makes it: a group heading, the observed heading, or an
-    /// endpoint's row, with the line's margins.</summary>
-    private Element MapRow(MapLine line, bool selected)
+    /// endpoint's row, with the line's margins. The list draws the selection (MapSelection).</summary>
+    private Element MapRow(MapLine line)
     {
         Element row;
         if (line.Endpoint is { } endpoint)
         {
             EndpointRowsMade++;
-            row = EndpointRow(endpoint, selected);
+            row = EndpointRow(endpoint);
         }
         else if (line.Observed)
             row = Ui.Mono(line.Heading!, 10f, Azimuth.StatusWarn).FlexShrink(0).AutomationId("disc-observed-header");
@@ -638,8 +658,9 @@ public partial class MeridianApp
     /// <summary>A map row. Confidence is a chip treatment, not just a section:
     /// declared endpoints get the solid method tint, observed ones a hollow
     /// dashed-reading chip and an italic-equivalent muted path plus their
-    /// evidence ("seen 4× · 200").</summary>
-    private Element EndpointRow(Endpoint endpoint, bool selected)
+    /// evidence ("seen 4× · 200"). The selected look (the Raised fill, a 2 px accent on the top edge)
+    /// and the hover tint are the list's to draw (MapSelection, MapRowTakesHover), under the row.</summary>
+    private Element EndpointRow(Endpoint endpoint)
     {
         bool observed = endpoint.Confidence == Confidence.Observed;
 
@@ -647,15 +668,13 @@ public partial class MeridianApp
             .AlignItems(AlignItems.Center)
             .Padding(new Thickness(0, Azimuth.S2, 0, Azimuth.S2))
             .CornerRadius(Azimuth.Radius1)
-            .BorderColor(selected ? Azimuth.Accent : Color.Transparent)
-            .BorderWidth(new Thickness(2, 0, 0, 0))
+            // Transparent: the room for the selection's accent, which the list draws.
+            .BorderColor(Color.Transparent)
+            .BorderWidth(MapAccent)
             .Cursor(CursorType.Pointer)
             .AccessibleRole(AccessibilityRole.Button)
             .AccessibleName(EndpointName(endpoint))
-            // One of a set the user picks from, as a tab is: a reader says which row the detail shows.
-            .AccessibleSelected(selected)
             .AutomationId("ep-" + endpoint.Method + endpoint.Path.Replace('/', '-').Replace("{", "").Replace("}", ""));
-        if (selected) row.Background(Azimuth.Raised);
 
         var color = Azimuth.MethodColor(endpoint.Method);
         var chip = Box.New()
@@ -676,7 +695,6 @@ public partial class MeridianApp
             row.AddChild(Ui.Mono(evidence, 9.5f, Azimuth.TextFaint).FlexShrink(0));
 
         row.OnClick(_ => SelectEndpoint(endpoint));
-        if (!selected) row.HoverBg(Azimuth.Raised, Color.Transparent);
         return row;
     }
 

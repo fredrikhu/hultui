@@ -1539,6 +1539,10 @@ list.SelectionHighlight(new RowHighlight(fill, new CornerRadius(3), accent)
 });
 ```
 
+Meridian's endpoint map draws its selected row this way (its rows keep a transparent 2 px top
+border) and its hover tint with `.HoverHighlight(…, rows:)`, headings left out: a click makes no
+row (2 → 0) and allocates 13.6 KB instead of 22.1 at 600 endpoints, with the same pixels.
+
 It fits only a selection that
 is a background. A row that shows its selection any other way cannot show it any more: a bolder
 label or an icon's colour. Such a list keeps the selection in its rows. Assistive technology
