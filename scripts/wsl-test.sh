@@ -63,7 +63,15 @@ if [ $# -gt 0 ] && [[ $1 != -* ]]; then target=$1; shift; fi
 # where the archive's contents should be. A Fedora user's shell has bin first.
 export PATH=/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin
 
+# The runtime the tests' apphosts (an app the tests start, testhost) load is the one beside the
+# dotnet on PATH, not the system's. Without DOTNET_ROOT an apphost reads
+# /etc/dotnet/install_location, which on Fedora names Fedora's own packaged .NET; a newer SDK
+# installed beside it (/usr/local/share/dotnet, linked as /usr/local/bin/dotnet) then builds
+# for a runtime that root does not have.
+DOTNET_ROOT=$(dirname "$(readlink -f "$(command -v dotnet)")")
+export DOTNET_ROOT
+
 . /etc/os-release
-echo "Testing $(git log --oneline -1) ($ref) on $PRETTY_NAME, .NET $(dotnet --version)"
+echo "Testing $(git log --oneline -1) ($ref) on $PRETTY_NAME, .NET $(dotnet --version) from $DOTNET_ROOT"
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 exec dotnet test "$target" -c Release "$@"
