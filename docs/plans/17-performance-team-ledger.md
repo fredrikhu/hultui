@@ -5,27 +5,27 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 11
-- **Phase:** survey — round 11. Its first step, the **.NET 11 upgrade**, landed on the branch 2026-11-11
-  (6403f8fe..868e2ffc; Landed, round 11; not yet on main: it merges with the round). The survey profiles .NET 11 /
-  SDK 11.0.100. Round 10 released: merged into main as cc55bdcc; CI run 42924747474 green; app releases
-  junction-v1.25.0, vesper-v1.25.0, meridian-v1.8.0, aperture-v1.23.0, reel-v1.9.0. Round 11's survey first archives
-  round 9's Landed rows, round 10's build order and answered questions 10 and 26–36, and round 9's log entries
-  (2026-11-08 to its release on 2026-11-09), then spawns the eight experts. To resume in a fresh context, run in this worktree: `/loop Run the next step
-  of the performance team: follow docs/plans/17-performance-team.md, with state in
+- **Phase:** build — round 11. The survey is done (reports `17-reports/r11-*`, 2026-11-11): experts 2 and 3 satisfied,
+  two review objections (the .NET 11 upgrade's AOT lookups, 207fbe25; Meridian's map item rows, 5e93a4fe). Step 0, the
+  .NET 11 upgrade, landed (6403f8fe..868e2ffc; not yet on main: it merges with the round). Next: **step 1**
+  (text-word-cache-own-table). Questions 37–45 are open: steps 2, 6, 7 and 10 wait for 38–41; the rest goes ahead. Round
+  10 released: merged into main as cc55bdcc; CI run 42924747474 green. To resume in a fresh context, run in this
+  worktree: `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md, with state in
   docs/plans/17-performance-team-ledger.md. Read both once per session (afterwards only the ledger's Phase and the part
   the step needs), do the step the ledger's Phase calls for, record it in the ledger, and commit.` Before resuming,
-  `git fetch` and merge main if it moved. The common survey brief from round 10 is reusable: session 3484c586's
-  scratchpad `brief-r10-survey.md` (see Probe code); build steps use `scripts/perf/step-ab.ps1`. Answered 2026-11-11:
-  26 yes and 10 yes (now Waiting **syntax-merged-theme** and **tokenize-diff-public**, for round 11's build order), 33
-  keep. Open for the user, not blocking: the live screen-reader check of menus. Older rounds are in [the
-  archive](17-performance-team-ledger-archive.md) (search it, don't read it whole). History note: rewritten 2026-10-25
-  (every commit after 3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history).
+  `git fetch` and merge main if it moved. The common survey brief for round 11 is in session ec6d577c's scratchpad
+  `brief-r11-survey.md` (see Probe code); build steps use `scripts/perf/step-ab.ps1`. Open for the user, not blocking:
+  the live screen-reader check of menus. Older rounds are in [the archive](17-performance-team-ledger-archive.md)
+  (search it, don't read it whole). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a
+  pre-push hook refuses pushes built on the old history).
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`)
 - **Review commits since:** round 11's survey reviews round 10's build and the .NET 11 upgrade, f4d6050d..868e2ffc
   (the last survey report to the upgrade's captures; round 10's merge into main cc55bdcc is in the range). Earlier: round 10's survey reviewed round 9's build, 4919ac40..facced69 (the last survey report
   to the round 9 release; 82 commits, 81 not merges; no merge from main this round). Round 9's survey reviewed
   eaa1ec29..10acc8c0 (round 8's build, with main's merge 3a15b5b1); round 8's survey reviewed 17d4220a..df45b4a2.
-- **Probe code:** round 10 surveys in session 3484c586's scratchpad
+- **Probe code:** round 11 surveys (and the upgrade's harness `r11u\`) in session ec6d577c's scratchpad
+  `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\ec6d577c-f9ba-4479-acbd-908e67c0ea0a\scratchpad\r11-<area>\`
+  (the common brief `brief-r11-survey.md` beside them); round 10 surveys in session 3484c586's scratchpad
   `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\3484c586-c631-4af0-957d-95e7a03cac41\scratchpad\r10-<area>\`
   (the common brief `brief-r10-survey.md` beside them); round 9's build-step probes `r9b<N>\` in session c484f5ac's
   scratchpad `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\c484f5ac-8f22-48dd-b669-13c24b1e7889\scratchpad\`;
@@ -62,14 +62,14 @@ memory `release-tagging` (≤3 tags per push).
 
 | Expert | Round | Satisfied | Review objections |
 |---|---|---|---|
-| 1. Layout | 10 | no | none (214 shared suite rows: no layout counter rose; app walks equal to round 9 apart from the landed drops; ff6125a6 at most 2 settles a step, 0 B). New: the wheel latch keeps a removed view alive → step 3 |
-| 2. SkiaSharp: painting | 10 | no | none (every paint counter on 214 shared rows within 5 % of round 9; the line cull skips 1,836 lines a step unread; faded images and Sync rows 0 layers) |
-| 3. GL and Vulkan | 10 | yes | none (steady 0 B and idle 0 wakes on GL, Vulkan 8-bit and F16, JIT and AOT; held resize with a post 1 frame a second; hidden page −15…−34 % GPU; 29 guarded windows at 1.5× on the 4K, 0 foreground takes, no new `nvlddmkm`) |
-| 4. .NET runtime | 10 | no | **c940c643**: Meridian's kept tree rows keep the whole Requests view alive behind every other view (1,350 KB of 5,770 at 200 requests) → step 2. Suite 0 rows rose JIT or AOT; steady 0 B; idle unchanged |
-| 5. Text pipeline | 10 | no | none (48,000-layout hash 7A18AF8DE8E05271 and both 240,000-layout corpora unchanged; 43 text rows flat or lower) |
-| 6. Reactivity and reconcile | 10 | no | none (c940c643 flat with collection size; 25a96234 amortized O(1); reader-focus commits add no build) |
-| 7. Accessibility bridges | 10 | no | **cb1df8c0 with ea42f45b**: Meridian's map rows are Buttons, so a selected-state change builds the whole tree with a reader (974 KB a click at 2,000 endpoints, ×8.1 the bridge-off cost) → step 1. Audit 0 STALE in 3,374, 0 WALK-VALUE/EVENT, fallbacks 126 → 82 |
-| 8. App workloads | 10 | no | none (Junction diff find Enter +1.0 % bisected: bimodal noise). Round 9 helped the apps: 65 walks geometric mean 0.852, sum 20,186 → 11,239 KB a key (−44 %); Discovery click −97 %, Environments typing −99.4 %, 89k body typing −24 %, Aperture resize −49 %; Junction flat (no Junction commit) |
+| 1. Layout | 11 | no | none (221 shared suite rows: no layout counter moved ≥ 3 % on .NET 11; app walks equal to round 10, KB −0.1…−1.1; `DOTNET_TieredCompilation=0` adds nothing). New: scroll columns measured once per forced height → step 4 |
+| 2. SkiaSharp: painting | 11 | yes | none (paint counters within 5 % on 221 rows; 102 rows render 0 B on JIT, TC=0 and AOT; every paint-side key shape 0 B a call after 1.2 M warm-up calls; the two slower AOT TextArea rows draw exactly what they drew on .NET 10) |
+| 3. GL and Vulkan | 11 | yes | none (steady 0.0 B and idle 0 wakes on GL, Vulkan 8-bit and F16, JIT ± PGO and AOT; JIT drag frames −96 B on .NET 11; held resize with a post 1 frame a second; hidden page −17 % GL / −32 % Vulkan GPU; 30 guarded launches + 14 UiTests windows on the 1440p at 100 %, 0 foreground takes). One F16 held-drag stall → question 37 |
+| 4. .NET runtime | 11 | no | **207fbe25** (the upgrade, AOT): ILCompiler 11 no longer devirtualizes `IAlternateEqualityComparer` in `Dictionary.AlternateLookup` (2 interface dispatches a lookup; reproduced outside HultUI) → step 1. JIT app walks net10 = net11 (56 walks, 0 rose, geomean 0.983); no other nullable-struct `HashCode` or boxing pattern on a hot path |
+| 5. Text pipeline | 11 | no | none (48,000-layout hash 7A18AF8DE8E05271 and both 240,000-layout corpora F09E9038726E4BD6 unchanged on .NET 11; 92 text rows at or below round 10, TC=0 too). Found the AOT regression's cause → step 1 |
+| 6. Reactivity and reconcile | 11 | no | none (only b2fdcf52 in the area; generators 0 warnings on SDK 11 and 0 B a read/write for 18 types on .NET 11 and 10; suite component/a11y/input rows 0 up) |
+| 7. Accessibility bridges | 11 | no | **5e93a4fe** with `KeepUnchangedRows`: an item whose label changes off screen is never told (Meridian "seen 1×" stale 90 of 90 frames) → step 2. Audit 1 STALE in 3,549 (that item), 0 WALK-VALUE/EVENT, fallbacks 10; UIA identical on .NET 10/11 (JIT, TC=0, AOT); AT-SPI ±10 B a signal |
+| 8. App workloads | 11 | no | none (Vesper +1.5…+7.9 % between rounds is the machine: the same binary reproduces it across days; same day all equal). Round 10 helped the apps: 69 walks geometric mean 0.674, KB a key sum 1,919,189 → 38,495 (−98 %; Runner −98.6 %, Sync 2,568.6 → 0.5, response drag −90.9 %, map click −71 %). Render 90 % of headless UI cycles (median) |
 
 ## Queued candidates
 
@@ -78,6 +78,95 @@ Rounds 1–10's build orders all landed but round 6's step 8 and round 10's step
 build order comes from its survey (the .NET 11 upgrade went first, as step 0: Landed).
 A build step may bundle one expert's related small candidates as separate commits. Items marked **(user)** wait for a
 decision in Needs the user; the rest of their step goes ahead.
+
+### Round 11 build order
+
+Ranked by expected win over cost: the review objections first, then the tests CI needs before the release, then
+scaling and retention, then app wins, then the approved non-perf steps. Each step names the report lines its brief
+quotes (`r11-k` = `17-reports/r11-k-<area>.md`).
+
+1. **AOT text lookups** (5, with 4; r11-5 Candidates 1–3, r11-4 Review and Candidate 1; closes Waiting
+   dotnet11-aot-textarea-long-document) — the objection to 207fbe25: ILCompiler 11.0.0 no longer devirtualizes
+   `IAlternateEqualityComparer` in `Dictionary.AlternateLookup.FindValue`, so the word shape cache (MeasurementCache.cs
+   :50–72, :191) makes 2 `RhpInterfaceDispatch` calls and out-of-line `GetHashCode`/`Equals` a lookup (AOT
+   micro-probe 15.3 → 26.6 ns; 38,036 lookups a step × 12.2 ns = 0.46 ms of `text/open a long document`'s +0.52 ms;
+   sample share of the lookup cluster 12.2 → 20.0 %). (a) **text-word-cache-own-table**: its own chained table with an
+   index-linked LRU, LruCache's rules kept (8,192 entries, 4 MB bound, half the bound per entry, least recently used out,
+   Put replaces): prototype `r11-text\proto-words-only.patch` open −27 %, resize −23 %, rich text/wrap/ellipsis/labels
+   −6…−17 %, 42 rows none slower; ~124 → 52 B bookkeeping a word. The width cache the same way only if it costs nothing
+   extra (595 lookups a step, ~7 µs). (b) **text-itemize-extends-below-marks**: `FontItemizer.Extends` (FontItemizer.cs
+   :165, or before the call at :85) returns false below U+0300 without `GetUnicodeCategory` (13.9 % of the line walk;
+   identical results, test over U+0000–U+02FF): open −7 %. (c) **text-itemize-primary-glyph-per-char**, measure first:
+   `primaryFont.HasGlyph` per character in Itemize is 8.5 % of the walk after (a)+(b); keep only if it clears a bar.
+   Corpora 48k/240k unchanged; tests for eviction order, weight bound, re-put, span equals string, growth, slot reuse;
+   `step-ab.ps1 -Runtime Jit,Aot`. Medium-small, no API.
+2. **a11y-item-rows-offscreen-label** (7; r11-7 Review and Candidate) **(user, question 38)** — the objection to
+   5e93a4fe: in `VirtualListElement.KeepUnchangedRows`, an item whose label a reader was given and that no longer equals
+   the item at its index asks the frame's in-place walk. Meridian, an observed endpoint seen again off screen: stale
+   frames 90 → 0 (1 in-place walk, 0 trees); on screen unchanged; audit STALE 1 → 0, walks +6/+46/0, 0 mismatches; 0 B
+   without a reader. Prototype `r11-a11y\apply-proto2.py` (6 lines); run Junction's audit too (19 lists use
+   `RenderWith`). Small, no API.
+3. **Tests that fail by clock or order** (4 with 3 and 8; each its own commit; r11-4 Waiting
+   meridian-stalled-timeout-early, r11-3 Waiting uitests-liveresize-order and uitests-workareas-before-dpi-aware, r11-8
+   Waiting meridian-history-test-midnight) — needed before the release (2-core CI). (a) HttpEngineTests.cs:207 allows one
+   clock-interrupt step: `>= 400 ms − 17 ms`, with the reason (TimerQueue counts on the interrupt clock, 15.625 ms steps;
+   the 388/399 ms failures; .NET 10 failed the same way). (b) `GpuImageSourceGLTests` (GpuImageSourceGLTests.cs:28–30)
+   lets its image go (`image.Source = null` in a `finally`), and the two LiveResizeFrameTests assert
+   `!GpuFrameSink.MaySignalOnlyByPosting` first (5/7 → 7/7 in one run); the four early `WorkAreas()` reads set the thread
+   per-monitor aware first (WindowPlacementTests.cs:29, :52, WindowStateActivationTests.cs:65,
+   CustomFrameSystemMenuTests.cs:47). (c) Meridian's History reads `_app.Time.GetLocalNow()` (11 `DateTimeOffset.Now`
+   sites in MeridianApp.History.cs) and its tests set noon (HistoryTests :356–384, :411, :468, :547, :601; PartTests:42;
+   ReaderFocusTests:122). Small.
+4. **layout-scroll-forced-height-measure** (1; r11-1 Candidate; the measure half of Waiting
+   virtuallist-selection-relayout) — a column with `OverflowY == Scroll` measured at a forced height takes its unforced
+   measurement at the same width with the height applied (`LayoutEngine.MeasureSize`, ~10 lines; not grids, percentage
+   or min/max heights, aspect ratios), so the 4-slot `MeasureCache` stops thrashing (the map list sees 4 widths × 4 forced
+   heights a click). MeasureSize a map click 869 → 245 (60 endpoints), 941 → 257 (600), 943.9 → 259.9 (2,000); rows
+   flex-measured 912 → 152; Junction commit Down 85.5 → 17.3, branches 97.5 → 46.3, files search 518.8 → 261.8; Vesper
+   same-names 141.3 → 81.4; ~60 suite rows fewer, ~10 rise by 1–2; 0 B; pixel and geometry hashes identical; Core 5,078
+   and Headless 1,553 pass. The layout-change audit across all suites (with Waiting layout-audit-padding-border's padding
+   and border compare and layout-virtuallist-spacer-stale's spacer check), a count test, the sideways mirror case
+   checked. Prototype `r11-layout\proto-scroll-forced-height.cs.txt`. Time by step-ab (the map click was JIT +14 % after
+   round 10 step 11). Small, no API.
+5. **apps-refs-hold-last-view-rest** (4; r11-4 Candidate 2; closes Waiting apps-refs-hold-last-view (unmeasured
+   holders)) — Aperture `_cursorCard` (ApertureApp.Cursor.cs:40/212): Library 600 → Settings −265 KB (−6.0 %), Home
+   5×20 → Settings −264 KB (−6.6 %); Meridian `_historyListRef` with `_historyFieldRef` and `_historyArchiveRef` (all
+   three, or 0 is freed): History → Requests −289 KB (−6.1 %) at 200 sends, −238 KB (−4.7 %) at 2,000; Vesper
+   `_thumbVListL/R` (keep the height as a float): −274 KB (−4.3 %) at 400 files. Weak-reference tests; each app its own
+   commit. Small, app.
+6. **apps-meridian-body-formatted-again** (8 with 6, 4 for retention; r11-8 Candidate) **(user, question 39)** — keep
+   the last few finished response views by (tab, response, mode) instead of one job slot (`_respJob`,
+   MeridianApp.Response.cs:461–505). Switch back to an HTML tab 51,016 KB on all threads (316 on the UI thread) →
+   ~200–316; XML 10,864, JSON 6,252 → the same; pretty HTML toggle 52,125 KB; GCs over 20 switches 35/8/2 → ~0; Part
+   builds 3 → 1. Kept views 0.4–1.3 MB each (pretty HTML 1,265 KB), bounded LRU (4 suggested). Small–medium, app.
+7. **reactivity-meridian-map-list-draws-selection** (6; r11-6 Candidate; the app half of virtuallist-selection-relayout)
+   **(user, question 40)** — the map list draws its selection (`.SelectionHighlight(Azimuth.Raised, Azimuth.Radius1)`,
+   MeridianApp.Discovery.cs:598; hover to `.HoverHighlight`): KB a click 30.8 → 22.2 at 600 endpoints (−28 %), 26.4 →
+   19.6 at 60, probe-free −37 %; rows made 2 → 0, layout visits 70.2 → 20.3. After step 4; measure the two together.
+   Small, app (+ a public per-side `RowHighlight` border under 40 (c)).
+8. **syntax-merged-theme** (5; approved, question 26) — r11-5's scope: SyntaxHighlighter.cs only (a merged raw theme,
+   the include chain flattened, included rules before main rules, GUI colours main over included; an options wrapper in
+   `EnsureRegistry` :356; `RootedOptions`/`RootedTheme` :541–617 wrap it), ~50–80 lines; only Dark+ and Light+ change;
+   ThemeColourTests +3 (Dark+ JSON key #9CDCFE, `this` #569CD6, a Light+ case); no golden changes; round 9's VS Code
+   corpus (`r9b14b\probe`) differences should fall to the explained lines; before/after images with step 14b's harness;
+   step-ab on the theme load and a key. Small–medium.
+9. **tokenize-diff-public** (5; approved, question 10) — r11-5's scope: `TokenizeDiff` (:205), `LineRange` (:14),
+   `TokenizedDiff` (:18) public; `TimeProvider? clock = null`; `LineRange` documented 1-based with both ends included and
+   validated (rising, non-overlapping, First ≥ 1); arrays null for a side with no text or nothing shown; keep
+   `LinesWalked`; drop `<InternalsVisibleTo Include="Junction" />`; reflection and validation tests; a docs section
+   (THEMES.md); docfx 0 warnings. Small.
+10. **ondafterbuild-markdirty-dropped** (6; r11-6 Waiting) **(user, question 41)** — under (a): REACTIVITY.md's
+    lifecycle table says a MarkDirty or a write to a signal the build read, from `OnBeforeBuild`, `Build` or
+    `OnAfterBuild`, is dropped (use `RequestPostFrameCallback` or `InvokeOnMainThread`); delete Vesper's dead
+    `RestorePaneScroll` retry (CommanderApp.cs:305, dead since 00b8fc79). Never honour a MarkDirty during `Build`
+    (Junction's find bar relies on the drop: 0.95 drops a key on Changes). Small.
+11. **suite-document-switch** (8; r11-8 Waiting Suite scenarios) — a suite row for a list cursor that swaps a document
+    whose text arrives later (Junction Files Down: 86.2 KB a key, 1.23 builds, 149.1 measure misses, 60.8 layout
+    visits), with a twin that builds once. Small, tooling.
+12. **findbar-count-after-bind** (6; r11-6 Needs the user; **question 45**) — check first: Meridian builds
+    `_responseFind.Build()` before the body binds the search (Response.cs:384) and Junction before `BindDiffSearch`
+    (Diff.cs:76), and the re-run's "changed" is dropped, so an open bar may show the old "n of m" after a pretty/raw
+    switch or a new file. If it reproduces, fix it in FindBar (read the count after the bind). Small, not perf.
 
 ### Waiting
 
@@ -102,23 +191,10 @@ Re-ranked by the next survey.
   (Scrollbar.cs:161 track click, :190 thumb drag) and Brief makes columns only on one (CommanderApp.Views.cs:586): 400
   files, a track click to offset 2,197 shows 4 of 4 columns blank, a thumb drag 7 of 8 moves with a blank column, 0
   builds (r10-1).
-- **uitests-workareas-before-dpi-aware** (tests, small; found running f9bceb6d's checks) — the placement UiTests read
-  `WorkAreas()` before SDL makes the process per-monitor aware, so the first Borderless pass sees the 4K at 96 dpi
-  (2560×1392 at 0,0); and every UiTests window is made on the 96 dpi monitor first (`scale=1` at creation), so the
-  high-dpi cases are brief moves. Set the test thread per-monitor aware first (`SetThreadDpiAwarenessContext(-4)`, as
-  the scratch check `r9-4k\ZzR9FourKVisibleTests.cs` did). Round 10: still true; a third file reads it early
-  (CustomFrameSystemMenuTests.cs:47, b44b4db5); do it with the next UiTests change.
 - **findbar-countonscreen-foreach** (4, nit) — `CountOnScreen` loops `foreach` over `bar.Children` (32 B on AOT, 0.4 %
   of an 8 KB Enter); fix when FindBar is next touched.
 - **terminal-noop-scrollback-wheel** + **terminal-row-strings-by-content** (2/Terminal, low) — a no-op notch draws a
   whole terminal frame (5,440–5,682 glyphs); 10,276 B a streamed line. Only the terminal sample uses HultUI.Terminal.
-- **layout-ordered-children** (1, low) — suite rows only (wheel over 5,000 rows 4,954 hit visits); apps at most 33.5 hit
-  visits a move and 13 culls a frame. Round 10: Meridian's map is the first app case (618 hit visits a move, 579 culls
-  a frame at 600 endpoints); step 11's VirtualList fixes more, so still not a framework change.
-- **Suite scenarios** (8): document-switch (Junction Files 86.2 KB a key, 1.23 builds a key — the file's text lands
-  and builds again — 149.1 measure misses a key, render 78 % of cycles). Round 10 adds two patterns, each with a
-  kept-rows twin: a cursor key over a plain 200-row list rebuilt through the root (with step 7) and one row a frame
-  appended to a 200-row list rebuilt through the root (with step 4).
 - **textarea-chunked-document** (5/4; the user chose option B on 2026-10-25) — parked: Meridian's 89k body typing is
   ~238–241 KB/key, most of it the TextArea's new string; the user's 256k-character condition is unmet.
 - **a11y-served-items-followups** — a live Orca check only (no desktop Orca here; optional).
@@ -138,8 +214,6 @@ Re-ranked by the next survey.
   min-width wraps only after a send (760×540: "Headers 6" wraps, Send's keycap and the response bar's end cut off;
   shots `r10-apps\drv\shots\min760*.png`).
 
-- **apps-refs-hold-last-view (unmeasured holders)** (4; found in round 10 step 2) — Aperture `_cursorCard`, Vesper
-  `_thumbVListL/R` (the next build reads its height), Meridian `_historyListRef`: measure at the next survey.
 
 - **aperture-cursor-guard-textarea** (6, low; found in round 10 step 5) — Aperture's cursor-key guard tests only
   `TextInputElement`, not `TextArea`; no harm seen in the issue reply. Check with the next Aperture keyboard change.
@@ -147,72 +221,54 @@ Re-ranked by the next survey.
 - **a11y-label-under-named-button** (7, lead; found in round 10 step 10) — a label under a name-from-content button,
   changed with no structure change, still builds a tree through the leaf patch (`NamedFromContentAbove`); it could fall
   back to the walk now that a renamed node with children walks in place. Measure at the next survey.
+  Round 11 (r11-7): measured, 60 rows 16.74 → 0.08 KB a change, 1,000 rows 264.9 → 0.08 (trees 1 → 0, reader events
+  identical); no app pays it (Vesper's 432 such changes all land in frames that walk anyway, 0 refused). Prototype
+  `r11-a11y\apply-proto.py` ready (it fails the 4 `A11yLeafPatchTests` that pin the rebuild); build it when an app
+  has a button whose label changes alone.
 
-- **virtuallist-selection-relayout** (1/6, framework; found in round 10 step 11) — a selection move in an item-row
-  `VirtualList` lays out every realized row again (869 measure calls against 113 for the old column at 60 endpoints): a
-  JIT click in Meridian's map +14 % at 60 endpoints (AOT within 1.5 %). Measure at the next survey.
 
 - **syntax-shared-registry-rest** (5; found in round 10 step 12) — Typst (`.typ`/`.typc` reach 57 grammars), Julia
   (9.2 MB), PHP, Razor (`.cshtml`) and HTML files still use the shared registry with a fixed set of grammars. Measure at
   the next survey if an app opens them.
+  Round 11 (r11-5), first file in its own process, KB kept: `.typ`/`.typc` +42,419 (57 grammars, 117,238
+  allocated; the largest single retention now, ×1.4 Markdown's before step 12), `.jl` +9,183, `.php` +4,449,
+  `.cshtml` +4,567, `.html` +3,078. Typst is worth step 12's fence-scan route if the apps meet it → question 42;
+  the rest stay parked.
 - **junction-chromeparttests-load** (tests; round 10 step 12) — two `ChromePartTests` failed once in a full run while a
   four-way corpus scan loaded the machine; passed alone and on a quiet machine. Their build counts are load-sensitive:
   watch at the full suite and in CI.
 
-- **ondafterbuild-markdirty-dropped** (6, framework; found in round 10 step 15) — `MarkDirty` called from
-  `OnAfterBuild` is silently dropped, so Vesper's `RestorePaneScroll` retry never runs (Detail and Thumbnails restore on
-  the first build, so harmless today). A trap for app authors: document or make it work; measure at the next survey.
 
-- **dotnet11-aot-textarea-long-document** (5/4; found by the upgrade step) — the one place .NET 11 got slower: AOT
-  `long TextArea document` +13–15 % (3.466 → 3.984 ms min) and `wrapped TextArea resize` +11 % (2.916 → 3.246), both
-  pairs. **Cause found by the survey (r11-5, profiles): .NET 11's NativeAOT no longer devirtualizes the
-  `IAlternateEqualityComparer` calls in `Dictionary.AlternateLookup`**, so the word shape cache's 38,036 lookups a step
-  each pay an interface dispatch and out-of-line `GetHashCode`/`Equals` (AOT micro-probe 15.3 → 26.6 ns a lookup;
-  12.2 ns × 38,036 = 0.46 ms of the row's +0.52 ms). That is the whole regression; the 10.0.15 side below had a
-  separate artefact of its own (`FontItemizer.Extends` self 3.2 → 6.0–6.8 %, gone on 11), which made .NET 11's share
-  look smaller than it is. → closed into r11-5's text-word-cache-own-table. Earlier note, superseded:
-  **Correction (2026-11-11, from the captures' runtime fields):** the "SDK share" is not ILCompiler 11. The main
-  comparison's AOT before side ran .NET **10.0.8** (the runtime pack and ILCompiler SDK 10.0.300 brings); the split's
-  before side (net10.0 built by SDK 11.0.100) ran **10.0.15**. So the split is 10.0.15 → 11.0.0 (+6 % and +4 %, under
-  the bar: long document 3.686 → 3.912 ms, resize 3.079 → 3.212), and the rest, roughly +6 %, came with the .NET 10
-  servicing update 10.0.8 → 10.0.15 that any .NET 10 app gets (inferred across two sessions' runs, not alternated in
-  one; confirm with one alternated AOT pair, 10.0.8 against 10.0.15). JIT 0 slower (its before side ran 10.0.14). The
-  survey's experts 5 and 4 profile the AOT path (codegen of the line walk, inlining).
-  Captures `samples/HultUI.Samples.PerfSuite/captures/2026-11-11-c99e23bf-dotnet11-aot-{before,after}.json`; split
-  runs in this session's scratchpad `r11u\ab-split\`.
-- **meridian-stalled-timeout-early** (tests; found by the upgrade step) — `HttpEngineTests.AStalledServerIsATimeoutThat
-  SaysItConnected` failed in both Windows full runs on .NET 11: the timeout fired at 388 and 399 ms against a ≥ 400 ms
-  assertion (passes 8/8 alone, 5/5 in its project). Early, not late: the lower bound measures from a point after the
-  timer starts, or .NET 11's timer fires up to ~12 ms early. Known flake since 2026-10-05 (memory ci-red-findings), now
-  more likely; fix the assertion's start point (or a tolerance the timer's resolution explains) before the round's
-  release so 2-core CI stays green.
-- **uitests-liveresize-order** (3, tests; found by the upgrade step) — two `LiveResizeFrameTests` fail in the full
-  real-window UiTests run on .NET 10 too (pass alone); GPU-sink tests that run before them likely leave a process-wide
-  flag set. Pre-existing; fix with the next UiTests change (with uitests-workareas-before-dpi-aware).
 - **fedora-local-dotnet** (environment) — remove `/usr/local/share/dotnet` and the `/usr/local/bin/dotnet` link in WSL
   Fedora once Fedora ships the final `dotnet-sdk-11.0`; `wsl-test.sh` takes `DOTNET_ROOT` from the dotnet on PATH
   since 67105a0b, so it follows.
 
-- **syntax-merged-theme** (5, Syntax + every app that colours code; the user said yes to question 26 on 2026-11-11) —
-  give TextMateSharp one merged theme (the included theme's rules folded into the main theme's lookup) so colours
-  match VS Code: JSON keys #9CDCFE (today teal; every key in Meridian's JSON bodies), `this` #569CD6. Its own step,
-  not folded into a perf step: before/after images of JSON, C#, TypeScript, Markdown and a Junction diff under each
-  theme that includes another; update the golden images it recolours (`HULTUI_UPDATE_GOLDENS`) and say which ones
-  in the step; check the colour-cache and theme-load cost with `step-ab.ps1` (a merge done once per theme load
-  should cost nothing a key). Round 9 step 14b's ~974k-line corpus comparison is the test: differences from VS Code
-  should fall to the ones explained elsewhere.
-- **tokenize-diff-public** (5, Syntax; the user said yes to question 10 on 2026-11-11) — make
-  `SyntaxHighlighter.TokenizeDiff` (SyntaxHighlighter.cs:205) public, with the two types it uses, both internal today:
-  `LineRange` (the shown lines it takes) and `TokenizedDiff` (the spans it returns). Review the surface first: the
-  required `TimeProvider clock` (`TokenizeLines` takes it optional), whether `LineRange` is inclusive at `Last`, the
-  nullable arrays in the result. Then XML docs, a docs page entry (docfx `--warningsAsErrors` stays at 0), drop
-  `<InternalsVisibleTo Include="Junction" />` from HultUI.Syntax.csproj if Junction then needs no other internal, and
-  a public-API test in HultUI.Syntax.Tests. No perf number expected; small.
 
-- **meridian-history-test-midnight** (tests; found 2026-11-11 by meridian-v1.8.0's installer run at 00:00:41 UTC) —
-  `HistoryTests.AnOlderSendFadesItsColours_NotItsRow` (tests/Meridian.Tests/HistoryTests.cs ~:411) captures
-  `DateTimeOffset.Now` and asserts `HistoryLog.IsToday`; across midnight the send and the test's "now" fall on different
-  days. Use a fixed clock (e.g. noon) or an injected time; check other `IsToday`/`DateTime.Now` tests the same way.
+
+- **f16-held-drag-post-stall** (3; r11-3 Needs the user; **question 37**) — a Vulkan F16 held drag with a post waiting
+  stalled once (`drag-vk16-post`, JIT): step 0 of the warm grow took 165 ms, then no frame for 1,006 ms, the watchdog
+  stopped the run; no `nvlddmkm` or other event, the foreground never taken; first F16 run with a held post ever; the
+  plain F16 drag passed 4 runs; `RenderLiveResizeFrame` takes the same branches for 8-bit and F16 (Application.cs
+  :589–605); `AcquireNextImage` and `WaitForFences` wait with no timeout (SdlVulkanHost.cs:1153, :1169). Not repeated.
+- **vesper-folder-nudge-stale** (6 → 8, lead; r11-6 Examined) — `NudgeWhenConnectingIsDue` (CommanderApp.cs:631) tests
+  only `Loader(side).IsLoading`, not that it is still the load it was set for: fast repeated navigation may pay one view
+  build (~30–34 KB of 280–313 a key). Check in a real window.
+- **junction-held-key-bigfiles** (8, lead; r11-8 Examined) — a held key over 40 files of 8,000 lines at a 33 ms pace:
+  2,367–3,110 KB a key on all threads against 585 on the UI thread, 0.65–0.85 git shows a key; the headless clock can't
+  judge a real key repeat (the worker and `Task.Delay(HighlightRest)` run on real time). Measure with `JUNCTION_BENCH`
+  before calling it a candidate.
+- **atspi-aot-unmeasured** (7; **question 44**, optional) — AT-SPI on NativeAOT needs clang and lld in WSL Fedora; JIT
+  TC=0 and the suite's 20 AOT AT-SPI rows show nothing new.
+- **cleanup after round 11's survey** (housekeeping) — expert 5 left the Visual Studio collector service
+  `VSStandardCollectorService150` (manual start) running; expert 7's WSL build `~/r11-a11y-dbusprobe` in FedoraLinux-44
+  can be deleted.
+
+Closed from Waiting by the round 11 survey: dotnet11-aot-textarea-long-document (→ step 1), uitests-liveresize-order,
+uitests-workareas-before-dpi-aware, meridian-stalled-timeout-early, meridian-history-test-midnight (→ step 3),
+virtuallist-selection-relayout (→ steps 4 and 7), apps-refs-hold-last-view (unmeasured holders) (→ step 5),
+syntax-merged-theme (→ step 8), tokenize-diff-public (→ step 9), ondafterbuild-markdirty-dropped (→ step 10, question
+41), Suite scenarios (→ step 11; round 10's two other patterns landed as rows in its steps 4 and 7),
+layout-ordered-children (→ Examined: the map now 40.5–42.5 hit visits a move, apps ≤ 42.5).
 
 ## Landed
 
@@ -242,6 +298,42 @@ are in [the archive](17-performance-team-ledger-archive.md#landed-rounds-14) ([r
 | 11 | 6403f8fe, 207fbe25, 67105a0b, c177a16c, c99e23bf, 868e2ffc | dotnet-11-upgrade (the user, 2026-11-11) | Everything targets .NET 11: one `HultUITargetFramework` (net11.0) in Directory.Build.props used by all 102 projects; a new `global.json` (SDK 11.0.100, latestFeature) that every workflow's setup-dotnet reads; installer, workflow and script publish paths; `wsl-test.sh` exports `DOTNET_ROOT` from the dotnet on PATH; guides and the two skills name .NET 11; `step-ab.ps1 -BaseSdk` and per-side target framework for the AOT wrapper. Fix found by the measurement (c99e23bf): .NET 11's optimized JIT boxes `HashCode.Add<T?>` in `TextPipeline.MetricDigest`'s loop (2–3 × 24 B a metric span on every styled layout; 12 JIT rows' allocKB up, styled wrap 74.8 → 225.7 KB) — plain values now, test fails on net11 with the old code (72 B a call). Measured ca31555d on SDK 10.0.300 / net10.0 against the tree on SDK 11.0.100 / net11.0, whole suite (230 rows), 2 pairs: JIT 0 slower / 0 faster, A/A 0/0, allocKB down on 2 rows (dropdown 38.4 → 36.8, wheel 4.4 → 4.2); AOT A/A 0/0, 2 slower (long TextArea document +13–15 %, wrapped TextArea resize +11 %; → Waiting dotnet11-aot-textarea-long-document), highlighted JSON −15 %; idle 0.2 passes/s, the 17 zero-KB rows still 0. AOT app walks (69 × 2): geometric mean 1.000, KB a key +0.3 %, none > 5 % (Vesper thumbs +4.8 %), builds equal, GCs gen0/1/2 123/17/8 → 121/15/8. Start-up (42 guarded launches, 0 foreground takes): Junction median 258.8 → 255.3 ms, Vesper 280.9 → 275.6, the others ±9 ms; working set flat (Junction 105.5 → 105.6 MB, Aperture 116.3 → 116.2). Exe sizes +0.2…+1.6 % (Junction 23.87 → 24.03 MB). Warnings: build 367 → 359 (SDK 10's ILCompiler NU1903 gone), AOT/trim 0 → 0 (Aperture's Kiota IL2104 1 → 1), docfx 0. Tests: Windows 30 projects, round 10's counts + 1 (Meridian's stalled-timeout flake failed both full runs → Waiting); Fedora 22 projects, 0 failures (Vesper zebra tint once, then 10/10); UiTests 130 pass (2 LiveResizeFrameTests fail in the full run on .NET 10 too → Waiting); mpv 29/29. Harness in this session's scratchpad `r11u\`. |
 
 ## Examined, not worth it
+
+From the round 11 surveys (details in `17-reports/r11-*`):
+
+- **layout-ordered-children** (1; closed from Waiting): Meridian's map, the one app case (618 hit visits a move in round
+  10), now 40.5–42.5 at every size; apps ≤ 42.5 (Junction changes wheel 33.5–36.2); only suite rows remain.
+- **The map selection drop without the list's layout mark** (1): −46 ComputeLayout a click (41 of them cache-clean), 0
+  MeasureSize or KB; risks a list whose width comes from its rows. **Keeping the list's measure cache across a
+  render-time `ReplaceChildren`**: 0 saved. **Measure-cache capacity**: fits once forced heights collapse; not raised
+  without a case.
+- **Paint on .NET 11** (2): `richtext/open 5,000 blocks` +7.2 KB render (+0.3 %, first open, the paragraph layout in
+  render); sub-blob misses after a relayout keyed by run object (only the synthetic 600-span row pays, 223.6 a key;
+  realistic rows 3; 0 managed bytes); pixel-route frames 248 B (surfaces without GL only); 7ca2b3db's second frame per
+  width-changing step with a pan bar (merges into the next move's frame in a paced loop).
+- **GL/Vulkan on .NET 11** (3): no tier-1 or PGO allocation in frame, present or resize paths (every steady round 0.0 B);
+  an app element unmounted holding its own `IGpuImageSource` would turn 7e964aeb's gate off for the process (64–65
+  frames a second on a held edge with a post), but no app or sample has one (GpuFrameSink.cs:58–59 documents it);
+  other-thread bytes 0.5–0.6 B a frame.
+- **.NET 11 JIT boxing patterns** (4): a nullable non-int struct boxes 24 B a value in a loop through
+  `HashCode.Add/Combine`, a generic `v is null` / `v?.GetHashCode()` on `T?`, or a `Dictionary<(int, W?)>` lookup; single
+  calls, `int?`, `EqualityComparer<T?>`, record structs with nullable fields, `HashSet<W?>` don't. None left on a hot
+  path in src or apps (c99e23bf was the one). AOT 11 boxes only the generic `IsNull<T?>` loop (unused).
+- **Text alternatives** (5): a range-key struct with the default comparer, 25 ns a lookup on both runtimes (slower than
+  .NET 10's shape); a non-randomized word hash (Marvin 9 % of the walk; a crafted document could chain a bounded
+  cache); the width cache's dispatch alone (595 lookups a step, ~7 µs).
+- **Reactivity** (6): `WeakElementRef` derives from `WeakReference`, so each kept key is finalizable (one finalizer run
+  and one extra survival when pruned; once a key, not per build); duplicate dependency reads (Junction 10 reads, 3
+  distinct; lists reused, 0 B); Vesper folder in/out's 4 builds a key are chained (navigation, listing, preview part,
+  nudge), one batch would not merge them; `AsyncLoader.Start` in Aperture's build (once a process).
+- **Bridges on .NET 11** (7): UIA identical on .NET 10 and 11 in JIT, TC=0 and AOT (a label edit 0/80/80 B off/tree/UIA;
+  a client walk 10.6 B a node; a served item 104 B); AT-SPI over a real D-Bus ±10 B a signal (PropertyChange 188 →
+  179–181 B); our `CallMethodAsync` +64 B a call (start-up and status changes only).
+- **Apps** (8): Vesper +1.5…+7.9 % and Junction −4.7…+0.5 % between rounds are the machine (the same binary reproduces
+  them across days); Junction bigfiles +0.4 % same day; Junction Changes Down over 300 files 294 KB a key, 83 % first
+  draws of 26.2 new diff rows; Meridian find typing 59.1 KB and History search 50.0 KB a character (by design); Vesper
+  folder in/out 288 KB once per Enter (55 % first draws); Meridian palette with a reader "frameOther" 17.3 of 32.2 KB
+  (the overlay, flat since round 8); Aperture Discover Down 0.67 builds a key.
 
 From the round 10 surveys (details in `17-reports/r10-*`):
 
@@ -495,11 +587,41 @@ From the round 1 surveys (details in `17-reports/`):
 
 ## Needs the user
 
-No question is open from rounds 1–10. Their answered questions are in the archive
+Round 11 questions (from the survey, 2026-11-11). Recommendations in brackets.
+
+37. **f16-held-drag-post-stall** (r11-3): a Vulkan F16 held drag with a post waiting stopped drawing for 1 s once (no
+    driver event, focus never taken; never run before; not repeated). Allow **one** diagnostic re-run (JIT, F16, a post;
+    each step logged before `SetWindowPos`, `dotnet-dump collect` at the stall instead of exiting, stop at the first
+    stall)? If it is a deadlock, an HDR app could freeze during a held resize. [Yes: one guarded run.]
+38. **a11y-item-rows-offscreen-label** (r11-7; step 2): a reader then hears an item's new label when it changed while
+    its row was off screen (today it keeps the old one, "seen 1×", until something rebuilds). Fix it as a bug? [Yes.]
+39. **apps-meridian-body-formatted-again** (r11-8; step 6): switching back to a request tab or toggling pretty/raw then
+    shows the finished, coloured body at once (today an empty body, or the other mode greyed, then uncoloured text,
+    then colour). Approve, and how many views to keep (0.4–1.3 MB each)? [Yes; the last 4 (tab, response, mode).]
+40. **meridian-map-selection-look** (r11-6; step 7): the list's own highlight can't draw today's 2 px left-only accent.
+    (a) a 2 px accent all round the selected row, (b) no accent, the Raised fill only, or (c) a new public
+    `RowHighlight` border width per side (today's look kept)? Images can be made: the headless map at 600 endpoints with
+    row 3 selected and hovered, base against the prototype. [Images first; (c) keeps today's look.]
+41. **ondafterbuild-markdirty** (r11-6; step 10): (a) document that a MarkDirty from `OnAfterBuild` is dropped and delete
+    Vesper's dead retry, or (b) honour it, deferred to the frame's drain with a per-host cap per frame (never during
+    `Build`)? Either costs 0 builds in today's apps. [(a).]
+42. **syntax-typst** (r11-5): do the apps meet Typst (`.typ`) files? The first one keeps +42 MB of grammars until
+    `SetTheme`; the fence-scan route (step 12 of round 10) fixes it with no colour change. [Only if you open Typst files
+    in Junction or Vesper; else park.]
+43. **report-upstream** (r11-4, r11-5, the upgrade): file the two .NET 11 regressions on dotnet/runtime — ILCompiler 11
+    no longer devirtualizes `IAlternateEqualityComparer` in `Dictionary.AlternateLookup.FindValue` (a 40-line repro,
+    `r11-dotnet\altprobe\`), and JIT 11 boxes `HashCode.Add<T?>` of a nullable struct in a loop (the upgrade's
+    probe)? Public posts from your account. [Your call; steps 1 and c99e23bf work around both.]
+44. **atspi-aot** (r11-7): install clang and lld in WSL Fedora to measure AT-SPI on NativeAOT? [No: nothing points to an
+    AOT difference.]
+45. **findbar-count-after-bind** (r11-6; step 12): if an open find bar's "n of m" goes stale after a pretty/raw switch or
+    a new file (read in the code, not reproduced), fix it in FindBar? [Yes, after a check; not perf.]
+
+Rounds 1–10's answered questions are in the archive
 ([round 10, with round 9's 26 and the earlier 10](17-performance-team-ledger-archive.md#needs-the-user-round-10),
 [round 9](17-performance-team-ledger-archive.md#needs-the-user-round-9), [round 8](17-performance-team-ledger-archive.md#needs-the-user-round-8),
 [round 7](17-performance-team-ledger-archive.md#needs-the-user-round-7), [round 6](17-performance-team-ledger-archive.md#needs-the-user-round-6)). Search it by candidate id
-before asking anything an earlier round asked. Recommendations in brackets.
+before asking anything an earlier round asked.
 
 Reminder (expert 8): Aperture signed in to jellyfin.home 3 more times this round as device
 "aperture-survey"; the user should remove those devices and revoke the API key when the work is done.
@@ -714,3 +836,11 @@ From 2026-11-09 (round 10's survey); earlier entries are in the archive ([to 202
   session's scratchpad, probes in its `r11-<area>\` folders. Each re-ranks its Waiting items; experts 4 and 5 take
   dotnet11-aot-textarea-long-document, expert 4 also meridian-stalled-timeout-early and a sweep for other .NET 11
   tier-1 JIT allocations.
+- 2026-11-11: round 11 survey done (reports 305025b3..5731ee58, `17-reports/r11-*`, ~1 h): painting and GL/Vulkan
+  satisfied. Review objections: 207fbe25 (ILCompiler 11 lost the devirtualization of `Dictionary.AlternateLookup`'s
+  comparer — found by experts 4 and 5 apart; the whole AOT TextArea regression) and 5e93a4fe (an off-screen item's new
+  label never reaches a reader). Round 10 helped the apps (69 walks geomean 0.674, −98 % KB a key). Merged into a
+  12-step build order (one owner each; virtuallist-selection-relayout split into a framework measure fix, step 4, and
+  an app selection change, step 7), 12 Waiting items closed, questions 37–45 asked. The ledger's AOT note was corrected
+  twice on the way (the "SDK share" was a .NET 10 servicing artefact, then the cause found). Phase → build.
+
