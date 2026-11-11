@@ -7,8 +7,8 @@ file after every step and commits it with the step's work. Full survey reports a
 - **Round:** 11
 - **Phase:** build — round 11. The survey is done (reports `17-reports/r11-*`, 2026-11-11): experts 2 and 3 satisfied,
   two review objections (the .NET 11 upgrade's AOT lookups, 207fbe25; Meridian's map item rows, 5e93a4fe). Step 0, the
-  .NET 11 upgrade, landed (6403f8fe..868e2ffc; not yet on main: it merges with the round). Next: **step 1**
-  (text-word-cache-own-table). Questions 37–45 are open: steps 2, 6, 7 and 10 wait for 38–41; the rest goes ahead. Round
+  .NET 11 upgrade, landed (6403f8fe..868e2ffc; not yet on main: it merges with the round). Steps 1, 3 and 4 landed; step 5 runs; then 2, 6–14
+  (questions 37–45 answered 2026-11-11). Round
   10 released: merged into main as cc55bdcc; CI run 42924747474 green. To resume in a fresh context, run in this
   worktree: `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md, with state in
   docs/plans/17-performance-team-ledger.md. Read both once per session (afterwards only the ledger's Phase and the part
@@ -100,7 +100,7 @@ quotes (`r11-k` = `17-reports/r11-k-<area>.md`).
    `primaryFont.HasGlyph` per character in Itemize is 8.5 % of the walk after (a)+(b); keep only if it clears a bar.
    Corpora 48k/240k unchanged; tests for eviction order, weight bound, re-put, span equals string, growth, slot reuse;
    `step-ab.ps1 -Runtime Jit,Aot`. Medium-small, no API.
-2. **a11y-item-rows-offscreen-label** (7; r11-7 Review and Candidate) **(user, question 38)** — the objection to
+2. **a11y-item-rows-offscreen-label** (7; r11-7 Review and Candidate) **(question 38: yes)** — the objection to
    5e93a4fe: in `VirtualListElement.KeepUnchangedRows`, an item whose label a reader was given and that no longer equals
    the item at its index asks the frame's in-place walk. Meridian, an observed endpoint seen again off screen: stale
    frames 90 → 0 (1 in-place walk, 0 trees); on screen unchanged; audit STALE 1 → 0, walks +6/+46/0, 0 mismatches; 0 B
@@ -134,13 +134,13 @@ quotes (`r11-k` = `17-reports/r11-k-<area>.md`).
    three, or 0 is freed): History → Requests −289 KB (−6.1 %) at 200 sends, −238 KB (−4.7 %) at 2,000; Vesper
    `_thumbVListL/R` (keep the height as a float): −274 KB (−4.3 %) at 400 files. Weak-reference tests; each app its own
    commit. Small, app.
-6. **apps-meridian-body-formatted-again** (8 with 6, 4 for retention; r11-8 Candidate) **(user, question 39)** — keep
+6. **apps-meridian-body-formatted-again** (8 with 6, 4 for retention; r11-8 Candidate) **(question 39: yes, the last 4)** — keep
    the last few finished response views by (tab, response, mode) instead of one job slot (`_respJob`,
    MeridianApp.Response.cs:461–505). Switch back to an HTML tab 51,016 KB on all threads (316 on the UI thread) →
    ~200–316; XML 10,864, JSON 6,252 → the same; pretty HTML toggle 52,125 KB; GCs over 20 switches 35/8/2 → ~0; Part
    builds 3 → 1. Kept views 0.4–1.3 MB each (pretty HTML 1,265 KB), bounded LRU (4 suggested). Small–medium, app.
 7. **reactivity-meridian-map-list-draws-selection** (6; r11-6 Candidate; the app half of virtuallist-selection-relayout)
-   **(user, question 40)** — the map list draws its selection (`.SelectionHighlight(Azimuth.Raised, Azimuth.Radius1)`,
+   **(question 40: images first, then (c))** — the map list draws its selection (`.SelectionHighlight(Azimuth.Raised, Azimuth.Radius1)`,
    MeridianApp.Discovery.cs:598; hover to `.HoverHighlight`): KB a click 30.8 → 22.2 at 600 endpoints (−28 %), 26.4 →
    19.6 at 60, probe-free −37 %; rows made 2 → 0, layout visits 70.2 → 20.3. After step 4; measure the two together.
    Small, app (+ a public per-side `RowHighlight` border under 40 (c)).
@@ -155,7 +155,7 @@ quotes (`r11-k` = `17-reports/r11-k-<area>.md`).
    validated (rising, non-overlapping, First ≥ 1); arrays null for a side with no text or nothing shown; keep
    `LinesWalked`; drop `<InternalsVisibleTo Include="Junction" />`; reflection and validation tests; a docs section
    (THEMES.md); docfx 0 warnings. Small.
-10. **ondafterbuild-markdirty-dropped** (6; r11-6 Waiting) **(user, question 41)** — under (a): REACTIVITY.md's
+10. **ondafterbuild-markdirty-dropped** (6; r11-6 Waiting) **(question 41: (a))** — under (a): REACTIVITY.md's
     lifecycle table says a MarkDirty or a write to a signal the build read, from `OnBeforeBuild`, `Build` or
     `OnAfterBuild`, is dropped (use `RequestPostFrameCallback` or `InvokeOnMainThread`); delete Vesper's dead
     `RestorePaneScroll` retry (CommanderApp.cs:305, dead since 00b8fc79). Never honour a MarkDirty during `Build`
@@ -163,10 +163,20 @@ quotes (`r11-k` = `17-reports/r11-k-<area>.md`).
 11. **suite-document-switch** (8; r11-8 Waiting Suite scenarios) — a suite row for a list cursor that swaps a document
     whose text arrives later (Junction Files Down: 86.2 KB a key, 1.23 builds, 149.1 measure misses, 60.8 layout
     visits), with a twin that builds once. Small, tooling.
-12. **findbar-count-after-bind** (6; r11-6 Needs the user; **question 45**) — check first: Meridian builds
+12. **findbar-count-after-bind** (6; r11-6 Needs the user; **question 45: yes**) — check first: Meridian builds
     `_responseFind.Build()` before the body binds the search (Response.cs:384) and Junction before `BindDiffSearch`
     (Diff.cs:76), and the re-run's "changed" is dropped, so an open bar may show the old "n of m" after a pretty/raw
     switch or a new file. If it reproduces, fix it in FindBar (read the count after the bind). Small, not perf.
+13. **f16-held-drag-post-stall** (3; r11-3 Needs the user; **question 37: yes, one run**) — one diagnostic re-run of
+    `drag-vk16-post` (JIT, Vulkan F16, a held drag with a post waiting) with every real-window guard: each step logged
+    before `SetWindowPos`, `dotnet-dump collect` at the first stall instead of exiting, then stop. Read the dump's UI
+    thread: a driver wait in `AcquireNextImage`/`WaitForFences` (no timeout, SdlVulkanHost.cs:1153, :1169), a deadlock,
+    or steps that draw nothing. If it doesn't stall, say so and stop (no repeats). A fix, if one is clear, is its own
+    step. Small, measured.
+14. **atspi-aot** (7; r11-7 Needs the user; **question 44: yes**) — install clang and lld in WSL Fedora (`dnf`), publish
+    expert 7's D-Bus probe (`r11-a11y\dbusprobe\`) as NativeAOT on .NET 11, and compare bytes a signal and a client call
+    with JIT (PropertyChange 179–181 B, ChildrenChanged 190, AddAccessible 237–240, StateChanged 101–104, Properties.Get
+    1,104, GetRole 896). Information unless AOT differs. Small.
 
 ### Waiting
 
@@ -236,6 +246,7 @@ Re-ranked by the next survey.
   allocated; the largest single retention now, ×1.4 Markdown's before step 12), `.jl` +9,183, `.php` +4,449,
   `.cshtml` +4,567, `.html` +3,078. Typst is worth step 12's fence-scan route if the apps meet it → question 42;
   the rest stay parked.
+  The user, 2026-11-11 (question 42): no Typst files — skip; the whole item stays parked.
 - **junction-chromeparttests-load** (tests; round 10 step 12) — two `ChromePartTests` failed once in a full run while a
   four-way corpus scan loaded the machine; passed alone and on a quiet machine. Their build counts are load-sensitive:
   watch at the full suite and in CI.
@@ -247,11 +258,6 @@ Re-ranked by the next survey.
 
 
 
-- **f16-held-drag-post-stall** (3; r11-3 Needs the user; **question 37**) — a Vulkan F16 held drag with a post waiting
-  stalled once (`drag-vk16-post`, JIT): step 0 of the warm grow took 165 ms, then no frame for 1,006 ms, the watchdog
-  stopped the run; no `nvlddmkm` or other event, the foreground never taken; first F16 run with a held post ever; the
-  plain F16 drag passed 4 runs; `RenderLiveResizeFrame` takes the same branches for 8-bit and F16 (Application.cs
-  :589–605); `AcquireNextImage` and `WaitForFences` wait with no timeout (SdlVulkanHost.cs:1153, :1169). Not repeated.
 - **vesper-folder-nudge-stale** (6 → 8, lead; r11-6 Examined) — `NudgeWhenConnectingIsDue` (CommanderApp.cs:631) tests
   only `Loader(side).IsLoading`, not that it is still the load it was set for: fast repeated navigation may pay one view
   build (~30–34 KB of 280–313 a key). Check in a real window.
@@ -263,8 +269,6 @@ Re-ranked by the next survey.
   `NarrowEditorLayoutTests.Tab_titles_…` ("chain sub-tab shows 61.6 of its 66.2px"), on the base commit too: Fedora's
   fonts. CI's Linux job doesn't run Meridian.Tests. Pin the font (DejaVu, as the goldens do) or measure the title
   with the face the test gets.
-- **atspi-aot-unmeasured** (7; **question 44**, optional) — AT-SPI on NativeAOT needs clang and lld in WSL Fedora; JIT
-  TC=0 and the suite's 20 AOT AT-SPI rows show nothing new.
 - **cleanup after round 11's survey** (housekeeping) — expert 5 left the Visual Studio collector service
   `VSStandardCollectorService150` (manual start) running; expert 7's WSL build `~/r11-a11y-dbusprobe` in FedoraLinux-44
   can be deleted.
@@ -601,30 +605,30 @@ Round 11 questions (from the survey, 2026-11-11). Recommendations in brackets.
 37. **f16-held-drag-post-stall** (r11-3): a Vulkan F16 held drag with a post waiting stopped drawing for 1 s once (no
     driver event, focus never taken; never run before; not repeated). Allow **one** diagnostic re-run (JIT, F16, a post;
     each step logged before `SetWindowPos`, `dotnet-dump collect` at the stall instead of exiting, stop at the first
-    stall)? If it is a deadlock, an HDR app could freeze during a held resize. [Yes: one guarded run.]
+    stall)? If it is a deadlock, an HDR app could freeze during a held resize. [Yes: one guarded run.] → **yes** (2026-11-11; one guarded run, step 13).
 38. **a11y-item-rows-offscreen-label** (r11-7; step 2): a reader then hears an item's new label when it changed while
-    its row was off screen (today it keeps the old one, "seen 1×", until something rebuilds). Fix it as a bug? [Yes.]
+    its row was off screen (today it keeps the old one, "seen 1×", until something rebuilds). Fix it as a bug? [Yes.] → **yes** (2026-11-11; step 2).
 39. **apps-meridian-body-formatted-again** (r11-8; step 6): switching back to a request tab or toggling pretty/raw then
     shows the finished, coloured body at once (today an empty body, or the other mode greyed, then uncoloured text,
-    then colour). Approve, and how many views to keep (0.4–1.3 MB each)? [Yes; the last 4 (tab, response, mode).]
+    then colour). Approve, and how many views to keep (0.4–1.3 MB each)? [Yes; the last 4 (tab, response, mode).] → **yes, the last 4** (2026-11-11; step 6).
 40. **meridian-map-selection-look** (r11-6; step 7): the list's own highlight can't draw today's 2 px left-only accent.
     (a) a 2 px accent all round the selected row, (b) no accent, the Raised fill only, or (c) a new public
     `RowHighlight` border width per side (today's look kept)? Images can be made: the headless map at 600 endpoints with
-    row 3 selected and hovered, base against the prototype. [Images first; (c) keeps today's look.]
+    row 3 selected and hovered, base against the prototype. [Images first; (c) keeps today's look.] → **images first, then (c)** (2026-11-11; the user took the recommendation; step 7 adds a public per-side `RowHighlight` border).
 41. **ondafterbuild-markdirty** (r11-6; step 10): (a) document that a MarkDirty from `OnAfterBuild` is dropped and delete
     Vesper's dead retry, or (b) honour it, deferred to the frame's drain with a per-host cap per frame (never during
-    `Build`)? Either costs 0 builds in today's apps. [(a).]
+    `Build`)? Either costs 0 builds in today's apps. [(a).] → **(a)** (2026-11-11; step 10).
 42. **syntax-typst** (r11-5): do the apps meet Typst (`.typ`) files? The first one keeps +42 MB of grammars until
     `SetTheme`; the fence-scan route (step 12 of round 10) fixes it with no colour change. [Only if you open Typst files
-    in Junction or Vesper; else park.]
+    in Junction or Vesper; else park.] → **no Typst: skip** (2026-11-11; syntax-shared-registry-rest stays parked).
 43. **report-upstream** (r11-4, r11-5, the upgrade): file the two .NET 11 regressions on dotnet/runtime — ILCompiler 11
     no longer devirtualizes `IAlternateEqualityComparer` in `Dictionary.AlternateLookup.FindValue` (a 40-line repro,
     `r11-dotnet\altprobe\`), and JIT 11 boxes `HashCode.Add<T?>` of a nullable struct in a loop (the upgrade's
-    probe)? Public posts from your account. [Your call; steps 1 and c99e23bf work around both.]
+    probe)? Public posts from your account. [Your call; steps 1 and c99e23bf work around both.] → **no** (2026-11-11; nothing filed upstream).
 44. **atspi-aot** (r11-7): install clang and lld in WSL Fedora to measure AT-SPI on NativeAOT? [No: nothing points to an
-    AOT difference.]
+    AOT difference.] → **yes** (2026-11-11; install clang and lld in WSL Fedora, step 14).
 45. **findbar-count-after-bind** (r11-6; step 12): if an open find bar's "n of m" goes stale after a pretty/raw switch or
-    a new file (read in the code, not reproduced), fix it in FindBar? [Yes, after a check; not perf.]
+    a new file (read in the code, not reproduced), fix it in FindBar? [Yes, after a check; not perf.] → **yes** (2026-11-11; step 12).
 
 Rounds 1–10's answered questions are in the archive
 ([round 10, with round 9's 26 and the earlier 10](17-performance-team-ledger-archive.md#needs-the-user-round-10),
@@ -868,3 +872,8 @@ From 2026-11-09 (round 10's survey); earlier entries are in the archive ([to 202
   commit Down 85.5 → 17.3 measure calls. The layout audit is now committed (`HULTUI_LAYOUT_AUDIT`), with padding,
   border and margin. For the guidelines: prove a layout change with the audit against a run with the change off.
   Next: step 5 (steps 2, 6, 7 and 10 wait for questions 38–41).
+- 2026-11-11: the user answered questions 37–45: 37–41 as recommended (one guarded F16 diagnostic run; tell a reader
+  an off-screen label change; keep Meridian's last 4 views; map selection images first, then a public per-side
+  `RowHighlight` border; document the OnAfterBuild drop), 42 skip Typst, 43 file nothing upstream, 44 install clang
+  and lld in WSL Fedora for the AT-SPI AOT check, 45 fix the find bar count if it reproduces. Steps 13 (F16
+  diagnostic) and 14 (AT-SPI AOT) added. Order after step 5: 2, 6, 7, 8, 9, 10, 11, 12, 13, 14.
