@@ -202,7 +202,7 @@ samples/
   HultUI.Samples.ProceduralVideo/ frames from an algorithm, --app procedural
 ```
 
-All three packages are `net10.0`, `IsAotCompatible`, in `HultUI.CrossPlatform.slnf`,
+All three packages are `net11.0`, `IsAotCompatible`, in `HultUI.CrossPlatform.slnf`,
 and pack through `src/Directory.Build.props` like everything else. `PACKAGING.md`'s
 table gains three rows.
 

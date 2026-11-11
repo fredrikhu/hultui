@@ -4,7 +4,8 @@ Build your first HultUI desktop application from scratch.
 
 ## Prerequisites
 
-- [.NET 10.0 SDK](https://dotnet.microsoft.com/download) or later
+- [.NET 11.0 SDK](https://dotnet.microsoft.com/download) or later (the repository's `global.json`
+  asks for 11.0.100 or a later 11.0 SDK)
 - A GPU with OpenGL 3.3+ support
 - Linux (X11 or Wayland), Windows, or macOS
 
@@ -21,7 +22,7 @@ Edit `MyApp.csproj` to reference HultUI and the source generator:
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>

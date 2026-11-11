@@ -167,7 +167,7 @@ path at a time left 51 KB (round 9 of plan 17, `OpenApi.Parse` of bytes).
 | | NativeAOT | Framework-dependent | Self-contained (no AOT) |
 |---|---|---|---|
 | Shipping payload (excl. `.pdb`) | **~18 MB** | ~17 MB | ~90 MB+ |
-| .NET runtime required on target | **None** | .NET 10 (~85 MB shared) | Bundled (in the 90 MB) |
+| .NET runtime required on target | **None** | .NET 11 (~83 MB shared) | Bundled (in the 90 MB) |
 | Managed code form | Native, in the `.exe` | Loose IL `.dll`s, JIT'd | Loose IL `.dll`s, JIT'd |
 | JIT warmup | None | Yes | Yes |
 | Native `.exe` size | 2.5 MB | 0.16 MB apphost stub | 0.16 MB apphost stub |
