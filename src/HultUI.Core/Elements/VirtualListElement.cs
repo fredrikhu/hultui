@@ -1098,15 +1098,24 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             DrawHighlight(ctx, in highlight, row);
     }
 
-    // BoxElement.Render's call for a background with a uniform solid border, or none.
+    // BoxElement.Render's calls for a background with a solid border, or none: one call for a
+    // uniform width, and for widths per side the fill and then the border on its own.
     private static void DrawHighlight(IRenderContext ctx, in RowHighlight highlight, Element row)
     {
         var box = row.Layout.AbsoluteBorderBox;
-        bool ring = highlight.BorderColor.A > 0 && highlight.BorderWidth > 0;
+        var w = highlight.Widths;
+        bool ring = highlight.BorderColor.A > 0 && (w.Top > 0 || w.Right > 0 || w.Bottom > 0 || w.Left > 0);
         if (highlight.Background.A == 0 && !ring) return;
+        if (ring && !(w.Top == w.Right && w.Right == w.Bottom && w.Bottom == w.Left))
+        {
+            if (highlight.Background.A > 0)
+                ctx.DrawRoundedRect(box, highlight.CornerRadius, highlight.Background, Color.Transparent, default);
+            ctx.DrawBorder(box, highlight.CornerRadius, highlight.BorderColor, w, BorderStyle.Solid);
+            return;
+        }
         ctx.DrawRoundedRect(box, highlight.CornerRadius, highlight.Background,
             ring ? highlight.BorderColor : Color.Transparent,
-            ring ? new Thickness(highlight.BorderWidth) : default);
+            ring ? w : default);
     }
 
     private void LayoutVisibleChildren()

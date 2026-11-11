@@ -355,7 +355,9 @@ public static class ElementExtensions
     /// <summary>The list draws the selection itself, under each selected row on screen: this
     /// fill, corner radius and (optional) uniform border, at the row's box, as a box would draw
     /// them. Rows are then made unselected (<c>selected = false</c>), so a selection move makes no
-    /// row again; see <see cref="VirtualListElement{T}.SelectionHighlight"/>.</summary>
+    /// row again; see <see cref="VirtualListElement{T}.SelectionHighlight"/>. For a border whose
+    /// width differs by side, pass a <see cref="RowHighlight"/> with
+    /// <see cref="RowHighlight.BorderThickness"/> set.</summary>
     public static VirtualListElement<T> SelectionHighlight<T>(this VirtualListElement<T> el, Color background,
         float cornerRadius = 0f, Color borderColor = default, float borderWidth = 0f)
     {

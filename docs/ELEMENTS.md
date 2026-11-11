@@ -1364,7 +1364,7 @@ var list = VirtualListElement<FileEntry>.New()
 | — | `RowsAreComposite` | one item is a row of controls (a wrap grid), so the realized rows answer to assistive tech rather than one node per item — see **A row that is not one thing** below |
 | — | `InvalidateHeights()`, `InvalidateRows()` | after a change the list cannot see; with `ItemRowTemplate`, whenever anything a row shows besides its item and selected state changes |
 | — | `InvalidateRow(index)` | `InvalidateRows()` for one item: its row (if realized) and its kept label are made again, every other row is kept — for something only a row or two show that moves (see **State that only some rows show** below) |
-| `.SelectionHighlight(fill, radius, ring, width)`, `.SelectionHighlight(RowHighlight?)` | `SelectionHighlight` | the list draws the selection itself, under each selected row on screen, and makes its rows unselected, so a selection move makes no row — see **A selection the list draws** below |
+| `.SelectionHighlight(fill, radius, ring, width)`, `.SelectionHighlight(RowHighlight?)` | `SelectionHighlight` | the list draws the selection itself, under each selected row on screen, and makes its rows unselected, so a selection move makes no row; a `RowHighlight` with `BorderThickness` draws a ring whose width differs by side (an accent on one edge) — see **A selection the list draws** below |
 | `.HoverHighlight(fill, radius, rows)` | `HoverHighlight`, `HoverRowFor` | the list draws a tint under the unselected row the pointer is on, so rows it keeps need no hover of their own; with `rows`, only under the rows it is true for (not a header) — same section |
 | `.SelectionOverlay(element)` | `SelectionOverlay` | the list holds one element over the selected row, against its end, for what only that row shows — same section |
 | `.StickyRows(Func<T,int,bool>)` | `StickyRowFor` | the rows held at the top while the rows after them scroll under them, each until the next pushes it off — see **Rows held at the top** below |
@@ -1527,7 +1527,19 @@ var list = VirtualListElement<Tag>.New()
 
 The pixels are the same as rows that drew it when the highlight is the fill, radius and ring the
 row drew and the row's own background becomes transparent (a row with a ring keeps a transparent
-border of the ring's width, so its contents stay where they were). It fits only a selection that
+border of the ring's width, so its contents stay where they were). A ring on some sides only — a
+selected row marked by an accent on one edge — is the highlight's `BorderThickness`, a width per
+side as a box's `.BorderWidth(Thickness)` takes it, drawn as a box draws such a border (the fill,
+then the border on its own):
+
+```csharp
+list.SelectionHighlight(new RowHighlight(fill, new CornerRadius(3), accent)
+{
+    BorderThickness = new Thickness(2, 0, 0, 0),   // what the selected row's .BorderWidth(…) was: the top edge
+});
+```
+
+It fits only a selection that
 is a background. A row that shows its selection any other way cannot show it any more: a bolder
 label or an icon's colour. Such a list keeps the selection in its rows. Assistive technology
 reads the list's selection, not the rows', so it is told the same either way. On composite rows
