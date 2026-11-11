@@ -79,7 +79,8 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
     // Item rows only: the label each index was named with and the item it was made from. Kept
     // while that item stays equal (EqualityComparer<T>.Default) and the delegate is the same;
-    // InvalidateRows, new Items and another delegate let them all go.
+    // InvalidateRows, new Items and another delegate let them all go. A patch that finds another
+    // item at an index lets its label go and asks the frame's walk (KeepUnchangedRows).
     private ItemLabel[]? _labels;
 
     private readonly record struct ItemLabel(T Item, string? Label, bool Made);
@@ -1562,6 +1563,14 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     {
         _items = items;
         var comparer = EqualityComparer<T>.Default;
+        // An item a reader was given the label of, and another item at its index now (or none): the
+        // frame's walk makes its node again and tells its new name, or that it is gone, as a build
+        // would. A row made again asks the walk (the list's children change), but the item's row may
+        // be off screen, not an element, and then only the kept label knows; a change of the list's
+        // name asks it. Labels are kept only by the tree's builds and walks on the UI thread: with
+        // no reader, none.
+        if (_labels is { } told && ForgetReplaced(told, items, comparer))
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.Name);
         foreach (var (index, row) in _activeElements)
         {
             if (index < items.Count && comparer.Equals(row.Item, items[index]))
@@ -1609,6 +1618,25 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
                 MarkPaintDirty();
             }
         }
+    }
+
+    /// <summary>Lets go of each kept label whose item is no longer equal to the item at its index, or
+    /// whose index is past the items' end now, and says whether one of them has no row this patch makes
+    /// again: a row made again asks the walk itself, at the time it always has. Each label would be made
+    /// again when asked for anyway; let go, it does not ask for another walk at the next patch when none
+    /// asks for the labels (a list over 2,000 items serves them from the list). O(n) comparisons,
+    /// nothing made.</summary>
+    private bool ForgetReplaced(ItemLabel[] told, IReadOnlyList<T> items, EqualityComparer<T> comparer)
+    {
+        bool ask = false;
+        for (int i = 0; i < told.Length; i++)
+        {
+            if (!told[i].Made || i < items.Count && comparer.Equals(told[i].Item, items[i])) continue;
+            told[i] = default;
+            if (!_activeElements.TryGetValue(i, out var row) || i < items.Count && comparer.Equals(row.Item, items[i]))
+                ask = true;
+        }
+        return ask;
     }
 }
 

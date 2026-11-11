@@ -1662,6 +1662,12 @@ lambda that captures nothing, or keep the delegate in a field: a lambda that cap
 build's state is a new delegate every build and keeps nothing (which is right for a label
 that reads that state, unless the state is in the shape you invalidate on). On the walk with
 a recording bridge listening, keeping the labels takes a step from 274 to 112 KB.
+A reader hears an item's new label whether its row is on screen or not: a patch that finds another
+item where a label was kept, or none (past the items' new end), asks the frame's in-place walk,
+which names that item again, or tells it gone, with no tree built. The check is one comparison per
+kept label and makes nothing; with no reader no label is kept. Until plan 17 round 11 an item
+changed off screen kept its old name (Meridian's map said "seen 1×" for an endpoint seen again)
+until something else walked or built the tree.
 
 **A scroll view of rows becomes a list.** A `ScrollView` over a padded `Flex.Column` of rows and
 headings can move onto a list with the same pixels (Meridian's Discovery map, plan 17 round 10

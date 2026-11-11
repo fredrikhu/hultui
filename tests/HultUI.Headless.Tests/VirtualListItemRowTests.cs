@@ -628,6 +628,54 @@ public class VirtualListItemRowTests
         }
     }
 
+    /// <summary>
+    /// A reader is told an item's new name whether its row is on screen or not, as a build tells it
+    /// and with no tree built; the same for an item gone from the end. A row on screen is made again,
+    /// which changes the list's children and so walks the tree in place; a row off screen is not an
+    /// element, and only the label the list kept for the item knows it changed (Meridian's map kept
+    /// "seen 1×" for an endpoint seen again).
+    /// </summary>
+    [Theory]
+    [InlineData("on screen", 5)]
+    [InlineData("off screen", 150)]
+    [InlineData("the last gone", 199)]
+    public void AChangedItem_IsToldToAReader_OnScreenOrNot_WithNoTreeBuilt(string change, int index)
+    {
+        var (session, pane) = Mount(itemRows: true);
+        using var _ = session;
+        var window = session.Window.Window;
+        var bridge = session.Window.InstallAccessibilityBridge();
+        session.PumpFrames(2);
+        Assert.Equal(change == "on screen", Rows(pane).Any(r => r.Name == $"entry {index}"));
+        var before = session.Window.AccessibilityTree;   // a build of its own
+        bridge.ClearDiffs();
+        int trees = window.AccessibilityTreesBuilt, walks = window.AccessibilityLayoutRefreshesInPlace;
+
+        var items = pane.Items.ToList();
+        if (change == "the last gone") items.RemoveAt(index);
+        else items[index] = new Entry(index, $"entry {index} renamed");
+        pane.Items = items;
+        pane.Rebuild();
+        session.PumpFrame(TimeSpan.FromMilliseconds(16));
+        session.PumpFrame(TimeSpan.FromMilliseconds(120));
+        session.PumpFrame(TimeSpan.FromMilliseconds(120));
+
+        Assert.Equal(0, window.AccessibilityTreesBuilt - trees);
+        Assert.True(window.AccessibilityLayoutRefreshesInPlace > walks);
+        var after = session.Window.AccessibilityTree;
+        Assert.Equal(Items(after), Items(bridge.CurrentTree!));
+        Assert.Equal(Told([AccessibilityTreeDiffer.Diff(before, after)]), Told(bridge.Diffs));
+        Assert.Equal([change == "the last gone" ? $"- ListItem entry {index}" : $"Name ListItem entry {index} renamed"],
+            Told(bridge.Diffs));
+
+        static List<string> Told(IEnumerable<TreeDiff> diffs) =>
+        [
+            .. diffs.SelectMany(d => d.PropertyChanged.Select(c => $"{c.PropertyName} {c.Node.Role} {c.Node.Name}")
+                .Concat(d.Added.Select(a => $"+ {a.Node.Role} {a.Node.Name}"))
+                .Concat(d.Removed.Select(r => $"- {r.Node.Role} {r.Node.Name}"))),
+        ];
+    }
+
     private static List<(string? Name, bool? Selected)> Items(AccessibilityNode root)
     {
         var found = new List<(string?, bool?)>();
