@@ -15,7 +15,8 @@ file after every step and commits it with the step's work. Full survey reports a
   the step needs), do the step the ledger's Phase calls for, record it in the ledger, and commit.` Before resuming,
   `git fetch` and merge main if it moved. The common survey brief for round 11 is in session ec6d577c's scratchpad
   `brief-r11-survey.md` (see Probe code); build steps use `scripts/perf/step-ab.ps1`. Open for the user, not blocking:
-  the live screen-reader check of menus. Older rounds are in [the archive](17-performance-team-ledger-archive.md)
+  the live screen-reader check of menus. **Round 12's survey** measures in real windows too and ranks by real-app effect
+  (user, 2026-11-11; the brief's "Real windows too" and "Real apps first"): update the common survey brief for it. Older rounds are in [the archive](17-performance-team-ledger-archive.md)
   (search it, don't read it whole). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a
   pre-push hook refuses pushes built on the old history).
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`)
@@ -897,3 +898,6 @@ From 2026-11-09 (round 10's survey); earlier entries are in the archive ([to 202
 - 2026-11-11: round 11 step 7 landed (1c7dc920, 1879ba78; captures 1fcbd1b7): public `RowHighlight.BorderThickness`;
   Meridian's map list draws its selection with today's look (images byte-identical, so none sent): −28 % KB a click,
   −11…−12 % click time, 0 rows made. Next: step 8 (merged syntax theme, with images).
+- 2026-11-11: the user: the next survey also measures with real windows (headless hides work a real window does) and
+  favours the real apps over synthetic rows. Written into the brief: "Real apps first" under What counts, "Real
+  windows too" under Phase `survey`, and the merge ranks by expected win in the real apps.
