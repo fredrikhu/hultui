@@ -307,4 +307,19 @@ public sealed partial class ApertureApp
             && _cursorCard.Current is { IsHosted: true } card)
             card.Focus();
     }
+
+    /// <summary>
+    /// After a build, once its own reads are done (<see cref="FocusCursorCard"/>): the cursor's card,
+    /// if it left the window. A card holds the whole view it was in through its parents (REACTIVITY.md,
+    /// "A ref into a view keeps the whole view"): Home or the library grid behind Settings, a film's
+    /// page or any other view, once a key had moved the cursor. Every view with cards shares the ref, so
+    /// no one view's build can empty it. Nothing wants a card out of the window: the menu key would
+    /// open the card's menu over a view that is gone, and a focus would go to an element no one sees.
+    /// The build or the key that next draws the cursor's card sets the ref again (TrackCursor,
+    /// MoveRingWithoutBuild); the cursor itself is its place in the list (<see cref="_cursorIndex"/>).
+    /// </summary>
+    private void LetGoOfLeftCursorCard()
+    {
+        if (_cursorCard.Current is { IsHosted: false }) _cursorCard.Current = null;
+    }
 }
