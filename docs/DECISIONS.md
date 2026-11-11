@@ -765,6 +765,44 @@ under the 5 % bar: the step got 7–10 µs faster for 1,939 lines not tested, ab
 Declined. Revisit if a text of tens of thousands of lines is drawn every frame: at that cost a
 20,000-line body would spend about 0.1 ms a frame on the scan.
 
+### The itemizer asks the primary face about every character: a mask of found ASCII measured and declined (round 11)
+
+`FontItemizer.Itemize` asks the primary face `HasGlyph` once for every character that no earlier
+rule placed: one interface call each, into `SkiaResolvedFont`'s bitset. With round 11's word table
+and the U+0300 arm in `Extends` (7d823b34, 6274c26c), the survey's NativeAOT profile put the call at
+8.5 % of a long document's line walk. Counted a step (a JIT probe):
+
+| Row | Itemize calls | Primary asks | Of them ASCII | Asked before in the same call |
+|---|---|---|---|---|
+| text/open a long document in a TextArea | 648 | 116,260 | 116,260 | 101,154 (87 %) |
+| text/resize a wrapped TextArea | 668 | 117,547 | 117,547 | 102,128 (87 %) |
+| richtext/open 5,000 blocks | 4,643 | 284,349 | 284,349 | 206,776 (73 %) |
+| text/ellipsis 1,000 labels resize | 1,055 | 74,426 | 73,401 | 51,823 (70 %) |
+
+Plan 17's round 11, step 1 tried a mask for each call: 128 bits, in two `ulong`s, of the ASCII
+characters the primary face was found to have, so a character met again skips the call. Two forms
+were tried: an inlined helper that took the two by `ref`, and the test written into the loop's
+condition. Measured with `scripts/perf/step-ab.ps1` against 6274c26c, the 42 text and rich text
+rows, two alternated idle-gated pairs, i7-14700K on its P-cores (min ms, best of pairs, before →
+after):
+
+| Row | JIT, helper | JIT, in the loop | AOT, helper | AOT, in the loop |
+|---|---|---|---|---|
+| open a long document | 2.125 → 2.333 | 2.258 → 2.320 | 2.650 → 2.830 | 2.666 → 2.792 |
+| resize a wrapped TextArea | 1.959 → 2.093 | 1.966 → 2.088 | 2.358 → 2.469 | 2.359 → 2.415 |
+| richtext/open 5,000 blocks | 7.290 → 7.796 | 7.261 → 7.613 | 8.619 → 9.173 | 8.618 → 9.221 |
+| wrap 150 paragraphs resize | 1.795 → 1.894 | 1.757 → 1.887 | 2.036 → 2.139 | 2.023 → 2.086 |
+
+Both forms were slower on every row that itemizes much, by 2–10 %; the other rows moved within
+noise, and the A/A lines moved nothing. The answer is already a bitset read behind one well-predicted call, and the
+mask's own test and branch in the loop cost more than the calls it saved. Declined.
+
+The width cache (`TextPipeline.Widths`) still finds its entries through `Dictionary.AlternateLookup`
+and dispatches through `IAlternateEqualityComparer` on NativeAOT 11 as the word cache did. It was
+left on `LruCache`: it makes 595 lookups a step on the long-document row (about 7 µs), and the word
+table is made for word keys, so sharing it would need a generic key and comparer layer for less
+than any bar.
+
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
 BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction
