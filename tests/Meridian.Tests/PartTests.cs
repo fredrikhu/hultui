@@ -39,7 +39,7 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
             Write($"orders/o{i}.req", $"GET {_server.Origin}/ok\nname Order {i}\n");
         Write("envs/local.env", $"base_url={_server.Origin}\nhost=127.0.0.1\n");
         Write("envs/staging.env", "base_url=http://staging.invalid\nhost=staging.invalid\n");
-        var start = DateTimeOffset.Now.AddMinutes(-90);
+        var start = HistoryClock.Noon.AddMinutes(-90);   // all today: the app's clock is at noon (Hosted)
         for (int i = 0; i < 12; i++)
             HistoryLog.Append(_root, new HistoryEntry(start.AddMinutes(i), i % 3 == 0 ? "POST" : "GET",
                 $"https://api.x/v1/items/{i}", i % 5 == 4 ? 404 : 200, 10 + i, null, null));
@@ -820,6 +820,7 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
     private void Hosted(Action<Fixture> body)
     {
         using var session = HeadlessSession.Create(1440, 900);
+        HistoryClock.Set(session, HistoryClock.Noon);
         MeridianApp? app = null;
         try
         {

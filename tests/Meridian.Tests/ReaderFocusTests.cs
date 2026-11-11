@@ -28,6 +28,7 @@ public class ReaderFocusTests : IClassFixture<TestHttpServer>, IDisposable
     private void Hosted(Action<HeadlessSession, MeridianApp> body)
     {
         using var session = HeadlessSession.Create(1440, 900);
+        HistoryClock.Set(session, HistoryClock.Noon);
         MeridianApp? app = null;
         try
         {
@@ -119,7 +120,7 @@ public class ReaderFocusTests : IClassFixture<TestHttpServer>, IDisposable
     [Fact]
     public void HistoryOpens_WithItsListFocused_AndTheListHoldsTheFocusWhileWalked()
     {
-        var start = DateTimeOffset.Now.AddMinutes(-60);
+        var start = HistoryClock.Noon.AddMinutes(-60);   // all today: the app's clock is at noon (Hosted)
         for (int i = 0; i < 30; i++)
             Meridian.Core.HistoryLog.Append(_root, new Meridian.Core.HistoryEntry(start.AddMinutes(i), "GET",
                 $"https://api.x/v1/items/{i}", 200, 10 + i, null, null));

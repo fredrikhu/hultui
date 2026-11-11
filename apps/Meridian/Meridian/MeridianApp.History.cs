@@ -35,15 +35,20 @@ public partial class MeridianApp
 
     internal IReadOnlyList<HistoryEntry> History => _history;
 
+    /// <summary>The time History stamps a send with and reads "today" against: the app's clock
+    /// (<see cref="HultUI.Application.Time"/>), which is the system's in the app. A test sets its
+    /// session's time of day, so its sends are today or not whatever the hour it runs at.</summary>
+    private DateTimeOffset HistoryNow => _app.Time.GetLocalNow();
+
     /// <summary>Every send lands here. Called with the response or the failure —
     /// an unreachable host is history too, and the row says so.</summary>
     internal void RecordHistory(string method, string url, SendResult result)
     {
         if (_workspace is not { } ws) return;
         var entry = result.Response is { } response
-            ? new HistoryEntry(DateTimeOffset.Now, method, url, response.StatusCode,
+            ? new HistoryEntry(HistoryNow, method, url, response.StatusCode,
                 response.Timings.Total.TotalMilliseconds, _envName, ActiveTab?.Path)
-            : new HistoryEntry(DateTimeOffset.Now, method, url, 0,
+            : new HistoryEntry(HistoryNow, method, url, 0,
                 result.Failure?.Elapsed.TotalMilliseconds ?? 0, _envName, ActiveTab?.Path,
                 result.Failure?.Headline ?? "no response");
 
@@ -76,7 +81,7 @@ public partial class MeridianApp
     /// list is the caller's to read, not to change.</remarks>
     internal List<HistoryEntry> FilteredHistory()
     {
-        var now = DateTimeOffset.Now;
+        var now = HistoryNow;
         var query = _historyFind.Query.Trim();
         var filter = new HistoryFilter(_historyVersion, _filterMethod, _filterFailuresOnly, _filterTodayOnly,
             _filterTodayOnly ? now.ToLocalTime().Date : default, _filterEnv, query);
@@ -131,7 +136,7 @@ public partial class MeridianApp
     {
         _historyCursor = cursor;
         var selected = _historySelection = rows[cursor];
-        var now = DateTimeOffset.Now;
+        var now = HistoryNow;
         if (_historyListRef.Current is not { IsHosted: true } list || _historyArchiveRef.Current is not { IsHosted: true }
             || !ReferenceEquals(rows, _historyListRows) || now.ToLocalTime().Date != _historyRowsDay)
         {
@@ -299,7 +304,7 @@ public partial class MeridianApp
 
         // A row's time reads against today (a clock time today, "yesterday", a weekday, a
         // date), so a new day makes the rows on screen, and their labels, again.
-        var day = DateTimeOffset.Now.ToLocalTime().Date;
+        var day = HistoryNow.ToLocalTime().Date;
         if (day != _historyRowsDay)
         {
             _historyRowsDay = day;
@@ -316,9 +321,9 @@ public partial class MeridianApp
             .ItemHeight((int)Azimuth.RowRun)
             .Items(new HistoryRowItems(rows))
             .RenderWith((item, _) => HistoryRow(item.Entry, item.Index))
-            .SelectionHighlight(HistoryHighlight(_historySelection, DateTimeOffset.Now))
+            .SelectionHighlight(HistoryHighlight(_historySelection, HistoryNow))
             // One delegate from build to build, so the list keeps each row's label too.
-            .AccessibleItemLabel(_historyItemLabel ??= item => HistoryRowName(item.Entry, DateTimeOffset.Now))
+            .AccessibleItemLabel(_historyItemLabel ??= item => HistoryRowName(item.Entry, HistoryNow))
             .OnActivateItem(item => { _historySelection = item.Entry; MarkViewDirty(); })
             .SelectedIndex(SelectedHistoryIndex(rows))
             .FlexGrow(1);
@@ -403,7 +408,7 @@ public partial class MeridianApp
     private Element HistoryRow(HistoryEntry entry, int index)
     {
         HistoryRowsMade++;
-        var now = DateTimeOffset.Now;
+        var now = HistoryNow;
         bool today = HistoryLog.IsToday(entry, now);
         var (glyph, color) = entry.Reached ? StatusFace(entry.StatusCode) : ("!", Azimuth.StatusWarn);
 
@@ -466,7 +471,7 @@ public partial class MeridianApp
     /// <summary>Whether the archive on screen is not what a build of it for <paramref name="selected"/>
     /// makes now.</summary>
     private bool ArchiveStale(HistoryEntry selected) =>
-        !ReferenceEquals(_archiveShown, selected) || _archiveDay != DateTimeOffset.Now.ToLocalTime().Date
+        !ReferenceEquals(_archiveShown, selected) || _archiveDay != HistoryNow.ToLocalTime().Date
         || _archiveRevision != _partRevision.Peek();
 
     /// <summary>The archive's host, for the view's build to place beside the list: built again
@@ -480,7 +485,7 @@ public partial class MeridianApp
             // nothing takes the selection away.
             if (_historySelection is not { } entry) return Box.New();
             _archiveShown = entry;
-            _archiveDay = DateTimeOffset.Now.ToLocalTime().Date;
+            _archiveDay = HistoryNow.ToLocalTime().Date;
             _archiveRevision = _partRevision.Peek();
             var archive = BuildHistoryArchive(entry);
             archive.Key = "history-archive";
@@ -518,7 +523,7 @@ public partial class MeridianApp
         panel.AddChild(Flex.Row(gap: Azimuth.S3).AlignItems(AlignItems.Center).Children(
             Ui.Mono(entry.Reached ? $"{glyph} {entry.StatusCode}" : $"! {entry.Detail}", 12f, color),
             Ui.Mono($"{entry.DurationMs:0} ms", 11f, Azimuth.TextMuted),
-            Ui.Mono(HistoryLog.TimeLabel(entry, DateTimeOffset.Now), 11f, Azimuth.TextMuted),
+            Ui.Mono(HistoryLog.TimeLabel(entry, HistoryNow), 11f, Azimuth.TextMuted),
             Ui.Mono(entry.EnvName is { } env ? $"env: {env}" : "no environment", 11f, Azimuth.TextMuted)));
 
         panel.AddChild(Ui.Mono(entry.RequestPath is { } path
