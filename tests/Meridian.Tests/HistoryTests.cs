@@ -603,6 +603,46 @@ public class HistoryTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    /// <summary>Another view lets History go (plan 17 round 11). Its list's ref, its find field's and the
+    /// archived send panel's each held the whole History view through their parents behind every other
+    /// view; a build that shows another view empties them. Back in History the selection is where it was,
+    /// and a key moves it with no build of the window, the list told through its ref and the archive
+    /// building alone, as before.</summary>
+    [Fact]
+    public void AnotherView_LetsHistoryGo_AndBackInHistoryAKeyBuildsTheArchiveAlone()
+    {
+        var start = HistoryClock.Noon.AddMinutes(-90);
+        for (int i = 0; i < 40; i++)
+            HistoryLog.Append(_root, new HistoryEntry(start.AddMinutes(i), "GET",
+                $"https://api.x/v1/items/{i}", 200, 10 + i, null, null));
+        Hosted((session, app) =>
+        {
+            GoTo(session, KeyCode.Digit4);
+            for (int i = 0; i < 5; i++) GoTo(session, KeyCode.Down);   // cursor on row 4, items/35
+            var history = WeakHistoryList(session);
+
+            GoTo(session, KeyCode.Digit1);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            Assert.False(history.IsAlive, "the History view outlived its build behind Requests");
+
+            GoTo(session, KeyCode.Digit4);
+            Assert.EndsWith("/items/35 200", Walk(session.Window.AccessibilityTree).Single(n => n.IsSelected == true).Name);
+            Assert.Contains("https://api.x/v1/items/35", ArchiveTexts(session));
+            int builds = app.Builds, archived = app.HistoryArchiveBuilds;
+            GoTo(session, KeyCode.Down);
+            Assert.Equal(0, app.Builds - builds);
+            Assert.Equal(1, app.HistoryArchiveBuilds - archived);
+            Assert.EndsWith("/items/34 200", Walk(session.Window.AccessibilityTree).Single(n => n.IsSelected == true).Name);
+            Assert.Contains("https://api.x/v1/items/34", ArchiveTexts(session));
+        });
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static WeakReference WeakHistoryList(HeadlessSession session) =>
+        new(session.Window.FindByAutomationId("history-rows")!.Element);
+
     private static List<string> ArchiveTexts(HeadlessSession session) =>
         Descendants(session.Window.FindByAutomationId("history-archive")!.Element)
             .OfType<HultUI.Core.Elements.TextElement>().Select(t => t.Content).ToList();

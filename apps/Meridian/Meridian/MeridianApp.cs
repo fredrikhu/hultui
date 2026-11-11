@@ -260,6 +260,17 @@ public partial class MeridianApp : Component, IDisposable
             _responseBodyRef.Current = null;
             _responsePanelRef.Current = null;
         }
+        // History's refs, its list, its find field and the archived send's panel, each held the whole
+        // History view behind every other view. Only History reads them (its keys, its focus after a
+        // build), and its build sets them again: the list and the field are made by every History
+        // build, and the panel's part builds anew where it is next placed, its host having left the
+        // window with the view.
+        if (View != MeridianView.History)
+        {
+            _historyListRef.Current = null;
+            _historyFieldRef.Current = null;
+            _historyArchiveRef.Current = null;
+        }
         var root = Flex.Column(gap: 0)
             .FlexGrow(1)
             .Background(Azimuth.Bg)
