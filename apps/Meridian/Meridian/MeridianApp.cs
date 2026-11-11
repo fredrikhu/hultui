@@ -670,6 +670,7 @@ public partial class MeridianApp : Component, IDisposable
         finally
         {
             tab.Sending = null;
+            ForgetReplacedBodies(tab);
             MarkDirty();
         }
     }

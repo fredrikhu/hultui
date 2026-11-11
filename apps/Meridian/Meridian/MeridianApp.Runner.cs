@@ -450,7 +450,11 @@ public partial class MeridianApp
             var open = BarAction("open response", "open-response", () =>
             {
                 OpenRequest(result.Path);
-                if (ActiveTab is { } tab) tab.Result = result.Send;
+                if (ActiveTab is { } tab)
+                {
+                    tab.Result = result.Send;
+                    ForgetReplacedBodies(tab);
+                }
                 SetView(MeridianView.Requests);
             });
             inset.AddChild(open);
