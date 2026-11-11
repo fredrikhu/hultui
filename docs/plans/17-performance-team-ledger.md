@@ -10,15 +10,15 @@ file after every step and commits it with the step's work. Full survey reports a
   vesper-v1.25.0, meridian-v1.8.0 (re-run once: a midnight race in a test, Waiting), aperture-v1.23.0, reel-v1.9.0. Round
   11 begins with Waiting **dotnet-11-upgrade** as its own measured step (expert 4; one build agent; SDKs installed on
   Windows and WSL Fedora 2026-11-11; read that item's traps), then the survey. Round 11's survey archives round 9's
-  Landed rows, round 10's build order and answered questions 27–32, 34–36 (33 stays open), and round 9's log entries
+  Landed rows, round 10's build order and answered questions 10 and 26–36, and round 9's log entries
   (2026-11-08 to its release on 2026-11-09). To resume in a fresh context, run in this worktree: `/loop Run the next step
   of the performance team: follow docs/plans/17-performance-team.md, with state in
   docs/plans/17-performance-team-ledger.md. Read both once per session (afterwards only the ledger's Phase and the part
   the step needs), do the step the ledger's Phase calls for, record it in the ledger, and commit.` Before resuming,
   `git fetch` and merge main if it moved. The common survey brief from round 10 is reusable: session 3484c586's
-  scratchpad `brief-r10-survey.md` (see Probe code); build steps use `scripts/perf/step-ab.ps1`. Open for the user, none
-  blocking: question 26 (a merged syntax theme to match VS Code), question 10 (`TokenizeDiff` public), question 33 (an
-  unreadable request counted in the Runner's rail), the live screen-reader check of menus. Older rounds are in [the
+  scratchpad `brief-r10-survey.md` (see Probe code); build steps use `scripts/perf/step-ab.ps1`. Answered 2026-11-11:
+  26 yes and 10 yes (now Waiting **syntax-merged-theme** and **tokenize-diff-public**, for round 11's build order), 33
+  keep. Open for the user, not blocking: the live screen-reader check of menus. Older rounds are in [the
   archive](17-performance-team-ledger-archive.md) (search it, don't read it whole). History note: rewritten 2026-10-25
   (every commit after 3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history).
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`)
@@ -292,6 +292,22 @@ Re-ranked by the next survey.
   the base measurement's SDK (a temporary `global.json` at 10.0.300) or measure SDK and target change apart; apphosts
   on Fedora read `/etc/dotnet/install_location` (→ Fedora's root, .NET 10 only), so `wsl-test.sh` must export
   `DOTNET_ROOT=/usr/local/share/dotnet` once projects target `net11.0`.
+
+- **syntax-merged-theme** (5, Syntax + every app that colours code; the user said yes to question 26 on 2026-11-11) —
+  give TextMateSharp one merged theme (the included theme's rules folded into the main theme's lookup) so colours
+  match VS Code: JSON keys #9CDCFE (today teal; every key in Meridian's JSON bodies), `this` #569CD6. Its own step,
+  not folded into a perf step: before/after images of JSON, C#, TypeScript, Markdown and a Junction diff under each
+  theme that includes another; update the golden images it recolours (`HULTUI_UPDATE_GOLDENS`) and say which ones
+  in the step; check the colour-cache and theme-load cost with `step-ab.ps1` (a merge done once per theme load
+  should cost nothing a key). Round 9 step 14b's ~974k-line corpus comparison is the test: differences from VS Code
+  should fall to the ones explained elsewhere.
+- **tokenize-diff-public** (5, Syntax; the user said yes to question 10 on 2026-11-11) — make
+  `SyntaxHighlighter.TokenizeDiff` (SyntaxHighlighter.cs:205) public, with the two types it uses, both internal today:
+  `LineRange` (the shown lines it takes) and `TokenizedDiff` (the spans it returns). Review the surface first: the
+  required `TimeProvider clock` (`TokenizeLines` takes it optional), whether `LineRange` is inclusive at `Last`, the
+  nullable arrays in the result. Then XML docs, a docs page entry (docfx `--warningsAsErrors` stays at 0), drop
+  `<InternalsVisibleTo Include="Junction" />` from HultUI.Syntax.csproj if Junction then needs no other internal, and
+  a public-API test in HultUI.Syntax.Tests. No perf number expected; small.
 
 - **meridian-history-test-midnight** (tests; found 2026-11-11 by meridian-v1.8.0's installer run at 00:00:41 UTC) —
   `HistoryTests.AnOlderSendFadesItsColours_NotItsRow` (tests/Meridian.Tests/HistoryTests.cs ~:411) captures
@@ -633,7 +649,8 @@ Round 10 questions (from the survey, 2026-11-09). Recommendations in brackets.
 33. **meridian-runner-unreadable-count** (step 4, 2026-11-10; behaviour, minor): the Runner's rail now counts from the
     scanned collection, so a request file that can't be read is counted in "N req" and "Run · N req" but still left out
     of the run ("49 / 49" beside "Run · 50 req"); before, the count read every file and left it out. Keep, or mark
-    unreadable files apart in the rail (a small follow-up)? [Keep: rare, and the run still reports what it ran.]
+    unreadable files apart in the rail (a small follow-up)? [Keep: rare, and the run still reports what it ran.] →
+    **keep** (2026-11-11).
 
 34. **meridian-map-rows-list-items** (step 11, 2026-11-10; reader behaviour): the Discovery map is now a virtual list,
     so a screen reader hears each endpoint as a "list item" (selected / not selected) in a list, where before it was a
@@ -657,14 +674,14 @@ Round 10 questions (from the survey, 2026-11-09). Recommendations in brackets.
     how the existing setter behaves before layout, no new API — and Brief makes the columns for it)? [(b): returning
     where you were is what a file manager should do; small.] → **(b)** (2026-11-11; step 15b).
 
-Round 9 question 26 (from step 14b, 2026-11-09), still open. Round 9's answered questions 14–25 are in
+Round 9 question 26 (from step 14b, 2026-11-09), answered 2026-11-11. Round 9's answered questions 14–25 are in
 [the archive](17-performance-team-ledger-archive.md#needs-the-user-round-9). Recommendations in brackets.
 
 26. **syntax-merged-theme** (from step 14b; not perf, not blocking): today and the encoded path both differ from VS Code
     on ~974k corpus lines because TextMateSharp keeps an included theme in a second lookup and the main theme's broader
     rule wins: JSON keys are teal where VS Code shows #9CDCFE (every key in Meridian's JSON bodies), `this` is #9CDCFE
     where VS Code shows #569CD6. Giving it one merged theme would match VS Code. Wanted? [Later, its own step with
-    images: it recolours every JSON key.]
+    images: it recolours every JSON key.] → **yes** (2026-11-11; Waiting syntax-merged-theme, round 11).
 
 Round 9 questions 14–25, round 8 questions 11–13, round 7 questions 1–4, round 6 questions 1–9 and round 5's question 5,
 all answered, are in the archive ([round 9](17-performance-team-ledger-archive.md#needs-the-user-round-9),
@@ -674,7 +691,8 @@ Recommendations in brackets.
 
 10. **tokenize-diff-public** (from step 12; not blocking): `TokenizeDiff` in HultUI.Syntax tokenizes only the lines a diff
     shows and is `internal`, with Junction as a friend assembly. Another diff view would want it. Make it public? [Yes,
-    but later: no second user exists, and a friend assembly costs nothing. Decide when one turns up.]
+    but later: no second user exists, and a friend assembly costs nothing. Decide when one turns up.] → **yes**
+    (2026-11-11; Waiting tokenize-diff-public, round 11).
 
 Reminder (expert 8): Aperture signed in to jellyfin.home 3 more times this round as device
 "aperture-survey"; the user should remove those devices and revoke the API key when the work is done.
@@ -1072,3 +1090,7 @@ From 2026-11-08 (round 9's survey); earlier entries are in the archive ([to 2026
   only the grammars it reaches (−95 % kept), and bug fixes the user approved (Aperture Backspace, Brief's blank columns
   and return position, Sync's cursor reveal, Junction's sideways pan); public `ScrollViewElement.UserScrolled`. Round →
   11, Phase → upgrade then survey; the loop stops, and round 11 starts in a fresh context.
+- 2026-11-11: the user answered the open questions: 26 **yes** (a merged syntax theme to match VS Code) and 10 **yes**
+  (`TokenizeDiff` public), both now Waiting items for round 11's build order (syntax-merged-theme,
+  tokenize-diff-public); 33 **keep** (an unreadable request file stays counted in the Runner's rail). Only the live
+  screen-reader check of menus stays open for the user.
