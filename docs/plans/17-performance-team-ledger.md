@@ -7,7 +7,7 @@ file after every step and commits it with the step's work. Full survey reports a
 - **Round:** 11
 - **Phase:** build — round 11. The survey is done (reports `17-reports/r11-*`, 2026-11-11): experts 2 and 3 satisfied,
   two review objections (the .NET 11 upgrade's AOT lookups, 207fbe25; Meridian's map item rows, 5e93a4fe). Step 0, the
-  .NET 11 upgrade, landed (6403f8fe..868e2ffc; not yet on main: it merges with the round). Steps 1–12 landed; step 13 next; then 14
+  .NET 11 upgrade, landed (6403f8fe..868e2ffc; not yet on main: it merges with the round). Steps 1–13 done; step 14 next; then the full suite and the release
   (questions 37–45 answered 2026-11-11). Round
   10 released: merged into main as cc55bdcc; CI run 42924747474 green. To resume in a fresh context, run in this
   worktree: `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md, with state in
@@ -270,6 +270,9 @@ Re-ranked by the next survey.
   list, off screen, is still not told to a reader (applied tree 200 items, a fresh build 201, 0 walks); a fix needs a
   guard for lists over 2,000 items (labels read live). Also: a label delegate made anew each build drops the kept
   labels, so step 2's check doesn't cover those lists. Next survey.
+- **f16-held-drag-post-stall** (3; survey stall once, round 11 step 13's one approved re-run clean) — cause unknown.
+  The re-run opened on the 4K at 120 Hz; the stall was on the 1440p at 200 Hz. Another run needs a new approval
+  from the user and should place the window on the 200 Hz display. No fix: no evidence points to one.
 - **meridian-narrow-editor-fedora-fonts** (tests; found in round 11 step 3) — on WSL Fedora, Meridian.Tests alone fails
   `NarrowEditorLayoutTests.Tab_titles_…` ("chain sub-tab shows 61.6 of its 66.2px"), on the base commit too: Fedora's
   fonts. CI's Linux job doesn't run Meridian.Tests. Pin the font (DejaVu, as the goldens do) or measure the title
@@ -323,6 +326,7 @@ are in [the archive](17-performance-team-ledger-archive.md#landed-rounds-14) ([r
 | 11 | bf9aa781, 1d9eaf92 | ondafterbuild-markdirty-dropped (question 41: (a)) | Not perf. REACTIVITY.md (lifecycle table, a paragraph with an example, a link from MarkDirty) and Component.cs's XML docs: a MarkDirty or a write to a signal the build read is dropped in OnBeforeBuild, Build and OnAfterBuild; use `Application.InvokeOnMainThread(MarkDirty)` or `RequestPostFrameCallback(MarkDirty)`; deliberate (Junction's find bar relies on it); a build inside another component's reconcile has its MarkDirty deferred, not dropped. Vesper's `RestorePaneScroll` makes one try (the 4-build counter is a bool); `ClosingTheViewerPutsAThumbnailPaneBackWhereItWas` (with the restore stubbed, the viewer, diff and Thumbnails tests fail); Vesper 931 pass. A Debug-only once-per-type note for a drop inside OnAfterBuild was proposed, not built. |
 | 11 | 0ed79e8a, f0444f6e | findbar-count-after-bind (question 45: yes) | Bug, reproduced headlessly (Ctrl+F, a query): Junction a.txt (3 matches) → b.txt (1) showed "1 of 3" for "1 of 1", first frame and settled; Meridian pretty/raw: raw "1 of 2" with 0 hits, pretty "no matches" with 2; Meridian tabs (since step 6's kept bodies) the other tab's "1 of 1". Fix: `FindBar.Service` compares a new internal `TextSearch.Version` with the version the bar was built from and, if it moved, writes the count and its good/bad colour into the bar on screen with no build (nothing while closed); ELEMENTS.md. Builds a key 1.00 in both apps, unchanged; Junction Changes caret 311.6 → 311.8 KB, with the bar open 333.4 → 333.5 KB (count wrong on 10 of 90 keys → 0); Meridian find typing 65.9 → 65.9. Suite 0/0 JIT and AOT, no allocKB moved. 4 tests (FindBarTests, DiffFindTests, ResponseBodyWorkerTests, KeptResponseBodyTests), all fail reverse-edited; Core 5,084, Headless 1,559, Vesper 931, Meridian 676; Junction 1,092 of 1,093 (`ReviewTests.TheKeyboardReachesTheCommentAgain`, the known focus flake, 3/3 alone). |
 | 11 | 4016e20b, 18772928 | suite-document-switch | Two suite rows (`Scenarios.DocumentSwitch.cs`; README; 232 scenarios, 205 off Windows): `component/cursor key over a 200-file list beside its document, text landing a frame later` (a VirtualList of 200 files and a read-only coloured TextArea of 180–420 lines through a KeyedAsyncLoader; the key posted so it lands inside the step's frame) and its twin `…, text in hand`. JIT, two idle-gated runs: landing 1.85/1.84 ms min, 198.4 KB, 2.0 builds; in hand 1.38/1.37 ms, 167.9 KB, 1.0 build — the second build and its frame ≈ 0.47 ms and 30.5 KB a key; AOT 1.86 / 1.42 ms, 198.1 / 167.8 KB; render 94–97 % (the new TextArea's first draw). Per-step checks (build count, a laid-out "Loading…" frame, text, spans, key, one row filled, a quiet next frame), each seen failing when broken. About twice Junction's Files walk a key (86.2 KB, 1.23 builds), since every key here opens an unseen file. Other rows unmoved (JIT 0/0; AOT one outlier row cleared by two more pairs). |
+| 11 | (none) | f16-held-drag-post-stall, one diagnostic run (question 37: yes, one run) | **Not reproduced.** The one approved launch (JIT, Vulkan F16, a post waiting at every step) ran clean: exit 0 in 14 s, graceful WM_CLOSE, guards never fired, no dump. It opened on the 4K (scale 1.5, 120 Hz, 1200×800 px), where every survey run including the stall opened on the 1440p (scale 1, 200 Hz, 800×533) — the one visible difference. Step 0 274 ms (268 ms the first over-allocated F16 swapchain build, 1224×816 into 1280×1024); all 80 steps one frame each (median 3.6 ms), acquire, fence wait and present returning at once; 3 bucket builds (30–33 ms) and the exact-size build at the end (30 ms). Held 1 s without a post: 60 timer events, 0 frames; with a post: 63 events, 1 frame 15 ms after it (present SuboptimalKHR, the over-allocated swapchain kept, as designed). 0 `nvlddmkm`/System/Application events. Logging-only probe edits reverse-edited; nothing committed. Files `r11b13\runs\`. |
 
 ## Examined, not worth it
 
@@ -920,3 +924,6 @@ From 2026-11-09 (round 10's survey); earlier entries are in the archive ([to 202
 - 2026-11-11: round 11 step 11 landed (4016e20b; captures 18772928): two suite rows for a list cursor that opens a
   document whose text lands a frame later, with an in-hand twin (the second build ≈ 0.47 ms and 30.5 KB a key). Next:
   step 13 (one guarded F16 held-drag diagnostic; dotnet-dump 9.0 is already a global tool).
+- 2026-11-12: round 11 step 13 (no commit): the one approved F16 held-drag re-run did not stall (clean on the 4K at
+  120 Hz; the survey's stall was on the 1440p at 200 Hz). Back to Waiting; another run needs the user's approval.
+  Next: step 14.
