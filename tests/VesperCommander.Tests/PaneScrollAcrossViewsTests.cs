@@ -69,6 +69,37 @@ public class PaneScrollAcrossViewsTests
         Assert.Equal(before, LeftList(t).ScrollOffsetY);
     }
 
+    /// <summary>Thumbnails scrolls a list of its own, which comes back the same way: one try, on
+    /// the build that brings the panes back, as an offset set before the list's first layout is
+    /// kept by it.</summary>
+    [Fact]
+    public void ClosingTheViewerPutsAThumbnailPaneBackWhereItWas()
+    {
+        using var t = new ViewerTests.Fixture();
+        Populate(t);
+        t.Open();
+        t.Press(KeyCode.F3, KeyModifiers.Ctrl);   // view: Thumbnails
+        t.Session.PumpFrames(2);
+        ThumbList(t).ScrollOffsetY = 1200f;
+        t.Session.PumpFrame();
+        t.PutCursorOn("a100.txt");   // first, in case the cursor's move scrolls
+        t.Session.PumpFrames(2);
+        float before = ThumbList(t).ScrollOffsetY;
+        Assert.True(before > 500f, $"the thumbnails did not scroll (offset {before})");
+
+        t.ViewFile("a100.txt");
+        Assert.True(t.ViewerOpen);
+        t.Press(KeyCode.Escape);
+        t.Session.PumpFrames(2);
+
+        Assert.False(t.ViewerOpen);
+        Assert.Equal(before, ThumbList(t).ScrollOffsetY);
+    }
+
+    private static VirtualListElement<CommanderApp.ThumbRowItem> ThumbList(ViewerTests.Fixture t) =>
+        t.Field<Ref<VirtualListElement<CommanderApp.ThumbRowItem>>>("_thumbVListL").Current
+        ?? throw new Xunit.Sdk.XunitException("the left pane has no thumbnails");
+
     /// <summary>A pane that was at the top stays at the top — the restore must not invent
     /// an offset, and a second open must not put back a stale one.</summary>
     [Fact]
