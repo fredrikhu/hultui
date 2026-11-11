@@ -479,6 +479,60 @@ public class ViewModesTests
         return (new System.WeakReference(cell), scroll.ScrollOffsetX);
     }
 
+    /// <summary>Detail lets Thumbnails go (plan 17 round 11). The thumbnail list's ref held the list it last
+    /// pointed at, and through its parents the whole grid behind Detail. A build now lets go of it once it
+    /// left the window, and keeps its height, which the next Thumbnails build sizes its page from as it did
+    /// from the old list. Back in Thumbnails the page and the list's height are what they were. Over a
+    /// full-shell view (the diff) the list is let go too, and the pane comes back scrolled where it was.</summary>
+    [Fact]
+    public void Detail_LetsThumbnailsGo_AndThumbnailsComeBackAsTheyWere()
+    {
+        using var t = new DiffViewTests.Fixture();
+        for (int i = 0; i < 400; i++) t.WriteLeft($"f{i:000}.txt", "x");
+        t.WriteRight("f399.txt", "y");
+        t.Open();
+        t.Press(KeyCode.F3, KeyModifiers.Ctrl);   // view: Thumbnails
+        t.Session.PumpFrames(2);
+        int page = t.Field<int[]>("_viewPage")[0];
+        var (grid, height) = WeakThumbList(t);
+        var thumbs = t.Field<Ref<VirtualListElement<CommanderApp.ThumbRowItem>>>("_thumbVListL");
+
+        t.Press(KeyCode.F1, KeyModifiers.Ctrl);   // view: Detail
+        t.Session.PumpFrames(3);
+        System.GC.Collect();
+        System.GC.WaitForPendingFinalizers();
+        System.GC.Collect();
+
+        Assert.False(grid.IsAlive, "the thumbnail grid outlived its view behind Detail");
+        Assert.Null(thumbs.Current);
+        Assert.Equal(height, t.Field<float?[]>("_thumbListHeight")[0]);
+
+        t.Press(KeyCode.F3, KeyModifiers.Ctrl);   // back to Thumbnails
+        Assert.Equal(page, t.Field<int[]>("_viewPage")[0]);
+        t.Session.PumpFrames(2);
+        Assert.Equal(height, thumbs.Current!.Layout.AbsoluteContentBox.Height);
+        Assert.Equal(page, t.Field<int[]>("_viewPage")[0]);
+
+        t.Press(KeyCode.End);
+        t.Session.PumpFrames(3);
+        float scrolled = thumbs.Current!.ScrollOffsetY;
+        Assert.True(scrolled > 0, "End did not scroll the grid");
+        t.OpenDiffOn("f399.txt");
+        Assert.True(t.DiffOpen);
+        Assert.Null(thumbs.Current);
+        t.Press(KeyCode.Escape);
+        t.Session.PumpFrames(6);
+        Assert.False(t.DiffOpen);
+        Assert.Equal(scrolled, thumbs.Current!.ScrollOffsetY);
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static (System.WeakReference Grid, float Height) WeakThumbList(DiffViewTests.Fixture t)
+    {
+        var list = t.Field<Ref<VirtualListElement<CommanderApp.ThumbRowItem>>>("_thumbVListL").Current!;
+        return (new System.WeakReference(list), list.Layout.AbsoluteContentBox.Height);
+    }
+
     /// <summary>The names on the Brief cells made, all columns.</summary>
     private static List<string> BriefCellNames(DiffViewTests.Fixture t) =>
         t.Field<Ref<ScrollViewElement>>("_briefScrollL").Current!.Children[0].Children
