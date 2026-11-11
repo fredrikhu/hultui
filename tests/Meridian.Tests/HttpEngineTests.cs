@@ -204,7 +204,13 @@ public class HttpEngineTests : IClassFixture<TestHttpServer>
         // "connected · no response bytes", never "never connected" — the socket opened.
         Assert.Contains("connected", failure.Detail);
         Assert.DoesNotContain("never", failure.Detail);
-        Assert.True(failure.Elapsed >= TimeSpan.FromMilliseconds(400));
+        // The timeout fired, not something sooner. The bound allows one clock-interrupt step
+        // (15.625 ms) plus the millisecond the timer queue truncates to: the queue counts on the
+        // interrupt clock (QueryUnbiasedInterruptTime, in whole ms), while Elapsed is a QPC
+        // Stopwatch, so a timer woken by another timer's tick can fire up to that much early by
+        // the Stopwatch (388 and 399 ms were seen in full runs). Linux's ~4 ms coarse clock fits too.
+        Assert.True(failure.Elapsed >= TimeSpan.FromMilliseconds(400) - TimeSpan.FromMilliseconds(17),
+            $"the timeout of 400 ms came after only {failure.Elapsed.TotalMilliseconds:F1} ms");
     }
 
     [Fact]
