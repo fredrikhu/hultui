@@ -5,13 +5,12 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 11
-- **Phase:** upgrade, then survey — round 11, to start in a fresh context (the loop stopped 2026-11-11 after round 10's
-  release). Round 10 released: merged into main as cc55bdcc; CI run 42924747474 green; app releases junction-v1.25.0,
-  vesper-v1.25.0, meridian-v1.8.0 (re-run once: a midnight race in a test, Waiting), aperture-v1.23.0, reel-v1.9.0. Round
-  11 begins with Waiting **dotnet-11-upgrade** as its own measured step (expert 4; one build agent; SDKs installed on
-  Windows and WSL Fedora 2026-11-11; read that item's traps), then the survey. Round 11's survey archives round 9's
-  Landed rows, round 10's build order and answered questions 10 and 26–36, and round 9's log entries
-  (2026-11-08 to its release on 2026-11-09). To resume in a fresh context, run in this worktree: `/loop Run the next step
+- **Phase:** survey — round 11. Its first step, the **.NET 11 upgrade**, landed on the branch 2026-11-11
+  (6403f8fe..868e2ffc; Landed, round 11; not yet on main: it merges with the round). The survey profiles .NET 11 /
+  SDK 11.0.100. Round 10 released: merged into main as cc55bdcc; CI run 42924747474 green; app releases
+  junction-v1.25.0, vesper-v1.25.0, meridian-v1.8.0, aperture-v1.23.0, reel-v1.9.0. Round 11's survey first archives
+  round 9's Landed rows, round 10's build order and answered questions 10 and 26–36, and round 9's log entries
+  (2026-11-08 to its release on 2026-11-09), then spawns the eight experts. To resume in a fresh context, run in this worktree: `/loop Run the next step
   of the performance team: follow docs/plans/17-performance-team.md, with state in
   docs/plans/17-performance-team-ledger.md. Read both once per session (afterwards only the ledger's Phase and the part
   the step needs), do the step the ledger's Phase calls for, record it in the ledger, and commit.` Before resuming,
@@ -22,8 +21,8 @@ file after every step and commits it with the step's work. Full survey reports a
   archive](17-performance-team-ledger-archive.md) (search it, don't read it whole). History note: rewritten 2026-10-25
   (every commit after 3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history).
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`)
-- **Review commits since:** round 11's survey reviews round 10's build and the .NET 11 upgrade, f4d6050d..(the upgrade's
-  merge) (the last survey report to the release). Earlier: round 10's survey reviewed round 9's build, 4919ac40..facced69 (the last survey report
+- **Review commits since:** round 11's survey reviews round 10's build and the .NET 11 upgrade, f4d6050d..868e2ffc
+  (the last survey report to the upgrade's captures; round 10's merge into main cc55bdcc is in the range). Earlier: round 10's survey reviewed round 9's build, 4919ac40..facced69 (the last survey report
   to the round 9 release; 82 commits, 81 not merges; no merge from main this round). Round 9's survey reviewed
   eaa1ec29..10acc8c0 (round 8's build, with main's merge 3a15b5b1); round 8's survey reviewed 17d4220a..df45b4a2.
 - **Probe code:** round 10 surveys in session 3484c586's scratchpad
@@ -274,24 +273,24 @@ Re-ranked by the next survey.
   `OnAfterBuild` is silently dropped, so Vesper's `RestorePaneScroll` retry never runs (Detail and Thumbnails restore on
   the first build, so harmless today). A trap for app authors: document or make it work; measure at the next survey.
 
-- **dotnet-11-upgrade** (4, all; the user, 2026-11-11: ".NET 11 has just been released, we should consider picking it
-  up for the next round") — round 11 takes it up first, as its own step before the survey, so the survey profiles the
-  runtime the apps will ship on and the upgrade's own effect is measured alone. State on 2026-11-11: this machine has
-  only the .NET 10 SDK (10.0.300); no `global.json`; 102 project files set `net10.0` each (consider one
-  `TargetFramework` in Directory.Build.props); every workflow pins `actions/setup-dotnet` to `10.0.x`. Needs: the .NET 11
-  SDK here and in WSL Fedora (the user installs it, or approves the download); retarget projects, CI and docs
-  (NATIVE-AOT.md, ENVIRONMENT.md, CI.md); check every dependency (SkiaSharp/HarfBuzzSharp, TextMateSharp, Kiota and
-  Aperture's `--probe`, XTerm.NET, WebView2, CEF, mpv interop, source generators and analyzers) and NativeAOT/trim
-  warnings; measure with `step-ab.ps1` (base the last .NET 10 commit, `-Pairs 2 -Runtime Jit,Aot`) plus the AOT app
-  walks (KB/key, start-up, working set); run every suite on Windows and Fedora and CI's macOS keyring job.
-  **SDKs installed 2026-11-11:** Windows 11.0.100 beside 10.0.300 (the user); WSL Fedora 11.0.100 + runtimes 11.0.0 and
-  10.0.15 (NETCore and AspNetCore) in `/usr/local/share/dotnet` via Microsoft's dotnet-install.sh, linked as
-  `/usr/local/bin/dotnet` (first on `wsl-test.sh`'s PATH), because Fedora 44 has only RCs (rc.1 updates, rc.3
-  updates-testing); Fedora's packaged 10.0.112 in `/usr/lib64/dotnet` untouched; remove ours when Fedora ships the
-  final package. Traps for the upgrade: with no `global.json` both machines now build `net10.0` with SDK 11, so pin
-  the base measurement's SDK (a temporary `global.json` at 10.0.300) or measure SDK and target change apart; apphosts
-  on Fedora read `/etc/dotnet/install_location` (→ Fedora's root, .NET 10 only), so `wsl-test.sh` must export
-  `DOTNET_ROOT=/usr/local/share/dotnet` once projects target `net11.0`.
+- **dotnet11-aot-textarea-long-document** (5/4; found by the upgrade step) — the one place .NET 11 got slower: AOT
+  `long TextArea document` +13–15 % (3.466 → 3.984 ms min) and `wrapped TextArea resize` +11 % (2.916 → 3.246), both
+  pairs; the SDK-vs-runtime split puts the runtime's own share at +6 % and +4 % (under the bar), the rest the SDK's
+  (ILCompiler 11). JIT 0 slower. The survey's experts 5 and 4 profile the AOT path (codegen of the line walk, inlining).
+  Captures `samples/HultUI.Samples.PerfSuite/captures/2026-11-11-c99e23bf-dotnet11-aot-{before,after}.json`; split
+  runs in this session's scratchpad `r11u\ab-split\`.
+- **meridian-stalled-timeout-early** (tests; found by the upgrade step) — `HttpEngineTests.AStalledServerIsATimeoutThat
+  SaysItConnected` failed in both Windows full runs on .NET 11: the timeout fired at 388 and 399 ms against a ≥ 400 ms
+  assertion (passes 8/8 alone, 5/5 in its project). Early, not late: the lower bound measures from a point after the
+  timer starts, or .NET 11's timer fires up to ~12 ms early. Known flake since 2026-10-05 (memory ci-red-findings), now
+  more likely; fix the assertion's start point (or a tolerance the timer's resolution explains) before the round's
+  release so 2-core CI stays green.
+- **uitests-liveresize-order** (3, tests; found by the upgrade step) — two `LiveResizeFrameTests` fail in the full
+  real-window UiTests run on .NET 10 too (pass alone); GPU-sink tests that run before them likely leave a process-wide
+  flag set. Pre-existing; fix with the next UiTests change (with uitests-workareas-before-dpi-aware).
+- **fedora-local-dotnet** (environment) — remove `/usr/local/share/dotnet` and the `/usr/local/bin/dotnet` link in WSL
+  Fedora once Fedora ships the final `dotnet-sdk-11.0`; `wsl-test.sh` takes `DOTNET_ROOT` from the dotnet on PATH
+  since 67105a0b, so it follows.
 
 - **syntax-merged-theme** (5, Syntax + every app that colours code; the user said yes to question 26 on 2026-11-11) —
   give TextMateSharp one merged theme (the included theme's rules folded into the main theme's lookup) so colours
@@ -361,6 +360,7 @@ Round 9 (the round round 10's survey reviews; it moves to the archive at round 1
 | 10 | 0b276fec | junction-view-only-tests-settle (tests) | Cause: on Windows a folder made by TempRepo's copy reports a change the first time anything lists it, so the app's first `git for-each-ref` set off "refs\heads changed" in 25 of 25 fresh copies and the watcher reloaded ~300 ms later inside the counted window (chrome 14 → 21, data generation 0 → 1). `CopyTree` lists every folder of a copy before any watcher exists (0 of 19 copies report after; `FixtureQuietTests` fails 3 of 3 without it); `HostedOnGitLab` settles after the GitLab mark; `ViewOnlyClicks` waits for the watcher's report of its own write. 20 fresh runs each with 28 busy threads: `AFolderOrFilterCharacter` 3/20 (+2/20 instrumented) → 0/20; `ViewOnlyClicks` 0/20 → 0/20 (step 13's ~1 in 4 not reproduced here). Reverse edits of steps 5/8 still fail. `ReviewTests.TheKeyboardReachesTheCommentAgain` left (a different flake: nothing focused after a Tab). Junction 1,092 ×2 (one earlier run 1,091 + that flake), Headless 1,541, Core 5,082 pass. Tests only. |
 | 10 | 2f7ab168, 81b6d84e, b63f8ceb, ab8c714d, 495f1e85, 4cb55b86 | vesper-brief-scrollbar-columns | Approved (question 28 (a); public API). **Public `ScrollViewElement.UserScrolled` (`Action?`)**: "Called after the user moves this view's offset: the wheel, the scrollbar (a track click, each move of a thumb drag), the autoscroll (the middle button held, a selection held past the view's edge) and a VirtualListElement's own scroll keys"; once per move that changed the offset, last in each path; code scrolls (setters, `ScrollBy`, reveals) and moves handed to a `SidewaysScroller` raise nothing; `PatchFrom` carries it; the window's autoscroll goes through an internal `ScrollByUser`; `ScrollEvent` unchanged (scope wider than the brief: question 35). Vesper: Brief listens to `UserScrolled` and makes the columns it scrolls to; returns from another view at the start with columns made for the start (question 36); a folder that fits its pane has nothing to scroll (`FlexGrow` on the content made it ~1.7e38 px wide at 60 files). Blank columns in view, headless 1240×820: track click 400 files 4 of 4 → 0 (0 → 1 build); bar walk 400 / 3,000 / 60 files 15 / 22 / 22 → 0; autoscroll 182 frames 139 / 139 / 111 → 0; return from Detail, Thumbnails, viewer 17 / 17 / 0 → 0; wheel builds 25 → 4; steps not matching a full build 30 → 0 at 400 and 3,000. Brief KB a key Down 5.0 → 4.9, Up 5.2, 12 builds; 3,000 files 6.07, 105 builds. step-ab `-Pairs 1` JIT 0/0, no allocation moved (captures 4cb55b86). UserScrolledTests 9, BriefScrollColumnsTests 4, BriefReturnTests 4 (reverse edits fail); Core 5,072, Headless 1,550, Vesper 919, Junction 1,092, Meridian 664, Aperture 362 pass; docfx `--warningsAsErrors` 0. ELEMENTS.md. |
 | 10 | 00b8fc79, d85c6ff6, f0106c63 | vesper-brief-return-offset | Approved (question 36 (b)). Framework, no new API: while a view has no viewport or no content on an axis, setting `ScrollOffsetX`/`Y` keeps the value (≥ 0) and reads it back; the layout pass applies it once both have a size, clamped, before any held reveal, raising no `UserScrolled`; a later set replaces it, `ScrollBy` adds to it; user input never holds an offset (private `MoveOffsetX/Y`: wheel, bar, autoscrolls, VirtualList keys); `ScrollRangeIntoView` reveals from the held offset, `ScrollRangeIntoViewHorizontal` does nothing before a width; VirtualList's content is its row height. Callers checked (every reveal in Junction, Meridian, Aperture, CommandPalette, Inspector, Vesper; autoscroll carry-over; UIA scroll; a11y horizontal reveal; Locator; PerfSuite); one needed a guard (`ScrollBriefToCursor` before layout). Vesper: leaving Brief stores offset, cursor and result set (`PaneTab.BriefLeft`); the build that makes the new scroll view sets it and builds those columns (`BriefOpenAt`); a cursor moved while away is revealed with the least move; `NavigateTo` clears it. Return walk at 60/400/3,000 files × mid/end × cursor/bar × Detail, Thumbnails, viewer, diff, sync: back at the offset and cursor left 20 → 60 of 60, cursor shown as left 40 → 60 of 60, blank-column steps 0 → 0 of 138, steps differing from a full build 0 → 0; the return build at 400/end 596 → 459 KB. step-ab `-Pairs 1` JIT 0 slower, no allocation moved (captures f0106c63). ScrollViewElementTests +6 (replaces `ScrollOffset_ClampsToZeroWhenNoContent`), ScrollOffsetBeforeLayoutTests 3, BriefReturnTests 14; reverse edits fail; Core 5,088, Headless 1,553, Vesper 929, Junction 1,092, Meridian 664, Aperture 362 pass; docfx 0 warnings. ELEMENTS.md §6, REACTIVITY.md. |
+| 11 | 6403f8fe, 207fbe25, 67105a0b, c177a16c, c99e23bf, 868e2ffc | dotnet-11-upgrade (the user, 2026-11-11) | Everything targets .NET 11: one `HultUITargetFramework` (net11.0) in Directory.Build.props used by all 102 projects; a new `global.json` (SDK 11.0.100, latestFeature) that every workflow's setup-dotnet reads; installer, workflow and script publish paths; `wsl-test.sh` exports `DOTNET_ROOT` from the dotnet on PATH; guides and the two skills name .NET 11; `step-ab.ps1 -BaseSdk` and per-side target framework for the AOT wrapper. Fix found by the measurement (c99e23bf): .NET 11's optimized JIT boxes `HashCode.Add<T?>` in `TextPipeline.MetricDigest`'s loop (2–3 × 24 B a metric span on every styled layout; 12 JIT rows' allocKB up, styled wrap 74.8 → 225.7 KB) — plain values now, test fails on net11 with the old code (72 B a call). Measured ca31555d on SDK 10.0.300 / net10.0 against the tree on SDK 11.0.100 / net11.0, whole suite (230 rows), 2 pairs: JIT 0 slower / 0 faster, A/A 0/0, allocKB down on 2 rows (dropdown 38.4 → 36.8, wheel 4.4 → 4.2); AOT A/A 0/0, 2 slower (long TextArea document +13–15 %, wrapped TextArea resize +11 %; → Waiting dotnet11-aot-textarea-long-document), highlighted JSON −15 %; idle 0.2 passes/s, the 17 zero-KB rows still 0. AOT app walks (69 × 2): geometric mean 1.000, KB a key +0.3 %, none > 5 % (Vesper thumbs +4.8 %), builds equal, GCs gen0/1/2 123/17/8 → 121/15/8. Start-up (42 guarded launches, 0 foreground takes): Junction median 258.8 → 255.3 ms, Vesper 280.9 → 275.6, the others ±9 ms; working set flat (Junction 105.5 → 105.6 MB, Aperture 116.3 → 116.2). Exe sizes +0.2…+1.6 % (Junction 23.87 → 24.03 MB). Warnings: build 367 → 359 (SDK 10's ILCompiler NU1903 gone), AOT/trim 0 → 0 (Aperture's Kiota IL2104 1 → 1), docfx 0. Tests: Windows 30 projects, round 10's counts + 1 (Meridian's stalled-timeout flake failed both full runs → Waiting); Fedora 22 projects, 0 failures (Vesper zebra tint once, then 10/10); UiTests 130 pass (2 LiveResizeFrameTests fail in the full run on .NET 10 too → Waiting); mpv 29/29. Harness in this session's scratchpad `r11u\`. |
 
 ## Examined, not worth it
 
@@ -1094,3 +1094,11 @@ From 2026-11-08 (round 9's survey); earlier entries are in the archive ([to 2026
   (`TokenizeDiff` public), both now Waiting items for round 11's build order (syntax-merged-theme,
   tokenize-diff-public); 33 **keep** (an unreadable request file stays counted in the Runner's rail). Only the live
   screen-reader check of menus stays open for the user.
+- 2026-11-11: round 11 step 0, **dotnet-11-upgrade** (expert 4, one build agent, brief in this session's scratchpad
+  `brief-r11u.md`): kept, 6403f8fe..868e2ffc (Landed). One `HultUITargetFramework` for 102 projects, a `global.json`
+  (11.0.100) the workflows read, Fedora's `DOTNET_ROOT` from the dotnet on PATH; one .NET 11 JIT boxing regression
+  found and fixed (c99e23bf). Suite JIT 0/0, AOT 2 TextArea rows slower (+11…+15 %, mostly the SDK's ILCompiler; →
+  Waiting), app walks geomean 1.000, start-up −3…−5 ms, working set flat. Tests: Windows 30 and Fedora 22 projects green
+  apart from Meridian's stalled-timeout flake (both Windows full runs; → Waiting, fix before the release). CI must still
+  confirm the macOS keyring job, setup-dotnet reading global.json, docfx on an ubuntu runner with only .NET 11, and the
+  installers' publish paths (at the round's release). Phase → survey.
