@@ -1027,7 +1027,19 @@ for speed:
 - **Where views share a ref, let go once the build is done.** Vesper's cursor ref is the row, cell or tile
   of whichever view draws the cursor, so no one view can empty it. `OnAfterBuild` lets go of it, and of
   Brief's scroll view's, when its element is no longer in the window (`Element.IsHosted`), after the
-  build's own reads; the build or key that next draws the cursor sets it again.
+  build's own reads; the build or key that next draws the cursor sets it again. Round 11 did the same for
+  Aperture's cursor card, the one card of whichever view drew the cursor, which kept Home or the grid
+  behind Settings once a key had moved it, and for Vesper's thumbnail list.
+- **Every ref into the view, even one nothing reads** (round 11). Meridian's History had three: the
+  list's, the find field's and the archived send panel's. Emptying the list's alone freed nothing; the path
+  search found the other two, and nothing read the field's at all: `WithRef` makes the ref a holder
+  whether or not anything reads it. The build empties all three when it shows another view.
+- **A ref a part's build sets comes back with the part** (round 11). History's panel is a `Part`, and only
+  its own build sets the panel's ref; a part kept between the owner's builds does not build, so emptying
+  the ref at the start of every owner build would leave it empty while History is on screen, and every key
+  would build the window. Emptied only in the builds that show another view, it comes back: the part's
+  host left the window with the view, an unmounted host lets go of its component, and the next `Mount()`
+  makes a new host that builds at once.
 - **Keep the value a later build reads, not the element, and give it to the new element.** Aperture's
   library build sized what it asks for from the old grid's viewport height; that is kept as a number now,
   so what the next build makes is what it was. Vesper's Brief kept its old scroll view's offset the same
@@ -1075,9 +1087,19 @@ Headless, full GC and `GC.GetTotalMemory(true)`, the heap after the switch, JIT 
 | Meridian Discovery map, 60 endpoints, wheeled → Requests (the latch) | 1,122 / 948 KB | 841 / 670 KB |
 | Aperture library grid, 600 films, wheeled → Settings (the latch) | 1,566 / 1,430 KB | 1,300 / 1,164 KB |
 | Aperture Home, 5 × 20, wheeled → Settings (the latch) | 1,295 / 1,158 KB | 1,030 / 894 KB |
+| Aperture Home, 5 × 20, 3 cursor moves → Settings (round 11) | 1,212 / 1,213 KB | 948 / 951 KB |
+| Aperture library grid, 600 films, 5 cursor moves → Settings (round 11) | 1,485 / 1,517 KB | 1,221 / 1,239 KB |
+| Meridian History, 200 sends → Requests (round 11) | 1,101 / 1,109 KB | 784 / 793 KB |
+| Meridian History, 2,000 sends → Requests (round 11) | 1,495 / 1,489 KB | 1,178 / 1,173 KB |
+| Meridian History, 200 sends → Discovery (round 11) | 1,115 / 1,123 KB | 799 / 808 KB |
+| Vesper Thumbnails, 400 files → Detail (round 11) | 1,510 / 1,518 KB | 1,232 / 1,250 KB |
+| Vesper Thumbnails, 3,000 files → Detail (round 11) | 2,213 / 2,207 KB | 1,935 / 1,932 KB |
 
 The old view was alive before and is collected after in every row. The bytes of a build or a key did not
-move (Meridian's full build at 200 requests 59.4 KB, Home and the grid's keys, Brief's Down and Insert).
+move (Meridian's full build at 200 requests 59.4 KB, Home and the grid's keys, Brief's Down and Insert;
+in round 11 Home's and the grid's keys, a Home and a Settings build, a History key and build, the
+Thumbnails and Detail keys and builds). Round 11's rows come from a host of its own (one process per
+row), so their heaps are not comparable with round 10's.
 
 ### Keep the index out of a list's item
 
