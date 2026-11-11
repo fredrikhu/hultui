@@ -165,8 +165,13 @@ Re-ranked by the next survey.
 
 - **dotnet11-aot-textarea-long-document** (5/4; found by the upgrade step) — the one place .NET 11 got slower: AOT
   `long TextArea document` +13–15 % (3.466 → 3.984 ms min) and `wrapped TextArea resize` +11 % (2.916 → 3.246), both
-  pairs; the SDK-vs-runtime split puts the runtime's own share at +6 % and +4 % (under the bar), the rest the SDK's
-  (ILCompiler 11). JIT 0 slower. The survey's experts 5 and 4 profile the AOT path (codegen of the line walk, inlining).
+  pairs. **Correction (2026-11-11, from the captures' runtime fields):** the "SDK share" is not ILCompiler 11. The main
+  comparison's AOT before side ran .NET **10.0.8** (the runtime pack and ILCompiler SDK 10.0.300 brings); the split's
+  before side (net10.0 built by SDK 11.0.100) ran **10.0.15**. So the split is 10.0.15 → 11.0.0 (+6 % and +4 %, under
+  the bar: long document 3.686 → 3.912 ms, resize 3.079 → 3.212), and the rest, roughly +6 %, came with the .NET 10
+  servicing update 10.0.8 → 10.0.15 that any .NET 10 app gets (inferred across two sessions' runs, not alternated in
+  one; confirm with one alternated AOT pair, 10.0.8 against 10.0.15). JIT 0 slower (its before side ran 10.0.14). The
+  survey's experts 5 and 4 profile the AOT path (codegen of the line walk, inlining).
   Captures `samples/HultUI.Samples.PerfSuite/captures/2026-11-11-c99e23bf-dotnet11-aot-{before,after}.json`; split
   runs in this session's scratchpad `r11u\ab-split\`.
 - **meridian-stalled-timeout-early** (tests; found by the upgrade step) — `HttpEngineTests.AStalledServerIsATimeoutThat
