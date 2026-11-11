@@ -736,6 +736,56 @@ entity.other.attribute-name.id". No fork. After it, Dark+ and Light+ change 2,33
 tokens, exactly step 14b's less the 61 PowerShell member tokens; a PowerShell fence in Markdown has
 no source.powershell scope and its members stay light blue, as in VS Code.
 
+### A theme that includes another is merged with it, as VS Code merges them (round 11)
+
+Three of TextMateSharp 2.0.4's 21 bundled themes include another file: Dark+ includes dark_vs, and
+Light+ and High Contrast Light include light_vs. VS Code reads the two files as one list of rules, the
+included file's first, so for each scope the most specific rule of either file wins, and of two as
+specific the theme's own. TextMateSharp keeps the included file in a second lookup that it reads only
+when no rule of the theme's own applies to the scope, however broad. So Dark+'s "support.type" teal
+beat dark_vs's "support.type.property-name" light blue on every JSON key, and Dark+'s "variable"
+beat dark_vs's "variable.language" on `this`. Step 14b of round 9 found it; the user chose VS Code's
+colours (plan 17, question 26).
+
+`SyntaxHighlighter` now builds every registry over the theme merged as VS Code merges it
+(`MergedOptions`): one theme with no include, the included file's rules first and the theme's own
+after them in one list, so a rule's place breaks ties across both files, and the editor colours
+(`editor.foreground`) of the theme over those of the file it includes. A theme that includes
+nothing is handed over as it is. The rule a PowerShell or Less file gets without its parent (above)
+still goes last, now after the rules of both files. No fork.
+
+Round 9's corpus, frozen into a copy so both sides read the same texts: 3,206 files, 3,094 of them
+tokenized, 1,759,787 lines. Each line went through the highlighter in each theme, before and after,
+and each token's colour was checked against an emulation of VS Code (vscode-textmate's rule trie over
+the same theme files, include merged) and of TextMateSharp with two lookups and with one; each
+TextMateSharp emulation reproduces the real spans of its side on every token of Dark+ and Light+.
+
+| Theme | Lines whose colour differs from VS Code, before → after | Lines whose spans changed |
+|---|---|---|
+| Dark+ | 974,248 → 0 | 974,248 (JSON 962,423, JavaScript 9,736, C# 1,187, CSS 650, TypeScript 117, Markdown 78, HTML 52, PowerShell 4, Rust 1) |
+| Light+ | 974,478 → 0 | 974,478 |
+| High Contrast Light | 0 → 0 | 0 |
+| The other 18 | unchanged | 0 |
+
+In Dark+ that is 2,891,518 property-name tokens (JSON, JSONC and CSS keys) from #4EC9B0 to #9CDCFE,
+13,108 `this`, `self`, `base`, `super`, `arguments` and C# `_` discard tokens from #9CDCFE to
+#569CD6, and two C macro names in a Markdown fence from #DCDCAA to #569CD6. Light+ moves the same
+tokens to its own colours: JSON keys #267F99 → #0451A5, CSS property names → #FF0000, `this` #001080 →
+#0000FF. The tokenizer's state after each line is the same before and after in all three themes
+(its rules and scopes; the colour ids it carries differ). Monokai, Quiet Light, Red and Dimmed Monokai
+still differ from VS Code on 166,353, 63,784, 17,264 and 6,870 lines, before and after: mostly rules
+naming parent scopes (Monokai's "meta.structure.dictionary.json string.quoted.double.json"), which
+TextMateSharp does not apply.
+
+Cost: the merge runs once per theme load, and tokenizing is unchanged. The theme file is now read
+once per load, not once per registry: idle-gated, pinned, two alternated pairs, least of 300 after
+5 s of warm-up, JIT:
+
+| | Dark+ before → after | Solarized Light before → after |
+|---|---|---|
+| Theme load (the first registry) | 1.666–1.675 → 1.587 ms; 4,519,568 → 4,277,080 B | 1.555–1.596 → 1.535–1.586 ms; 4,297,056 → 4,113,976 B |
+| Each further registry (a Markdown text's set of grammars, a PowerShell file) | 0.123–0.127 → 0.067–0.070 ms; 387,384 → 139,736 B | 0.067–0.069 → 0.023–0.024 ms; 230,120 → 46,896 B |
+
 ### A long label tests each of its lines against the clip: a binary search measured and declined (round 10)
 
 `DrawText` (both overloads) and `DrawParagraph` test every line of a text against the clip each

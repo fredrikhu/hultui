@@ -38,6 +38,9 @@ public static class SyntaxHighlighter
 {
     private static readonly object Gate = new();
     private static RegistryOptions? _options;
+    /// <summary>What every registry is built over: <see cref="_options"/> with the theme merged
+    /// with the one it includes (<see cref="MergedOptions"/>).</summary>
+    private static MergedOptions? _themed;
     private static Registry? _registry;
     private static Palette? _palette;
     private static readonly Dictionary<string, Language?> LanguageByExt = new(StringComparer.OrdinalIgnoreCase);
@@ -338,6 +341,7 @@ public static class SyntaxHighlighter
             // grammar's cached tokenization belong to the theme that produced them.
             _registry = null;
             _options = null;
+            _themed = null;
             _palette = null;
             _rootParents = null;
             LanguageByExt.Clear();
@@ -354,9 +358,10 @@ public static class SyntaxHighlighter
         RegistryUsesOnThisThread++;
         if (_registry != null) return;
         _options = new RegistryOptions(_themeName);
-        _registry = new Registry(_options);
+        _themed = new MergedOptions(_options);
+        _registry = new Registry(_themed);
         _palette = new Palette(_registry.GetTheme());
-        _rootParents = RootedOptions.ParentsNamed(_options);
+        _rootParents = RootedOptions.ParentsNamed(_themed.GetDefaultTheme());
     }
 
     /// <summary>
@@ -449,8 +454,8 @@ public static class SyntaxHighlighter
         }
 
         IRegistryOptions options = _rootParents!.Any(parent => RootedOptions.Names(root, parent))
-            ? new RootedOptions(_options!, root)
-            : _options!;
+            ? new RootedOptions(_themed!, root)
+            : _themed!;
         var reach = new ReachOptions(options, root, reached, parsed);
         var registry = new Registry(reach);
         if (registry.LoadGrammar(root) is not { } grammar) return null;
@@ -506,6 +511,72 @@ public static class SyntaxHighlighter
         }
     }
 
+    // ── A theme that includes another ────────────────────────────────────
+    //
+    // A VS Code theme file can include another: Dark+ includes dark_vs, and Light+ and High Contrast
+    // Light include light_vs. VS Code reads the two as one list of rules, the included file's first,
+    // so for each scope the most specific rule of either file wins, and of two as specific the theme's
+    // own. TextMateSharp keeps the included file in a second lookup that it reads only when no rule of
+    // the theme's own applies to the scope, however broad, so a broader rule of the theme's beats a
+    // narrower one of the file it includes: in Dark+ a JSON key took dark_plus's "support.type" teal
+    // over dark_vs's "support.type.property-name" light blue, and `this` dark_plus's "variable" light
+    // blue over dark_vs's "variable.language" blue. So every registry gets the theme merged as VS Code
+    // merges it (MergedOptions), and TextMateSharp, seeing no include, has one lookup. A theme that
+    // includes nothing is handed over as it is.
+
+    /// <summary>The registry's options with the theme merged with the one it includes, merged once.</summary>
+    private sealed class MergedOptions(RegistryOptions inner) : IRegistryOptions
+    {
+        private readonly IRawTheme _theme = MergedTheme.Of(inner.GetDefaultTheme(), inner);
+
+        public IRawTheme GetDefaultTheme() => _theme;
+        public IRawTheme GetTheme(string scopeName) => inner.GetTheme(scopeName);
+        public IRawGrammar GetGrammar(string scopeName) => inner.GetGrammar(scopeName);
+        public ICollection<string> GetInjections(string scopeName) => inner.GetInjections(scopeName);
+    }
+
+    /// <summary>
+    /// A theme and the chain of themes it includes as one theme that includes none: the rules of the
+    /// last theme included first and the theme's own last, in their files' order, and the colours of
+    /// the editor's parts (<c>editor.foreground</c>) of each theme over those of the one it includes.
+    /// </summary>
+    private sealed class MergedTheme(IRawTheme theme, List<IRawThemeSetting> rules,
+        List<KeyValuePair<string, object>> guiColors) : IRawTheme
+    {
+        public static IRawTheme Of(IRawTheme theme, IRegistryOptions options)
+        {
+            var chain = new List<IRawTheme> { theme };
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            while (chain[^1].GetInclude() is { Length: > 0 } include && seen.Add(include)
+                   && options.GetTheme(include) is { } included)
+                chain.Add(included);
+            if (chain.Count == 1) return theme;
+
+            var rules = new List<IRawThemeSetting>();
+            var guiColors = new List<KeyValuePair<string, object>>();
+            var at = new Dictionary<string, int>(StringComparer.Ordinal);
+            for (int i = chain.Count - 1; i >= 0; i--)
+            {
+                rules.AddRange(chain[i].GetSettings() ?? []);
+                rules.AddRange(chain[i].GetTokenColors() ?? []);
+                foreach (var color in chain[i].GetGuiColors() ?? [])
+                {
+                    if (at.TryGetValue(color.Key, out int k)) guiColors[k] = color;
+                    else { at[color.Key] = guiColors.Count; guiColors.Add(color); }
+                }
+            }
+            return new MergedTheme(theme, rules, guiColors);
+        }
+
+        public string GetName() => theme.GetName();
+        public string GetInclude() => null!;
+        // One list, so a rule's place in it (which TextMateSharp breaks ties of specificity by) runs
+        // across both files.
+        public ICollection<IRawThemeSetting> GetSettings() => null!;
+        public ICollection<IRawThemeSetting> GetTokenColors() => rules;
+        public ICollection<KeyValuePair<string, object>> GetGuiColors() => guiColors;
+    }
+
     // ── A theme rule that names the root scope ───────────────────────────
     //
     // TextMateSharp never colours an encoded token by a theme rule that names parent scopes: it
@@ -527,7 +598,7 @@ public static class SyntaxHighlighter
         if (!_rootParents!.Any(parent => RootedOptions.Names(scope, parent)))
             return _registry!.LoadGrammar(scope) is { } grammar ? new Language(grammar, _palette!) : null;
         if (LanguageByRoot.TryGetValue(scope, out var known)) return known;
-        var registry = new Registry(new RootedOptions(_options!, scope));
+        var registry = new Registry(new RootedOptions(_themed!, scope));
         if (registry.LoadGrammar(scope) is not { } rooted) return null;
         return LanguageByRoot[scope] = new Language(rooted, new Palette(registry.GetTheme()));
     }
@@ -535,10 +606,11 @@ public static class SyntaxHighlighter
     /// <summary>
     /// The registry's options with the theme as TextMateSharp should see it for a grammar whose
     /// root scope is <paramref name="root"/>: a rule whose one parent names the root, "source.powershell
-    /// variable.other.member" for <c>source.powershell</c>, without its parent, and last in its theme
-    /// file, as VS Code prefers a rule with parents to one without for the same scope.
+    /// variable.other.member" for <c>source.powershell</c>, without its parent, and last in the theme
+    /// (the merged one, so after the rules of both files), as VS Code prefers a rule with parents to
+    /// one without for the same scope.
     /// </summary>
-    private sealed class RootedOptions(RegistryOptions inner, string root) : IRegistryOptions
+    private sealed class RootedOptions(IRegistryOptions inner, string root) : IRegistryOptions
     {
         public IRawTheme GetDefaultTheme() => new RootedTheme(inner.GetDefaultTheme(), root);
         public IRawTheme GetTheme(string scopeName) => inner.GetTheme(scopeName) is { } theme ? new RootedTheme(theme, root) : null!;
@@ -551,17 +623,16 @@ public static class SyntaxHighlighter
             scope.StartsWith(selector, StringComparison.Ordinal)
             && (scope.Length == selector.Length || scope[selector.Length] == '.');
 
-        /// <summary>The parent scope of every rule of the theme (and of the one it includes) that names
-        /// one: the roots a grammar may need its own registry for.</summary>
-        public static HashSet<string> ParentsNamed(RegistryOptions options)
+        /// <summary>The parent scope of every rule of <paramref name="theme"/> (merged, so the rules of
+        /// the one it includes are among them) that names one: the roots a grammar may need its own
+        /// registry for.</summary>
+        public static HashSet<string> ParentsNamed(IRawTheme theme)
         {
             var parents = new HashSet<string>(StringComparer.Ordinal);
-            for (var theme = options.GetDefaultTheme(); theme is not null;
-                 theme = theme.GetInclude() is { Length: > 0 } include ? options.GetTheme(include) : null)
-                foreach (var settings in new[] { theme.GetSettings(), theme.GetTokenColors() })
-                    foreach (var setting in settings ?? [])
-                        foreach (var selector in Selectors(setting.GetScope()))
-                            if (ParentOf(selector) is { } parent) parents.Add(parent);
+            foreach (var settings in new[] { theme.GetSettings(), theme.GetTokenColors() })
+                foreach (var setting in settings ?? [])
+                    foreach (var selector in Selectors(setting.GetScope()))
+                        if (ParentOf(selector) is { } parent) parents.Add(parent);
             return parents;
         }
 

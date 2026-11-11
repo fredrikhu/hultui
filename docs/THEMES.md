@@ -162,6 +162,10 @@ children, since the patch runs it on the twin too.
 
 Add a `NamedTheme` to `ThemeCatalog` and put it in `All`. Transcribe the scheme's published
 ground, surface, foreground, accents and red/green/amber; pick the nearest bundled
-TextMateSharp theme for `SyntaxTheme`. The catalogue tests run against every entry
+TextMateSharp theme for `SyntaxTheme`. A code theme colours as it does in VS Code: Dark+,
+Light+ and High Contrast Light include another theme file (dark_vs, light_vs), and
+`SyntaxHighlighter` merges the two into one list of rules as VS Code does, where TextMateSharp
+alone would let the theme's broader rules beat the included file's narrower ones (a JSON key
+teal instead of light blue; see DECISIONS.md, round 11). The catalogue tests run against every entry
 automatically — they will tell you if the text does not clear 4.5:1 on the ground or the
 surface, if `IsDark` disagrees with the ground, or if two of the semantic colours collided.
