@@ -179,6 +179,10 @@ handler, say, since blur fires synchronously when the focused element is removed
 patch — is deferred to the end of the outer pass rather than nesting. Nothing to do on
 your side; just know that the rebuild lands a moment later than the call.
 
+A `MarkDirty()` from the component's own `OnBeforeBuild`, `Build` or `OnAfterBuild` is not
+deferred but dropped, and so is a write there to a signal the build read. See
+[Lifecycle hooks](#lifecycle-hooks) for what to call instead.
+
 Drag handlers are the case to defer by hand: a `DragEnter` or `DragOver` that marks
 dirty replaces the element the hover landed on. The framework re-resolves the drop
 target by hit-testing again, so the drop still arrives, but
@@ -1180,8 +1184,39 @@ Components expose lifecycle hooks that you can override:
 |---|---|
 | `OnMount()` | After the component is first mounted into the tree |
 | `OnUnmount()` | When the component, or any element it sits under, is removed from the tree |
-| `OnBeforeBuild()` | Immediately before each `Build()` call |
-| `OnAfterBuild()` | Immediately after each `Build()` call |
+| `OnBeforeBuild()` | Immediately before each `Build()` call. A rebuild asked for here is dropped (below) |
+| `OnAfterBuild()` | Immediately after each `Build()` call and its reconcile. A rebuild asked for here is dropped (below) |
+
+**A rebuild asked for during a build is dropped.** `OnBeforeBuild`, `Build` and `OnAfterBuild`
+all run inside the component's build effect (`ComponentHost.Rebuild`). While that effect runs,
+`MarkDirty()` returns without doing anything (the effect ignores a forced run from inside
+itself), and a write to a signal the build read does not mark it either; when the build ends,
+the effect notes the signal's new value as already seen. So the build you asked for never
+comes, and the screen shows what this build made until something else rebuilds. (The one
+exception: a build that runs inside another component's reconcile, such as a component mounting
+again in its parent's patch, has its `MarkDirty()` deferred to the end of that pass, like any
+other request made mid-reconcile.) To build once more, ask outside the build:
+
+```csharp
+protected override void OnAfterBuild()
+{
+    if (_needsAnotherPass)
+    {
+        _needsAnotherPass = false;
+        // MarkDirty() here would be dropped: this build has not finished.
+        Application.InvokeOnMainThread(MarkDirty);         // on the next frame
+        // or, when the next build needs this frame's layout:
+        // _window.RequestPostFrameCallback(MarkDirty);    // after this frame is drawn
+    }
+}
+```
+
+The rule is deliberate, and an app relies on it. Junction's diff binds its find bar's search to
+the file it shows inside `Build` (`TextSearch.Bind` → the search's change → `FindBar` →
+`MarkViewDirty`), on about 95 of every 100 keys that move the caret in the Changes list.
+Honoured, each of those keys would build the view twice. Meridian's response body does the same
+with a signal write on a switch between pretty and raw. Work that only has to follow a build, such as a focus or a reveal, belongs in
+`OnAfterBuild` as it is; only a second build has to be asked for this way.
 
 **`OnAfterBuild` runs before the style and layout passes.** The new tree has been
 reconciled but not laid out, so any geometry read there — a viewport height, a column
