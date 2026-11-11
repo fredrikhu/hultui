@@ -695,3 +695,11 @@ From 2026-11-09 (round 10's survey); earlier entries are in the archive ([to 202
   apart from Meridian's stalled-timeout flake (both Windows full runs; → Waiting, fix before the release). CI must still
   confirm the macOS keyring job, setup-dotnet reading global.json, docfx on an ubuntu runner with only .NET 11, and the
   installers' publish paths (at the round's release). Phase → survey.
+- 2026-11-11: round 11 survey started (session ec6d577c, the same fresh context as step 0). Main has not moved
+  (origin/main cc55bdcc is in the branch). Moved to the archive by a checked script (every moved line found there,
+  nothing lost): round 9's 18 Landed rows, round 10's build order with its closed-from-Waiting note, round 10's
+  answered questions 27–36 with round 9's 26 and the earlier 10, and round 9's log (2026-11-08 to 2026-11-09). The
+  eight experts run in their own worktrees at dee48fbb on .NET 11; common brief `brief-r11-survey.md` in this
+  session's scratchpad, probes in its `r11-<area>\` folders. Each re-ranks its Waiting items; experts 4 and 5 take
+  dotnet11-aot-textarea-long-document, expert 4 also meridian-stalled-timeout-early and a sweep for other .NET 11
+  tier-1 JIT allocations.
