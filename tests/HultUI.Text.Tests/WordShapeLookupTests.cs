@@ -175,57 +175,6 @@ public class WordShapeLookupTests
     }
 
     [Fact]
-    public void ASegmentLookedUpInPlace_HashesAndMatchesAsItsString()
-    {
-        var comparer = WordShapeKeyComparer.Instance;
-        var font = new StubResolvedFont();
-        var other = new StubResolvedFont();
-        string[] words =
-        [
-            "a", "pretty", "12345", "  ", " ", "Ελλη", "東京", "e" + Acute,
-            "x" + char.ConvertFromUtf32(0x1F600) + "y", (char)0xAD + "soft", new string('w', 300),
-        ];
-        foreach (var word in words)
-        {
-            string text = "<<" + word + ">>";
-            var segment = text.AsSpan(2, word.Length);
-            var key = new WordShapeKey(word, font, 16f);
-            var span = WordSpan(segment, font, 16f);
-
-            Assert.Equal(word.GetHashCode(), string.GetHashCode(segment));
-            Assert.Equal(comparer.GetHashCode(key), comparer.GetHashCode(span));
-            Assert.True(comparer.Equals(span, key), $"\"{word}\" in place is not \"{word}\"");
-            var created = comparer.Create(span);
-            Assert.Equal(key, created);
-            Assert.NotSame(text, created.Segment);
-            Assert.Equal(comparer.GetHashCode(key), comparer.GetHashCode(created));
-
-            // Font instance and size are the key's too; and the characters, not the length.
-            Assert.False(comparer.Equals(WordSpan(segment, other, 16f), key));
-            Assert.False(comparer.Equals(WordSpan(segment, font, 16.5f), key));
-            string changed = text[..^3] + (char)(text[^3] + 1) + text[^2..];
-            Assert.False(comparer.Equals(WordSpan(changed.AsSpan(2, word.Length), font, 16f), key),
-                $"\"{changed[2..^2]}\" matched \"{word}\"");
-        }
-
-        // Key against key, as the record's own equality has them for fonts that, like every
-        // IResolvedFont, are equal only to themselves — and the same hash where equal.
-        var pairs = new (WordShapeKey, WordShapeKey)[]
-        {
-            (new("word", font, 16f), new(new string("word".AsSpan()), font, 16f)),
-            (new("word", font, 0f), new("word", font, -0f)),
-            (new("word", font, 16f), new("word", other, 16f)),
-            (new("word", font, 16f), new("Word", font, 16f)),
-            (new("word", font, 16f), new("word", font, 16.25f)),
-        };
-        foreach (var (x, y) in pairs)
-        {
-            Assert.Equal(x.Equals(y), comparer.Equals(x, y));
-            if (x.Equals(y)) Assert.Equal(comparer.GetHashCode(x), comparer.GetHashCode(y));
-        }
-    }
-
-    [Fact]
     public void MeasuringWordsItHasMet_AllocatesNothing()
     {
         var pipeline = new TextPipeline(new WidthChangeEquivalenceTests.TwoFonts(negativeDescent: false),
@@ -273,10 +222,6 @@ public class WordShapeLookupTests
     private static List<FontRun> FontRuns(IFontCollection fonts, string text, ResolvedInheritedStyle style) =>
         FontItemizer.Itemize(text, fonts, style.FontFamily, style.FontWeight, style.FontSlant, null, new List<FontRun>());
 
-    // A segment's key in place, with its font's share of the hash as TextPipeline works it out.
-    internal static WordSpanKey WordSpan(ReadOnlySpan<char> segment, IResolvedFont font, float fontSize) =>
-        new(segment, font, fontSize, WordShapeKeyComparer.FontHash(font, fontSize));
-
     private sealed class CountingShaper(ITextShaper inner) : ITextShaper
     {
         public int Calls;
@@ -293,8 +238,15 @@ public class WordShapeLookupTests
 /// takes a new entry into the node of the one it evicts.</summary>
 public class LruCacheTests
 {
-    private static WordSpanKey WordSpan(ReadOnlySpan<char> segment, IResolvedFont font, float fontSize) =>
-        WordShapeLookupTests.WordSpan(segment, font, fontSize);
+    private static readonly ResolvedInheritedStyle WidthStyle = new(
+        FontFamily: "TestFont", FontSize: 16f, FontWeight: FontWeight.Regular,
+        TextColor: new(0, 0, 0, 255), TextDirection: TextDirection.Ltr, Cursor: CursorType.Default);
+    private static readonly int WidthStyleHash = WidthKeyComparer.StyleHash(WidthStyle);
+
+    private static WidthSpanKey Span(ReadOnlySpan<char> text) =>
+        new(text, WidthStyle, TextDirection.Ltr, WidthKeyComparer.HashOf(text, WidthStyleHash, TextDirection.Ltr));
+
+    private static WidthKey Key(string text) => WidthKeyComparer.Instance.Create(Span(text));
 
     [Fact]
     public void AFullCache_EvictsTheLeastRecentlyUsed()
@@ -323,26 +275,26 @@ public class LruCacheTests
     [Fact]
     public void AnInPlaceLookup_CountsAsAUse()
     {
-        var font = new StubResolvedFont();
-        var cache = new LruCache<WordShapeKey, int>(capacity: 2, WordShapeKeyComparer.Instance);
-        cache.Add(new("alpha", font, 16f), 1);
-        cache.Add(new("beta", font, 16f), 2);
+        // The width cache's keys: a line found by a span of the document.
+        var cache = new LruCache<WidthKey, float>(capacity: 2, WidthKeyComparer.Instance);
+        cache.Add(Key("alpha"), 1f);
+        cache.Add(Key("beta"), 2f);
 
         const string text = "alpha beta";
-        var inPlace = cache.LookedUpBy<WordSpanKey>();
-        Assert.True(inPlace.TryGet(WordSpan(text.AsSpan(0, 5), font, 16f), out int alpha));
-        Assert.Equal(1, alpha);
-        cache.Add(new("gamma", font, 16f), 3);
+        var inPlace = cache.LookedUpBy<WidthSpanKey>();
+        Assert.True(inPlace.TryGet(Span(text.AsSpan(0, 5)), out float alpha));
+        Assert.Equal(1f, alpha);
+        cache.Add(Key("gamma"), 3f);
 
-        Assert.True(inPlace.TryGet(WordSpan(text.AsSpan(0, 5), font, 16f), out _));
-        Assert.False(inPlace.TryGet(WordSpan(text.AsSpan(6, 4), font, 16f), out _));
-        Assert.False(cache.TryGet(new("beta", font, 16f), out _));
+        Assert.True(inPlace.TryGet(Span(text.AsSpan(0, 5)), out _));
+        Assert.False(inPlace.TryGet(Span(text.AsSpan(6, 4)), out _));
+        Assert.False(cache.TryGet(Key("beta"), out _));
 
         // A view made before a Clear still sees the cache.
         cache.Clear();
-        cache.Add(new("delta", font, 16f), 4);
-        Assert.True(inPlace.TryGet(WordSpan("a delta".AsSpan(2), font, 16f), out int delta));
-        Assert.Equal(4, delta);
+        cache.Add(Key("delta"), 4f);
+        Assert.True(inPlace.TryGet(Span("a delta".AsSpan(2)), out float delta));
+        Assert.Equal(4f, delta);
     }
 
     [Fact]
