@@ -321,6 +321,12 @@ public sealed class TextPipeline
 
     // Layout-relevant digest of a span list: offsets and metric fields only. Colors
     // and decorations are paint-only and must not fragment the layout caches.
+    //
+    // The nullable fields go in as plain values, an unset one as a value no set one has (-1 for
+    // the enums, NaN for the size): HashCode.Add of a Nullable<T> boxed the value on .NET 11's JIT
+    // inside this loop, two boxes (48 B) for each metric span of every styled layout, cache hits
+    // included (text/styled wrap 150 paragraphs resize 74.8 -> 225.7 KB a step). .NET 10's JIT and
+    // NativeAOT on both did not box it.
     private static int MetricDigest(IReadOnlyList<Core.Rendering.TextSpan> spans)
     {
         var hash = new HashCode();
@@ -329,7 +335,10 @@ public sealed class TextPipeline
             var s = spans[i];
             if (!s.IsMetricAffecting) continue;
             hash.Add(s.Start); hash.Add(s.Length);
-            hash.Add(s.Weight); hash.Add(s.Slant); hash.Add(s.FontSize); hash.Add(s.FontFamily);
+            hash.Add(s.Weight is { } weight ? (int)weight : -1);
+            hash.Add(s.Slant is { } slant ? (int)slant : -1);
+            hash.Add(s.FontSize is { } size ? size : float.NaN);
+            hash.Add(s.FontFamily);
         }
         return hash.ToHashCode();
     }
