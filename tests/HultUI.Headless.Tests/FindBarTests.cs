@@ -76,8 +76,16 @@ public class FindBarTests
             if (Find.IsOpen) root.AddChild(Find.Build());
             var body = TextArea.New(string.Join('\n', Lines)).ReadOnly().FlexGrow(1).FlexBasis(0f).WithRef(Body);
             root.AddChild(body);
+            // Where an app's body binds the search to the text it shows: after the bar is built.
+            InBuild?.Invoke();
             return root;
         }
+
+        /// <summary>Runs in <see cref="Build"/> after the bar and the body are made.</summary>
+        public Action? InBuild;
+
+        /// <summary>A build asked for from outside one, as a key or a loader asks.</summary>
+        public void Rebuild() => MarkDirty();
 
         protected internal override void OnAfterBuild() => Find.Service();
     }
@@ -416,6 +424,53 @@ public class FindBarTests
         s.PumpFrames(2);
 
         Assert.Equal("line 1", view.Find.Search.Query);
+    }
+
+    /// <summary>
+    /// An owner that builds the bar above its body and binds the search to the text the body now
+    /// shows, in the same build: Meridian's switch between pretty and raw, Junction's next file. The
+    /// bar is built with the count of the text before, and the search's change on the bind asks for
+    /// a build from inside one, which is dropped; the count showed the old text's "n of m" until
+    /// something else built. It is the new text's on the frame that shows it, colour included, and
+    /// costs no build.
+    /// </summary>
+    [Fact]
+    public void ATextBoundInTheBuildAfterTheBar_IsWhatTheCountCounts_WithNoBuildOfItsOwn()
+    {
+        var (s, view) = Open();
+        using var _ = s;
+        s.Application.Theme = Theme.Dark.With(new FindBarTheme { StatusErrorColor = Color.FromHex("#FF00AA") });
+        Press(s, KeyCode.F, KeyModifiers.Ctrl);
+        s.Window.TypeText("needle");
+        s.PumpFrames(2);
+        Assert.Equal("1 of 4", Status(s));
+        var good = s.Window.FindByAutomationId("find-status")!.Element.ResolvedInherited.TextColor;
+
+        string[]? bind = ["one needle", "two needle", "three"];
+        view.InBuild = () =>
+        {
+            if (bind is not { } lines) return;
+            bind = null;
+            view.Find.Search.Bind(lines.Length, 1, (line, _) => line >= 0 && line < lines.Length ? lines[line] : null);
+        };
+        int builds = view.Builds;
+        view.Rebuild();
+        s.PumpFrame();
+        Assert.Equal(builds + 1, view.Builds);
+        Assert.Equal("1 of 2", Status(s));
+
+        bind = ["nothing here"];
+        view.Rebuild();
+        s.PumpFrame();
+        Assert.Equal(builds + 2, view.Builds);
+        Assert.Equal("no matches", Status(s));
+        Assert.Equal(Color.FromHex("#FF00AA"), s.Window.FindByAutomationId("find-status")!.Element.ResolvedInherited.TextColor);
+
+        bind = ["a needle again"];
+        view.Rebuild();
+        s.PumpFrame();
+        Assert.Equal("1 of 1", Status(s));
+        Assert.Equal(good, s.Window.FindByAutomationId("find-status")!.Element.ResolvedInherited.TextColor);
     }
 
     [Theory]

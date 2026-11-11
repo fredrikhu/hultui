@@ -1,3 +1,6 @@
+using System.Reflection;
+using System.Runtime.Versioning;
+
 namespace HultUI.UiTests;
 
 /// <summary>Locates a built sample executable relative to the repo root.</summary>
@@ -7,14 +10,20 @@ internal static class SamplePath
     public static string VirtualList() => Resolve("HultUI.Samples.VirtualList");
     public static string WebView() => Resolve("HultUI.Samples.WebView");
 
-    /// <summary>The WinForms host sample, which targets net10.0-windows rather than net10.0.</summary>
-    public static string WinFormsHost() => Resolve("HultUI.Samples.WinFormsHost", "net10.0-windows");
+    /// <summary>The WinForms host sample, which targets the framework's "-windows" flavour.</summary>
+    public static string WinFormsHost() => Resolve("HultUI.Samples.WinFormsHost", TargetFramework + "-windows");
 
     /// <summary>The Vulkan probe window, which lives beside these tests rather than among the samples.</summary>
     public static string VulkanProbe() => Resolve("HultUI.UiTests.VulkanProbe", folder: "tests");
 
-    private static string Resolve(string sample, string targetFramework = "net10.0", string folder = "samples")
+    /// <summary>The samples' output folder name ("net11.0"): every project here targets the same
+    /// .NET (Directory.Build.props), so it is read off this assembly rather than written down.</summary>
+    private static readonly string TargetFramework = "net" +
+        typeof(SamplePath).Assembly.GetCustomAttribute<TargetFrameworkAttribute>()!.FrameworkName.Split("Version=v")[1];
+
+    private static string Resolve(string sample, string? targetFramework = null, string folder = "samples")
     {
+        targetFramework ??= TargetFramework;
         string config =
 #if DEBUG
             "Debug";

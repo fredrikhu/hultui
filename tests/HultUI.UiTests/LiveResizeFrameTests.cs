@@ -67,6 +67,17 @@ public sealed class LiveResizeFrameTests(ITestOutputHelper output)
         return (app, hwnd, counter);
     }
 
+    /// <summary>
+    /// A waiting post draws once only while no image in the process can hold a GPU source that
+    /// signals its frames only by posting. The count behind that is process-wide, so an earlier
+    /// test that left an image holding its own source, or a sink nobody disposed, makes a waiting
+    /// post draw on every tick here (10 where 1 is expected): say so instead.
+    /// </summary>
+    private static void AssertNoSourceOnlyPosts() =>
+        Assert.False(GpuFrameSink.MaySignalOnlyByPosting,
+            "an earlier test left an image holding its own GPU source, or a frame sink nobody disposed " +
+            "(GpuFrameSink.MaySignalOnlyByPosting is true for the whole process)");
+
     private static Element Plain(Element counter) =>
         Flex.Column().FlexGrow(1).Background(Color.FromHex("#202020")).Children(
             Box.New().Width(120f).Height(40f).Background(Color.FromHex("#5b8def")), counter);
@@ -144,6 +155,7 @@ public sealed class LiveResizeFrameTests(ITestOutputHelper output)
             return Flex.Column().FlexGrow(1).Background(Color.FromHex("#202020")).Children(box, c);
         });
         using var _ = app;
+        AssertNoSourceOnlyPosts();
         var window = (SDL3Window)typeof(Window).GetProperty("PlatformWindow", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(app.PrimaryWindow)!;
 
@@ -280,6 +292,7 @@ public sealed class LiveResizeFrameTests(ITestOutputHelper output)
         var backend = new HultUI.Media.Testing.FakeMediaBackend();
         using var player = new HultUI.Media.MediaPlayer(backend);
         var sink = backend.Sink ?? throw new InvalidOperationException("the player attached no sink");
+        AssertNoSourceOnlyPosts();   // the player's sink asks for its frames
 
         int Tick(int times)
         {

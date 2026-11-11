@@ -457,12 +457,21 @@ public partial class MeridianApp
     // stops the job that is no longer wanted (its token), and a result that lands for one is
     // dropped. The tokenize's time budget runs on the application's clock, so under a headless
     // session a body's colour does not depend on how busy the machine is.
+    //
+    // The last KeptBodies finished bodies — text and colour — are kept by tab, response and
+    // pretty/raw, so a tab switched back to, or a toggle back, shows its coloured body in the
+    // first frame and runs no worker. Until round 11 of plan 17 only the body on screen was kept:
+    // each switch back formatted and tokenized again (51 MB of allocation a switch to a 3,641-line
+    // HTML body, on all threads) and showed an empty pane, then plain text, then colour.
 
     private readonly AsyncLoader<ResponseView?> _respViews = new(null);
     private readonly AsyncLoader<ResponseColour?> _respColours = new(null);
 
     /// <summary>The body the pane asked for last, and the token that stops its work.</summary>
     private ResponseJob? _respJob;
+
+    /// <summary>The tab whose body the loaders were asked for last: what their values hold.</summary>
+    private RequestTab? _respLoadedFor;
 
     private sealed class ResponseJob(RequestTab tab, HttpResponseData response, bool raw)
     {
@@ -472,7 +481,25 @@ public partial class MeridianApp
         public CancellationTokenSource Stop { get; } = new();
         /// <summary>The colour job has been asked for.</summary>
         public bool Colouring;
+        /// <summary>The finished body, kept from an earlier showing or since it finished here:
+        /// the pane shows it and asks the workers for nothing.</summary>
+        public KeptBody? Finished;
     }
+
+    /// <summary>A finished body: its text and its colour (null when it has none).</summary>
+    private readonly record struct KeptBody(RequestTab Tab, ResponseView View, IReadOnlyList<TextSpan>? Spans);
+
+    /// <summary>How many finished bodies are kept. A pretty 3,641-line HTML body keeps ~1.3 MB
+    /// (text, lines, line starts, spans), a 2,000-line JSON one ~0.4 MB.</summary>
+    internal const int KeptBodies = 4;
+
+    /// <summary>The finished bodies, least recently shown first.</summary>
+    private readonly List<KeptBody> _kept = new(KeptBodies);
+
+    /// <summary>The theme the kept bodies were coloured under. An app changes theme by setting
+    /// <c>Application.Theme</c> (and the highlighter's with it); a kept body's colours belong to
+    /// the one before.</summary>
+    private HultUI.Core.Styling.Theme? _keptTheme;
 
     /// <summary>The body the pane showed last, with its spans and the tab it was shown for —
     /// what stays up, greyed, while that tab's next body is formatted.</summary>
@@ -486,8 +513,9 @@ public partial class MeridianApp
 
     /// <summary>
     /// The body to show for <paramref name="response"/> in <paramref name="tab"/>, and its colour
-    /// spans once they are in. Asks the workers for what is missing. While the text is being
-    /// formatted: the body this tab showed last, <c>Stale</c>, or null when it showed none.
+    /// spans once they are in. A kept body shows at once; otherwise asks the workers for what is
+    /// missing. While the text is being formatted: the body this tab showed last, <c>Stale</c>, or
+    /// null when it showed none.
     /// </summary>
     private (ResponseView View, IReadOnlyList<TextSpan>? Spans, bool Stale)? ResponseBody(
         RequestTab tab, HttpResponseData response)
@@ -499,10 +527,18 @@ public partial class MeridianApp
         {
             job?.Stop.Cancel();
             job = _respJob = new ResponseJob(tab, response, raw);
-            var token = job.Stop.Token;
-            var clock = _app.Time;
-            _respViews.Load(job, () => FormatOnWorker(response, raw, clock, token));
+            job.Finished = TakeKept(tab, response, raw);
+            if (job.Finished is null)
+            {
+                var token = job.Stop.Token;
+                var clock = _app.Time;
+                _respLoadedFor = tab;
+                ResponseWorkerJobs++;
+                _respViews.Load(job, () => FormatOnWorker(response, raw, clock, token));
+            }
         }
+        if (job.Finished is { } finished)
+            return Showing(tab, finished.View, finished.Spans);
 
         // Reactive reads: the view or its colour landing rebuilds.
         var view = _respViews.Value;
@@ -510,19 +546,37 @@ public partial class MeridianApp
             return _respShown is { } shown && _respShownTab == tab ? (shown, _respShownSpans, true) : null;
 
         var spans = view.Spans;
+        bool done = !view.ColourToCome;
         if (view.ColourToCome)
         {
             if (_respColours.Value is { } colour && ReferenceEquals(colour.View, view))
+            {
                 spans = colour.Spans;
+                done = true;
+            }
             else if (!job.Colouring)
             {
                 job.Colouring = true;
                 var token = job.Stop.Token;
                 var clock = _app.Time;
+                ResponseWorkerJobs++;
                 _respColours.Load(job, () => ColourOnWorker(view, clock, token));
             }
         }
+        if (done)
+        {
+            var body = new KeptBody(tab, view, spans);
+            job.Finished = body;
+            Keep(body);
+        }
+        return Showing(tab, view, spans);
+    }
 
+    /// <summary>Records <paramref name="view"/> as the body on screen, binding the search to it
+    /// when it is another.</summary>
+    private (ResponseView View, IReadOnlyList<TextSpan>? Spans, bool Stale) Showing(
+        RequestTab tab, ResponseView view, IReadOnlyList<TextSpan>? spans)
+    {
         if (!ReferenceEquals(_respShown, view))
         {
             // (Re)bind the search to the shown text.
@@ -536,6 +590,66 @@ public partial class MeridianApp
         _respShownTab = tab;
         return (view, spans, false);
     }
+
+    /// <summary>The kept body for <paramref name="tab"/>, <paramref name="response"/> and
+    /// <paramref name="raw"/>, now the most recently shown; null when there is none. Drops the
+    /// tab's bodies of an earlier response on the way.</summary>
+    private KeptBody? TakeKept(RequestTab tab, HttpResponseData response, bool raw)
+    {
+        ForgetKeptOfAnotherTheme();
+        KeptBody? found = null;
+        for (int i = _kept.Count - 1; i >= 0; i--)
+        {
+            var kept = _kept[i];
+            if (kept.Tab != tab) continue;
+            if (!ReferenceEquals(kept.View.Response, response))
+                _kept.RemoveAt(i);   // a newer response replaced it
+            else if (kept.View.Raw == raw)
+            {
+                _kept.RemoveAt(i);
+                found = kept;
+            }
+        }
+        if (found is { } hit) _kept.Add(hit);
+        return found;
+    }
+
+    /// <summary>Keeps a finished body as the most recently shown, letting the least recently
+    /// shown go past <see cref="KeptBodies"/>.</summary>
+    private void Keep(KeptBody body)
+    {
+        ForgetKeptOfAnotherTheme();
+        for (int i = _kept.Count - 1; i >= 0; i--)
+            if (_kept[i].Tab == body.Tab && ReferenceEquals(_kept[i].View.Response, body.View.Response)
+                && _kept[i].View.Raw == body.View.Raw)
+                _kept.RemoveAt(i);
+        if (_kept.Count >= KeptBodies) _kept.RemoveAt(0);
+        _kept.Add(body);
+    }
+
+    private void ForgetKeptOfAnotherTheme()
+    {
+        if (ReferenceEquals(_keptTheme, _app.Theme)) return;
+        _kept.Clear();
+        _keptTheme = _app.Theme;
+    }
+
+    /// <summary>Drops the kept bodies of <paramref name="tab"/> that are not of its response now:
+    /// a send or the Runner replaced it.</summary>
+    private void ForgetReplacedBodies(RequestTab tab)
+    {
+        var response = tab.Result?.Response;
+        for (int i = _kept.Count - 1; i >= 0; i--)
+            if (_kept[i].Tab == tab && !ReferenceEquals(_kept[i].View.Response, response))
+                _kept.RemoveAt(i);
+    }
+
+    /// <summary>Test seam: how many finished bodies are kept.</summary>
+    internal int KeptBodyCount => _kept.Count;
+
+    /// <summary>Test seam: how many body jobs were handed to a worker (a format, and a colour
+    /// when it comes later).</summary>
+    internal int ResponseWorkerJobs { get; private set; }
 
     private static ResponseView? FormatOnWorker(HttpResponseData response, bool raw, TimeProvider clock,
         CancellationToken token)
@@ -553,13 +667,38 @@ public partial class MeridianApp
     /// <summary>Test seam: the token that stops the body work the pane asked for last.</summary>
     internal CancellationToken ResponseWorkToken => _respJob?.Stop.Token ?? CancellationToken.None;
 
-    /// <summary>Stops the body work for <paramref name="tab"/> (any tab when null): it is
-    /// closing, or the app is.</summary>
+    /// <summary>Stops the body work for <paramref name="tab"/> (any tab when null) and lets go of
+    /// its bodies, kept or on screen: it is closing, or the app is.</summary>
     private void StopResponseWork(RequestTab? tab = null)
     {
         if (_respJob is { } job && (tab is null || job.Tab == tab))
+        {
             job.Stop.Cancel();
+            _respJob = null;
+        }
+        for (int i = _kept.Count - 1; i >= 0; i--)
+            if (tab is null || _kept[i].Tab == tab)
+                _kept.RemoveAt(i);
+        if (_respShownTab is { } shown && (tab is null || shown == tab))
+        {
+            _respShown = null;
+            _respShownSpans = null;
+            _respShownTab = null;
+            _respLineStarts = [];
+            (_highlights, _highlightsStarts) = (null, null);
+            _responseBodyRef.Current = null;
+            _responseFind.Search.Unbind();
+        }
+        if (_respLoadedFor is { } loaded && (tab is null || loaded == tab))
+        {
+            // The loaders hold the last body they delivered: load nothing in its place.
+            _respLoadedFor = null;
+            _respViews.Load(NoBody, static () => null);
+            _respColours.Load(NoBody, static () => null);
+        }
     }
+
+    private static readonly object NoBody = new();
 
     /// <summary>The search's matches as the body's highlights, in absolute offsets: a layer
     /// over the syntax spans, which the body keeps from key to key.

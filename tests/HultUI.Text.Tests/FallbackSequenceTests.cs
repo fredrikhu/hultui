@@ -40,6 +40,38 @@ public class FallbackSequenceTests
         Assert.Equal([("a‍b", "Text")], Runs("a‍b"));
     }
 
+    /// <summary>
+    /// The itemizer answers what extends the character before it without the category lookup below
+    /// U+0300: at every code point, in a face that has them all and one that has none, the answer
+    /// is the whole rule's — the joiners, variation selectors and emoji tags always, the skin tones
+    /// and the marks (Mn, Mc, Me) when the face has them. None of U+0000–U+02FF extends; U+0300
+    /// does.
+    /// </summary>
+    [Fact]
+    public void WhatExtendsTheCharacterBefore_IsTheWholeRule_AtEveryCodePoint()
+    {
+        foreach (var font in new[] { new FakeFont("All", _ => true), new FakeFont("None", _ => false) })
+        {
+            int belowMarks = 0;
+            for (int cp = 0; cp <= 0x10FFFF; cp++)
+            {
+                bool always = cp is 0x200C or 0x200D or (>= 0xFE00 and <= 0xFE0F) or (>= 0xE0100 and <= 0xE01EF)
+                    or (>= 0xE0020 and <= 0xE007F);
+                bool ifInFace = cp is >= 0x1F3FB and <= 0x1F3FF
+                    || System.Globalization.CharUnicodeInfo.GetUnicodeCategory(cp)
+                        is System.Globalization.UnicodeCategory.NonSpacingMark
+                        or System.Globalization.UnicodeCategory.SpacingCombiningMark
+                        or System.Globalization.UnicodeCategory.EnclosingMark;
+                bool rule = always || ifInFace && font.HasGlyph(cp);
+                if (FontItemizer.Extends(cp, font) != rule)
+                    Assert.Fail($"U+{cp:X4} in {font.FamilyName}: {!rule}, the whole rule says {rule}");
+                if (cp < 0x300 && !rule) belowMarks++;
+            }
+            Assert.Equal(0x300, belowMarks);
+        }
+        Assert.True(FontItemizer.Extends(0x300, new FakeFont("All", _ => true)));
+    }
+
     private static List<(string, string)> Runs(string text)
     {
         var pipeline = new TextPipeline(new Fonts(), new FixedAdvanceShaper());

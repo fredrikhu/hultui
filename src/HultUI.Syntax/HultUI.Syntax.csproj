@@ -7,7 +7,7 @@
     code reference this; apps that don't pay nothing.
   -->
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>$(HultUITargetFramework)</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>HultUI.Syntax</RootNamespace>
@@ -29,8 +29,6 @@
     <InternalsVisibleTo Include="HultUI.Syntax.Tests" />
     <InternalsVisibleTo Include="HultUI.Icons.Tests" />
     <InternalsVisibleTo Include="Meridian.Tests" />
-    <!-- TokenizeDiff: Junction's diff is its one caller so far. -->
-    <InternalsVisibleTo Include="Junction" />
   </ItemGroup>
 
 </Project>

@@ -3,6 +3,7 @@ using Aperture;
 using Aperture.Core;
 using Aperture.Core.Testing;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
 using HultUI.Core.Platform;
 using HultUI.Headless;
 using Xunit;
@@ -144,6 +145,45 @@ public class HomeShelfKeepTests
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private static WeakReference[] WeakShelves(HeadlessSession session) =>
         Shelves(session).Select(s => new WeakReference(s)).ToArray();
+
+    /// <summary>Another view lets Home go once a key moved the cursor (plan 17 round 11). The cursor's card
+    /// is the one card a ref holds, and through its parents it held the whole of Home behind Settings; a
+    /// build that leaves it out of the window lets it go. Back on Home the ring is on the card it was on,
+    /// and the next key moves it on and hands the keyboard over, as before.</summary>
+    [Fact]
+    public void AnotherView_AfterTheCursorMoved_LetsHomeGo()
+    {
+        Host((session, app, _) =>
+        {
+            for (int i = 0; i < 3; i++) { session.Window.PressKey(KeyCode.Right); session.PumpFrames(2); }
+            var (home, ringed) = WeakHome(session);
+
+            app.Navigate(new Route(ApertureView.Settings));
+            Settle(session);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            Assert.False(home.IsAlive, "Home outlived the view through the cursor's card");
+            app.Navigate(new Route(ApertureView.Home));
+            Settle(session);
+            Assert.Equal(ringed, Ringed(session).AutomationId);
+            session.Window.PressKey(KeyCode.Right);
+            session.PumpFrames(2);
+            var next = Ringed(session);
+            Assert.NotEqual(ringed, next.AutomationId);
+            Assert.Same(next, session.Window.Window.FocusedElement);
+        });
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static (WeakReference Home, string? Ringed) WeakHome(HeadlessSession session) =>
+        (new(Descendants(Root(session)).Single(e => e.Key == "view-Home")), Ringed(session).AutomationId);
+
+    /// <summary>The one card with the cursor's ring.</summary>
+    private static BoxElement Ringed(HeadlessSession session) =>
+        Descendants(Root(session)).OfType<BoxElement>().Single(c => c.Outline.Width > 0
+            && c.AutomationId is { } id && (id.StartsWith("card-", StringComparison.Ordinal) || id.StartsWith("resume-", StringComparison.Ordinal)));
 
     // ── Hosting ──────────────────────────────────────────────────────────
 

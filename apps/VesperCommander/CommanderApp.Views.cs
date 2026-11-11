@@ -46,6 +46,10 @@ public partial class CommanderApp
     private Ref<ScrollViewElement> BriefScroll(char side) => side == 'L' ? _briefScrollL : _briefScrollR;
     private readonly Ref<VirtualListElement<ThumbRowItem>> _thumbVListL = new(), _thumbVListR = new();
     private Ref<VirtualListElement<ThumbRowItem>> ThumbVList(char side) => side == 'L' ? _thumbVListL : _thumbVListR;
+    /// <summary>Per side: the thumbnail list's height as its last layout left it, kept when the list
+    /// left the window (<see cref="LetGoOfLeftViews"/>). The next Thumbnails build sizes its page from
+    /// it (<see cref="ThumbGeometry"/>), as it did from the old list.</summary>
+    private readonly float?[] _thumbListHeight = new float?[2];
 
     // Shared thumbnail decode cache. A decode lands on a worker thread and posts a rebuild so
     // the tile swaps its thumbnail in, one post at a time (see PostThumbnailLanded).
@@ -146,7 +150,7 @@ public partial class CommanderApp
         const float pad = 10f;
         float paneW = PaneContentWidthEstimate();
         float availW = paneW - 2 * pad;
-        float availH = ThumbVList(side).Current?.Layout.AbsoluteContentBox.Height
+        float availH = ThumbVList(side).Current?.Layout.AbsoluteContentBox.Height ?? _thumbListHeight[Si(side)]
             ?? (_window.LayoutHeight > 0 ? _window.LayoutHeight - 160f : 600f);
         int perRow = ThumbPerRow(availW, m.TileW, m.Gap);
         int visRows = Math.Max(1, (int)(availH / (m.TileH + m.Gap)));
@@ -812,13 +816,16 @@ public partial class CommanderApp
     /// <summary>
     /// After a build: a ref whose element left the window held the whole view that element was in,
     /// through its parents (REACTIVITY.md, "A ref into a view keeps the whole view"): Brief's cells
-    /// and columns behind Detail or Thumbnails. The cursor's row (a cell, a tile or a row, whichever
-    /// view drew the cursor) is let go, as nothing reads one out of the window (CursorRowBox wants a
-    /// row on screen). Brief's scroll view too: its offset was noted as Brief left
-    /// (<see cref="NoteBriefLeaving"/>), and the build that brings Brief back makes a new view, opened
-    /// there, and the columns for it (<see cref="BriefOpenAt"/>). Both are set
-    /// again by the build or the key that next draws them. The Sync rows a key moved the ring on and
-    /// Sync's scroll view the same once they left (only Sync's next build and keys read them).
+    /// and columns behind Detail or Thumbnails, the thumbnail grid behind Detail or Brief. The cursor's
+    /// row (a cell, a tile or a row, whichever view drew the cursor) is let go, as nothing reads one out
+    /// of the window (CursorRowBox wants a row on screen). Brief's scroll view too: its offset was noted
+    /// as Brief left (<see cref="NoteBriefLeaving"/>), and the build that brings Brief back makes a new
+    /// view, opened there, and the columns for it (<see cref="BriefOpenAt"/>). Both are set again by the
+    /// build or the key that next draws them. The thumbnail list too: the next Thumbnails build makes a
+    /// new one and sets its ref, and the one thing it read from the old list, its height, is kept
+    /// (<see cref="_thumbListHeight"/>); its scroll, for a full-shell view, was noted while it was on
+    /// screen (<see cref="RememberPaneScroll"/>). The Sync rows a key moved the ring on and Sync's scroll
+    /// view the same once they left (only Sync's next build and keys read them).
     /// </summary>
     private void LetGoOfLeftViews()
     {
@@ -829,6 +836,12 @@ public partial class CommanderApp
             if (cursor.Current is { IsHosted: false }) cursor.Current = null;
             var brief = BriefScroll(side);
             if (brief.Current is { IsHosted: false }) brief.Current = null;
+            var thumbs = ThumbVList(side);
+            if (thumbs.Current is { IsHosted: false } list)
+            {
+                _thumbListHeight[si] = list.Layout.AbsoluteContentBox.Height;
+                thumbs.Current = null;
+            }
         }
         // The Sync rows a key moved the ring on, and Sync's scroll view, once they left the window.
         if (_syncRingMoved is [var (moved, _, _), ..] && !moved.IsHosted) _syncRingMoved.Clear();

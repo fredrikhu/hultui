@@ -40,7 +40,7 @@ What the jobs add to the image:
 
 | Job | Adds | Why |
 |---|---|---|
-| every job that runs `dotnet` | `actions/setup-dotnet`, `10.0.x` | there is no `global.json`, so any 10.0 SDK builds the solution, and the newest is taken |
+| every job that runs `dotnet` | `actions/setup-dotnet` with `global-json-file: global.json` | the repository's `global.json` asks for SDK 11.0.100 with `rollForward: latestFeature`, which setup-dotnet turns into the newest 11.0 SDK; the same file picks the SDK on every machine, so CI and a desk build alike |
 | `test-linux` | `fonts-dejavu-core fonts-noto-cjk fonts-noto-core fonts-noto-color-emoji 7zip` | see the next section |
 | `test-linux`, `cef-natives` | `sysctl kernel.apparmor_restrict_unprivileged_userns=0` | Ubuntu 24.04 forbids an unconfined program a user namespace, so Chromium's sandbox cannot start: the CEF engine tests time out and `CefSandboxTests.OnThisMachine_TheSandboxCanStart` fails. The old runner, a Proxmox container, had its host's 0. Not something to ask of a user (`docs/design/WEBVIEW-LINUX-BRIEF.md`), but a hosted VM is thrown away after its job |
 | `meridian-keyring` Linux | `gnome-keyring libsecret-1-0 dbus-daemon`, then a private `dbus-run-session` with `gnome-keyring-daemon --unlock` | a Secret Service with an unlocked login keyring, for `PlatformKeyringTests` (`MERIDIAN_KEYRING_TESTS=1`) |

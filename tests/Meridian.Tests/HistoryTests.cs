@@ -126,9 +126,12 @@ public class HistoryTests : IClassFixture<TestHttpServer>, IDisposable
     // ── The view ─────────────────────────────────────────────────────────
 
 
-    private void Hosted(Action<HeadlessSession, MeridianApp> body, HeadlessOptions? options = null)
+    /// <summary>The app over the temp collection, its clock at <paramref name="at"/> (local noon on
+    /// a fixed day unless given; see <see cref="HistoryClock"/>).</summary>
+    private void Hosted(Action<HeadlessSession, MeridianApp> body, HeadlessOptions? options = null, DateTimeOffset? at = null)
     {
         using var session = HeadlessSession.Create(1600, 900, options: options);
+        HistoryClock.Set(session, at ?? HistoryClock.Noon);
         MeridianApp? app = null;
         try
         {
@@ -353,9 +356,9 @@ public class HistoryTests : IClassFixture<TestHttpServer>, IDisposable
     {
         // Two sends two days old (at the end of the list, drawn at 60 %), then forty from today.
         for (int i = 0; i < 2; i++)
-            HistoryLog.Append(_root, new HistoryEntry(DateTimeOffset.Now.AddDays(-2).AddMinutes(i), "GET",
+            HistoryLog.Append(_root, new HistoryEntry(HistoryClock.Noon.AddDays(-2).AddMinutes(i), "GET",
                 $"https://api.x/v1/old/{i}", 200, 10, null, null));
-        var start = DateTimeOffset.Now.AddMinutes(-90);
+        var start = HistoryClock.Noon.AddMinutes(-90);
         for (int i = 0; i < 40; i++)
             HistoryLog.Append(_root, new HistoryEntry(start.AddMinutes(i), i % 3 == 0 ? "POST" : "GET",
                 $"https://api.x/v1/items/{i}", 200, 10 + i, null, null));
@@ -376,9 +379,10 @@ public class HistoryTests : IClassFixture<TestHttpServer>, IDisposable
             var selected = Walk(session.Window.AccessibilityTree).Single(n => n.IsSelected == true);
             Assert.EndsWith("/items/34 200", selected.Name);
             Assert.Equal(5, list.SelectedIndex);
-            // The row's own fill, drawn by the list; no row draws one (none is hovered).
-            Assert.Equal(HistoryLog.IsToday(app.FilteredHistory()[5], DateTimeOffset.Now) ? raised
-                : Meridian.Theme.Azimuth.Alpha(raised, 0.6), list.SelectionHighlight!.Value.Background);
+            // The row's own fill, drawn by the list; no row draws one (none is hovered). The send is
+            // today's: 56 minutes before the app's noon.
+            Assert.True(HistoryLog.IsToday(app.FilteredHistory()[5], HistoryClock.Noon));
+            Assert.Equal(raised, list.SelectionHighlight!.Value.Background);
             Assert.DoesNotContain(list.Children, r => r is HultUI.Core.Elements.BoxElement { BackgroundColor: var c } && c == raised);
             // On a send older than today, the fill at the row's 60 %.
             while (list.SelectedIndex < 41) GoTo(session, KeyCode.Down);
@@ -408,7 +412,7 @@ public class HistoryTests : IClassFixture<TestHttpServer>, IDisposable
     public void AnOlderSendFadesItsColours_NotItsRow()
     {
         // The same send twice: two days old, then from today (newest first: today's is row 0).
-        var now = DateTimeOffset.Now;
+        var now = HistoryClock.Noon;
         HistoryLog.Append(_root, new HistoryEntry(now.AddDays(-2), "POST", "https://api.x/v1/same", 201, 12, "ci", null));
         HistoryLog.Append(_root, new HistoryEntry(now.AddMinutes(-1), "POST", "https://api.x/v1/same", 201, 12, "ci", null));
         static Color Fade(Color c) => new(c.R, c.G, c.B, (byte)Math.Round(c.A * 0.6));
@@ -455,6 +459,38 @@ public class HistoryTests : IClassFixture<TestHttpServer>, IDisposable
         }, new HeadlessOptions { RecordDrawCalls = true });
     }
 
+    /// <summary>Thirty seconds after midnight, by the app's clock, a send from a minute ago is
+    /// yesterday's and one from twenty seconds ago is today's: in the row's time, in the "today"
+    /// filter, and in the time a new send is stamped with. History read the machine's clock
+    /// (DateTimeOffset.Now), so a test could not set the time of day, and one that sent "a minute
+    /// ago" failed from 00:00 to 00:01 local (meridian-v1.8.0's installer run, at 00:00:41 UTC).</summary>
+    [Fact]
+    public void JustAfterMidnight_TodayIsTheAppClocks()
+    {
+        var midnight = HistoryClock.At(0, 0, 30);
+        HistoryLog.Append(_root, new HistoryEntry(midnight.AddMinutes(-1), "GET", "https://api.x/v1/late", 200, 12, null, null));
+        HistoryLog.Append(_root, new HistoryEntry(midnight.AddSeconds(-20), "GET", "https://api.x/v1/early", 200, 12, null, null));
+        Hosted((session, app) =>
+        {
+            GoTo(session, KeyCode.Digit4);
+            // Newest first: the send at 00:00:10 is row 0, the one at 23:59:30 row 1.
+            var list = session.Window.FindByAutomationId("history-rows")!.Element;
+            string TimeOf(string row) => Descendants(list.Children.Single(r => r.AutomationId == row))
+                .OfType<HultUI.Core.Elements.TextElement>().First().Content;
+            Assert.Equal("00:00:10", TimeOf("hist-row-0"));
+            Assert.Equal("yesterday 23:59", TimeOf("hist-row-1"));
+
+            Click(session, "filter-today");
+            Assert.Equal(["https://api.x/v1/early"], app.FilteredHistory().Select(e => e.Url));
+            Click(session, "filter-today");
+
+            app.RecordHistory("GET", "https://api.x/v1/now", SendResult.Infra(
+                new InfraFailure(InfraKind.Timeout, "timed out", "", TimeSpan.FromSeconds(1))));
+            var stamped = app.History.Single(e => e.Url == "https://api.x/v1/now").At;
+            Assert.InRange(stamped - midnight, TimeSpan.Zero, TimeSpan.FromSeconds(5));
+        }, at: midnight);
+    }
+
     /// <summary>A key in History builds the archived send beside the list and nothing else: the list
     /// draws the selection and is told through its ref, so the window does not build (plan 17
     /// round 8: 52 KB a key, the window built for a panel). The archive shows the send the key
@@ -465,7 +501,7 @@ public class HistoryTests : IClassFixture<TestHttpServer>, IDisposable
     [Fact]
     public void AKeyBuildsTheArchiveAlone_AndASearchCharacterBuildsNoArchive()
     {
-        var start = DateTimeOffset.Now.AddMinutes(-90);
+        var start = HistoryClock.Noon.AddMinutes(-90);
         for (int i = 0; i < 40; i++)
             HistoryLog.Append(_root, new HistoryEntry(start.AddMinutes(i), i % 3 == 0 ? "POST" : "GET",
                 $"https://api.x/v1/items/{i}", 200, 10 + i, null, null));
@@ -544,7 +580,7 @@ public class HistoryTests : IClassFixture<TestHttpServer>, IDisposable
     [Fact]
     public void UpAfterASearchThatShortenedTheRows_SelectsTheLastRow()
     {
-        var start = DateTimeOffset.Now.AddMinutes(-90);
+        var start = HistoryClock.Noon.AddMinutes(-90);
         for (int i = 0; i < 40; i++)
             HistoryLog.Append(_root, new HistoryEntry(start.AddMinutes(i), "GET",
                 $"https://api.x/v1/items/{i}", 200, 10 + i, null, null));
@@ -566,6 +602,46 @@ public class HistoryTests : IClassFixture<TestHttpServer>, IDisposable
             Assert.EndsWith("/items/10 200", Walk(session.Window.AccessibilityTree).Single(n => n.IsSelected == true).Name);
         });
     }
+
+    /// <summary>Another view lets History go (plan 17 round 11). Its list's ref, its find field's and the
+    /// archived send panel's each held the whole History view through their parents behind every other
+    /// view; a build that shows another view empties them. Back in History the selection is where it was,
+    /// and a key moves it with no build of the window, the list told through its ref and the archive
+    /// building alone, as before.</summary>
+    [Fact]
+    public void AnotherView_LetsHistoryGo_AndBackInHistoryAKeyBuildsTheArchiveAlone()
+    {
+        var start = HistoryClock.Noon.AddMinutes(-90);
+        for (int i = 0; i < 40; i++)
+            HistoryLog.Append(_root, new HistoryEntry(start.AddMinutes(i), "GET",
+                $"https://api.x/v1/items/{i}", 200, 10 + i, null, null));
+        Hosted((session, app) =>
+        {
+            GoTo(session, KeyCode.Digit4);
+            for (int i = 0; i < 5; i++) GoTo(session, KeyCode.Down);   // cursor on row 4, items/35
+            var history = WeakHistoryList(session);
+
+            GoTo(session, KeyCode.Digit1);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            Assert.False(history.IsAlive, "the History view outlived its build behind Requests");
+
+            GoTo(session, KeyCode.Digit4);
+            Assert.EndsWith("/items/35 200", Walk(session.Window.AccessibilityTree).Single(n => n.IsSelected == true).Name);
+            Assert.Contains("https://api.x/v1/items/35", ArchiveTexts(session));
+            int builds = app.Builds, archived = app.HistoryArchiveBuilds;
+            GoTo(session, KeyCode.Down);
+            Assert.Equal(0, app.Builds - builds);
+            Assert.Equal(1, app.HistoryArchiveBuilds - archived);
+            Assert.EndsWith("/items/34 200", Walk(session.Window.AccessibilityTree).Single(n => n.IsSelected == true).Name);
+            Assert.Contains("https://api.x/v1/items/34", ArchiveTexts(session));
+        });
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static WeakReference WeakHistoryList(HeadlessSession session) =>
+        new(session.Window.FindByAutomationId("history-rows")!.Element);
 
     private static List<string> ArchiveTexts(HeadlessSession session) =>
         Descendants(session.Window.FindByAutomationId("history-archive")!.Element)
@@ -598,7 +674,7 @@ public class HistoryTests : IClassFixture<TestHttpServer>, IDisposable
     [Fact]
     public void AWalkPastTheScreenKeepsTheSelectedRowInView()
     {
-        var start = DateTimeOffset.Now.AddMinutes(-200);
+        var start = HistoryClock.Noon.AddMinutes(-200);
         for (int i = 0; i < 120; i++)
             HistoryLog.Append(_root, new HistoryEntry(start.AddMinutes(i), "GET",
                 $"https://api.x/v1/items/{i}", 200, 10 + i, null, null));

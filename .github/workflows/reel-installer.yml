@@ -42,7 +42,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
 
       - name: Build app (Release)
         run: dotnet build apps/Reel/Reel.csproj -c Release
@@ -73,7 +73,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
 
       # Tag reel-v1.2.0 -> 1.2.0; other builds get a CI prerelease version. The
       # version reaches command lines below, so a tag that does not hold one stops here.
@@ -106,7 +106,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $publish = "apps/Reel/bin/Release/net10.0/win-x64/publish"
+          $publish = "apps/Reel/bin/Release/net11.0/win-x64/publish"
           # The transport is called as the Python it is. "python3" on a Windows PATH can be
           # the Store's stub, which does nothing and exits, so each candidate is tried.
           $py = $null

@@ -240,7 +240,7 @@ these carry a whole product's worth of them.
 
 ## Requirements
 
-- .NET 10.0+
+- .NET 11.0+
 - OpenGL 3.3+ capable GPU
 - Linux (X11 or Wayland), Windows, or macOS
 

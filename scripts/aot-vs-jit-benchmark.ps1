@@ -55,7 +55,7 @@ if ($LASTEXITCODE -ne 0) { throw "AOT publish failed (exit $LASTEXITCODE)." }
 
 # ── 3) NativeAOT ─────────────────────────────────────────────────────────────
 Write-Host '== NativeAOT: running suite ==' -ForegroundColor Cyan
-$exe = Join-Path $proj "bin/x64/Release/net10.0/$rid/publish/HultUI.Samples.Benchmark.exe"
+$exe = Join-Path $proj "bin/x64/Release/net11.0/$rid/publish/HultUI.Samples.Benchmark.exe"
 $aotOut = & $exe --auto 2>&1
 $aotOut | Write-Host
 $aot = Get-Medians $aotOut

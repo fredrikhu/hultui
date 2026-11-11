@@ -20,7 +20,7 @@ produces nineteen packages plus symbol packages (snupkg):
 | `HultUI.Rendering.Skia` | SkiaSharp renderer. |
 | `HultUI.Platform.SDL3` | Windowing/input/clipboard/dialogs. |
 | `HultUI.Platform.Accessibility.Windows` / `.Linux` | UIA and AT-SPI bridges. |
-| `HultUI.WinForms` | The WinForms host: mount a HultUI tree as a `System.Windows.Forms.Control`. The only `net10.0-windows` package, and the only one not in the cross-platform solution filter. |
+| `HultUI.WinForms` | The WinForms host: mount a HultUI tree as a `System.Windows.Forms.Control`. The only `net11.0-windows` package, and the only one not in the cross-platform solution filter. |
 | `HultUI.Headless` | Headless testing host — consumers test their apps with it. |
 | `HultUI.Media` | Video playback without a decoder: the backend contract, the reactive `MediaPlayer`, `VideoElement`, `VideoPlayer`, and a fake backend for tests. A decoder is a separate package. |
 | `HultUI.Media.Mpv` | The libmpv backend. Bindings and `MpvBackend` only; the native library is the consumer's, per its README. |
@@ -110,7 +110,7 @@ everywhere. CI runs the same command with `--warningsAsErrors` and uploads the
 site as an artifact — a bad cref or a stale link breaks the build instead of the
 site. Three packages are absent from the API reference. `HultUI.SourceGenerators`
 is a build-time analyzer with no runtime surface for a consumer to call;
-`HultUI.WinForms` targets `net10.0-windows`, which will not build on the Linux
+`HultUI.WinForms` targets `net11.0-windows`, which will not build on the Linux
 runner this job uses; `HultUI.Themes` is an omission rather than a decision, and
 worth adding.
 

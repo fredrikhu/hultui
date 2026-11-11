@@ -26,7 +26,7 @@ public sealed class WindowPlacementTests(ITestOutputHelper output)
     {
         using var guard = ForegroundGuard.Begin();
         foreach (var style in Styles)
-        foreach (var area in WorkAreas())
+        foreach (var area in Monitors.WorkAreas())
         {
             var wanted = new WindowPlacement((int)area.X + 40, (int)area.Y + 40, 900, 640, false);
             using var app = Open(style);
@@ -49,7 +49,7 @@ public sealed class WindowPlacementTests(ITestOutputHelper output)
     {
         using var guard = ForegroundGuard.Begin();
         foreach (var style in Styles)
-        foreach (var area in WorkAreas())
+        foreach (var area in Monitors.WorkAreas())
         {
             var normal = new WindowPlacement((int)area.X + 60, (int)area.Y + 60, 900, 640, false);
             using var app = Open(style);
@@ -87,7 +87,7 @@ public sealed class WindowPlacementTests(ITestOutputHelper output)
         using var guard = ForegroundGuard.Begin();
         foreach (var style in Styles)
         {
-            var area = WorkAreas()[0];
+            var area = Monitors.WorkAreas()[0];
             var normal = new WindowPlacement((int)area.X + 80, (int)area.Y + 80, 800, 600, false);
             using var app = Open(style);
             var window = app.PrimaryWindow;
@@ -129,7 +129,7 @@ public sealed class WindowPlacementTests(ITestOutputHelper output)
         // maximized: every file handed over from a second launch shrank the player.
         foreach (var style in Styles)
         {
-            var area = WorkAreas()[0];
+            var area = Monitors.WorkAreas()[0];
             var normal = new WindowPlacement((int)area.X + 80, (int)area.Y + 80, 800, 600, false);
             using var app = Open(style);
             var window = app.PrimaryWindow;
@@ -172,7 +172,7 @@ public sealed class WindowPlacementTests(ITestOutputHelper output)
         var landed = OuterRect(window);
 
         Assert.Equal((900, 640), (landed.Width, landed.Height));
-        Assert.Contains(WorkAreas(), a => landed.X >= a.X && landed.Y >= a.Y
+        Assert.Contains(Monitors.WorkAreas(), a => landed.X >= a.X && landed.Y >= a.Y
             && landed.X + landed.Width <= a.X + a.Width && landed.Y + landed.Height <= a.Y + a.Height);
         window.Close();
     }
@@ -211,33 +211,12 @@ public sealed class WindowPlacementTests(ITestOutputHelper output)
     private static bool Cloaked(nint hwnd) =>
         DwmGetWindowAttribute(hwnd, 14 /* DWMWA_CLOAKED */, out int cloaked, sizeof(int)) == 0 && cloaked != 0;
 
-    private static List<Rect> WorkAreas()
-    {
-        var areas = new List<Rect>();
-        EnumDisplayMonitors(0, 0, (monitor, _, _, _) =>
-        {
-            var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
-            if (GetMonitorInfoW(monitor, ref info))
-                areas.Add(new Rect(info.rcWork.Left, info.rcWork.Top,
-                    info.rcWork.Right - info.rcWork.Left, info.rcWork.Bottom - info.rcWork.Top));
-            return true;
-        }, 0);
-        return areas;
-    }
-
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT { public int Left, Top, Right, Bottom; }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT { public int X, Y; }
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MONITORINFO { public int cbSize; public RECT rcMonitor, rcWork; public uint dwFlags; }
-
-    private delegate bool MonitorEnumProc(nint monitor, nint hdc, nint clip, nint data);
-
-    [DllImport("user32")] private static extern bool EnumDisplayMonitors(nint hdc, nint clip, MonitorEnumProc proc, nint data);
-    [DllImport("user32", EntryPoint = "GetMonitorInfoW")] private static extern bool GetMonitorInfoW(nint monitor, ref MONITORINFO info);
     [DllImport("user32")] private static extern bool GetWindowRect(nint hwnd, out RECT rect);
     [DllImport("user32")] private static extern bool GetClientRect(nint hwnd, out RECT rect);
     [DllImport("user32")] private static extern bool ClientToScreen(nint hwnd, ref POINT point);

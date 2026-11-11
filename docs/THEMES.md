@@ -80,6 +80,39 @@ theme. Three things must follow it, and none of them happen inside:
 
 Then rebuild.
 
+## Colouring code and diffs
+
+`HultUI.Syntax` turns text into coloured spans with VS Code's TextMate grammars, in the code
+theme above. `SyntaxHighlighter.TokenizeLines(path, text)` gives one span list per line, for
+views that draw a row per line, and `SpansForText(path, text)` one list for a `Text` or
+`TextArea` that holds the whole text. The file's extension picks the grammar, and
+`CanHighlight(path)` says up front whether one exists. Tokenize on a worker: the first call
+loads the grammars, and a large file takes the low hundreds of milliseconds.
+
+A diff shows a few lines of two versions of a file, and `TokenizeDiff` colours only those. A
+line's colour depends on the lines above it (a block comment opened 900 lines up), so each
+version is walked from its first line to its last shown one, and the lines both versions start
+with are walked once. Lines are `LineRange`s, numbered from 1 with both ends included, in rising
+order and not overlapping; anything else throws `ArgumentException`.
+
+```csharp
+// The lines a diff shows of each version, as its hunk headers number them.
+LineRange[] oldShown = [new(40, 46)];
+LineRange[] newShown = [new(40, 49), new(120, 126)];
+
+TokenizedDiff diff = await Task.Run(() => SyntaxHighlighter.TokenizeDiff("src/Parser.cs",
+    oldText, oldShown, newText, newShown, SyntaxHighlighter.DefaultMaxLines, cancel.Token));
+
+// Line 42 of the new version; null when that version has nothing coloured.
+IReadOnlyList<TextSpan>? spans = diff.New is { Length: >= 42 } lines ? lines[41] : null;
+```
+
+`Old` and `New` are null for a version with no text (a file added or deleted), nothing shown,
+or a text too long to colour (more than `maxLines` lines or two million characters); both are
+null when the extension has no grammar. A version's array ends at its last shown line and holds
+spans only for the lines shown. Junction's diff runs on this:
+`apps/Junction/JunctionApp.Highlight.cs`.
+
 ## The framework's own controls
 
 Each built-in control reads its knobs from a `Theme` extension (`Theme.Button`,
@@ -162,6 +195,10 @@ children, since the patch runs it on the twin too.
 
 Add a `NamedTheme` to `ThemeCatalog` and put it in `All`. Transcribe the scheme's published
 ground, surface, foreground, accents and red/green/amber; pick the nearest bundled
-TextMateSharp theme for `SyntaxTheme`. The catalogue tests run against every entry
+TextMateSharp theme for `SyntaxTheme`. A code theme colours as it does in VS Code: Dark+,
+Light+ and High Contrast Light include another theme file (dark_vs, light_vs), and
+`SyntaxHighlighter` merges the two into one list of rules as VS Code does, where TextMateSharp
+alone would let the theme's broader rules beat the included file's narrower ones (a JSON key
+teal instead of light blue; see DECISIONS.md, round 11). The catalogue tests run against every entry
 automatically — they will tell you if the text does not clear 4.5:1 on the ground or the
 surface, if `IsDark` disagrees with the ground, or if two of the semantic colours collided.

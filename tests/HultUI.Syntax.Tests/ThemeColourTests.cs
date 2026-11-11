@@ -1,6 +1,9 @@
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Syntax;
+using TextMateSharp.Grammars;
+using TextMateSharp.Internal.Grammars;
+using TextMateSharp.Registry;
 using Xunit;
 
 namespace HultUI.Syntax.Tests;
@@ -9,7 +12,9 @@ namespace HultUI.Syntax.Tests;
 /// The colours Dark+ (the default theme) gives the tokens whose colour changed when the highlighter
 /// took them from TextMateSharp's encoded tokens (plan 17 round 9, approved by the user): each is
 /// VS Code's. Before, the first rule with a colour from any of a token's scopes won, the theme's own
-/// file before the one it includes, and a rule's parent scopes were ignored.
+/// file before the one it includes, and a rule's parent scopes were ignored. Then those whose colour
+/// changed when the highlighter merged Dark+ with dark_vs, the theme it includes, into one (round 11,
+/// approved by the user), each VS Code's too.
 /// </summary>
 public class ThemeColourTests
 {
@@ -22,7 +27,7 @@ public class ThemeColourTests
     /// <summary>The colour of the characters <paramref name="token"/> covers where it first appears
     /// after <paramref name="after"/> on the last line of <paramref name="text"/>; null when they draw
     /// plain, throws when they are not one colour.</summary>
-    private static Color? ColourOf(string path, string text, string token, string after = "")
+    internal static Color? ColourOf(string path, string text, string token, string after = "")
     {
         var spans = SyntaxHighlighter.TokenizeLines(path, text, SyntaxHighlighter.DefaultMaxLines,
             CancellationToken.None, SteppingClock.Standing)!;
@@ -82,4 +87,118 @@ public class ThemeColourTests
         Assert.Equal(Variable, ColourOf("a.ps1", line, "$items"));
         Assert.Equal(Variable, ColourOf("a.md", "```powershell\n" + line, ".Count"));
     }
+
+    /// <summary>A JSON key is a property name's light blue, as in VS Code: it was teal. Dark+'s own
+    /// "support.type" beat "support.type.property-name" of dark_vs, the theme it includes, while
+    /// TextMateSharp kept the two files apart; the highlighter now merges them as VS Code does (plan 17
+    /// round 11, approved by the user). Strings and numbers keep their colours.</summary>
+    [Theory]
+    [InlineData("a.json")]
+    [InlineData("a.jsonc")]
+    public void AJsonKeyIsAPropertyName(string path)
+    {
+        const string line = "{ \"name\": \"hultui\", \"stars\": 128 }";
+        Assert.Equal(Variable, ColourOf(path, line, "\"name\""));
+        Assert.Equal(Variable, ColourOf(path, line, "\"stars\""));
+        Assert.Equal(String, ColourOf(path, line, "\"hultui\""));
+        Assert.Equal(Number, ColourOf(path, line, "128"));
+    }
+
+    /// <summary><c>this</c> is a keyword's blue, as in VS Code: it was a variable's light blue, Dark+'s
+    /// own "variable" before dark_vs's "variable.language". The member after it stays a variable.</summary>
+    [Theory]
+    [InlineData("a.ts", "const n = this.items.size;")]
+    [InlineData("a.js", "const n = this.items.size;")]
+    [InlineData("a.cs", "class C { int F() => this.items.Count; }")]
+    public void ThisIsAKeyword(string path, string line)
+    {
+        Assert.Equal(Keyword, ColourOf(path, line, "this"));
+        Assert.Equal(Variable, ColourOf(path, line, "items"));
+    }
 }
+
+/// <summary>
+/// The themes other than Dark+ (the default). Run alone: each test changes the process-wide theme,
+/// which would recolour the tests running beside it.
+/// </summary>
+[Collection(nameof(OtherThemeColourTests))]
+public class OtherThemeColourTests
+{
+    /// <summary>Light+ includes light_vs as Dark+ includes dark_vs, and merges it the same way: a JSON
+    /// key is light_vs's property-name blue (it was Light+'s "support.type" teal, #267F99) and
+    /// <c>this</c> light_vs's "variable.language" blue (it was Light+'s "variable", #001080).</summary>
+    [Fact]
+    public void LightPlusMergesTheThemeItIncludes()
+    {
+        SyntaxHighlighter.SetTheme("LightPlus");
+        try
+        {
+            Assert.Equal(Color.FromHex("#0451A5"), ThemeColourTests.ColourOf("a.json", "{ \"name\": 1 }", "\"name\""));
+            Assert.Equal(Color.FromHex("#0000FF"), ThemeColourTests.ColourOf("a.ts", "const n = this.items.size;", "this"));
+            Assert.Equal(Color.FromHex("#001080"), ThemeColourTests.ColourOf("a.ts", "const n = this.items.size;", "items"));
+        }
+        finally { SyntaxHighlighter.SetTheme("DarkPlus"); }
+    }
+
+    private static readonly (string Path, string Scope, string Text)[] Samples =
+    [
+        ("a.json", "source.json", "{\n  \"name\": \"hultui\",\n  \"tags\": [\"ui\", 2, true, null],\n  \"owner\": { \"login\": \"f\" }\n}"),
+        ("a.ts", "source.ts", "export class Store {\n  private items = new Map<string, number>();\n  get size(): number { return this.items.size; }\n}\nconst o = { 'quoted': 1, plain: 2, 7: 3 };"),
+        ("a.cs", "source.cs", "namespace N;\n/// <summary>Doc.</summary>\npublic sealed class C(int x)\n{\n    public int F() => this.G($\"{x} items\", _ => 1) + 0x1F;\n}"),
+    ];
+
+    /// <summary>A theme that includes no other is handed to TextMateSharp as it is: in every such
+    /// bundled theme each character of a few languages has the colour TextMateSharp's own registry
+    /// gives it, unwrapped (a token of the default foreground, or of the editor's, draws plain).</summary>
+    [Fact]
+    public void AThemeThatIncludesNoneColoursAsTextMateSharpAlone()
+    {
+        int themes = 0;
+        try
+        {
+            foreach (var name in Enum.GetValues<ThemeName>())
+            {
+                var options = new RegistryOptions(name);
+                if (options.GetDefaultTheme().GetInclude() is { Length: > 0 }) continue;
+                themes++;
+                Assert.True(SyntaxHighlighter.SetTheme(name.ToString()));
+                var registry = new Registry(options);
+                var theme = registry.GetTheme();
+                Color? editor = theme.GetGuiColorDictionary().TryGetValue("editor.foreground", out var fg) ? Parse(fg) : null;
+                foreach (var (path, scope, text) in Samples)
+                {
+                    var spans = SyntaxHighlighter.TokenizeLines(path, text, SyntaxHighlighter.DefaultMaxLines,
+                        CancellationToken.None, SteppingClock.Standing)!;
+                    var grammar = registry.LoadGrammar(scope);
+                    IStateStack? state = null;
+                    var lines = text.Split('\n');
+                    for (int i = 0; i < lines.Length; i++)
+                    {
+                        var result = grammar.TokenizeLine2(new LineText(lines[i].AsMemory()), state, TimeSpan.MaxValue);
+                        state = result.RuleStack;
+                        var expected = new Color?[lines[i].Length];
+                        for (int k = 0; k < result.Tokens.Length / 2; k++)
+                        {
+                            int id = EncodedTokenAttributes.GetForeground(result.Tokens[2 * k + 1]);
+                            Color? colour = id <= 1 ? null : Parse(theme.GetColor(id));
+                            if (colour == editor) colour = null;
+                            int end = k + 1 < result.Tokens.Length / 2 ? result.Tokens[2 * k + 2] : lines[i].Length;
+                            for (int c = result.Tokens[2 * k]; c < end; c++) expected[c] = colour;
+                        }
+                        var actual = new Color?[lines[i].Length];
+                        foreach (var span in spans[i])
+                            for (int c = span.Start; c < span.End; c++) actual[c] = span.Color;
+                        Assert.True(expected.SequenceEqual(actual), $"{name} {path} line {i + 1}: '{lines[i]}'");
+                    }
+                }
+            }
+        }
+        finally { SyntaxHighlighter.SetTheme("DarkPlus"); }
+        Assert.Equal(18, themes);
+    }
+
+    private static Color? Parse(string? hex) => hex is { Length: 7 or 9 } && hex[0] == '#' ? Color.FromHex(hex) : null;
+}
+
+[CollectionDefinition(nameof(OtherThemeColourTests), DisableParallelization = true)]
+public class OtherThemeColourCollection;

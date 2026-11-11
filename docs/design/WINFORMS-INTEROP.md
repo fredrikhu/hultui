@@ -318,8 +318,8 @@ document proposed are **not needed** — experiment D removed the reason for the
 
 ### `src/HultUI.WinForms`
 
-A new package, `net10.0-windows` with `UseWindowsForms`, referencing `HultUI`. The
-only Windows-Desktop-flavoured project in the repo; the framework's own `net10.0`
+A new package, `net11.0-windows` with `UseWindowsForms`, referencing `HultUI`. The
+only Windows-Desktop-flavoured project in the repo; the framework's own `net11.0`
 targets stay clean and nothing else in the solution depends on it.
 
 ```

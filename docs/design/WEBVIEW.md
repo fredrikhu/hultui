@@ -126,7 +126,7 @@ backend resolves libmpv (`HULTUI_WEBVIEW2_LOADER` → app dir → `runtimes/<rid
 **Verify** which package assets carry it, so the package can take the DLL without
 the managed assemblies.
 
-The Windows engine targets `net10.0` with `SupportedOSPlatform("windows")`, like
+The Windows engine targets `net11.0` with `SupportedOSPlatform("windows")`, like
 the accessibility bridge, so it stays in the cross-platform solution filter and
 the docs build.
 

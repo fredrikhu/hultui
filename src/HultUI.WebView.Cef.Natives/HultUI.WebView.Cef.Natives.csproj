@@ -16,7 +16,7 @@
     licences, listed in CEF-CREDITS.html beside libcef.so.
   -->
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>$(HultUITargetFramework)</TargetFramework>
     <Rid Condition="'$(Rid)' == ''">linux-x64</Rid>
     <PackageId>HultUI.WebView.Cef.Natives.$(Rid)</PackageId>
     <IncludeBuildOutput>false</IncludeBuildOutput>

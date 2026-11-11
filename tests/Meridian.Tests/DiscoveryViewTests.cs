@@ -375,15 +375,17 @@ public class DiscoveryViewTests : IClassFixture<TestHttpServer>, IDisposable
     // ── A click at scale ─────────────────────────────────────────────────
     //
     // The map is a virtual list of its lines: only the rows on screen are elements. A click moves the
-    // selection, which only the list and the detail beside it show: it tells the list, which makes
-    // the two rows it moves between, and the detail builds alone (MeridianApp.Discovery.cs). The
-    // oracle is a build that keeps nothing.
+    // selection, which only the list and the detail beside it show: it tells the list, which draws the
+    // highlight under another row and makes none, and the detail builds alone
+    // (MeridianApp.Discovery.cs). The oracle is a build that keeps nothing.
 
-    /// <summary>A click makes the row it leaves and the row it reaches and builds the detail, not the
-    /// window: the same elements at 30 endpoints as at 300. It made every row again, 2.8 MB a click at
-    /// 600; then it built the view.</summary>
+    /// <summary>A click makes no row and builds the detail, not the window: the same elements at 30
+    /// endpoints as at 300, and the rows on screen are the ones that were. The list draws the
+    /// selection (the Raised fill and the 2 px top accent the selected row drew) and the hover tint.
+    /// It made the row it left and the row it reached; before that every row, 2.8 MB a click at 600,
+    /// and then it built the view.</summary>
     [Fact]
-    public void AClickMakesTheTwoRowsItMovesBetween_HoweverLongTheMap()
+    public void AClickMakesNoRow_HoweverLongTheMap()
     {
         var made = new List<ulong>();
         foreach (int paths in new[] { 15, 150 })
@@ -402,11 +404,34 @@ public class DiscoveryViewTests : IClassFixture<TestHttpServer>, IDisposable
                 session.PumpFrames(2);
                 made.Add(ElementId.New().Value - before - 1);
 
-                Assert.Equal(2, app.EndpointRowsMade - rows);   // the row it left and the row it reached
+                Assert.Equal(0, app.EndpointRowsMade - rows);   // it made the row it left and the row it reached
+                Assert.Same(first, RowElement("ep-GET-v1-group00-items000-id"));
+                Assert.Same(second, RowElement("ep-PUT-v1-group00-items000-id"));
                 Assert.Equal(0, app.Builds - builds);
                 Assert.Equal(0, app.PartBuilds - parts);         // the title bar and the rail show no selection
                 Assert.Equal(1, app.MapDetailBuilds - details);
                 Assert.True(Selected(session, "ep-PUT-v1-group00-items000-id"));
+                Assert.False(Selected(session, "ep-GET-v1-group00-items000-id"));
+
+                // The look the rows drew: the selected row's fill under a 2 px accent on its top edge,
+                // the fill alone under the row the pointer is on, nothing under another row.
+                var hovered = RowElement("ep-GET-v1-group00-items012-id")!;
+                var at = CenterOf(hovered);
+                session.Window.MoveMouse(at.X, at.Y);
+                session.PumpFrames(2);
+                using var image = session.Window.CapturePixels();
+                using var shot = SkiaSharp.SKBitmap.FromImage(image);
+                SkiaSharp.SKColor Px(Element row, float dy)
+                {
+                    var box = row.ScreenBorderBox;
+                    return shot.GetPixel((int)(box.X + box.Width - 30), (int)(box.Y + dy));   // past the row's text
+                }
+                SkiaSharp.SKColor Sk(HultUI.Core.Primitives.Color c) => new(c.R, c.G, c.B, c.A);
+                Assert.Equal(Sk(Meridian.Theme.Azimuth.Accent), Px(second, 1));
+                Assert.Equal(Sk(Meridian.Theme.Azimuth.Raised), Px(second, 12));
+                Assert.Equal(Sk(Meridian.Theme.Azimuth.Raised), Px(hovered, 1));
+                Assert.Equal(Sk(Meridian.Theme.Azimuth.Raised), Px(hovered, 12));
+                Assert.NotEqual(Sk(Meridian.Theme.Azimuth.Raised), Px(first, 12));
             });
         Assert.True(made[0] == made[1], $"a click made {made[0]} elements at 30 endpoints and {made[1]} at 300");
     }

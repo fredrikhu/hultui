@@ -277,7 +277,7 @@ public partial class CommanderApp : Component, IDisposable
     // been. The offset of each pane's scrolling element (which one depends on the view mode)
     // is noted on the way in and put back on the first build with the panes on screen again.
     private readonly float[] _paneScroll = new float[2];
-    private int _pendingPaneScroll;   // builds left to try the restore; 0 = nothing pending
+    private bool _pendingPaneScroll;   // put back on the next build with the panes on screen
 
     /// <summary>Call before opening a full-shell view, while the panes still exist.</summary>
     private void RememberPaneScroll()
@@ -297,32 +297,30 @@ public partial class CommanderApp : Component, IDisposable
                 _ => VList(side).Current?.ScrollOffsetY ?? 0f,
             };
         }
-        // A few builds rather than one: the offset clamps against a content size the list
-        // may not know on the very first build after the panes come back.
-        _pendingPaneScroll = 4;
+        _pendingPaneScroll = true;
     }
 
+    /// <summary>
+    /// Puts the noted offsets back, from the first OnAfterBuild with the panes on screen again.
+    /// Once: the new list keeps an offset set before its first layout and applies it then, against
+    /// the content it measures. This used to try again on up to three more builds in case the
+    /// offset clamped short, asking for them with a MarkViewDirty from OnAfterBuild, which is
+    /// dropped: since the list keeps the offset the first try always reads back, and a retry that
+    /// worked would only have built the view three more times (plan 17, round 11).
+    /// </summary>
     private void RestorePaneScroll()
     {
-        bool settled = true;
+        _pendingPaneScroll = false;
         foreach (char side in "LR")
         {
             float want = _paneScroll[Si(side)];
             if (want <= 0f) continue;
-            float got;
-            switch (ViewOf(side))
+            if (ViewOf(side) == ViewMode.Thumbnails)
             {
-                case ViewMode.Thumbnails:
-                    if (ThumbVList(side).Current is not { } tv) { settled = false; continue; }
-                    tv.ScrollOffsetY = want; got = tv.ScrollOffsetY; break;
-                default:
-                    if (VList(side).Current is not { } vl) { settled = false; continue; }
-                    vl.ScrollOffsetY = want; got = vl.ScrollOffsetY; break;
+                if (ThumbVList(side).Current is { } tv) tv.ScrollOffsetY = want;
             }
-            if (got < want) settled = false;   // clamped short — the content isn't measured yet
+            else if (VList(side).Current is { } vl) vl.ScrollOffsetY = want;
         }
-        _pendingPaneScroll = settled ? 0 : _pendingPaneScroll - 1;
-        if (_pendingPaneScroll > 0) MarkViewDirty();
     }
 
     // Each pane is a Tab-focusable region; `_active` follows which one holds focus
@@ -846,7 +844,7 @@ public partial class CommanderApp : Component, IDisposable
             _pendingPaneFocus = null;
             PaneRef(paneSide).Current?.Focus();
         }
-        if (_pendingPaneScroll > 0 && !FullShellOpen) RestorePaneScroll();
+        if (_pendingPaneScroll && !FullShellOpen) RestorePaneScroll();
         if (_pendingScrollL) { _pendingScrollL = false; ScrollCursorIntoView('L'); }
         if (_pendingScrollR) { _pendingScrollR = false; ScrollCursorIntoView('R'); }
         if (_pendingNamePromptFocus)

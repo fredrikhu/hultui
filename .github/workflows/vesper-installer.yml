@@ -40,7 +40,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
 
       - name: Build app (Release)
         run: dotnet build apps/VesperCommander/VesperCommander.csproj -c Release
@@ -69,7 +69,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
 
       # Tag vesper-v1.2.0 -> 1.2.0; other builds get a CI prerelease version. The
       # version reaches command lines below, so a tag that does not hold one stops here.

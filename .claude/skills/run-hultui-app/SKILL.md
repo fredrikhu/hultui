@@ -19,7 +19,7 @@ window on the user's desktop and there is no safe way to drive or capture it —
 The .NET SDK, already required to build this repo. Nothing else — no display, no GPU.
 
 ```bash
-dotnet --version   # 10.0.300 when this was written
+dotnet --version   # 11.0.100 since the .NET 11 upgrade (global.json)
 ```
 
 The driver is a .NET file-based app: the `#:project` lines at the top of `driver.cs` pull in

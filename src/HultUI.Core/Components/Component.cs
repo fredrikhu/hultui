@@ -28,10 +28,12 @@ public abstract class Component
     /// </summary>
     protected internal virtual void OnUnmount() { }
 
-    /// <summary>Called before each Build() invocation.</summary>
+    /// <summary>Called before each Build() invocation, inside the build: a rebuild asked for
+    /// here is dropped (see <see cref="MarkDirty"/>).</summary>
     protected internal virtual void OnBeforeBuild() { }
 
-    /// <summary>Called after each Build() invocation and tree reconciliation.</summary>
+    /// <summary>Called after each Build() invocation and tree reconciliation, still inside the
+    /// build: a rebuild asked for here is dropped (see <see cref="MarkDirty"/>).</summary>
     protected internal virtual void OnAfterBuild() { }
 
     /// <summary>
@@ -40,6 +42,13 @@ public abstract class Component
     /// dependencies — it is safe for a rebuild triggered this way to start reading a
     /// reactive source it has never read before.
     /// </summary>
+    /// <remarks>
+    /// Called from this component's own <see cref="OnBeforeBuild"/>, <see cref="Build"/> or
+    /// <see cref="OnAfterBuild"/>, it is dropped: the build is still running. So is a write
+    /// there to a signal the build read. Ask from outside the build instead, with
+    /// <c>Application.InvokeOnMainThread(MarkDirty)</c> or the window's
+    /// <c>RequestPostFrameCallback(MarkDirty)</c> (docs/REACTIVITY.md, Lifecycle hooks).
+    /// </remarks>
     protected void MarkDirty() => Host?.ForceRebuild();
 
     /// <summary>

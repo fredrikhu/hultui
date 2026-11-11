@@ -17,10 +17,22 @@ the rows whose allocKB moved by more than 0.2 KB and 2 %; an A/A line (before ag
 NativeAOT: `-p:PublishAot=true` on the suite's own project fails (NETSDK1207: the global property reaches the
 source generator), so each side is published through a generated wrapper project that sets PublishAot on itself
 only. The wrapper and its bin/obj live under a short path in %TEMP% (link.exe fails on long scratchpad paths), and
-the Visual Studio Installer folder goes on PATH for vswhere.
+the Visual Studio Installer folder goes on PATH for vswhere. The wrapper targets the framework its side's suite
+project targets (asked of MSBuild in that side's tree), so a step that changes the target framework compares each
+side on its own.
+
+SDK: each side builds with the SDK its own tree selects (its global.json, or the newest SDK installed when it has
+none); the AOT wrapper gets a copy of that global.json. -BaseSdk pins the before side to one SDK instead: the
+script writes a global.json for that version (no roll-forward) into the extracted before tree and its wrapper
+folder, and keeps that tree apart from an unpinned one. Use it when the SDK itself is what changes: with no
+global.json both sides would otherwise build with the newest SDK. The SDK each side builds with is printed.
 
 .EXAMPLE
 pwsh scripts/perf/step-ab.ps1 -Base 58c304fc -Work C:\scratch\r9b4 -Filter text/ -Show 'wheel over a 2,000|plain label' -Runtime Jit,Aot -Slug label-lines-cull
+
+.EXAMPLE
+# a .NET upgrade: the before side on the old SDK and target framework, the after side on the new ones
+pwsh scripts/perf/step-ab.ps1 -Base ca31555d -BaseSdk 10.0.300 -Work C:\scratch\r11u -Runtime Jit,Aot -Slug dotnet11
 
 .EXAMPLE
 # allocation-only rows (no timings needed): skip the gate, one pair
@@ -35,6 +47,7 @@ param(
     [ValidateRange(1, 10)][int]$Pairs = 2,
     [double]$Threshold = 10,
     [string]$Slug = '',
+    [string]$BaseSdk = '',
     [switch]$NoGate,
     [switch]$SkipBuild
 )
@@ -57,7 +70,8 @@ function Say([string]$s) { Write-Host $s }   # Write-Host: functions below retur
 Say "step-ab: before $baseSha, after $headSha$(if ($dirty) { ' + uncommitted changes' }); runtimes $($Runtime -join ', '); $Pairs pair(s); filter '$Filter'"
 
 # --- the before tree -------------------------------------------------------------------------------------------
-$baseRoot = Join-Path $Work "base-$baseSha"
+$sdkTag = if ($BaseSdk) { "-sdk$BaseSdk" } else { '' }
+$baseRoot = Join-Path $Work "base-$baseSha$sdkTag"
 if (-not (Test-Path (Join-Path $baseRoot '.step-ab-ready'))) {
     if (Test-Path $baseRoot) { Remove-Item -Recurse -Force $baseRoot }
     New-Item -ItemType Directory -Force $baseRoot | Out-Null
@@ -72,10 +86,23 @@ if (-not (Test-Path (Join-Path $baseRoot '.step-ab-ready'))) {
     }
     Remove-Item $tar
     git -C $baseRoot init -q   # its own repository: %TEMP% is a git repository, and git must not walk up into it
+    if ($BaseSdk) {
+        # No roll-forward: the pinned SDK or a clear error, never a quiet substitute.
+        Set-Content -Path (Join-Path $baseRoot 'global.json') -Encoding utf8 `
+            -Value "{ `"sdk`": { `"version`": `"$BaseSdk`", `"rollForward`": `"disable`" } }"
+    }
     New-Item -ItemType File (Join-Path $baseRoot '.step-ab-ready') | Out-Null
     Say "before tree extracted: $baseRoot"
 }
 $roots = [ordered]@{ before = $baseRoot; after = $repo }
+foreach ($side in $roots.Keys) {
+    Push-Location $roots[$side]
+    $v = (dotnet --version 2>&1 | Select-Object -Last 1)
+    $code = $LASTEXITCODE
+    Pop-Location
+    if ($code -ne 0) { throw "no SDK for the $side side in $($roots[$side]): $v" }
+    Say "$side builds with SDK $v"
+}
 
 # --- builds ----------------------------------------------------------------------------------------------------
 function Build-Jit([string]$side) {
@@ -86,12 +113,21 @@ function Build-Jit([string]$side) {
     Pop-Location
     if ($code -ne 0) { Get-Content $log | Select-String ' error ' | Select-Object -First 10 | ForEach-Object { Say $_.Line }; throw "JIT build of $side failed (log $log)" }
 }
-function Aot-Dir([string]$side) { Join-Path $env:TEMP "hultui-ab\$(if ($side -eq 'before') { $baseSha } else { "$headSha-head" })" }
+function Aot-Dir([string]$side) { Join-Path $env:TEMP "hultui-ab\$(if ($side -eq 'before') { "$baseSha$sdkTag" } else { "$headSha-head" })" }
 function Build-Aot([string]$side) {
     $root = $roots[$side]
     $dir = Aot-Dir $side
     New-Item -ItemType Directory -Force $dir | Out-Null
     git -C $dir init -q 2>$null   # keep git (SourceLink, version stamps) from walking up into %TEMP%'s repository
+    # The wrapper builds with its side's SDK: the dotnet host picks the SDK from the folder it starts in.
+    $globalJson = Join-Path $root 'global.json'
+    if (Test-Path $globalJson) { Copy-Item $globalJson (Join-Path $dir 'global.json') -Force }
+    elseif (Test-Path (Join-Path $dir 'global.json')) { Remove-Item (Join-Path $dir 'global.json') }
+    # The side's own target framework, as MSBuild evaluates it (a literal or one set in Directory.Build.props).
+    Push-Location $root
+    $tfm = (dotnet msbuild "$suiteRel\HultUI.Samples.PerfSuite.csproj" -getProperty:TargetFramework -nologo 2>&1 | Select-Object -Last 1).Trim()
+    Pop-Location
+    if ($tfm -notmatch '^net\d+\.\d+$') { throw "could not read the $side side's target framework (got '$tfm')" }
     [xml]$real = Get-Content (Join-Path $root "$suiteRel\HultUI.Samples.PerfSuite.csproj")
     $refs = foreach ($r in $real.Project.ItemGroup.ProjectReference) {
         if (-not $r) { continue }
@@ -107,7 +143,7 @@ function Build-Aot([string]$side) {
        project only (NETSDK1207 otherwise), bin/obj under a short path for link.exe. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>$tfm</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <InvariantGlobalization>true</InvariantGlobalization>
@@ -133,7 +169,8 @@ $($refs -join "`n")
     $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
     $vcvars = Join-Path $vsPath 'VC\Auxiliary\Build\vcvars64.bat'
     $cmd = "set `"PATH=$(Split-Path $vswhere -Parent);%PATH%`" && call `"$vcvars`" >nul && dotnet publish `"$(Join-Path $dir 'SuiteAot.csproj')`" -r win-x64 -c Release -o `"$out`" -nologo -v q --disable-build-servers > `"$log`" 2>&1"
-    & cmd /c $cmd
+    Push-Location $dir
+    try { & cmd /c $cmd } finally { Pop-Location }
     if (-not (Test-Path (Join-Path $out 'HultUI.Samples.PerfSuite.exe'))) {
         Get-Content $log | Select-String ' error ' | Select-Object -First 10 | ForEach-Object { Say $_.Line }; throw "AOT publish of $side failed (log $log)"
     }

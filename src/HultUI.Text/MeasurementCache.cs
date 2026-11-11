@@ -24,51 +24,184 @@ internal readonly record struct ShapeKey(
     string Text, string FontFamily, float FontSize, FontWeight FontWeight, FontSlant FontSlant,
     float LineHeight, float LetterSpacing);
 
-/// <summary>Key for the word shape cache: a space or non-space segment of a run, and the font
-/// instance and size it was shaped in.</summary>
-internal readonly record struct WordShapeKey(string Segment, IResolvedFont Font, float FontSize);
-
-/// <summary><see cref="WordShapeKey"/> for a segment still inside the text it was cut from, so a
-/// lookup makes no string; only a miss copies the segment out, to keep it as the key.
-/// <paramref name="fontHash"/> is <see cref="WordShapeKeyComparer.FontHash"/> of the font and
-/// size, worked out once for all the segments of a run.</summary>
-internal readonly ref struct WordSpanKey(ReadOnlySpan<char> segment, IResolvedFont font, float fontSize, int fontHash)
-{
-    public readonly ReadOnlySpan<char> Segment = segment;
-    public readonly IResolvedFont Font = font;
-    public readonly float FontSize = fontSize;
-    public readonly int FontHash = fontHash;
-}
-
 /// <summary>
-/// <see cref="WordShapeKey"/>'s equality, and the same for a <see cref="WordSpanKey"/>: a span
-/// hashes as the string of its characters does (<see cref="string.GetHashCode(ReadOnlySpan{char})"/>),
-/// so it finds that string's entry. Fonts compare as instances — an <see cref="IFontCollection"/>
-/// hands out one per face, and no <see cref="IResolvedFont"/> defines equality of its own — which
-/// is what the record's equality came to, without a virtual call.
+/// The word shape cache: the shaped run of a word — a space or non-space segment of a run — in a
+/// font instance at a size, found by a span of the text the word is in, so a lookup makes no
+/// string; only a miss copies the word out, to keep it as the key. Fonts compare as instances: an
+/// <see cref="IFontCollection"/> hands out one per face, and no <see cref="IResolvedFont"/> defines
+/// equality of its own.
 /// </summary>
-internal sealed class WordShapeKeyComparer
-    : IEqualityComparer<WordShapeKey>, IAlternateEqualityComparer<WordSpanKey, WordShapeKey>
+/// <remarks>
+/// <see cref="LruCache{TKey, TValue}"/>'s rules in a table of its own: at most <c>capacity</c>
+/// entries and <c>maxWeight</c> of weight, an entry counting for at most half of that, the least
+/// recently used out first until both hold, and a word put again replacing its entry. Chained
+/// buckets over one array of entries, and the order of use as indices inside the entries. It was
+/// a <see cref="Dictionary{TKey, TValue}"/> found through an <c>AlternateLookup</c>, and a
+/// <see cref="LinkedList{T}"/> for the order. NativeAOT 11 calls that lookup's
+/// <see cref="IAlternateEqualityComparer{TAlternate, TOther}"/> through two interface dispatches,
+/// where 10 inlined it: a long document's 38,000 word lookups a step went from 15 to 27 ns each.
+/// Here the hash and the comparison are this class's own code. An entry is 48 bytes and its
+/// bucket 4, where the dictionary's entry, bucket and linked-list node came to about 124 and an
+/// object.
+/// </remarks>
+internal sealed class WordCache(int capacity, long maxWeight)
 {
-    public static readonly WordShapeKeyComparer Instance = new();
+    // Next chains a bucket, as an index + 1 (0 ends it), or, in a free slot, the free list. Newer
+    // and Older are the entry's neighbours in the order of use (-1 past either end).
+    private struct Entry
+    {
+        public string? Word;
+        public IResolvedFont? Font;
+        public ShapedRun? Run;
+        public int Hash, Next, Newer, Older, Weight;
+        public float Size;
+    }
 
-    /// <summary>The font and size's share of a key's hash, the same for every word of a run.</summary>
+    private int[] _buckets = [];   // each bucket's first entry, as an index + 1; a power of two of them
+    private Entry[] _entries = [];
+    private int _used;             // slots that have held an entry: the free ones among them are listed from _free
+    private int _free = -1, _freeCount;
+    private int _newest = -1, _oldest = -1;
+    private long _weight;
+
+    /// <summary>The number of entries.</summary>
+    public int Count => _used - _freeCount;
+
+    /// <summary>The sum of the entries' weights, as counted: never above the bound.</summary>
+    public long Weight => _weight;
+
+    /// <summary>The slots the entries have, for the tests: a full cache takes new entries into the
+    /// slots of those it evicts, so this stops growing.</summary>
+    internal int Slots => _entries.Length;
+
+    /// <summary>The font and size's share of a word's hash, the same for every word of a run: worked
+    /// out once for them all.</summary>
     public static int FontHash(IResolvedFont font, float fontSize) =>
         HashCode.Combine(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(font), fontSize);
 
-    public bool Equals(WordShapeKey x, WordShapeKey y) =>
-        ReferenceEquals(x.Font, y.Font) && x.FontSize.Equals(y.FontSize) && string.Equals(x.Segment, y.Segment);
+    /// <summary>The run of <paramref name="word"/> in <paramref name="font"/> at <paramref name="fontSize"/>,
+    /// which becomes the most recently used. <paramref name="fontHash"/> is <see cref="FontHash"/>
+    /// of the two.</summary>
+    public bool TryGet(ReadOnlySpan<char> word, IResolvedFont font, float fontSize, int fontHash, out ShapedRun run)
+    {
+        int i = Find(word, font, fontSize, string.GetHashCode(word) ^ fontHash);
+        if (i < 0)
+        {
+            run = null!;
+            return false;
+        }
+        if (i != _newest)
+        {
+            Unlink(i);
+            LinkNewest(i);
+        }
+        run = _entries[i].Run!;
+        return true;
+    }
 
-    public int GetHashCode(WordShapeKey key) => key.Segment.GetHashCode() ^ FontHash(key.Font, key.FontSize);
+    /// <summary>Puts <paramref name="run"/> under <paramref name="word"/>, <paramref name="font"/> and
+    /// <paramref name="fontSize"/>, replacing what was there, as the most recently used entry, after
+    /// the least recently used ones it leaves no room for. <paramref name="weight"/> counts towards
+    /// the weight bound (the caller's estimate of the bytes the entry keeps alive).</summary>
+    public void Put(string word, IResolvedFont font, float fontSize, int fontHash, ShapedRun run, int weight)
+    {
+        weight = weight <= maxWeight / 2 ? weight : (int)(maxWeight / 2);
+        int hash = string.GetHashCode(word.AsSpan()) ^ fontHash;
+        int existing = Find(word, font, fontSize, hash);
+        if (existing >= 0)
+            Remove(existing);
+        while (_oldest >= 0 && (Count >= capacity || _weight + weight > maxWeight))
+            Remove(_oldest);
 
-    public bool Equals(WordSpanKey alternate, WordShapeKey other) =>
-        ReferenceEquals(alternate.Font, other.Font) && alternate.FontSize.Equals(other.FontSize)
-        && alternate.Segment.SequenceEqual(other.Segment);
+        int slot;
+        if (_free >= 0)
+        {
+            slot = _free;
+            _free = _entries[slot].Next - 1;
+            _freeCount--;
+        }
+        else
+        {
+            if (_used == _entries.Length)
+                Grow();
+            slot = _used++;
+        }
+        ref int bucket = ref _buckets[hash & (_buckets.Length - 1)];
+        _entries[slot] = new Entry { Word = word, Font = font, Run = run, Hash = hash, Next = bucket, Weight = weight, Size = fontSize };
+        bucket = slot + 1;
+        LinkNewest(slot);
+        _weight += weight;
+    }
 
-    public int GetHashCode(WordSpanKey alternate) => string.GetHashCode(alternate.Segment) ^ alternate.FontHash;
+    // The entry of the word, font and size, whose hash is `hash`; -1 for none.
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private int Find(ReadOnlySpan<char> word, IResolvedFont font, float fontSize, int hash)
+    {
+        var buckets = _buckets;
+        if (buckets.Length == 0)
+            return -1;
+        var entries = _entries;
+        for (int i = buckets[hash & (buckets.Length - 1)] - 1; (uint)i < (uint)entries.Length; i = entries[i].Next - 1)
+        {
+            ref var e = ref entries[i];
+            if (e.Hash == hash && ReferenceEquals(e.Font, font) && e.Size.Equals(fontSize) && word.SequenceEqual(e.Word))
+                return i;
+        }
+        return -1;
+    }
 
-    public WordShapeKey Create(WordSpanKey alternate) =>
-        new(alternate.Segment.ToString(), alternate.Font, alternate.FontSize);
+    // Twice the slots, and the buckets with them. Only when no slot is free: every slot holds an entry.
+    private void Grow()
+    {
+        int size = Math.Max(16, 2 * _entries.Length);
+        Array.Resize(ref _entries, size);
+        var buckets = new int[size];
+        for (int i = 0; i < _used; i++)
+        {
+            ref var e = ref _entries[i];
+            ref int bucket = ref buckets[e.Hash & (size - 1)];
+            e.Next = bucket;
+            bucket = i + 1;
+        }
+        _buckets = buckets;
+    }
+
+    // Takes entry i out of its bucket and the order, and lists its slot, emptied, as free.
+    private void Remove(int i)
+    {
+        ref var e = ref _entries[i];
+        ref int link = ref _buckets[e.Hash & (_buckets.Length - 1)];
+        while (link - 1 != i)
+            link = ref _entries[link - 1].Next;
+        link = e.Next;
+        Unlink(i);
+        _weight -= e.Weight;
+        e = new Entry { Next = _free + 1 };
+        _free = i;
+        _freeCount++;
+    }
+
+    // Inlined into a hit's move to the front: NativeAOT left both out of line.
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private void Unlink(int i)
+    {
+        ref var e = ref _entries[i];
+        if (e.Newer >= 0) _entries[e.Newer].Older = e.Older;
+        else _newest = e.Older;
+        if (e.Older >= 0) _entries[e.Older].Newer = e.Newer;
+        else _oldest = e.Newer;
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private void LinkNewest(int i)
+    {
+        ref var e = ref _entries[i];
+        e.Newer = -1;
+        e.Older = _newest;
+        if (_newest >= 0) _entries[_newest].Newer = i;
+        else _oldest = i;
+        _newest = i;
+    }
 }
 
 /// <summary>Key for a string's width on one unbounded line (<see cref="TextPipeline.MeasureWidth"/>):

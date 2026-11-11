@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using HultUI.Core.Rendering;
 using HultUI.Syntax;
 using Xunit;
@@ -219,5 +221,113 @@ public class TokenizeDiffTests
 
         Assert.Throws<OperationCanceledException>(() =>
             Tokenize(Old, [new(1, 1)], New, [new(1, 1)], cancellationToken: cancel.Token));
+    }
+
+    // ── The public surface (plan 17 round 11; Junction was a friend assembly until then) ──
+
+    /// <summary>This project sees the library's internals, so only reflection shows that another
+    /// diff view can call it: the three are public, immutable, and take and give what their docs
+    /// say.</summary>
+    [Fact]
+    public void TheDiffApi_IsPublic_AsDocumented()
+    {
+        var method = typeof(SyntaxHighlighter).GetMethod(nameof(SyntaxHighlighter.TokenizeDiff),
+            BindingFlags.Public | BindingFlags.Static);
+        Assert.NotNull(method);
+        Assert.Equal(typeof(TokenizedDiff), method.ReturnType);
+
+        var nullability = new NullabilityInfoContext();
+        Assert.Equal(
+            [
+                "string path", "string? oldText", "IReadOnlyList<LineRange> oldShown",
+                "string? newText", "IReadOnlyList<LineRange> newShown", "int maxLines",
+                "CancellationToken cancellationToken", "TimeProvider? clock = null",
+            ],
+            method.GetParameters().Select(p =>
+                $"{Name(p.ParameterType)}{(nullability.Create(p).ReadState == NullabilityState.Nullable ? "?" : "")} "
+                + $"{p.Name}{(p.HasDefaultValue ? $" = {p.DefaultValue ?? "null"}" : "")}"));
+
+        Assert.Equal(["int First", "int Last"], Properties(typeof(LineRange)));
+        Assert.Equal(["IReadOnlyList<TextSpan>[]? Old", "IReadOnlyList<TextSpan>[]? New", "int LinesWalked"],
+            Properties(typeof(TokenizedDiff)));
+
+        IEnumerable<string> Properties(Type type)
+        {
+            Assert.True(type.IsPublic, type.Name);
+            Assert.True(type.IsValueType && type.IsDefined(typeof(IsReadOnlyAttribute)), $"{type.Name} is a readonly struct");
+            return type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .Where(p => p.DeclaringType == type && p.GetIndexParameters().Length == 0)
+                .Select(p =>
+                {
+                    // Set only in a constructor or an initializer (`with`), never after.
+                    Assert.Contains(typeof(IsExternalInit), p.SetMethod!.ReturnParameter.GetRequiredCustomModifiers());
+                    string nullable = nullability.Create(p).ReadState == NullabilityState.Nullable ? "?" : "";
+                    return $"{Name(p.PropertyType)}{nullable} {p.Name}";
+                });
+        }
+
+        static string Name(Type type) =>
+            type == typeof(string) ? "string"
+            : type == typeof(int) ? "int"
+            : type.IsArray ? Name(type.GetElementType()!) + "[]"
+            : type.IsGenericType ? $"{type.Name[..type.Name.IndexOf('`')]}<{string.Join(", ", type.GenericTypeArguments.Select(Name))}>"
+            : type.Name;
+    }
+
+    [Fact]
+    public void TheClock_IsTheSystemsWhenNoneIsGiven()
+    {
+        var result = SyntaxHighlighter.TokenizeDiff("a.cs", null, [], New, [new(Changed, Changed)],
+            SyntaxHighlighter.DefaultMaxLines, default);
+
+        Same(Whole(New), result.New!, [new(Changed, Changed)]);
+    }
+
+    public static TheoryData<int[], string> WrongRanges => new()
+    {
+        { [0, 3], "starts before line 1" },
+        { [-2, -1], "starts before line 1" },
+        { [5, 4], "ends before it starts" },
+        { [10, 12, 3, 4], "does not start after range 0, which ends at line 12" },
+        { [3, 6, 6, 8], "does not start after range 0, which ends at line 6" },
+        { [1, 1, 2, 9, 4, 5], "does not start after range 1, which ends at line 9" },
+    };
+
+    /// <summary>A side's last line is read from its last range, and the ranges are stepped through
+    /// once in order, so ranges out of order or overlapping would colour the wrong lines or stop
+    /// early. They throw instead, for either version, with or without its text.</summary>
+    [Theory]
+    [MemberData(nameof(WrongRanges))]
+    public void LinesShownOutOfOrder_OrNotNumberedFromOne_Throw(int[] pairs, string why)
+    {
+        LineRange[] wrong = [.. pairs.Chunk(2).Select(p => new LineRange(p[0], p[1]))];
+
+        var old = Assert.Throws<ArgumentException>(() =>
+            SyntaxHighlighter.TokenizeDiff("a.cs", Old, wrong, New, [new(1, 1)], SyntaxHighlighter.DefaultMaxLines, default));
+        Assert.Equal("oldShown", old.ParamName);
+        Assert.Contains(why, old.Message);
+
+        var @new = Assert.Throws<ArgumentException>(() =>
+            SyntaxHighlighter.TokenizeDiff("a.cs", Old, [new(1, 1)], null, wrong, SyntaxHighlighter.DefaultMaxLines, default));
+        Assert.Equal("newShown", @new.ParamName);
+        Assert.Contains(why, @new.Message);
+    }
+
+    [Fact]
+    public void NoListOfLinesShown_Throws()
+    {
+        var thrown = Assert.Throws<ArgumentNullException>(() =>
+            SyntaxHighlighter.TokenizeDiff("a.cs", Old, null!, New, [], SyntaxHighlighter.DefaultMaxLines, default));
+        Assert.Equal("oldShown", thrown.ParamName);
+    }
+
+    [Fact]
+    public void RangesThatTouch_AreOneRangeOfLines()
+    {
+        var split = Tokenize(Old, [new(Changed - 3, Changed), new(Changed + 1, Changed + 3)], New, []);
+        var joined = Tokenize(Old, [new(Changed - 3, Changed + 3)], New, []);
+
+        Assert.Equal(joined.Old!.Length, split.Old!.Length);
+        for (int i = 0; i < joined.Old.Length; i++) Assert.Equal(joined.Old[i], split.Old[i]);
     }
 }

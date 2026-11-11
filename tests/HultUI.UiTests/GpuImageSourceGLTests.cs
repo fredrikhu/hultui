@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using HultUI.Core.Builders;
+using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
@@ -23,10 +24,27 @@ public sealed class GpuImageSourceGLTests
         using var guard = ForegroundGuard.Begin();
         using var app = new Application(new SdlWindowingPlatform(), "gpu", 320, 200);
         var source = new SplitClearSource();
+        var image = Image.New(source);
+        try
+        {
+            Composite(app, image, source);
+        }
+        finally
+        {
+            // An image holding a GPU source of its own counts, for the whole process, as one that
+            // may signal its frames only by posting (GpuFrameSink.MaySignalOnlyByPosting) until it
+            // lets go; disposing the app does not let go. Left held, the live-resize tests that
+            // run after this one in the same process drew for a waiting post on every tick.
+            image.Source = null;
+        }
+    }
+
+    private static void Composite(Application app, ImageElement image, SplitClearSource source)
+    {
         // A column: the image on top, a red strip under it. The strip is Skia drawing
         // after the foreign GL ran; the clear colour is Skia drawing before it.
         app.SetRoot(Box.New().Background(Color.White).Width(320f).Height(200f).Children(
-            Image.New(source).Width(320f).Height(160f).ImageFit(ImageFit.Fill),
+            image.Width(320f).Height(160f).ImageFit(ImageFit.Fill),
             Box.New().Width(320f).Height(40f).Background(Color.Red)));
 
         Assert.True(app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true));

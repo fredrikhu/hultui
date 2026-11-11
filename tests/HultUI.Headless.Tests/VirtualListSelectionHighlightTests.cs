@@ -45,7 +45,15 @@ public class VirtualListSelectionHighlightTests
         RowsRing,
         /// <summary>By the list: the same fill and ring; the rows keep a transparent border of that width.</summary>
         ListRing,
+        /// <summary>By the rows: a fill, rounded, and a 2 px accent on the top edge only.</summary>
+        RowsEdge,
+        /// <summary>By the list: the same fill and accent (a border width per side); the rows keep a
+        /// transparent top border of that width.</summary>
+        ListEdge,
     }
+
+    /// <summary>The accent on one edge: the top, as Meridian's endpoint map draws its selected row.</summary>
+    private static readonly Thickness Edge = new(2, 0, 0, 0);
 
     /// <summary>A pane whose Build reads the selection, as Junction's Tags view does.</summary>
     private sealed class Pane(Draw draw, List<Entry> items) : Component
@@ -56,6 +64,7 @@ public class VirtualListSelectionHighlightTests
         {
             Draw.List => new RowHighlight(Selected, new CornerRadius(Radius)),
             Draw.ListRing => new RowHighlight(Selected, new CornerRadius(Radius), Ring, 1f),
+            Draw.ListEdge => new RowHighlight(Selected, new CornerRadius(Radius), Ring) { BorderThickness = Edge },
             _ => null,
         };
         public bool CanSelectMultiple;
@@ -92,6 +101,8 @@ public class VirtualListSelectionHighlightTests
                 .Children(TextB.New(e.Name).FontSize(12f));
             if (draw is Draw.Rows or Draw.List)
                 row.BorderColor(Line).BorderWidth(new Thickness(0, 0, 1, 0));
+            else if (draw is Draw.RowsEdge or Draw.ListEdge)
+                row.BorderWidth(Edge).BorderColor(selected ? Ring : Color.Transparent);
             else
                 row.BorderWidth(1f).BorderColor(selected ? Ring : Color.Transparent);
             if (Composite)
@@ -200,29 +211,61 @@ public class VirtualListSelectionHighlightTests
     [InlineData(1.5f, false)]
     [InlineData(1f, true)]
     [InlineData(1.5f, true)]
-    public void TheListDrawsTheSamePixelsAsRowsThatDrewTheSelection(float scale, bool ring)
-    {
-        (string What, Action<HeadlessSession, Pane> Step)[] steps =
-        [
-            ("selection on row 2", (_, p) => p.Select(2)),
-            ("selection moved to row 3", (_, p) => p.Select(3)),
-            ("row 5 under the pointer", (s, _) => s.Window.MoveMouse(100, 5 * RowHeight + 8)),
-            ("the row under the pointer selected", (_, p) => p.Select(5)),
-            ("selection past the edge, scrolled", (_, p) =>
-            {
-                p.Select(40);
-                p.List.Current!.ScrollRangeIntoView(40 * RowHeight, RowHeight);
-            }),
-            ("selection moved up", (_, p) => p.Select(39)),
-            ("the selection scrolled away", (_, p) => p.List.Current!.ScrollOffsetY = 80 * RowHeight),
-            ("selection on screen again", (_, p) => p.Select(81)),
-            ("dark theme", (s, _) => s.Application.Theme = Theme.Dark),
-            ("a move in the dark theme", (_, p) => p.Select(82)),
-        ];
+    public void TheListDrawsTheSamePixelsAsRowsThatDrewTheSelection(float scale, bool ring) =>
+        AssertTheSamePixels(ring ? Draw.RowsRing : Draw.Rows, ring ? Draw.ListRing : Draw.List, scale);
 
+    /// <summary>
+    /// A ring on one side only (<see cref="RowHighlight.BorderThickness"/>): rows that drew their
+    /// selection as a fill and a 2 px accent on the top edge, and the list drawing the same, give the
+    /// same pixels over the same steps, at 1x and 1.5x, and the accent is on the top edge alone.
+    /// </summary>
+    [Theory]
+    [InlineData(1f)]
+    [InlineData(1.5f)]
+    public void ABorderWidthPerSide_DrawsTheSamePixelsAsRowsWithAnAccentOnOneEdge(float scale)
+    {
+        AssertTheSamePixels(Draw.RowsEdge, Draw.ListEdge, scale);
+
+        // Where the accent is: on the selected row's top edge, and not down its left side.
+        var (session, pane) = Mount(Draw.ListEdge, scale: scale);
+        using var _ = session;
+        pane.Select(2);
+        session.PumpFrames(2);
+        using var shot = Shot(session);
+        int x = (int)(200 * scale);   // past the row's text
+        Assert.Equal(Sk(Ring), shot.GetPixel(x, (int)((2 * RowHeight + 1) * scale)));        // inside the 2 px top
+        Assert.Equal(Sk(Selected), shot.GetPixel(x, (int)((2 * RowHeight + 4) * scale)));    // the fill under it
+        Assert.Equal(Sk(Selected), RowFill(shot, 2, scale));                                 // no accent at the left
+        Assert.NotEqual(Sk(Ring), shot.GetPixel(x, (int)((3 * RowHeight + 1) * scale)));     // the next row has none
+        Assert.Equal(0, pane.MadeSelected);
+    }
+
+    private static readonly (string What, Action<HeadlessSession, Pane> Step)[] PixelSteps =
+    [
+        ("selection on row 2", (_, p) => p.Select(2)),
+        ("selection moved to row 3", (_, p) => p.Select(3)),
+        ("row 5 under the pointer", (s, _) => s.Window.MoveMouse(100, 5 * RowHeight + 8)),
+        ("the row under the pointer selected", (_, p) => p.Select(5)),
+        ("selection past the edge, scrolled", (_, p) =>
+        {
+            p.Select(40);
+            p.List.Current!.ScrollRangeIntoView(40 * RowHeight, RowHeight);
+        }),
+        ("selection moved up", (_, p) => p.Select(39)),
+        ("the selection scrolled away", (_, p) => p.List.Current!.ScrollOffsetY = 80 * RowHeight),
+        ("selection on screen again", (_, p) => p.Select(81)),
+        ("dark theme", (s, _) => s.Application.Theme = Theme.Dark),
+        ("a move in the dark theme", (_, p) => p.Select(82)),
+    ];
+
+    /// <summary>The list drawing the selection (<paramref name="byListDraw"/>) shows what rows that
+    /// drew it (<paramref name="byRowsDraw"/>) showed, after each of <see cref="PixelSteps"/>.</summary>
+    private static void AssertTheSamePixels(Draw byRowsDraw, Draw byListDraw, float scale)
+    {
+        var steps = PixelSteps;
         // One application per process: the two runs take turns.
-        var byRows = Shoot(ring ? Draw.RowsRing : Draw.Rows);
-        var byList = Shoot(ring ? Draw.ListRing : Draw.List);
+        var byRows = Shoot(byRowsDraw);
+        var byList = Shoot(byListDraw);
 
         for (int i = 0; i < steps.Length; i++)
             Assert.True(byRows[i].AsSpan().SequenceEqual(byList[i]), $"{steps[i].What}: the list drew other pixels than the rows");

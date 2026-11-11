@@ -15,10 +15,10 @@
   #define AppVersion "0.0.0"
 #endif
 #ifndef PublishDir
-  #define PublishDir "..\bin\Release\net10.0\win-x64\publish"
+  #define PublishDir "..\bin\Release\net11.0\win-x64\publish"
 #endif
 #ifndef CliPublishDir
-  #define CliPublishDir "..\..\Meridian.Cli\bin\Release\net10.0\win-x64\publish"
+  #define CliPublishDir "..\..\Meridian.Cli\bin\Release\net11.0\win-x64\publish"
 #endif
 
 [Setup]

@@ -150,6 +150,11 @@ A candidate is worth building when it is **measurable** and clears **one** bar:
 - **Idle:** an idle window (nothing dirty, no animation, no pending deadline) wakes the
   CPU less often; target about 1 wake per second or fewer beyond the deadlines it owns.
 
+**Real apps first (user, 2026-11-11).** What counts is what a user of the real apps would feel. A win measured in a
+real app scenario (Junction, Vesper Commander, Meridian, Aperture, Reel, the rich text editor) outranks the same win on
+a synthetic perf-suite row. A candidate seen only on a suite row is built only when it also has a real-app case or a
+scaling argument (O(n) work an app's data can grow into).
+
 It is **not** reasonable when it:
 
 - saves less than the noise (see `perf-p4-p5-measured`: 5 ns per event is noise);
@@ -206,8 +211,19 @@ Each expert:
 
    `SATISFIED: yes` means: no candidate in its area clears a bar.
 
+**Real windows too (user, 2026-11-11, from round 12).** Headless runs rasterize on the CPU and hide work a real window
+does: GPU flush and present, vsync pacing and wake-ups, DWM composition, resize and DPI changes, real system fonts, the
+system's own UIA client listening, input arriving from the OS. Every expert therefore also measures its area in real
+windows of the real apps (NativeAOT publishes), with every guard in "Rules for everyone" (default frame, the activation
+hint in-process, `WS_EX_NOACTIVATE`, the foreground guard, a graceful WM_CLOSE, never a screen capture), and reports what
+the real window shows that the headless run did not. The survey still reports counts and allocations only (real-window
+timings come from the build phase); keep launches few and batch measurements per launch, since eight experts share the
+desktop. Expert 8 leads the real-app walks and hands each expert the real-window harness (round 10's guarded-launch
+harness in `r10-gl-vulkan\`, round 11's `r11u\start\`).
+
 The orchestrator merges the reports into the ledger, folds duplicates into one
-candidate with one owner, ranks the candidates by expected win over cost, and sets Phase
+candidate with one owner, ranks the candidates by expected win in the real apps over cost (see "Real apps first"), and
+sets Phase
 `build`. If **every expert** said `SATISFIED: yes` and none raised a review objection, it
 sets Phase `guidelines` instead.
 

@@ -44,7 +44,7 @@ public sealed unsafe class CustomFrameSystemMenuTests(ITestOutputHelper output)
     {
         using var guard = ForegroundGuard.Begin();
         bool custom = style == WindowStyle.Borderless;
-        var areas = WorkAreas();
+        var areas = Monitors.WorkAreas();
         var area = areas[0];
         var normal = new WindowPlacement((int)area.X + 80, (int)area.Y + 80, 800, 600, false);
 
@@ -210,28 +210,11 @@ public sealed unsafe class CustomFrameSystemMenuTests(ITestOutputHelper output)
         EndMenu();
     }
 
-    private static List<Rect> WorkAreas()
-    {
-        var areas = new List<Rect>();
-        EnumDisplayMonitors(0, 0, (monitor, _, _, _) =>
-        {
-            var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
-            if (GetMonitorInfoW(monitor, ref info))
-                areas.Add(new Rect(info.rcWork.Left, info.rcWork.Top,
-                    info.rcWork.Right - info.rcWork.Left, info.rcWork.Bottom - info.rcWork.Top));
-            return true;
-        }, 0);
-        return areas;
-    }
-
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT { public int Left, Top, Right, Bottom; }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT { public int X, Y; }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MONITORINFO { public int cbSize; public RECT rcMonitor, rcWork; public uint dwFlags; }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct GUITHREADINFO
@@ -241,10 +224,6 @@ public sealed unsafe class CustomFrameSystemMenuTests(ITestOutputHelper output)
         public RECT rcCaret;
     }
 
-    private delegate bool MonitorEnumProc(nint monitor, nint hdc, nint clip, nint data);
-
-    [DllImport("user32")] private static extern bool EnumDisplayMonitors(nint hdc, nint clip, MonitorEnumProc proc, nint data);
-    [DllImport("user32", EntryPoint = "GetMonitorInfoW")] private static extern bool GetMonitorInfoW(nint monitor, ref MONITORINFO info);
     [DllImport("user32")] private static extern long GetWindowLongPtrW(nint hwnd, int index);
     [DllImport("user32")] private static extern bool ClientToScreen(nint hwnd, ref POINT point);
     [DllImport("user32")] private static extern nint SendMessageW(nint hwnd, uint msg, nuint wParam, nint lParam);

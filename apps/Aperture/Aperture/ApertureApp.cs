@@ -176,6 +176,7 @@ public sealed partial class ApertureApp : Component, IDisposable
     {
         FocusCursorCard();
         FocusPendingSearchField();
+        LetGoOfLeftCursorCard();
     }
 
     /// <summary>How many times <see cref="Build"/> has run, for the tests.</summary>

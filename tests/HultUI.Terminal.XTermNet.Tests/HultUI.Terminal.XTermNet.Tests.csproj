@@ -4,7 +4,7 @@
        engine HultUI builds (src/HultUI.Terminal.XTermNet). A patch that breaks upstream's
        expectations fails here, not in a user's terminal. -->
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>$(HultUITargetFramework)</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>

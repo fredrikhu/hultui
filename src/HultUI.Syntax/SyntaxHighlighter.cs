@@ -10,12 +10,36 @@ using TmTheme = TextMateSharp.Themes.Theme;   // "Theme" alone collides with Hul
 
 namespace HultUI.Syntax;
 
-/// <summary>Lines of a text, 1-based, both ends included.</summary>
-internal readonly record struct LineRange(int First, int Last);
+/// <summary>
+/// Lines of a text, numbered from 1, with both ends included: <c>new LineRange(3, 5)</c> is lines
+/// 3, 4 and 5, and <c>new LineRange(7, 7)</c> is line 7 alone. This is how a diff's hunk header
+/// numbers its lines.
+///
+/// <para><see cref="SyntaxHighlighter.TokenizeDiff"/> takes each side's lines as a list of these,
+/// and checks it: <see cref="First"/> at least 1, <see cref="Last"/> no less than
+/// <see cref="First"/>, and each range starting after the one before it ends (adjacent ranges are
+/// fine, overlapping or falling ones are not).</para>
+/// </summary>
+/// <param name="First">The first line of the range, numbered from 1.</param>
+/// <param name="Last">The last line of the range, which is included.</param>
+public readonly record struct LineRange(int First, int Last);
 
-/// <summary>What <see cref="SyntaxHighlighter.TokenizeDiff"/> made of two versions of a file: each
-/// side's spans by line, null when it has none, and how many lines it walked.</summary>
-internal readonly record struct TokenizedDiff(IReadOnlyList<TextSpan>[]? Old, IReadOnlyList<TextSpan>[]? New,
+/// <summary>
+/// What <see cref="SyntaxHighlighter.TokenizeDiff"/> made of two versions of a file. Each side is
+/// an array with one span list per line, line 1 at index 0, and offsets within the line, as
+/// <see cref="SyntaxHighlighter.TokenizeLines(string, string)"/> gives them.
+///
+/// <para>A side's array ends at its last shown line, or at the end of its text when that comes
+/// first. It holds spans only for the lines shown: every other line's list is empty, and so is a
+/// shown line with nothing to colour. A side is null when it had no text, nothing shown, or a
+/// text too long to colour, and both are null when the path has no grammar. <c>default</c> is
+/// the result with nothing coloured.</para>
+/// </summary>
+/// <param name="Old">The old version's spans by line, or null when it has none.</param>
+/// <param name="New">The new version's spans by line, or null when it has none.</param>
+/// <param name="LinesWalked">How many lines were tokenized, those both versions start with counted
+/// once: the work the call did, for a caller that counts it.</param>
+public readonly record struct TokenizedDiff(IReadOnlyList<TextSpan>[]? Old, IReadOnlyList<TextSpan>[]? New,
     int LinesWalked);
 
 /// <summary>
@@ -38,6 +62,9 @@ public static class SyntaxHighlighter
 {
     private static readonly object Gate = new();
     private static RegistryOptions? _options;
+    /// <summary>What every registry is built over: <see cref="_options"/> with the theme merged
+    /// with the one it includes (<see cref="MergedOptions"/>).</summary>
+    private static MergedOptions? _themed;
     private static Registry? _registry;
     private static Palette? _palette;
     private static readonly Dictionary<string, Language?> LanguageByExt = new(StringComparer.OrdinalIgnoreCase);
@@ -193,19 +220,45 @@ public static class SyntaxHighlighter
     /// up), but a diff needs nothing below its last line, and of the lines above it only that
     /// state. So each side stops at its last shown line; a line nobody shows is walked for its
     /// state and leaves no spans to keep (a diff's lines are a few in a hundred); and the lines
-    /// both versions start with are walked once. On the
-    /// spans of a line shown this is <see cref="TokenizeLines(string, string, int, CancellationToken, TimeProvider?)"/>,
-    /// and it holds a side to the same limits: a text too long for that gets none here.
+    /// both versions start with are walked once. A line shown gets the spans
+    /// <see cref="TokenizeLines(string, string, int, CancellationToken, TimeProvider?)"/> gives it,
+    /// and each side is held to the same limits: a text too long for that gets none here.
     ///
     /// <para>A side's array ends at its last shown line, and holds spans only for lines shown.
-    /// A side with no text, or nothing shown, is null.</para>
+    /// A side with no text, or nothing shown, is null; see <see cref="TokenizedDiff"/>.</para>
+    ///
+    /// <para>Call it from a worker, like the other tokenizes: it takes the same gate, and a change
+    /// near the end of a large file walks every line above it.</para>
     /// </summary>
-    /// <param name="oldShown">The old side's lines to colour, in rising order.</param>
-    /// <param name="newShown">The new side's, likewise.</param>
-    internal static TokenizedDiff TokenizeDiff(string path, string? oldText, IReadOnlyList<LineRange> oldShown,
+    /// <param name="path">The file's path or name; its extension picks the grammar, as for
+    /// <see cref="TokenizeLines(string, string)"/>. Both versions are coloured as that language.</param>
+    /// <param name="oldText">The old version's text, or null when there is none (a file the change
+    /// added).</param>
+    /// <param name="oldShown">The old version's lines to colour, numbered from 1 with both ends
+    /// included, in rising order and none overlapping another. Empty for none.</param>
+    /// <param name="newText">The new version's text, or null when there is none (a file the change
+    /// deleted).</param>
+    /// <param name="newShown">The new version's lines to colour, likewise.</param>
+    /// <param name="maxLines">The most lines a version may have: one with more gets no spans, as in
+    /// <see cref="TokenizeLines(string, string, int, CancellationToken, TimeProvider?)"/>. Pass
+    /// <see cref="DefaultMaxLines"/> for its usual cap.</param>
+    /// <param name="cancellationToken">Checked before every line; a cancelled tokenize throws
+    /// <see cref="OperationCanceledException"/> within a line.</param>
+    /// <param name="clock">What the three-second budget is measured on, the system clock when null;
+    /// see <see cref="TokenizeLines(string, string, int, CancellationToken, TimeProvider?)"/>.</param>
+    /// <returns>Each version's spans by line, and how many lines it took to find them.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="oldShown"/> or
+    /// <paramref name="newShown"/> is null.</exception>
+    /// <exception cref="ArgumentException">A range in <paramref name="oldShown"/> or
+    /// <paramref name="newShown"/> starts before line 1, ends before it starts, or does not start
+    /// after the range before it ends. Checked whether or not that version has text.</exception>
+    public static TokenizedDiff TokenizeDiff(string path, string? oldText, IReadOnlyList<LineRange> oldShown,
         string? newText, IReadOnlyList<LineRange> newShown, int maxLines, CancellationToken cancellationToken,
-        TimeProvider clock)
+        TimeProvider? clock = null)
     {
+        CheckShown(oldShown, nameof(oldShown));
+        CheckShown(newShown, nameof(newShown));
+        clock ??= TimeProvider.System;
         if (oldShown.Count == 0 || oldText is not null && TooLong(oldText, maxLines)) oldText = null;
         if (newShown.Count == 0 || newText is not null && TooLong(newText, maxLines)) newText = null;
         if (oldText is null && newText is null) return default;
@@ -232,6 +285,28 @@ public static class SyntaxHighlighter
             walk.Started = clock.GetTimestamp() - (long)(elapsed.TotalSeconds * clock.TimestampFrequency);
             walk.Run(oldLines, shared, oldLines.Count, ref sharedState, ref oldSide, ref Side.None);
             return new TokenizedDiff(oldSide.Result, newSide.Result, walk.Lines);
+        }
+    }
+
+    /// <summary>Throws unless <paramref name="shown"/> is what <see cref="LineRange"/> asks of a
+    /// side's lines. The walk reads a side's last line from its last range, and steps through the
+    /// ranges once, in order.</summary>
+    private static void CheckShown(IReadOnlyList<LineRange> shown, string paramName)
+    {
+        ArgumentNullException.ThrowIfNull(shown, paramName);
+        int previousLast = 0;
+        for (int i = 0; i < shown.Count; i++)
+        {
+            var (first, last) = shown[i];
+            string? wrong =
+                first < 1 ? "starts before line 1; lines are numbered from 1"
+                : last < first ? "ends before it starts; both ends are included, so one line is (n, n)"
+                : first <= previousLast ? $"does not start after range {i - 1}, which ends at line {previousLast}; "
+                    + "ranges go in rising order and do not overlap"
+                : null;
+            if (wrong is not null)
+                throw new ArgumentException($"Range {i} of the lines shown, ({first}, {last}), {wrong}.", paramName);
+            previousLast = last;
         }
     }
 
@@ -338,6 +413,7 @@ public static class SyntaxHighlighter
             // grammar's cached tokenization belong to the theme that produced them.
             _registry = null;
             _options = null;
+            _themed = null;
             _palette = null;
             _rootParents = null;
             LanguageByExt.Clear();
@@ -354,9 +430,10 @@ public static class SyntaxHighlighter
         RegistryUsesOnThisThread++;
         if (_registry != null) return;
         _options = new RegistryOptions(_themeName);
-        _registry = new Registry(_options);
+        _themed = new MergedOptions(_options);
+        _registry = new Registry(_themed);
         _palette = new Palette(_registry.GetTheme());
-        _rootParents = RootedOptions.ParentsNamed(_options);
+        _rootParents = RootedOptions.ParentsNamed(_themed.GetDefaultTheme());
     }
 
     /// <summary>
@@ -449,8 +526,8 @@ public static class SyntaxHighlighter
         }
 
         IRegistryOptions options = _rootParents!.Any(parent => RootedOptions.Names(root, parent))
-            ? new RootedOptions(_options!, root)
-            : _options!;
+            ? new RootedOptions(_themed!, root)
+            : _themed!;
         var reach = new ReachOptions(options, root, reached, parsed);
         var registry = new Registry(reach);
         if (registry.LoadGrammar(root) is not { } grammar) return null;
@@ -506,6 +583,72 @@ public static class SyntaxHighlighter
         }
     }
 
+    // ── A theme that includes another ────────────────────────────────────
+    //
+    // A VS Code theme file can include another: Dark+ includes dark_vs, and Light+ and High Contrast
+    // Light include light_vs. VS Code reads the two as one list of rules, the included file's first,
+    // so for each scope the most specific rule of either file wins, and of two as specific the theme's
+    // own. TextMateSharp keeps the included file in a second lookup that it reads only when no rule of
+    // the theme's own applies to the scope, however broad, so a broader rule of the theme's beats a
+    // narrower one of the file it includes: in Dark+ a JSON key took dark_plus's "support.type" teal
+    // over dark_vs's "support.type.property-name" light blue, and `this` dark_plus's "variable" light
+    // blue over dark_vs's "variable.language" blue. So every registry gets the theme merged as VS Code
+    // merges it (MergedOptions), and TextMateSharp, seeing no include, has one lookup. A theme that
+    // includes nothing is handed over as it is.
+
+    /// <summary>The registry's options with the theme merged with the one it includes, merged once.</summary>
+    private sealed class MergedOptions(RegistryOptions inner) : IRegistryOptions
+    {
+        private readonly IRawTheme _theme = MergedTheme.Of(inner.GetDefaultTheme(), inner);
+
+        public IRawTheme GetDefaultTheme() => _theme;
+        public IRawTheme GetTheme(string scopeName) => inner.GetTheme(scopeName);
+        public IRawGrammar GetGrammar(string scopeName) => inner.GetGrammar(scopeName);
+        public ICollection<string> GetInjections(string scopeName) => inner.GetInjections(scopeName);
+    }
+
+    /// <summary>
+    /// A theme and the chain of themes it includes as one theme that includes none: the rules of the
+    /// last theme included first and the theme's own last, in their files' order, and the colours of
+    /// the editor's parts (<c>editor.foreground</c>) of each theme over those of the one it includes.
+    /// </summary>
+    private sealed class MergedTheme(IRawTheme theme, List<IRawThemeSetting> rules,
+        List<KeyValuePair<string, object>> guiColors) : IRawTheme
+    {
+        public static IRawTheme Of(IRawTheme theme, IRegistryOptions options)
+        {
+            var chain = new List<IRawTheme> { theme };
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            while (chain[^1].GetInclude() is { Length: > 0 } include && seen.Add(include)
+                   && options.GetTheme(include) is { } included)
+                chain.Add(included);
+            if (chain.Count == 1) return theme;
+
+            var rules = new List<IRawThemeSetting>();
+            var guiColors = new List<KeyValuePair<string, object>>();
+            var at = new Dictionary<string, int>(StringComparer.Ordinal);
+            for (int i = chain.Count - 1; i >= 0; i--)
+            {
+                rules.AddRange(chain[i].GetSettings() ?? []);
+                rules.AddRange(chain[i].GetTokenColors() ?? []);
+                foreach (var color in chain[i].GetGuiColors() ?? [])
+                {
+                    if (at.TryGetValue(color.Key, out int k)) guiColors[k] = color;
+                    else { at[color.Key] = guiColors.Count; guiColors.Add(color); }
+                }
+            }
+            return new MergedTheme(theme, rules, guiColors);
+        }
+
+        public string GetName() => theme.GetName();
+        public string GetInclude() => null!;
+        // One list, so a rule's place in it (which TextMateSharp breaks ties of specificity by) runs
+        // across both files.
+        public ICollection<IRawThemeSetting> GetSettings() => null!;
+        public ICollection<IRawThemeSetting> GetTokenColors() => rules;
+        public ICollection<KeyValuePair<string, object>> GetGuiColors() => guiColors;
+    }
+
     // ── A theme rule that names the root scope ───────────────────────────
     //
     // TextMateSharp never colours an encoded token by a theme rule that names parent scopes: it
@@ -527,7 +670,7 @@ public static class SyntaxHighlighter
         if (!_rootParents!.Any(parent => RootedOptions.Names(scope, parent)))
             return _registry!.LoadGrammar(scope) is { } grammar ? new Language(grammar, _palette!) : null;
         if (LanguageByRoot.TryGetValue(scope, out var known)) return known;
-        var registry = new Registry(new RootedOptions(_options!, scope));
+        var registry = new Registry(new RootedOptions(_themed!, scope));
         if (registry.LoadGrammar(scope) is not { } rooted) return null;
         return LanguageByRoot[scope] = new Language(rooted, new Palette(registry.GetTheme()));
     }
@@ -535,10 +678,11 @@ public static class SyntaxHighlighter
     /// <summary>
     /// The registry's options with the theme as TextMateSharp should see it for a grammar whose
     /// root scope is <paramref name="root"/>: a rule whose one parent names the root, "source.powershell
-    /// variable.other.member" for <c>source.powershell</c>, without its parent, and last in its theme
-    /// file, as VS Code prefers a rule with parents to one without for the same scope.
+    /// variable.other.member" for <c>source.powershell</c>, without its parent, and last in the theme
+    /// (the merged one, so after the rules of both files), as VS Code prefers a rule with parents to
+    /// one without for the same scope.
     /// </summary>
-    private sealed class RootedOptions(RegistryOptions inner, string root) : IRegistryOptions
+    private sealed class RootedOptions(IRegistryOptions inner, string root) : IRegistryOptions
     {
         public IRawTheme GetDefaultTheme() => new RootedTheme(inner.GetDefaultTheme(), root);
         public IRawTheme GetTheme(string scopeName) => inner.GetTheme(scopeName) is { } theme ? new RootedTheme(theme, root) : null!;
@@ -551,17 +695,16 @@ public static class SyntaxHighlighter
             scope.StartsWith(selector, StringComparison.Ordinal)
             && (scope.Length == selector.Length || scope[selector.Length] == '.');
 
-        /// <summary>The parent scope of every rule of the theme (and of the one it includes) that names
-        /// one: the roots a grammar may need its own registry for.</summary>
-        public static HashSet<string> ParentsNamed(RegistryOptions options)
+        /// <summary>The parent scope of every rule of <paramref name="theme"/> (merged, so the rules of
+        /// the one it includes are among them) that names one: the roots a grammar may need its own
+        /// registry for.</summary>
+        public static HashSet<string> ParentsNamed(IRawTheme theme)
         {
             var parents = new HashSet<string>(StringComparer.Ordinal);
-            for (var theme = options.GetDefaultTheme(); theme is not null;
-                 theme = theme.GetInclude() is { Length: > 0 } include ? options.GetTheme(include) : null)
-                foreach (var settings in new[] { theme.GetSettings(), theme.GetTokenColors() })
-                    foreach (var setting in settings ?? [])
-                        foreach (var selector in Selectors(setting.GetScope()))
-                            if (ParentOf(selector) is { } parent) parents.Add(parent);
+            foreach (var settings in new[] { theme.GetSettings(), theme.GetTokenColors() })
+                foreach (var setting in settings ?? [])
+                    foreach (var selector in Selectors(setting.GetScope()))
+                        if (ParentOf(selector) is { } parent) parents.Add(parent);
             return parents;
         }
 

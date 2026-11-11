@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>$(HultUITargetFramework)-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -12,7 +12,7 @@
 
   <!-- The only Windows-Desktop-flavoured project in the repo. It is deliberately not
        in HultUI.CrossPlatform.slnf or docfx.json: both run on Linux, where
-       net10.0-windows will not build. -->
+       a -windows target framework will not build. -->
   <ItemGroup>
     <!-- The key map is a lookup table nothing else can reach; it is tested directly. -->
     <InternalsVisibleTo Include="HultUI.UiTests" />

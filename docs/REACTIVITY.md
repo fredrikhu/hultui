@@ -179,6 +179,10 @@ handler, say, since blur fires synchronously when the focused element is removed
 patch — is deferred to the end of the outer pass rather than nesting. Nothing to do on
 your side; just know that the rebuild lands a moment later than the call.
 
+A `MarkDirty()` from the component's own `OnBeforeBuild`, `Build` or `OnAfterBuild` is not
+deferred but dropped, and so is a write there to a signal the build read. See
+[Lifecycle hooks](#lifecycle-hooks) for what to call instead.
+
 Drag handlers are the case to defer by hand: a `DragEnter` or `DragOver` that marks
 dirty replaces the element the hover landed on. The framework re-resolves the drop
 target by hit-testing again, so the drop still arrives, but
@@ -1027,7 +1031,19 @@ for speed:
 - **Where views share a ref, let go once the build is done.** Vesper's cursor ref is the row, cell or tile
   of whichever view draws the cursor, so no one view can empty it. `OnAfterBuild` lets go of it, and of
   Brief's scroll view's, when its element is no longer in the window (`Element.IsHosted`), after the
-  build's own reads; the build or key that next draws the cursor sets it again.
+  build's own reads; the build or key that next draws the cursor sets it again. Round 11 did the same for
+  Aperture's cursor card, the one card of whichever view drew the cursor, which kept Home or the grid
+  behind Settings once a key had moved it, and for Vesper's thumbnail list.
+- **Every ref into the view, even one nothing reads** (round 11). Meridian's History had three: the
+  list's, the find field's and the archived send panel's. Emptying the list's alone freed nothing; the path
+  search found the other two, and nothing read the field's at all: `WithRef` makes the ref a holder
+  whether or not anything reads it. The build empties all three when it shows another view.
+- **A ref a part's build sets comes back with the part** (round 11). History's panel is a `Part`, and only
+  its own build sets the panel's ref; a part kept between the owner's builds does not build, so emptying
+  the ref at the start of every owner build would leave it empty while History is on screen, and every key
+  would build the window. Emptied only in the builds that show another view, it comes back: the part's
+  host left the window with the view, an unmounted host lets go of its component, and the next `Mount()`
+  makes a new host that builds at once.
 - **Keep the value a later build reads, not the element, and give it to the new element.** Aperture's
   library build sized what it asks for from the old grid's viewport height; that is kept as a number now,
   so what the next build makes is what it was. Vesper's Brief kept its old scroll view's offset the same
@@ -1075,9 +1091,19 @@ Headless, full GC and `GC.GetTotalMemory(true)`, the heap after the switch, JIT 
 | Meridian Discovery map, 60 endpoints, wheeled → Requests (the latch) | 1,122 / 948 KB | 841 / 670 KB |
 | Aperture library grid, 600 films, wheeled → Settings (the latch) | 1,566 / 1,430 KB | 1,300 / 1,164 KB |
 | Aperture Home, 5 × 20, wheeled → Settings (the latch) | 1,295 / 1,158 KB | 1,030 / 894 KB |
+| Aperture Home, 5 × 20, 3 cursor moves → Settings (round 11) | 1,212 / 1,213 KB | 948 / 951 KB |
+| Aperture library grid, 600 films, 5 cursor moves → Settings (round 11) | 1,485 / 1,517 KB | 1,221 / 1,239 KB |
+| Meridian History, 200 sends → Requests (round 11) | 1,101 / 1,109 KB | 784 / 793 KB |
+| Meridian History, 2,000 sends → Requests (round 11) | 1,495 / 1,489 KB | 1,178 / 1,173 KB |
+| Meridian History, 200 sends → Discovery (round 11) | 1,115 / 1,123 KB | 799 / 808 KB |
+| Vesper Thumbnails, 400 files → Detail (round 11) | 1,510 / 1,518 KB | 1,232 / 1,250 KB |
+| Vesper Thumbnails, 3,000 files → Detail (round 11) | 2,213 / 2,207 KB | 1,935 / 1,932 KB |
 
 The old view was alive before and is collected after in every row. The bytes of a build or a key did not
-move (Meridian's full build at 200 requests 59.4 KB, Home and the grid's keys, Brief's Down and Insert).
+move (Meridian's full build at 200 requests 59.4 KB, Home and the grid's keys, Brief's Down and Insert;
+in round 11 Home's and the grid's keys, a Home and a Settings build, a History key and build, the
+Thumbnails and Detail keys and builds). Round 11's rows come from a host of its own (one process per
+row), so their heaps are not comparable with round 10's.
 
 ### Keep the index out of a list's item
 
@@ -1158,8 +1184,40 @@ Components expose lifecycle hooks that you can override:
 |---|---|
 | `OnMount()` | After the component is first mounted into the tree |
 | `OnUnmount()` | When the component, or any element it sits under, is removed from the tree |
-| `OnBeforeBuild()` | Immediately before each `Build()` call |
-| `OnAfterBuild()` | Immediately after each `Build()` call |
+| `OnBeforeBuild()` | Immediately before each `Build()` call. A rebuild asked for here is dropped (below) |
+| `OnAfterBuild()` | Immediately after each `Build()` call and its reconcile. A rebuild asked for here is dropped (below) |
+
+**A rebuild asked for during a build is dropped.** `OnBeforeBuild`, `Build` and `OnAfterBuild`
+all run inside the component's build effect (`ComponentHost.Rebuild`). While that effect runs,
+`MarkDirty()` returns without doing anything (the effect ignores a forced run from inside
+itself), and a write to a signal the build read does not mark it either; when the build ends,
+the effect notes the signal's new value as already seen. So the build you asked for never
+comes, and the screen shows what this build made until something else rebuilds. (The one
+exception: a build that runs inside another component's reconcile, such as a component mounting
+again in its parent's patch, has its `MarkDirty()` deferred to the end of that pass, like any
+other request made mid-reconcile.) To build once more, ask outside the build:
+
+```csharp
+protected override void OnAfterBuild()
+{
+    if (_needsAnotherPass)
+    {
+        _needsAnotherPass = false;
+        // MarkDirty() here would be dropped: this build has not finished.
+        Application.InvokeOnMainThread(MarkDirty);         // on the next frame
+        // or, when the next build needs this frame's layout:
+        // _window.RequestPostFrameCallback(MarkDirty);    // after this frame is drawn
+    }
+}
+```
+
+The rule is deliberate, and an app relies on it. Junction's diff binds its find bar's search to
+the file it shows inside `Build` (`TextSearch.Bind` → the search's change → `FindBar` →
+`MarkViewDirty`), on about 95 of every 100 keys that move the caret in the Changes list.
+Honoured, each of those keys would build the view twice. Meridian's response body does the same
+with a signal write on a switch between pretty and raw. The bar does not need that build: its
+`Service`, from `OnAfterBuild`, writes the new count into the bar on screen. Work that only has to follow a build, such as a focus or a reveal, belongs in
+`OnAfterBuild` as it is; only a second build has to be asked for this way.
 
 **`OnAfterBuild` runs before the style and layout passes.** The new tree has been
 reconciled but not laid out, so any geometry read there — a viewport height, a column

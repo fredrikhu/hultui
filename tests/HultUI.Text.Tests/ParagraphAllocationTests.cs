@@ -161,6 +161,40 @@ public class ParagraphAllocationTests
     }
 
     [Fact]
+    public void AStyledLayoutFoundInTheCache_AllocatesNothing_HoweverManySpansItHas()
+    {
+        // A layout the cache has: what finding it costs, with spans that set every metric field.
+        // The key's digest of the spans added each nullable field with HashCode.Add, which on
+        // .NET 11's JIT boxed the value in the digest's loop: 48 B for each such span (the weight's
+        // box and the size's), on every styled layout, hits included.
+        var pipeline = new TextPipeline(new Fonts(), new Shaper());
+        string text = Lines(10);
+        TextSpan Span(int at) => new(at, 4, new(0, 0, 0, 255), Weight: FontWeight.Bold, Slant: FontSlant.Italic, FontSize: 12f);
+        TextSpan[] one = [Span(9)], twenty = [.. Enumerable.Range(0, 20).Select(i => Span(i * 4))];
+        // Found in the cache: the same layout again.
+        Assert.Same(pipeline.Layout(text, Style, 60f, null, TextOverflow.Clip, one),
+            pipeline.Layout(text, Style, 60f, null, TextOverflow.Clip, one));
+        Assert.Same(pipeline.Layout(text, Style, 60f, null, TextOverflow.Clip, twenty),
+            pipeline.Layout(text, Style, 60f, null, TextOverflow.Clip, twenty));
+
+        // Optimized code is what boxed (the first, quickly compiled code did not), so the lookup is
+        // made often enough, and given the time, for the JIT to compile it again optimized.
+        for (int pass = 0; pass < 4; pass++)
+        {
+            for (int i = 0; i < 2000; i++)
+            {
+                pipeline.Layout(text, Style, 60f, null, TextOverflow.Clip, one);
+                pipeline.Layout(text, Style, 60f, null, TextOverflow.Clip, twenty);
+            }
+            Thread.Sleep(150);
+        }
+        double oneBytes = Allocations.PerCall(500, () => pipeline.Layout(text, Style, 60f, null, TextOverflow.Clip, one));
+        double twentyBytes = Allocations.PerCall(500, () => pipeline.Layout(text, Style, 60f, null, TextOverflow.Clip, twenty));
+        Assert.Equal(0, oneBytes);
+        Assert.Equal(0, twentyBytes);
+    }
+
+    [Fact]
     public void AWrapsLastLine_IsSearchedWithoutATableOfItsOwn()
     {
         // The same paragraph but for its last line: four words of a letter each, or one word of the

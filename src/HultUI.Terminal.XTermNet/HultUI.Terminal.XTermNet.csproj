@@ -9,7 +9,7 @@
        not get two XTerm.NET.dll files. The namespaces stay XTerm.*: renaming them would make
        every patch and every upstream update conflict. -->
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>$(HultUITargetFramework)</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>XTerm</RootNamespace>

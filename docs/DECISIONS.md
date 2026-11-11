@@ -736,6 +736,56 @@ entity.other.attribute-name.id". No fork. After it, Dark+ and Light+ change 2,33
 tokens, exactly step 14b's less the 61 PowerShell member tokens; a PowerShell fence in Markdown has
 no source.powershell scope and its members stay light blue, as in VS Code.
 
+### A theme that includes another is merged with it, as VS Code merges them (round 11)
+
+Three of TextMateSharp 2.0.4's 21 bundled themes include another file: Dark+ includes dark_vs, and
+Light+ and High Contrast Light include light_vs. VS Code reads the two files as one list of rules, the
+included file's first, so for each scope the most specific rule of either file wins, and of two as
+specific the theme's own. TextMateSharp keeps the included file in a second lookup that it reads only
+when no rule of the theme's own applies to the scope, however broad. So Dark+'s "support.type" teal
+beat dark_vs's "support.type.property-name" light blue on every JSON key, and Dark+'s "variable"
+beat dark_vs's "variable.language" on `this`. Step 14b of round 9 found it; the user chose VS Code's
+colours (plan 17, question 26).
+
+`SyntaxHighlighter` now builds every registry over the theme merged as VS Code merges it
+(`MergedOptions`): one theme with no include, the included file's rules first and the theme's own
+after them in one list, so a rule's place breaks ties across both files, and the editor colours
+(`editor.foreground`) of the theme over those of the file it includes. A theme that includes
+nothing is handed over as it is. The rule a PowerShell or Less file gets without its parent (above)
+still goes last, now after the rules of both files. No fork.
+
+Round 9's corpus, frozen into a copy so both sides read the same texts: 3,206 files, 3,094 of them
+tokenized, 1,759,787 lines. Each line went through the highlighter in each theme, before and after,
+and each token's colour was checked against an emulation of VS Code (vscode-textmate's rule trie over
+the same theme files, include merged) and of TextMateSharp with two lookups and with one; each
+TextMateSharp emulation reproduces the real spans of its side on every token of Dark+ and Light+.
+
+| Theme | Lines whose colour differs from VS Code, before → after | Lines whose spans changed |
+|---|---|---|
+| Dark+ | 974,248 → 0 | 974,248 (JSON 962,423, JavaScript 9,736, C# 1,187, CSS 650, TypeScript 117, Markdown 78, HTML 52, PowerShell 4, Rust 1) |
+| Light+ | 974,478 → 0 | 974,478 |
+| High Contrast Light | 0 → 0 | 0 |
+| The other 18 | unchanged | 0 |
+
+In Dark+ that is 2,891,518 property-name tokens (JSON, JSONC and CSS keys) from #4EC9B0 to #9CDCFE,
+13,108 `this`, `self`, `base`, `super`, `arguments` and C# `_` discard tokens from #9CDCFE to
+#569CD6, and two C macro names in a Markdown fence from #DCDCAA to #569CD6. Light+ moves the same
+tokens to its own colours: JSON keys #267F99 → #0451A5, CSS property names → #FF0000, `this` #001080 →
+#0000FF. The tokenizer's state after each line is the same before and after in all three themes
+(its rules and scopes; the colour ids it carries differ). Monokai, Quiet Light, Red and Dimmed Monokai
+still differ from VS Code on 166,353, 63,784, 17,264 and 6,870 lines, before and after: mostly rules
+naming parent scopes (Monokai's "meta.structure.dictionary.json string.quoted.double.json"), which
+TextMateSharp does not apply.
+
+Cost: the merge runs once per theme load, and tokenizing is unchanged. The theme file is now read
+once per load, not once per registry: idle-gated, pinned, two alternated pairs, least of 300 after
+5 s of warm-up, JIT:
+
+| | Dark+ before → after | Solarized Light before → after |
+|---|---|---|
+| Theme load (the first registry) | 1.666–1.675 → 1.587 ms; 4,519,568 → 4,277,080 B | 1.555–1.596 → 1.535–1.586 ms; 4,297,056 → 4,113,976 B |
+| Each further registry (a Markdown text's set of grammars, a PowerShell file) | 0.123–0.127 → 0.067–0.070 ms; 387,384 → 139,736 B | 0.067–0.069 → 0.023–0.024 ms; 230,120 → 46,896 B |
+
 ### A long label tests each of its lines against the clip: a binary search measured and declined (round 10)
 
 `DrawText` (both overloads) and `DrawParagraph` test every line of a text against the clip each
@@ -764,6 +814,60 @@ stayed). The A/A line moved the wheel row 2.4 % (JIT) and 0.8 % (AOT). The win i
 under the 5 % bar: the step got 7–10 µs faster for 1,939 lines not tested, about 4–5 ns a line.
 Declined. Revisit if a text of tens of thousands of lines is drawn every frame: at that cost a
 20,000-line body would spend about 0.1 ms a frame on the scan.
+
+### The itemizer asks the primary face about every character: a mask of found ASCII measured and declined (round 11)
+
+`FontItemizer.Itemize` asks the primary face `HasGlyph` once for every character that no earlier
+rule placed: one interface call each, into `SkiaResolvedFont`'s bitset. With round 11's word table
+and the U+0300 arm in `Extends` (7d823b34, 6274c26c), the survey's NativeAOT profile put the call at
+8.5 % of a long document's line walk. Counted a step (a JIT probe):
+
+| Row | Itemize calls | Primary asks | Of them ASCII | Asked before in the same call |
+|---|---|---|---|---|
+| text/open a long document in a TextArea | 648 | 116,260 | 116,260 | 101,154 (87 %) |
+| text/resize a wrapped TextArea | 668 | 117,547 | 117,547 | 102,128 (87 %) |
+| richtext/open 5,000 blocks | 4,643 | 284,349 | 284,349 | 206,776 (73 %) |
+| text/ellipsis 1,000 labels resize | 1,055 | 74,426 | 73,401 | 51,823 (70 %) |
+
+Plan 17's round 11, step 1 tried a mask for each call: 128 bits, in two `ulong`s, of the ASCII
+characters the primary face was found to have, so a character met again skips the call. Two forms
+were tried: an inlined helper that took the two by `ref`, and the test written into the loop's
+condition. Measured with `scripts/perf/step-ab.ps1` against 6274c26c, the 42 text and rich text
+rows, two alternated idle-gated pairs, i7-14700K on its P-cores (min ms, best of pairs, before →
+after):
+
+| Row | JIT, helper | JIT, in the loop | AOT, helper | AOT, in the loop |
+|---|---|---|---|---|
+| open a long document | 2.125 → 2.333 | 2.258 → 2.320 | 2.650 → 2.830 | 2.666 → 2.792 |
+| resize a wrapped TextArea | 1.959 → 2.093 | 1.966 → 2.088 | 2.358 → 2.469 | 2.359 → 2.415 |
+| richtext/open 5,000 blocks | 7.290 → 7.796 | 7.261 → 7.613 | 8.619 → 9.173 | 8.618 → 9.221 |
+| wrap 150 paragraphs resize | 1.795 → 1.894 | 1.757 → 1.887 | 2.036 → 2.139 | 2.023 → 2.086 |
+
+Both forms were slower on every row that itemizes much, by 2–10 %; the other rows moved within
+noise, and the A/A lines moved nothing. The answer is already a bitset read behind one well-predicted call, and the
+mask's own test and branch in the loop cost more than the calls it saved. Declined.
+
+The width cache (`TextPipeline.Widths`) still finds its entries through `Dictionary.AlternateLookup`
+and dispatches through `IAlternateEqualityComparer` on NativeAOT 11 as the word cache did. It was
+left on `LruCache`: it makes 595 lookups a step on the long-document row (about 7 µs), and the word
+table is made for word keys, so sharing it would need a generic key and comparer layer for less
+than any bar.
+
+### A column that scrolls down is measured once for every height forced on it; a row that scrolls sideways is not (round 11)
+
+Plan 17's round 11, step 4 gave a flex column with `OverflowY == Scroll` its unforced measurement
+at the same width when a height is forced on it, with that height applied (`LayoutEngine.MeasureSize`,
+`ScrollsDown`): it measures its children against unbounded height, so the forced height changes only
+its own. Meridian's map list went from 869 to 245 measurements a click.
+
+The mirror case is the same shape: a flex row with `OverflowX == Scroll` measures its children
+against unbounded width, so a forced width changes only its own width. It was not built, because it
+does not occur. A probe counted every `MeasureSize` of such a row with a forced width: 0 on all 230
+perf-suite rows, 0 in the app walks (Junction History, Commit, Branches, Tags, Files search, palette
+and Changes; Vesper's panes; Aperture's grid) and 0 on Meridian's map. The two such rows in the apps
+(Meridian's request tab strip, Vesper's Brief view) are never measured at a forced width there.
+Build it when a sideways strip turns up measured at a forced width: the rule is the column's with
+the axes swapped, and its width validity is `WidthRange.Any`.
 
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 

@@ -94,6 +94,12 @@ The whole slnf takes about 90 s there. Traps, each already handled by the script
 - **Never build in `/mnt/c`**: it is slow, and it shares `bin/`/`obj/` with the Windows builds.
 - **WSL's PATH is not a Linux desktop's**: it appends the whole Windows PATH and puts `sbin`
   first. The script sets a Fedora user's PATH.
+- **Two .NETs on Fedora**: Fedora's packaged one in `/usr/lib64/dotnet` (10.0 only) and the
+  .NET 11 SDK from Microsoft's installer in `/usr/local/share/dotnet`, linked as
+  `/usr/local/bin/dotnet`, first on the script's PATH. An apphost (testhost, an app a test
+  starts) without `DOTNET_ROOT` reads `/etc/dotnet/install_location`, i.e. Fedora's root, and
+  finds no net11.0 runtime; the script exports `DOTNET_ROOT` as the folder of the `dotnet` it
+  builds with. Remove the second install once Fedora ships the final `dotnet-sdk-11.0`.
 
 Fedora's minimal image differs from CI's Ubuntu runner in what it has installed:
 - **Fonts:** it has no monospace face (`monospace` resolves to Noto Sans) and nothing for

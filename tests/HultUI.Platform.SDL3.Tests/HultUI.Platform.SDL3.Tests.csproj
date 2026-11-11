@@ -4,7 +4,7 @@
        translation against SDL's dummy video driver, which needs no display. Anything that
        needs a real window or a GPU belongs in HultUI.UiTests. -->
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>$(HultUITargetFramework)</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>

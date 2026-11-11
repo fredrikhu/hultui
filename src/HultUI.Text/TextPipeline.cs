@@ -29,11 +29,9 @@ public sealed class TextPipeline
     // kerning across a segment boundary is lost — a font that kerns
     // letter↔space pairs would measure differently. UI fonts essentially
     // never do, and WordShapeCacheTests verifies equivalence on this system.
-    // Looked up by a span of the text (WordSpanKey, through _wordsInPlace): a segment becomes a
-    // string of its own only on a miss, to be the entry's key.
-    private readonly LruCache<WordShapeKey, ShapedRun> _wordShapeCache =
-        new(capacity: 8192, WordShapeKeyComparer.Instance, maxWeight: WordCacheBytes);
-    private readonly LruCache<WordShapeKey, ShapedRun>.InPlace<WordSpanKey> _wordsInPlace;
+    // Looked up by a span of the text: a segment becomes a string of its own only on a miss, to
+    // be the entry's key.
+    private readonly WordCache _wordShapeCache = new(capacity: 8192, maxWeight: WordCacheBytes);
 
     // Widths of whole strings on one unbounded line, for MeasureWidth (Widths, below). Made at
     // the first width asked for: a pipeline that measures none — no TextArea — has none.
@@ -151,7 +149,6 @@ public sealed class TextPipeline
     {
         _fonts = fonts;
         _shaper = shaper;
-        _wordsInPlace = _wordShapeCache.LookedUpBy<WordSpanKey>();
     }
 
     /// <summary>
@@ -321,6 +318,12 @@ public sealed class TextPipeline
 
     // Layout-relevant digest of a span list: offsets and metric fields only. Colors
     // and decorations are paint-only and must not fragment the layout caches.
+    //
+    // The nullable fields go in as plain values, an unset one as a value no set one has (-1 for
+    // the enums, NaN for the size): HashCode.Add of a Nullable<T> boxed the value on .NET 11's JIT
+    // inside this loop, two boxes (48 B) for each metric span of every styled layout, cache hits
+    // included (text/styled wrap 150 paragraphs resize 74.8 -> 225.7 KB a step). .NET 10's JIT and
+    // NativeAOT on both did not box it.
     private static int MetricDigest(IReadOnlyList<Core.Rendering.TextSpan> spans)
     {
         var hash = new HashCode();
@@ -329,7 +332,10 @@ public sealed class TextPipeline
             var s = spans[i];
             if (!s.IsMetricAffecting) continue;
             hash.Add(s.Start); hash.Add(s.Length);
-            hash.Add(s.Weight); hash.Add(s.Slant); hash.Add(s.FontSize); hash.Add(s.FontFamily);
+            hash.Add(s.Weight is { } weight ? (int)weight : -1);
+            hash.Add(s.Slant is { } slant ? (int)slant : -1);
+            hash.Add(s.FontSize is { } size ? size : float.NaN);
+            hash.Add(s.FontFamily);
         }
         return hash.ToHashCode();
     }
@@ -1980,7 +1986,7 @@ public sealed class TextPipeline
             runs.Add(new PrefixRun(runStart, runEnd, font, before, segments.Count));
             float x = 0;
             int glyphs = 0;
-            int fontHash = WordShapeKeyComparer.FontHash(font, style.FontSize);
+            int fontHash = WordCache.FontHash(font, style.FontSize);
             for (int i = runStart; i < runEnd;)
             {
                 bool isSpace = text[i] == ' ';
@@ -2076,7 +2082,7 @@ public sealed class TextPipeline
         else
         {
             var part = ShapeSegment(text, seg.Start, cut - seg.Start, run.Font, fontSize,
-                WordShapeKeyComparer.FontHash(run.Font, fontSize));
+                WordCache.FontHash(run.Font, fontSize));
             width = part.Width;
             glyphs = part.Glyphs;
         }
@@ -2605,7 +2611,7 @@ public sealed class TextPipeline
         {
             float width = 0;
             int glyphs = 0;
-            int fontHash = WordShapeKeyComparer.FontHash(font, style.FontSize);
+            int fontHash = WordCache.FontHash(font, style.FontSize);
             for (int i = from; i < to;)
             {
                 bool isSpace = text[i] == ' ';
@@ -2636,7 +2642,7 @@ public sealed class TextPipeline
         }
         else if (text.AsSpan(from, to - from).IndexOf(' ') < 0)
         {
-            var word = ShapeSegment(text, from, to - from, font, fontSize, WordShapeKeyComparer.FontHash(font, fontSize));
+            var word = ShapeSegment(text, from, to - from, font, fontSize, WordCache.FontHash(font, fontSize));
             width = word.Width;
             glyphs = word.Glyphs;
         }
@@ -2644,7 +2650,7 @@ public sealed class TextPipeline
         {
             width = 0;
             glyphs = 0;
-            int fontHash = WordShapeKeyComparer.FontHash(font, fontSize);
+            int fontHash = WordCache.FontHash(font, fontSize);
             for (int i = from; i < to;)
             {
                 bool isSpace = text[i] == ' ';
@@ -2705,7 +2711,7 @@ public sealed class TextPipeline
     // (ShapedRun.GlyphsFollowText) — except one made for letter spacing to move.
     internal ShapedRun ShapeByWords(string text, IResolvedFont font, float fontSize, bool composeNow = false)
     {
-        int fontHash = WordShapeKeyComparer.FontHash(font, fontSize);
+        int fontHash = WordCache.FontHash(font, fontSize);
         if (text.IndexOf(' ') < 0)
         {
             var word = ShapeSegment(text, 0, text.Length, font, fontSize, fontHash);
@@ -2797,7 +2803,7 @@ public sealed class TextPipeline
         string text = run.Text;
         var font = run.Font;
         float fontSize = run.FontSize;
-        int fontHash = WordShapeKeyComparer.FontHash(font, fontSize);
+        int fontHash = WordCache.FontHash(font, fontSize);
         float x = 0;
         int at = 0;
         for (int i = 0; i < text.Length;)
@@ -2838,7 +2844,7 @@ public sealed class TextPipeline
     // text[start..start + length], shaped: from the digit table, else from the word cache, looked
     // up by the span; a miss shapes the segment as a string of its own (the text itself when the
     // segment is all of it) and keeps it under that string. fontHash is
-    // WordShapeKeyComparer.FontHash(font, fontSize), which the caller works out once per run.
+    // WordCache.FontHash(font, fontSize), which the caller works out once per run.
     private WordShape ShapeSegment(string text, int start, int length, IResolvedFont font, float fontSize,
         int fontHash)
     {
@@ -2846,8 +2852,8 @@ public sealed class TextPipeline
         if (DigitTableFor(segment, font, fontSize) is { } digits)
             return DigitSegment(segment, digits, start);
 
-        if (!_wordsInPlace.TryGet(new WordSpanKey(segment, font, fontSize, fontHash), out var run))
-            run = ShapeNewWord(text.Substring(start, length), font, fontSize);
+        if (!_wordShapeCache.TryGet(segment, font, fontSize, fontHash, out var run))
+            run = ShapeNewWord(text.Substring(start, length), font, fontSize, fontHash);
         return new WordShape(run, null, start, run.Width, run.Glyphs.Length);
     }
 
@@ -2857,8 +2863,8 @@ public sealed class TextPipeline
         if (DigitTableFor(segment, font, fontSize) is { } digits)
             return DigitSegment(segment, digits, start);
 
-        if (!_wordsInPlace.TryGet(new WordSpanKey(segment, font, fontSize, fontHash), out var run))
-            run = ShapeNewWord(segment.ToString(), font, fontSize);
+        if (!_wordShapeCache.TryGet(segment, font, fontSize, fontHash, out var run))
+            run = ShapeNewWord(segment.ToString(), font, fontSize, fontHash);
         return new WordShape(run, null, start, run.Width, run.Glyphs.Length);
     }
 
@@ -2870,12 +2876,10 @@ public sealed class TextPipeline
         return new WordShape(null, digits, start, x, segment.Length);
     }
 
-    private ShapedRun ShapeNewWord(string word, IResolvedFont font, float fontSize)
+    private ShapedRun ShapeNewWord(string word, IResolvedFont font, float fontSize, int fontHash)
     {
         var run = _shaper.Shape(word, font, fontSize);
-        // Put, not Add: next to the shaping a second lookup is nothing, and a key the
-        // lookup in place had missed would make Add throw.
-        _wordShapeCache.Put(new WordShapeKey(word, font, fontSize), run, WordBytes(word, run));
+        _wordShapeCache.Put(word, font, fontSize, fontHash, run, WordBytes(word, run));
         return run;
     }
 

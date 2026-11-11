@@ -13,4 +13,15 @@
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 
+  <!-- The .NET every project here builds for, in one place: each project sets
+       <TargetFramework>$(HultUITargetFramework)</TargetFramework> (the Windows-only ones add
+       "-windows"), so a .NET upgrade changes this line, global.json and the paths that name
+       the framework (installers, workflows), not a hundred project files. A property rather
+       than TargetFramework itself, so every project still says what it targets, a project with
+       another target (the source generator's netstandard2.0) needs nothing, and nothing turns a
+       TargetFrameworks project into a single-target one by accident. -->
+  <PropertyGroup>
+    <HultUITargetFramework>net11.0</HultUITargetFramework>
+  </PropertyGroup>
+
 </Project>

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>$(HultUITargetFramework)</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>HultUI.Core</RootNamespace>
@@ -45,6 +45,9 @@
     <!-- A faded image draws itself at its alpha, without an offscreen group, through a context
          that can (IFadingImageContext): the Skia renderer is that context. -->
     <InternalsVisibleTo Include="HultUI.Rendering.Skia" />
+    <!-- The live-resize tests check that no earlier test left an image holding its own GPU source,
+         or a sink nobody disposed, before they count frames (GpuFrameSink.MaySignalOnlyByPosting). -->
+    <InternalsVisibleTo Include="HultUI.UiTests" />
   </ItemGroup>
 
 </Project>
