@@ -36,6 +36,8 @@ public sealed partial class LayoutEngine
             if (--_passDepth == 0) ClearPlans();
         }
         ClearLayoutDirty(root);
+        if (LayoutAudit.Enabled && _passDepth == 0)
+            LayoutAudit.Check(_measureContext, root, availableWidth, availableHeight, forceRootFill);
     }
 
     private int _passDepth;
