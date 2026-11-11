@@ -4,21 +4,26 @@ State of [the performance team](17-performance-team.md). The orchestrator update
 file after every step and commits it with the step's work. Full survey reports are in
 [`17-reports/`](17-reports/).
 
-- **Round:** 10
-- **Phase:** release — round 10 merged into main as cc55bdcc (pushed; CI run 42924747474 running); after the full suite
-  passed (Windows 30 projects, Fedora 22, docfx 0 warnings) on 776838cb's source; **after green CI, cut new releases of all five apps (user, 2026-11-11)**. Round 11
-  starts with Waiting dotnet-11-upgrade (the user is installing the .NET 11 SDK on 2026-11-11). To resume in a fresh
-  context, run in this worktree: `/loop Run the next step of the performance team: follow
-  docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md. Read both once per session
-  (afterwards only the ledger's Phase and the part the step needs), do the step the ledger's Phase calls for, record it
-  in the ledger, and commit.` Before resuming, `git fetch` and merge main if it moved. Build steps use
-  `scripts/perf/step-ab.ps1`. Open for the user, none blocking: question 26 (a merged syntax theme to match VS Code),
-  question 10 (`TokenizeDiff` public), question 33 (an unreadable request counted in the Runner's rail), the live
-  screen-reader check of menus. Older rounds are in [the archive](17-performance-team-ledger-archive.md) (search it,
-  don't read it whole). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a pre-push hook
-  refuses pushes built on the old history).
+- **Round:** 11
+- **Phase:** upgrade, then survey — round 11, to start in a fresh context (the loop stopped 2026-11-11 after round 10's
+  release). Round 10 released: merged into main as cc55bdcc; CI run 42924747474 green; app releases junction-v1.25.0,
+  vesper-v1.25.0, meridian-v1.8.0 (re-run once: a midnight race in a test, Waiting), aperture-v1.23.0, reel-v1.9.0. Round
+  11 begins with Waiting **dotnet-11-upgrade** as its own measured step (expert 4; one build agent; SDKs installed on
+  Windows and WSL Fedora 2026-11-11; read that item's traps), then the survey. Round 11's survey archives round 9's
+  Landed rows, round 10's build order and answered questions 27–32, 34–36 (33 stays open), and round 9's log entries
+  (2026-11-08 to its release on 2026-11-09). To resume in a fresh context, run in this worktree: `/loop Run the next step
+  of the performance team: follow docs/plans/17-performance-team.md, with state in
+  docs/plans/17-performance-team-ledger.md. Read both once per session (afterwards only the ledger's Phase and the part
+  the step needs), do the step the ledger's Phase calls for, record it in the ledger, and commit.` Before resuming,
+  `git fetch` and merge main if it moved. The common survey brief from round 10 is reusable: session 3484c586's
+  scratchpad `brief-r10-survey.md` (see Probe code); build steps use `scripts/perf/step-ab.ps1`. Open for the user, none
+  blocking: question 26 (a merged syntax theme to match VS Code), question 10 (`TokenizeDiff` public), question 33 (an
+  unreadable request counted in the Runner's rail), the live screen-reader check of menus. Older rounds are in [the
+  archive](17-performance-team-ledger-archive.md) (search it, don't read it whole). History note: rewritten 2026-10-25
+  (every commit after 3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history).
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`)
-- **Review commits since:** round 10's survey reviews round 9's build, 4919ac40..facced69 (the last survey report
+- **Review commits since:** round 11's survey reviews round 10's build and the .NET 11 upgrade, f4d6050d..(the upgrade's
+  merge) (the last survey report to the release). Earlier: round 10's survey reviewed round 9's build, 4919ac40..facced69 (the last survey report
   to the round 9 release; 82 commits, 81 not merges; no merge from main this round). Round 9's survey reviewed
   eaa1ec29..10acc8c0 (round 8's build, with main's merge 3a15b5b1); round 8's survey reviewed 17d4220a..df45b4a2.
 - **Probe code:** round 10 surveys in session 3484c586's scratchpad
@@ -1058,3 +1063,12 @@ From 2026-11-08 (round 9's survey); earlier entries are in the archive ([to 2026
   meridian-v1.8.0's Windows test job failed on `HistoryTests.AnOlderSendFadesItsColours_NotItsRow` at 00:00:41 UTC (a
   midnight race in the test: `DateTimeOffset.Now` + `IsToday`; passed in CI on the same commit an hour earlier) →
   `gh run rerun --failed` once; the test fix is in Waiting.
+- 2026-11-11: meridian-v1.8.0 green on the re-run (attempt 2: test, test-linux, installer) and released
+  (Meridian-Setup-1.8.0.exe): all five app releases published. Round 10 landed 16 kept steps (1–13, 13b, 15, 15b; 14
+  declined) in ~60 commits: two review objections fixed (a selected Button patched in place; kept rows held weakly),
+  retention closed (views let go, the wheel latch), the Runner −98.6 % a run, typing that builds nothing in Junction and
+  Aperture, TextArea cluster ends per row (−84 % a key with an emoji), Sync and the Discovery map with no build a key,
+  Junction's view-only clicks and pane drags, a reader's focus lookups and renamed containers in place, Markdown loading
+  only the grammars it reaches (−95 % kept), and bug fixes the user approved (Aperture Backspace, Brief's blank columns
+  and return position, Sync's cursor reveal, Junction's sideways pan); public `ScrollViewElement.UserScrolled`. Round →
+  11, Phase → upgrade then survey; the loop stops, and round 11 starts in a fresh context.
