@@ -26,7 +26,7 @@ public readonly record struct RegistryEntry(string Key, string Name, string Valu
 /// which <see cref="Unregister"/> removes.</para>
 ///
 /// <para>The registry is reached through advapi32 rather than <c>Microsoft.Win32.Registry</c>
-/// because these projects target plain <c>net10.0</c>, where that API is not in the shared
+/// because these projects target plain <c>net11.0</c>, where that API is not in the shared
 /// framework — the same reason the window chrome talks to user32 directly.</para>
 /// </summary>
 public static class FileAssociations

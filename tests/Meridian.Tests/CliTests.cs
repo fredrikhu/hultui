@@ -53,8 +53,10 @@ public class CliTests : IClassFixture<TestHttpServer>, IDisposable
             Assert.True(repo != null, "could not locate the repository root");
             var configuration = AppContext.BaseDirectory.Contains($"{Path.DirectorySeparatorChar}Release{Path.DirectorySeparatorChar}")
                 ? "Release" : "Debug";
+            // The CLI targets the framework these tests do, so its folder is named as this one is (net11.0).
+            var targetFramework = Path.GetFileName(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar));
             var built = Path.Combine(repo!.FullName, "apps", "Meridian", "Meridian.Cli",
-                "bin", configuration, "net10.0", "meridian.dll");
+                "bin", configuration, targetFramework, "meridian.dll");
             Assert.True(File.Exists(built), $"the CLI is not built at {built}");
             return built;
         }

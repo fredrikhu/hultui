@@ -40,7 +40,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
 
       - name: Build solution
         run: dotnet build HultUI.slnx -c Release
@@ -67,7 +67,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
 
       # As in ci.yml: the font- and 7z-gated tests skip without these, naming the package.
       - name: Install fonts and 7-Zip
@@ -97,7 +97,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
 
       # Tag junction-v1.2.0 -> 1.2.0; other builds get a CI prerelease version. The
       # version reaches command lines below, so a tag that does not hold one stops here.

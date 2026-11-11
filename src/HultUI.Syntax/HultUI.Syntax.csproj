@@ -7,7 +7,7 @@
     code reference this; apps that don't pay nothing.
   -->
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>$(HultUITargetFramework)</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>HultUI.Syntax</RootNamespace>

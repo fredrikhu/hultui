@@ -4,7 +4,7 @@
     <!-- Console subsystem on purpose: this is the binary CI runs, and a WinExe
          cannot write to a pipeline log on Windows. -->
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>$(HultUITargetFramework)</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Meridian.Cli</RootNamespace>

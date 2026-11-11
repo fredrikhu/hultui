@@ -11,7 +11,7 @@
   #define AppVersion "0.0.0"
 #endif
 #ifndef PublishDir
-  #define PublishDir "..\Aperture\bin\Release\net10.0\win-x64\publish"
+  #define PublishDir "..\Aperture\bin\Release\net11.0\win-x64\publish"
 #endif
 
 [Setup]

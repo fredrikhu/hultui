@@ -40,10 +40,11 @@ jobs:
         with:
           persist-credentials: false
 
-      # No global.json: any 10.0 SDK builds the solution, so take the newest.
+      # The SDK comes from global.json (11.0.100, latestFeature): the newest 11.0 SDK, the one
+      # every machine that builds this repository uses.
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
 
       # external/XTerm.NET must be exactly upstream at the pinned commit plus
       # external/XTerm.NET.patches (docs/design/TERMINAL.md). A hand edit there would be lost at
@@ -84,7 +85,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
 
       # The tests that need a script's font skip without one, naming the package
       # ([HanFontsFact], [DevanagariFontsFact], [ColourEmojiFact]); Vesper's [SevenZipFact]
@@ -137,7 +138,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
 
       - name: Build
         run: dotnet build tests/Meridian.Tests -c Release
@@ -178,7 +179,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
 
       - name: Restore tools
         run: dotnet tool restore

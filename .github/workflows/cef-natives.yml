@@ -44,7 +44,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
 
       # build.sh: bzip2 to unpack, and a strip that reads each RID's ELF. The engine tests:
       # CEF's own libraries (the ones an application's .deb declares;
