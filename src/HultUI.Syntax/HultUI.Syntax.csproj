@@ -29,8 +29,6 @@
     <InternalsVisibleTo Include="HultUI.Syntax.Tests" />
     <InternalsVisibleTo Include="HultUI.Icons.Tests" />
     <InternalsVisibleTo Include="Meridian.Tests" />
-    <!-- TokenizeDiff: Junction's diff is its one caller so far. -->
-    <InternalsVisibleTo Include="Junction" />
   </ItemGroup>
 
 </Project>

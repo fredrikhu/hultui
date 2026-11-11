@@ -10,12 +10,36 @@ using TmTheme = TextMateSharp.Themes.Theme;   // "Theme" alone collides with Hul
 
 namespace HultUI.Syntax;
 
-/// <summary>Lines of a text, 1-based, both ends included.</summary>
-internal readonly record struct LineRange(int First, int Last);
+/// <summary>
+/// Lines of a text, numbered from 1, with both ends included: <c>new LineRange(3, 5)</c> is lines
+/// 3, 4 and 5, and <c>new LineRange(7, 7)</c> is line 7 alone. This is how a diff's hunk header
+/// numbers its lines.
+///
+/// <para><see cref="SyntaxHighlighter.TokenizeDiff"/> takes each side's lines as a list of these,
+/// and checks it: <see cref="First"/> at least 1, <see cref="Last"/> no less than
+/// <see cref="First"/>, and each range starting after the one before it ends (adjacent ranges are
+/// fine, overlapping or falling ones are not).</para>
+/// </summary>
+/// <param name="First">The first line of the range, numbered from 1.</param>
+/// <param name="Last">The last line of the range, which is included.</param>
+public readonly record struct LineRange(int First, int Last);
 
-/// <summary>What <see cref="SyntaxHighlighter.TokenizeDiff"/> made of two versions of a file: each
-/// side's spans by line, null when it has none, and how many lines it walked.</summary>
-internal readonly record struct TokenizedDiff(IReadOnlyList<TextSpan>[]? Old, IReadOnlyList<TextSpan>[]? New,
+/// <summary>
+/// What <see cref="SyntaxHighlighter.TokenizeDiff"/> made of two versions of a file. Each side is
+/// an array with one span list per line, line 1 at index 0, and offsets within the line, as
+/// <see cref="SyntaxHighlighter.TokenizeLines(string, string)"/> gives them.
+///
+/// <para>A side's array ends at its last shown line, or at the end of its text when that comes
+/// first. It holds spans only for the lines shown: every other line's list is empty, and so is a
+/// shown line with nothing to colour. A side is null when it had no text, nothing shown, or a
+/// text too long to colour, and both are null when the path has no grammar. <c>default</c> is
+/// the result with nothing coloured.</para>
+/// </summary>
+/// <param name="Old">The old version's spans by line, or null when it has none.</param>
+/// <param name="New">The new version's spans by line, or null when it has none.</param>
+/// <param name="LinesWalked">How many lines were tokenized, those both versions start with counted
+/// once: the work the call did, for a caller that counts it.</param>
+public readonly record struct TokenizedDiff(IReadOnlyList<TextSpan>[]? Old, IReadOnlyList<TextSpan>[]? New,
     int LinesWalked);
 
 /// <summary>
@@ -196,19 +220,45 @@ public static class SyntaxHighlighter
     /// up), but a diff needs nothing below its last line, and of the lines above it only that
     /// state. So each side stops at its last shown line; a line nobody shows is walked for its
     /// state and leaves no spans to keep (a diff's lines are a few in a hundred); and the lines
-    /// both versions start with are walked once. On the
-    /// spans of a line shown this is <see cref="TokenizeLines(string, string, int, CancellationToken, TimeProvider?)"/>,
-    /// and it holds a side to the same limits: a text too long for that gets none here.
+    /// both versions start with are walked once. A line shown gets the spans
+    /// <see cref="TokenizeLines(string, string, int, CancellationToken, TimeProvider?)"/> gives it,
+    /// and each side is held to the same limits: a text too long for that gets none here.
     ///
     /// <para>A side's array ends at its last shown line, and holds spans only for lines shown.
-    /// A side with no text, or nothing shown, is null.</para>
+    /// A side with no text, or nothing shown, is null; see <see cref="TokenizedDiff"/>.</para>
+    ///
+    /// <para>Call it from a worker, like the other tokenizes: it takes the same gate, and a change
+    /// near the end of a large file walks every line above it.</para>
     /// </summary>
-    /// <param name="oldShown">The old side's lines to colour, in rising order.</param>
-    /// <param name="newShown">The new side's, likewise.</param>
-    internal static TokenizedDiff TokenizeDiff(string path, string? oldText, IReadOnlyList<LineRange> oldShown,
+    /// <param name="path">The file's path or name; its extension picks the grammar, as for
+    /// <see cref="TokenizeLines(string, string)"/>. Both versions are coloured as that language.</param>
+    /// <param name="oldText">The old version's text, or null when there is none (a file the change
+    /// added).</param>
+    /// <param name="oldShown">The old version's lines to colour, numbered from 1 with both ends
+    /// included, in rising order and none overlapping another. Empty for none.</param>
+    /// <param name="newText">The new version's text, or null when there is none (a file the change
+    /// deleted).</param>
+    /// <param name="newShown">The new version's lines to colour, likewise.</param>
+    /// <param name="maxLines">The most lines a version may have: one with more gets no spans, as in
+    /// <see cref="TokenizeLines(string, string, int, CancellationToken, TimeProvider?)"/>. Pass
+    /// <see cref="DefaultMaxLines"/> for its usual cap.</param>
+    /// <param name="cancellationToken">Checked before every line; a cancelled tokenize throws
+    /// <see cref="OperationCanceledException"/> within a line.</param>
+    /// <param name="clock">What the three-second budget is measured on, the system clock when null;
+    /// see <see cref="TokenizeLines(string, string, int, CancellationToken, TimeProvider?)"/>.</param>
+    /// <returns>Each version's spans by line, and how many lines it took to find them.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="oldShown"/> or
+    /// <paramref name="newShown"/> is null.</exception>
+    /// <exception cref="ArgumentException">A range in <paramref name="oldShown"/> or
+    /// <paramref name="newShown"/> starts before line 1, ends before it starts, or does not start
+    /// after the range before it ends. Checked whether or not that version has text.</exception>
+    public static TokenizedDiff TokenizeDiff(string path, string? oldText, IReadOnlyList<LineRange> oldShown,
         string? newText, IReadOnlyList<LineRange> newShown, int maxLines, CancellationToken cancellationToken,
-        TimeProvider clock)
+        TimeProvider? clock = null)
     {
+        CheckShown(oldShown, nameof(oldShown));
+        CheckShown(newShown, nameof(newShown));
+        clock ??= TimeProvider.System;
         if (oldShown.Count == 0 || oldText is not null && TooLong(oldText, maxLines)) oldText = null;
         if (newShown.Count == 0 || newText is not null && TooLong(newText, maxLines)) newText = null;
         if (oldText is null && newText is null) return default;
@@ -235,6 +285,28 @@ public static class SyntaxHighlighter
             walk.Started = clock.GetTimestamp() - (long)(elapsed.TotalSeconds * clock.TimestampFrequency);
             walk.Run(oldLines, shared, oldLines.Count, ref sharedState, ref oldSide, ref Side.None);
             return new TokenizedDiff(oldSide.Result, newSide.Result, walk.Lines);
+        }
+    }
+
+    /// <summary>Throws unless <paramref name="shown"/> is what <see cref="LineRange"/> asks of a
+    /// side's lines. The walk reads a side's last line from its last range, and steps through the
+    /// ranges once, in order.</summary>
+    private static void CheckShown(IReadOnlyList<LineRange> shown, string paramName)
+    {
+        ArgumentNullException.ThrowIfNull(shown, paramName);
+        int previousLast = 0;
+        for (int i = 0; i < shown.Count; i++)
+        {
+            var (first, last) = shown[i];
+            string? wrong =
+                first < 1 ? "starts before line 1; lines are numbered from 1"
+                : last < first ? "ends before it starts; both ends are included, so one line is (n, n)"
+                : first <= previousLast ? $"does not start after range {i - 1}, which ends at line {previousLast}; "
+                    + "ranges go in rising order and do not overlap"
+                : null;
+            if (wrong is not null)
+                throw new ArgumentException($"Range {i} of the lines shown, ({first}, {last}), {wrong}.", paramName);
+            previousLast = last;
         }
     }
 
