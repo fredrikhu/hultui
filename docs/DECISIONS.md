@@ -803,6 +803,22 @@ left on `LruCache`: it makes 595 lookups a step on the long-document row (about 
 table is made for word keys, so sharing it would need a generic key and comparer layer for less
 than any bar.
 
+### A column that scrolls down is measured once for every height forced on it; a row that scrolls sideways is not (round 11)
+
+Plan 17's round 11, step 4 gave a flex column with `OverflowY == Scroll` its unforced measurement
+at the same width when a height is forced on it, with that height applied (`LayoutEngine.MeasureSize`,
+`ScrollsDown`): it measures its children against unbounded height, so the forced height changes only
+its own. Meridian's map list went from 869 to 245 measurements a click.
+
+The mirror case is the same shape: a flex row with `OverflowX == Scroll` measures its children
+against unbounded width, so a forced width changes only its own width. It was not built, because it
+does not occur. A probe counted every `MeasureSize` of such a row with a forced width: 0 on all 230
+perf-suite rows, 0 in the app walks (Junction History, Commit, Branches, Tags, Files search, palette
+and Changes; Vesper's panes; Aperture's grid) and 0 on Meridian's map. The two such rows in the apps
+(Meridian's request tab strip, Vesper's Brief view) are never measured at a forced width there.
+Build it when a sideways strip turns up measured at a forced width: the rule is the column's with
+the axes swapped, and its width validity is `WidthRange.Any`.
+
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
 BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction

@@ -580,6 +580,22 @@ public sealed partial class LayoutEngine
         if (!hasFlow)
             return MeasureLeafSize(element, constraint.AvailableWidth, constraint.AvailableHeight, forcedWidth, forcedHeight);
 
+        // A column that scrolls down lays its children out against unbounded height
+        // (MeasureFlexChildrenSize), so a height forced on it changes nothing but its own height:
+        // its children, and so its width, come out as they do unforced. The forced measurement is
+        // the unforced one at the same width given that height, as MeasureLeafSize does for a
+        // label given a height. Each forced height was an entry of its own in the cache, and every
+        // miss measured all the children again: a list in a pane forced to four heights at each of
+        // four widths (Meridian's map) measured its rows 24 times a click.
+        if (forcedHeight is { } forcedH && ScrollsDown(element))
+        {
+            var natural = MeasureSize(element, constraint, forcedWidth, null);
+            var ownBox = element.BoxRead;
+            _measuredFromH = AnyHeight;   // a set height: the height offered goes nowhere
+            return new Size(natural.Width,
+                ApplyMinMax(forcedH, ownBox.MinHeight, ownBox.MaxHeight, constraint.AvailableHeight) + ownBox.Margin.Vertical);
+        }
+
         // Cache hit: each ancestor's Phase 1 re-measures this element with a
         // small set of alternating (constraint, forced) inputs, so results are
         // reusable both within a pass and across frames. The cache is cleared
@@ -1075,6 +1091,18 @@ public sealed partial class LayoutEngine
         box.Height.Unit == DimensionUnit.Percent
         || box.MinHeight.Unit == DimensionUnit.Percent
         || box.MaxHeight.Unit == DimensionUnit.Percent;
+
+    /// <summary>Whether a container is a flex column that scrolls down, so that a height forced on
+    /// it is all a forced measurement changes (MeasureSize). Not a grid (its rows are sized from
+    /// the box), a box with a percentage height, min or max (the unforced box resolves it against
+    /// the height offered), or one with a ratio (its width follows the forced height).</summary>
+    private static bool ScrollsDown(Element element)
+    {
+        var box = element.BoxRead;
+        return box.OverflowY == Overflow.Scroll
+            && element.FlexRead.Direction is FlexDirection.Column or FlexDirection.ColumnReverse
+            && !element.GridRead.HasTemplate && !HasPercentHeight(box) && RatioOf(element) <= 0f;
+    }
 
     // The line lists, reused: every flex pass of every container made one, a dozen thousand a
     // frame on a long list resizing. A list is held across the recursion into the children, so a
