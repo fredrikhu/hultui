@@ -333,6 +333,64 @@ public class DiffFindTests
 
     // ── Reaching the app's state ─────────────────────────────────────────
 
+    /// <summary>
+    /// The bar is built above the diff, and the diff binds the search to the file it shows: the
+    /// bar was built with the count of the file the caret left, and the search's "changed" on the
+    /// bind is a request for a build from inside one, which is dropped. So with the bar open, a
+    /// move to another file showed the last file's "n of m" until something else built.
+    /// </summary>
+    [Fact]
+    public void MovingToAnotherFile_TheCountIsTheNewFiles()
+    {
+        using var repo = TempRepo.CreateWithInitialCommit();
+        repo.Write("a.txt", "x\n");
+        repo.Write("b.txt", "y\n");
+        repo.Git("add", "-A");
+        repo.Git("commit", "-m", "two files");
+        repo.Write("a.txt", "needle 1\nneedle 2\nneedle 3\n");
+        repo.Write("b.txt", "needle\n");
+
+        using var session = HeadlessSession.Create(1400, 900);
+        JunctionApp? app = null;
+        try
+        {
+            app = new JunctionApp(session.Application, session.Window.Window, new JunctionSettingsData
+            {
+                RepositoryPaths = [repo.Path],
+                ActiveRepoPath = repo.Path,
+                Workspaces = [new WorkspaceData { Id = "w1", Name = "Tests", RepoPaths = [repo.Path] }],
+                ActiveWorkspaceId = "w1",
+            });
+            session.Application.SetRoot(app.Mount());
+            session.PumpFrames(3);
+            session.Window.PressKey(KeyCode.Digit4);   // Changes
+            var ready = app;
+            session.PumpUntil(() => BodyOrNull(ready) is { } l && l.Children.Count > 1, TimeSpan.FromSeconds(30));
+            SettleBuilds(session, app);
+
+            Find(session, app, "needle");
+            SettleBuilds(session, app);
+            Assert.Equal(3, Search(app).Hits.Count);
+            Assert.Equal("1 of 3", StatusOnScreen(session));
+
+            // A click on the other file in the list, as a reader moves on.
+            var other = session.Window.FindByText("b.txt");
+            Assert.True(other is not null, "b.txt is not in the list");
+            other!.Click();
+            session.PumpUntil(() => Search(ready).Hits.Count == 1, TimeSpan.FromSeconds(30));
+
+            // On the first frame the search has the new file's matches, and once it settles.
+            string first = StatusOnScreen(session);
+            SettleBuilds(session, app);
+            Assert.Equal("1 of 1", FindBar.Status(Search(app)));
+            Assert.Equal(("1 of 1", "1 of 1"), (first, StatusOnScreen(session)));
+        }
+        finally { app?.Dispose(); }
+    }
+
+    private static string StatusOnScreen(HeadlessSession session) =>
+        ((TextElement)session.Window.FindByAutomationId("find-status")!.Element).Content;
+
     private static FindBar State(JunctionApp app) =>
         (FindBar)typeof(JunctionApp).GetField("_diffFind", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(app)!;

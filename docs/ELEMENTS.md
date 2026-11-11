@@ -2094,7 +2094,7 @@ _find.Service();
 | `Search` | the `TextSearch` — tint row views' lines with `Search.Decorate`, a `TextArea` body with its `Highlights`; rebind with `Search.Bind` |
 | `IsOpen`, `Open()`, `Close()`, `Next()`, `Previous()` | what the keys and buttons do |
 | `HandleKey(e)` | Ctrl+F, Escape, Enter / Shift+Enter, Alt+C, Alt+R, and `n` / `p` with `LetterKeys` |
-| `Service()` | focus the field, give the body the keyboard back, reveal the current match |
+| `Service()` | focus the field, give the body the keyboard back, reveal the current match, and put the count right when the build bound the search after it built the bar |
 | `RevealCurrent()` | ask for a reveal at the next `Service` without rebuilding |
 | `Moved` | runs instead of `onChanged` after a step that moved only the current match: the step builds nothing |
 | `Body`, `Reveal`, `Selection`, `Opening` | the owner's hooks |
@@ -2107,6 +2107,15 @@ the bar, which holds it for the step's own notice. Until round 5 of plan 17 a st
 call `onChanged` and then called it again, two builds for every Enter or F3 and three for Ctrl+F
 over a selection, the first before the step had asked for its reveal (Vesper's reader, find Enter:
 two builds a step → one). Don't make the bar's `TextSearch` call `MarkDirty` itself too.
+
+**Bind in the build; the count follows.** An owner may build the bar first and bind the search
+to the text in the same build, further down, where the body is made: Junction's diff, Meridian's
+response body. The bar then holds the count of the text before, and the search's change on the
+bind asks for a build from inside one, which is dropped (REACTIVITY.md, Lifecycle hooks). `Service`
+sees that the search moved since the bar was built and writes the count, and its colour, into the
+bar on screen, with no build. Until round 11 of plan 17 a new file in Junction, or a switch
+between pretty and raw or between tabs in Meridian, showed the last text's "n of m" until
+something else built.
 
 **Keep the current match out of the rows' shape.** A body on item rows tints its matches with
 `Search.Decorate`, the current one in a colour of its own. What every row shows — the query, its

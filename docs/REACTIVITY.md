@@ -1215,7 +1215,8 @@ The rule is deliberate, and an app relies on it. Junction's diff binds its find 
 the file it shows inside `Build` (`TextSearch.Bind` → the search's change → `FindBar` →
 `MarkViewDirty`), on about 95 of every 100 keys that move the caret in the Changes list.
 Honoured, each of those keys would build the view twice. Meridian's response body does the same
-with a signal write on a switch between pretty and raw. Work that only has to follow a build, such as a focus or a reveal, belongs in
+with a signal write on a switch between pretty and raw. The bar does not need that build: its
+`Service`, from `OnAfterBuild`, writes the new count into the bar on screen. Work that only has to follow a build, such as a focus or a reveal, belongs in
 `OnAfterBuild` as it is; only a second build has to be asked for this way.
 
 **`OnAfterBuild` runs before the style and layout passes.** The new tree has been

@@ -107,7 +107,7 @@ public sealed class TextSearch
         _textAt = null;
         _lineCount = 0;
         ClearResults();
-        _onChanged();
+        Changed();
     }
 
     public void SetQuery(string query)
@@ -143,7 +143,7 @@ public sealed class TextSearch
     {
         if (_hits.Count == 0) return;
         Index = (Index + dir + _hits.Count) % _hits.Count;
-        _onChanged();
+        Changed();
     }
 
     /// <summary>
@@ -170,7 +170,7 @@ public sealed class TextSearch
         }
         if (at == Index) return;
         Index = at;
-        _onChanged();
+        Changed();
     }
 
     /// <summary>
@@ -299,6 +299,17 @@ public sealed class TextSearch
     private void Rerun()
     {
         Run();
+        Changed();
+    }
+
+    /// <summary>Moves on with every change the owner hears of — the results, the current match,
+    /// the query and its options — so a find bar can tell whether the count it shows is still
+    /// this search's (<see cref="FindBar.Service"/>).</summary>
+    internal int Version { get; private set; }
+
+    private void Changed()
+    {
+        Version++;
         _onChanged();
     }
 

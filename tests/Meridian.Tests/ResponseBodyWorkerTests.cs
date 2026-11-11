@@ -327,6 +327,51 @@ public class ResponseBodyWorkerTests : IDisposable
         });
     }
 
+    /// <summary>
+    /// The bar is built above the body, and the body binds the search to the text it shows: the
+    /// bar was built with the count of the text it replaced, and the search's "changed" on the
+    /// bind is a request for a build from inside one, which is dropped. So with the bar open, a
+    /// switch between pretty and raw showed the other form's "n of m" until something else built.
+    /// Raw is formatted on a worker and lands a build later; pretty, kept, binds in the very build
+    /// the switch makes. Both read the count of the text they show.
+    /// </summary>
+    [Fact]
+    public void SwitchingPrettyAndRaw_TheCountIsTheShownTexts()
+    {
+        const string Compact = """{"alpha":"xray","beta":"yankee"}""";
+        Hosted((session, app) =>
+        {
+            Arrive(app, Compact);
+            session.PumpFrames(2);
+            session.Window.PressKey(KeyCode.F, KeyModifiers.Ctrl);
+            session.PumpFrames(2);
+            session.Window.TypeText("\": \"");   // the space after a colon is pretty's alone
+            session.PumpFrames(3);
+            var search = ((HultUI.Core.Builders.FindBar)typeof(MeridianApp).GetField("_responseFind",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(app)!).Search;
+            Assert.Equal(2, search.Hits.Count);
+            Assert.Equal("1 of 2", StatusOnScreen(session));
+
+            session.Window.FindByAutomationId("body-raw")!.Click();
+            session.PumpUntil(() => Body(session)?.Text == Compact, TimeSpan.FromSeconds(10));
+            Assert.Empty(search.Hits);
+            string rawFirst = StatusOnScreen(session);
+            session.PumpFrames(3);
+            string rawSettled = StatusOnScreen(session);
+
+            session.Window.FindByAutomationId("body-pretty")!.Click();
+            session.PumpUntil(() => Body(session)?.Text != Compact, TimeSpan.FromSeconds(10));
+            Assert.Equal(2, search.Hits.Count);
+            string prettyFirst = StatusOnScreen(session);
+            session.PumpFrames(3);
+            Assert.Equal(("no matches", "no matches", "1 of 2", "1 of 2"),
+                (rawFirst, rawSettled, prettyFirst, StatusOnScreen(session)));
+        });
+    }
+
+    private static string StatusOnScreen(HeadlessSession session) =>
+        ((TextElement)session.Window.FindByAutomationId("find-status")!.Element).Content;
+
     private static void MarkDirty(MeridianApp app) =>
         typeof(MeridianApp).GetMethod("MarkDirty",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!

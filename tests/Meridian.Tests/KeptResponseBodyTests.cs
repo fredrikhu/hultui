@@ -120,6 +120,36 @@ public class KeptResponseBodyTests : IDisposable
         });
     }
 
+    /// <summary>One find bar serves every tab. A switch to a tab with a kept body binds the search
+    /// to it in the build that shows it, and a close lets go of the binding and binds the next tab's
+    /// body: the count is the shown body's on the frame that shows it (FindBar.Service), not the
+    /// count of the tab before.</summary>
+    [Fact]
+    public void WithFindOpen_ASwitchAndACloseCountTheShownTabsBody()
+    {
+        Hosted((session, app) =>
+        {
+            OpenWithResponse(session, app, "one", """{"a":"needle","b":"needle"}""");
+            OpenWithResponse(session, app, "two", """{"c":"needle"}""");
+            session.Window.PressKey(KeyCode.F, KeyModifiers.Ctrl);
+            session.PumpFrames(2);
+            session.Window.TypeText("needle");
+            session.PumpFrames(3);
+            Assert.Equal("1 of 1", Status(session));
+
+            ClickOneFrame(session, "request-tab-0");
+            Assert.Equal("1 of 2", Status(session));
+
+            session.Window.PressKey(KeyCode.W, KeyModifiers.Ctrl);
+            session.PumpFrame();
+            Assert.Equal(1, app.OpenTabCount);
+            Assert.Equal("1 of 1", Status(session));
+        });
+
+        static string Status(HeadlessSession session) =>
+            ((TextElement)session.Window.FindByAutomationId("find-status")!.Element).Content;
+    }
+
     /// <summary>Pretty, raw, pretty: the third showing is the first one's body, with no job.</summary>
     [Fact]
     public void AToggleBackShowsTheKeptBody()

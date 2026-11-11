@@ -49,6 +49,8 @@ public sealed class FindBar
     // While above zero the bar is in a step of its own (a move, a switch, opening or closing), and
     // its own search's changes wait for the one onChanged the step ends with.
     private int _inStep;
+    // The search's version the count on screen was written from (TextSearch.Version).
+    private int _countVersion = -1;
 
     /// <param name="onChanged">Runs whenever the bar or its search changes — normally the
     /// owner's <c>MarkDirty</c>. Once for each step the bar takes (a key or a button: a move, a
@@ -194,6 +196,7 @@ public sealed class FindBar
         {
             moved();
             count.Content = Status(Search);
+            _countVersion = Search.Version;
             Service();
         }
         else _onChanged();
@@ -267,6 +270,14 @@ public sealed class FindBar
     /// </summary>
     public void Service()
     {
+        // The owner builds the bar, then the body, and the body binds the search to the text it
+        // shows: a switch between pretty and raw, another file. The bar was built with the count of
+        // the text before, and the search's change on the bind asks for a build from inside one,
+        // which is dropped (docs/REACTIVITY.md, Lifecycle hooks). So the count went on showing the
+        // other text's "n of m" until something else built. It is put right here, as a step writes
+        // it, with no build (plan 17, round 11).
+        if (IsOpen && Search.Version != _countVersion) RewriteCount();
+
         if (_pendingFocus && _field.Current is { } field)
         {
             _pendingFocus = false;
@@ -301,6 +312,25 @@ public sealed class FindBar
             host.RequestPostFrameCallback(reveal);
         }
     }
+
+    /// <summary>Writes the search's count, and whether it reads as bad, into the bar on screen.</summary>
+    private void RewriteCount()
+    {
+        if (CountOnScreen() is not { } count || count.Parent is not FindBarElement bar) return;
+        count.Content = Status(Search);
+        bool bad = IsBad(Search);
+        if (bar.StatusIsBad != bad)
+        {
+            bar.StatusIsBad = bad;
+            // Its theme writes the colour into the count (FindBarElement.ApplyTheme).
+            bar.MarkStyleDirty();
+        }
+        _countVersion = Search.Version;
+    }
+
+    /// <summary>Whether the count reads as a problem: a pattern that failed, or no matches.</summary>
+    private static bool IsBad(TextSearch search) =>
+        search.Error is not null || (search.Query.Length > 0 && !search.HasHits);
 
     /// <summary>The window an element is in. Not just its own <see cref="Element.OverlayHost"/>:
     /// the style pass hands that down, and it runs after <c>OnAfterBuild</c> — so a body that
@@ -341,8 +371,9 @@ public sealed class FindBar
         status.AutomationId = "find-status";
         // A move changes none of what makes the count look bad, so a step that rewrites the count
         // alone leaves this as it is.
-        bar.StatusIsBad = search.Error is not null || (search.Query.Length > 0 && !search.HasHits);
+        bar.StatusIsBad = IsBad(search);
         bar.AddChild(status);
+        _countVersion = search.Version;
 
         bar.AddChild(Box.New().FlexGrow(1));
 
