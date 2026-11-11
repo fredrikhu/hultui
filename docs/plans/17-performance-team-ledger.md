@@ -288,6 +288,11 @@ Re-ranked by the next survey.
   on Fedora read `/etc/dotnet/install_location` (→ Fedora's root, .NET 10 only), so `wsl-test.sh` must export
   `DOTNET_ROOT=/usr/local/share/dotnet` once projects target `net11.0`.
 
+- **meridian-history-test-midnight** (tests; found 2026-11-11 by meridian-v1.8.0's installer run at 00:00:41 UTC) —
+  `HistoryTests.AnOlderSendFadesItsColours_NotItsRow` (tests/Meridian.Tests/HistoryTests.cs ~:411) captures
+  `DateTimeOffset.Now` and asserts `HistoryLog.IsToday`; across midnight the send and the test's "now" fall on different
+  days. Use a fixed clock (e.g. noon) or an injected time; check other `IsToday`/`DateTime.Now` tests the same way.
+
 Closed from Waiting by the round 10 survey: apps-toast-gone-view-only (→ step 5), apps-meridian-response-drag-build
 (→ step 13, now 38.9–39.2 KB a move), vesper-brief-filter-clear-reveal's scrollbar half (→ question 28; the
 filter-clear half stays).
@@ -1049,3 +1054,7 @@ From 2026-11-08 (round 9's survey); earlier entries are in the archive ([to 2026
   approved (`ScrollViewElement.UserScrolled`; Meridian map rows read as list items). App releases cut on cc55bdcc (the
   user's request): junction-v1.25.0, vesper-v1.25.0, meridian-v1.8.0 (pushed first), aperture-v1.23.0, reel-v1.9.0;
   installer runs 42927197621, 42927198218, 42927198241, 42927201764, 42927202800 started.
+- 2026-11-11: installers: junction-v1.25.0, vesper-v1.25.0, aperture-v1.23.0, reel-v1.9.0 green and released;
+  meridian-v1.8.0's Windows test job failed on `HistoryTests.AnOlderSendFadesItsColours_NotItsRow` at 00:00:41 UTC (a
+  midnight race in the test: `DateTimeOffset.Now` + `IsToday`; passed in CI on the same commit an hour earlier) →
+  `gh run rerun --failed` once; the test fix is in Waiting.
