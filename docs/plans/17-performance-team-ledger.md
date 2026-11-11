@@ -936,3 +936,6 @@ From 2026-11-09 (round 10's survey); earlier entries are in the archive ([to 202
   Syntax 121, Reel 51, Fluent 34; UiTests 25 + 100 skipped, gate off); Fedora `wsl-test.sh` 22 projects, 0 failures
   (Core 5,083 + 1, Headless 1,390 + 83, Vesper 913 + 20); docfx `--warningsAsErrors` 0 warnings, 0 errors. origin/main
   cc55bdcc is in the branch. Phase → release.
+- 2026-11-12: round 11 merged into main as b0dd1954 (detached origin/main merge in this worktree, tree identical to the
+  tested branch; origin/main cc55bdcc was in the branch, so the push gate held). Primary checkout fast-forwarded behind
+  the guard; branch reset to the merge and pushed. CI run 43121085428 started (the first on .NET 11).
