@@ -890,6 +890,22 @@ reader must hear what came and went. Holding their bounds back while the size ch
 walking without writing the boxes and a second walk at rest; not built (2.8 to 5.4 ms of raises are
 left in a drag of about a second in Junction and Vesper).
 
+### A prefix table's own words are still shaped at every width (round 12)
+
+Plan 17's round 12, step 4 (7a753337) reads a word a prefix table cuts short off the whole word's
+cuts where HarfBuzz says the cut is safe. In Junction's Files view on a Japanese README, NativeAOT,
+a resize to 1000 px went from 14,105 HarfBuzz calls to 11,223 (frame 28.1 → 24.7 ms headless). What
+is left is mostly the tables' own words: in text without spaces a row's table starts at the row
+start, so its first word is a new string at every width, a slice from the middle of the line's word.
+Reading it off the line's word would need the script HarfBuzz guesses for the slice (from its own
+first character: in Japanese, kana and kanji start rows about equally, and Hiragana, Katakana and Han
+are three scripts), safe cuts at both ends, and the advances summed again from the slice's start
+(the pens hold sums from the word's start, which a difference of floats does not give back to the
+bit); not built. Two variants were measured and dropped: giving a word the cache holds without cuts
+(a line's width or a drawn row shaped it) its cuts the first time a table cuts it saved 7 calls of
+11,223; reading the cuts before looking the cut word up made a 40-frame drag 4 % slower (two
+lookups for every hit), so the lookup comes first.
+
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
 BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction
