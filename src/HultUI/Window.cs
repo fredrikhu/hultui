@@ -3159,8 +3159,20 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         if (PointerHeld) return;
         _hoverMayBeStale = false;
         if (_lastHoveredElement is not { } hovered || IsShownInWindow(hovered)) return;
+        long handlers = EventDispatcher.HandlerInvocationCount;
+        int drawn = _pointerState.DrawnHoverChanges;
         HoverAt(_pointerAt, _pointerModifiers);
-        _root?.MarkPaintDirty();   // the hover chain changed, as after a move (HandleInputEvent's tail)
+        // What the new hover changes on screen mostly asks for its frame itself: a hover or pressed
+        // look marks its element (InteractionStyles), a scrollbar its bar, a tooltip that closes the
+        // window. Three things do not, and only they need a frame from here: a list's tint under the
+        // row the pointer is on, drawn from the row's hover (VirtualListElement.HoverHighlight), an
+        // app's enter or leave handler, which may change what is drawn without marking it (as after a
+        // move, HandleInputEvent's tail), and the DevTools inspector, which draws the hovered element.
+        // The frame was asked for every time: Junction's commit file walk, with the pointer resting on
+        // the diff, drew each key twice, the second frame the same pixels (plan 17 round 12).
+        if (EventDispatcher.HandlerInvocationCount != handlers || _pointerState.DrawnHoverChanges != drawn
+            || _devTools.IsEnabled)
+            _root?.MarkPaintDirty();
     }
 
     /// <summary>Whether a press holds the pointer: a button is down (a press, a capture, a drag, a

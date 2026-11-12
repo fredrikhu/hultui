@@ -214,6 +214,9 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     }
     private RowHighlight? _hoverHighlight;
 
+    // The tint is drawn from the row's hover, which marks nothing: the window has to know.
+    internal override bool DrawsChildHover => _hoverHighlight is not null;
+
     /// <summary>
     /// The rows <see cref="HoverHighlight"/> is drawn under: null (the default) every row, otherwise
     /// those it is true for, so a row that took no tint of its own (a section's header, a line that

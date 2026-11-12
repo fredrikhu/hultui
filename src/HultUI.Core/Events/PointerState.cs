@@ -27,6 +27,17 @@ public sealed class PointerState(TimeProvider? timeProvider = null)
 
     public Element? HoveredElement => _hoveredElement;
 
+    /// <summary>How many times the hover of an element its parent draws hover for (a list's tint
+    /// under the row, <see cref="Element.DrawsChildHover"/>) has changed. Such an element's look
+    /// changes with no mark of its own, where a hover style marks the element it restyles: the
+    /// window reads this to know whether a hover it moved with no input has a frame to draw.</summary>
+    internal int DrawnHoverChanges { get; private set; }
+
+    private void HoverChanged(Element element)
+    {
+        if (element.Parent is { DrawsChildHover: true }) DrawnHoverChanges++;
+    }
+
     /// <summary>
     /// Update the hovered element based on pointer position.
     /// Dispatches PointerEnter/PointerLeave events following mouseenter/mouseleave
@@ -56,6 +67,7 @@ public sealed class PointerState(TimeProvider? timeProvider = null)
         for (var el = oldHovered; el is not null && !ReferenceEquals(el, commonAncestor); el = el.Parent)
         {
             el.SetInteractionHovered(false);
+            HoverChanged(el);
             if (el.HasEventHandler<PointerLeaveEvent>())
                 EventDispatcher.DispatchDirect(leaveEvt ??= new PointerLeaveEvent { Position = position, Modifiers = modifiers }, el);
         }
@@ -65,6 +77,7 @@ public sealed class PointerState(TimeProvider? timeProvider = null)
         for (var el = newHovered; el is not null && !ReferenceEquals(el, commonAncestor); el = el.Parent)
         {
             el.SetInteractionHovered(true);
+            HoverChanged(el);
             if (el.HasEventHandler<PointerEnterEvent>())
                 EventDispatcher.DispatchDirect(enterEvt ??= new PointerEnterEvent { Position = position, Modifiers = modifiers }, el);
         }
@@ -84,6 +97,7 @@ public sealed class PointerState(TimeProvider? timeProvider = null)
         for (var el = _hoveredElement; el is not null && !ReferenceEquals(el, survivor); el = el.Parent)
         {
             el.SetInteractionHovered(false);
+            HoverChanged(el);
             if (el.HasEventHandler<PointerLeaveEvent>())
                 EventDispatcher.DispatchDirect(leaveEvt ??= new PointerLeaveEvent { Position = position, Modifiers = modifiers }, el);
         }

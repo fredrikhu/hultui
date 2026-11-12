@@ -126,7 +126,12 @@ element's opens after the usual delay. Nothing happens while a press holds the p
 capture, a drag, a text selection, a slider, an autoscroll): hover stays where it is until the
 release, as it does on a move, and the frame after the release settles it. Nothing happens
 when the pointer is outside the window or has never been in it, or when the build kept the
-hovered element. Until plan 17's round 9, hover stayed on the removed element until the
+hovered element. The settle draws a frame of its own only when something shows the new
+hover: a hover or pressed style (`.OnHover`), a list's tint under the row
+(`.HoverHighlight`), or an enter or leave handler, which may change what is drawn without
+marking it. Otherwise the frame that replaced the elements stands: Junction drew every key of
+its commit file walk twice while the pointer rested on the diff, the second frame the same
+pixels (plan 17 round 12). Until plan 17's round 9, hover stayed on the removed element until the
 pointer moved, and through its parents that element kept the whole old view alive: in
 Meridian with a 2,000-endpoint spec, 7.8 MB of a 28 MB heap after a key switched the view.
 
