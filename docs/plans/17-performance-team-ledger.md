@@ -5,15 +5,14 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 13
-- **Phase:** survey — round 13's eight experts spawned 2026-11-12 in session 17c11f5e (common brief `brief-r13-survey.md`
-  in its scratchpad, probes in its `r13-<area>\` folders; desktop lock `Global\HultUI-r13-desktop`; expert 8's shared
-  AOT publishes in `r13-apps\aot\`). When all eight have reported: commit each report as `17-reports/r13-k-<area>.md`,
-  merge them into the ledger (Verdicts, a round 13 build order ranked by real-app effect, Waiting re-ranked, Examined,
-  questions from 52), and set Phase build. If the session dies, re-spawn only the experts without a `17-reports/r13-*`
-  report. The archive move for round 13 is done (round 11's Landed rows, round 12's build order and questions 46–51,
-  round 11's log; `archive_r13.py` in this session's scratchpad). Round 12 released: merged into main as afc1ed40; CI
-  run 43269911874 green on attempt 2; app releases junction-v1.26.0, vesper-v1.26.0, meridian-v1.9.0, aperture-v1.24.0,
-  reel-v1.10.0 on afc1ed40. To resume in a fresh context, run in this worktree: `/loop Run the next step of
+- **Phase:** build — round 13, step 1 next (reactivity-junction-watch-reftable + lock-echo, expert 6). The survey is
+  done (reports `17-reports/r13-*`, committed da6e72c8..8f01b6fd); 8 steps in the round 13 build order; questions 52–54
+  are open (52 shapes step 5 (a), 53 step 8, 54 step 6 (d)); the rest of each step goes ahead. Build briefs
+  `brief-r13b<N>.md` in session 17c11f5e's scratchpad quote their report lines; one build agent at a time in this
+  worktree, with `scripts/perf/step-ab.ps1` and the desktop lock `Global\HultUI-r13-desktop` for real windows. Round 12
+  released: merged into main as afc1ed40; CI run 43269911874 green on attempt 2; app releases junction-v1.26.0,
+  vesper-v1.26.0, meridian-v1.9.0, aperture-v1.24.0, reel-v1.10.0 on afc1ed40.
+  To resume in a fresh context, run in this worktree: `/loop Run the next step of
   the performance team: follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
   Read both once per session (afterwards only the ledger's Phase and the part the step needs), do the step the ledger's
   Phase calls for, record it in the ledger, and commit.` Before resuming, `git fetch` and merge main if it moved; build
@@ -22,7 +21,7 @@ file after every step and commits it with the step's work. Full survey reports a
   [the archive](17-performance-team-ledger-archive.md) (search it, don't read it whole). History note: rewritten
   2026-10-25 (every commit after 3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history).
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`)
-- **Review commits since:** round 13's survey reviews round 12's build, 5f1744ca..afc1ed40 (the last survey report to the round 12 release; the one merge is round 12's own into main). Earlier: round 12's survey reviewed round 11's build, 5731ee58..b0dd1954 (the last survey report to the
+- **Review commits since:** round 14's survey reviews round 13's build, 8f01b6fd..(round 13's release). Earlier: round 13's survey reviewed round 12's build, 5f1744ca..afc1ed40 (the last survey report to the round 12 release; the one merge is round 12's own into main). Round 12's survey reviewed round 11's build, 5731ee58..b0dd1954 (the last survey report to the
   round 11 release; it includes the .NET 11 upgrade's step 0 only as already reviewed). Earlier: round 11's survey reviewed round 10's build and the .NET 11 upgrade, f4d6050d..868e2ffc
   (the last survey report to the upgrade's captures; round 10's merge into main cc55bdcc is in the range). Earlier: round 10's survey reviewed round 9's build, 4919ac40..facced69 (the last survey report
   to the round 9 release; 82 commits, 81 not merges; no merge from main this round). Round 9's survey reviewed
@@ -71,23 +70,92 @@ memory `release-tagging` (≤3 tags per push).
 
 | Expert | Round | Satisfied | Review objections |
 |---|---|---|---|
-| 1. Layout | 12 | yes | none (a72ed576: Meridian map click MeasureSize 107 / 107 / 109.9 at 60 / 600 / 2,000 endpoints, all 24 hashes identical; the rule re-read and safe; 9fcf3696 off costs one static read a pass). Real windows (9 launches): resize steps made on the window's own thread equal headless in every layout count in Junction, Vesper and Meridian; real fonts and scale 1.5 change no count; a step made from another thread draws 3 frames on a grow (round 5's trap) |
-| 2. SkiaSharp: painting | 12 | yes | none (no paint counter moved ≥ 5 % on 230 rows; 91e5559c span counts identical on 8 files; the per-side ring makes the calls the row's box made). Real windows: draws per interaction equal headless; GR cache flat 8–9.4 MB, one 4 MB glyph atlas page, every GL program compiled by the first key. Cross-area: Junction's diff width follow draws a second frame per size change → step 1 |
-| 3. GL and Vulkan | 12 | yes | none (round 11 touched no SDL3, GL, Vulkan or media file). Real apps (16 launches): 0 frames, passes, waits and wakes at rest; 1 frame every drag step on GL, F16 and 8-bit; the first F16 replacement keeps +50 MB private and +26 MB DXGI (driver-side; 8-bit returns everything) → question 49 with expert 8's wakes |
-| 4. .NET runtime | 12 | yes | none (`WordCache` 0 B once full, 104 B a put while filling; kept bodies bounded; no new holder). Real apps (13 launches): 0 GCs through start-up, rest and resize; 0 B at rest in Junction and Vesper. Leads to 3 (Vulkan resize memory → question 49) and 7 (47 COM calls a raised event → step 3) |
-| 5. Text pipeline | 12 | no | none (corpora unchanged; WordCache and Extends sound). Font fallback answered from a struct table: −34 % on a CJK prefix pass → step 4; a wrapped CJK text is shaped ~1.3× its length at each new width (lead, step 4b). Real windows: the same faces and shaping as headless; the pipeline is scale-free |
-| 6. Reactivity and reconcile | 12 | no | none (kept bodies 4 parts + 1 build a switch; emptied refs add no build). Real windows: a repo watcher event builds Junction's chrome 10 times (−29…−52 % with three fixes); Meridian's tab switch rebuilds title bar and rail (−15 %) → step 2 |
-| 7. Accessibility bridges | 12 | no | none (audit 0 STALE in 3,606, fallbacks 10). Real windows: each raised event makes UIA call our providers 13 times plus 13 QIs on the UI thread; a resize raises bounds for every moved element (Vesper 1,596 a resize) → step 3 (question 47); off-screen appends never told → question 48; no client ever asked for a root → question 50 |
-| 8. App workloads | 12 | no | none (round 11 helped: 67 AOT walks geomean 0.964; Meridian tab switch −99.3 % on all threads, map click −36.5 %). Real windows (33 launches): Junction's commit file walk draws 2 frames a key (step 1) and pays 40 % of its UI bytes to the UIA bridge (step 3); the Vulkan apps wake ~207 times a second at rest, ~96 of them from the F16 swapchain → question 49 |
+| 1. Layout | 13 | no | none (c0ce9387: no hover look misses its repaint, 0 stale frames after 72 keys under a resting pointer; 3f93d54c O(1) a resize; 67fc0884 24–40 B an item an append). Real windows (4 launches): hover moves that draw nothing still make frames (drawn frames with the prototype Junction 244 → 129, Vesper 108 → 38, Meridian 180 → 140) → step 2; Vesper's wrapped viewer builds and draws twice a size change → step 7; posted moves count only while the user's cursor is inside the window |
+| 2. SkiaSharp: painting | 13 | no | none (c0ce9387: every paint-time hover read covered, 0 of 7 declined settles differ; 2d18a361: draws, layers, atlas and image textures identical on 8-bit, F16 and GL; no suite draw counter moved ≥ 5 %). Real windows (9 launches): a Vulkan window keeps a stencil for every size it drew at (Aperture, 9 sizes: 21.8 MB, 19 MB of it dead) → step 6; 62 of 62 (Junction) and 77 of 77 (Vesper) hover-only frames pixel-identical → step 2; meridian-hover-frames-real explained (a scrollbar tween at the display's rate) |
+| 3. GL and Vulkan | 13 | no | none (2d18a361 sound: mpv's event thread never waits on or posts to the UI thread; 0 loop frames, passes and wakes at rest in 14 launches). The rest win lasts until the first HDR video in a process (NVIDIA keeps its DXGI path: wakes 126 → 256–264 a second) → question 54. The ~112 rest wakes on 8-bit Vulkan are four NVIDIA driver threads, none ours. SDL holds 1 ms timer resolution for the app's life → step 8 (question 53); mpv's event thread wakes twice a second while paused → step 6 |
+| 4. .NET runtime | 13 | yes | none (every round 12 commit read: the fallback table 131 KB once a collection; the word cache array 458,776 B, 65 KB under the LOH line, which a 64 B entry would cross; bounded per-thread sets; 0 B a frame in the HDR follower). Real windows (12 launches): 0 B and 0 GCs at rest in 11 of 12; a windowless console holding only a Vulkan device shows the same four NVIDIA threads; SDL's 1 ms examined, no own wake saved |
+| 5. Text pipeline | 13 | no | 34dbc7fc's DECISIONS.md note: "cuts at first need" was dropped on the synthetic fixture only; on real text it is the largest share left → step 3. Real ja/zh READMEs: the fallback table answers 98.4–99.6 %; a 40-step drag at 960 logical px (a 1,440 px window at 150 %) on Chinese text shapes 277,414 times and allocates 82.8 MB in a real window (the word cache overflows), 2,096 calls and 1.1 MB with the prototype → step 3 |
+| 6. Reactivity and reconcile | 13 | no | b6c6eb6f: on a reftable repository an outside checkout, pull, reset, stash or rebase reaches only the working-tree watcher, so the branch, log and branch list stay stale (8 of 9 outside operations; 10 regressions over 53 real git operations) → step 1. Real window: a no-op fetch reloads everything from its lock files (14 git runs, 4.46 MB) → step 1; watcher events rebuild views no load re-keys, and an in-app action reloads twice → step 4 |
+| 7. Accessibility bridges | 13 | no | none (5d973076: a real cross-process client makes the same calls and QIs before and after, wrappers ~220 B made on first touch; 117 event streams identical; audit 0 STALE in 3,649, fallbacks 10; client calls arrive on UIA's worker threads, not the UI thread). Real windows (29 launches): `InvalidateRows` drops Junction History's 1,000 kept labels 4 times at start (−650 KB, −21 % of the start frames) → step 5 (question 52); a desktop listener receives our events without ever asking for a root (question 50's risk) |
+| 8. App workloads | 13 | no | 053a35ef and b6c6eb6f add ~0.8 KB to every Junction build (`SummaryFor`'s closures; below the bar) → step 4 (c). Round 12 helped: 67 AOT walks geomean 1.003 headless (Meridian tab switch −19.7 %); real windows (28 launches): commit file walk 1.00 frame a key (from 2.00), Vesper navigation 1.30 (from 2.37), Vulkan rest 110–118 wakes a second (from 207). Lead: the UIA bridge is 38 % of a Vesper navigation's frame time in a real window → step 5 (b) |
 
 ## Queued candidates
 
 Rounds 1–12's build orders all landed but round 6's step 8, round 10's step 14 and round 11's step 1 (c), measured
 and declined, and round 11's steps 13 and 14, measured with nothing to change (rounds 5–12 are in
 [the archive](17-performance-team-ledger-archive.md#round-12-build-order), with each survey's closed-from-Waiting note). Round 13's build order
-comes from its survey.
+follows, from its survey.
 A build step may bundle one expert's related small candidates as separate commits. Items marked **(user)** wait for a
 decision in Needs the user; the rest of their step goes ahead.
+
+### Round 13 build order
+
+Ranked by expected effect in the real apps over cost (the brief's "Real apps first"); the review objection first. Each
+step names the report lines its brief quotes (`r13-k` = `17-reports/r13-k-<area>.md`) and measures its real-app case in
+a guarded real window (the desktop lock `Global\HultUI-r13-desktop` and the harnesses in session 17c11f5e's scratchpad
+`r13-<area>\`) as well as by step-ab. CJK text work uses r13-5's real Japanese and Chinese fixtures (`mkreal.py`), not
+round 12's generated characters.
+
+1. **reactivity-junction-watch-reftable + reactivity-junction-watch-lock-echo** (6; r13-6 REVIEW and Candidates 1–2) —
+   separate commits. (a) The review objection to b6c6eb6f: when `.git/reftable` exists, GitWatcher watches it too and
+   reads the `tables.list` rename as a ref move: over 53 real git operations on both backends 0 regressions and 0 ref
+   moves unheard (today on reftable 10 regressions and 16 unheard); Junction headless 8 of 9 outside operations stale →
+   0. (b) A lock file alone, or a folder's own Changed, is a working-tree event (for reftable only the `tables.list`
+   rename is a ref move), and the reflog keys on DataGen: a no-op background fetch 17 → 5 git runs, UI 253.2 → 24.0 KB,
+   all threads 824.3 → 181.5 KB; the toolbar Fetch with nothing new 28 → 17 runs (−22 % UI, −30 % all threads); real
+   window 14 git runs and 4.46 MB → 0 runs and 81.7 KB. Dropping lock events outright lost 4 operations: not that.
+   Prototype `r13-reactivity\final13.patch` (`R13_REFTABLE`, `R13_NOLOCK`), watcher probe `fsw\`. Small; no API.
+2. **layout-hover-move-frames** (1, with 2; r13-1 Candidate 1, r13-2 Waiting) — an input's hover clause (Window.cs:2828)
+   asks for a frame only when `DrawnHoverChanges` moved or DevTools is open, the rule c0ce9387 gave the settle
+   (Window.cs:3198). Headless sweeps: Junction 297 → 109 frames (−63 %), Vesper 161 → 32 (−80 %), Meridian 303 → 127
+   (−58 %); 0 stale over 2,009 moves and 160 move-then-leave checks; expert 2: 62 of 62 (Junction) and 77 of 77 (Vesper)
+   such frames pixel-identical. Real windows (moves sent in-process): drawn frames Junction 244 → 129, Vesper 108 → 38,
+   Meridian 180 → 140; each removed frame is a full repaint (320–544 render visits in Junction). Prototype
+   `r13-layout\probe-r13-full.patch` (`PROBE_NOHOVERCLAUSE`). Small; no API, no pixels.
+3. **text-cjk-cuts-at-need** (5; r13-5 Candidate 1 and REVIEW) — (a) a word cut short that has no cuts yet gets them at
+   its first cut; (b) a table's last word cut by the table's end is read off the word to its natural end (at most 1,024
+   characters, only from a start that is the same at every width). Real Japanese / Chinese READMEs in Junction's Files
+   view: HarfBuzz calls at 1000 px −50 % / −64 %, a 40-frame drag −74 % / −81 %; at 960 logical px (a 1,440 px window at
+   150 %; real window, Chinese) a drag 277,414 calls and 82.8 MB → 2,096 and 1.1 MB; Latin control 137 → 103 calls; the
+   first new width +190 KB (natural-end words made once). Bit-identical: the CJK wrap corpus 0 of 1,344,616 widths, 48k
+   and 240k unchanged. Update 34dbc7fc's DECISIONS.md note. Patch `r13-text\proto-cuts-at-need.patch` (~45 lines in
+   TextPipeline.cs). Small; no API, no pixels; the time bar to confirm here.
+4. **Junction events build and load less** (6, with 8; r13-6 Candidates 3–4, r13-8 REVIEW) — separate commits: (a)
+   **reactivity-junction-watch-view-skip**: a watcher event skips `RerenderView` when the last view build read no
+   `DataGen` load (another repo's event; a working-tree event over History, Branches, Tags, Files, Commit or Overview):
+   another repo −19 % (touched −87 %), History −9.5 % and 2 → 1 frames (touched −88 %); real window a save 186.1 → 168.0
+   KB, 2 → 1 frames, empty builds 13 → 4 a launch (`R13_VIEWDG`). (b) **reactivity-junction-own-action-echo**, measure
+   first: an in-app checkout reloads again 300 ms later from the watcher (28 → 14 git runs, −23 % UI, −37 % all threads
+   against no watcher); read a refs/HEAD/config fingerprint before the own reload and let a refs event reload only when
+   it moved (not prototyped; medium). (c) **apps-junction-summaryfor-closures**: `SummaryFor` builds its closures and
+   key only when the key changed, in the app (an AsyncLoader state overload would be public API: not that): −0.8 KB a
+   build (History Down 29.3 KB a key, +3.4 % since 3f93d54c). Small–medium; no API.
+5. **Bridge work the apps don't need** (7, with 8's lead; r13-7 Candidate, r13-8 Candidate 1, r13-1 REAL WINDOW) —
+   separate commits: (a) **a11y-labels-kept-across-invalidaterows** **(question 52)**: `InvalidateRows` keeps item
+   labels and Meridian's history list passes a new label delegate at a day change (option 2): Junction start with a
+   reader −650 KB UI (−21 % of the start frames), each later History row-shape change −217 KB of 547 (−40 %); Branches
+   and Tags too. (b) **apps-vesper-nav-uia-share**, split first: in a real window the bridge is 38–40 % of a Vesper
+   folder navigation's frame time (1.1 % with `HULTUI_A11Y=0`; bytes only −4 %) and opening the viewer costs +420 KB of
+   bridge bytes (0 headless); count raises, calls and walks a navigation with round 12 step 3's probe and cut what a
+   reader is not told, reader event streams identical. Small (a), unknown (b).
+6. **Vulkan and media at rest** (3, with 2's prototype; r13-2 Candidate, r13-3 Candidate 2 and Waiting) — separate
+   commits: (a) **painting-vk-dead-size-stencils**: once a size change has rested, one purge of what was not used since
+   (images drawn since are kept): Aperture after 9 sizes 9 stencils (21.8 MB) → 1, GR budget 36.6 → 13.8 MB, private
+   188.3 → 163.7 MB; GL is flat (`r13-painting\host`, `PAINT_PURGE`). (b) **media-mpv-event-wait-forever**:
+   `mpv_wait_event(_mpv, -1)` (MpvBackend.cs:253; every flag the loop reads already has its `mpv_wakeup`): a paused
+   player 2 → 0 wakes a second; a test that Dispose still returns at once. (c) **vk-format-switch-chained**, only if the
+   step has room: the HDR → SDR switch rebuilds chained, not destroy-first (311 ms once a transition today). (d) HDR.md:
+   after an HDR video the process keeps NVIDIA's DXGI threads and memory **(question 54)**. Small; no API.
+7. **layout-vesper-wrap-resize-lead** (1; r13-1 Candidate 2) — Vesper's wrapped viewer and diff lead the body's width by
+   the window's delta before layout, as Junction's `LeadDiffWidth` does (`SettleWrappedRowWidths`, CommanderApp.cs:3323,
+   from `OnWindowResized` at :3274): a resize step 2 → 1 frames, builds 128 → 64, 373 → 310 KB (−17 %) (`PROBE_VLEAD`);
+   the first frame shows correct heights; compare settled pixels. Small, app.
+8. **gl-sdl-timer-resolution-at-rest** (3; r13-3 Candidate 1; experts 4 and 8 examined it as not worth it here)
+   **(question 53)** — set SDL's `SDL_TIMER_RESOLUTION` hint to "0" before SDL_Init, "1" only while the loop paces
+   frames or a tween runs, "0" again after ~1 s with none: the app's own wakes unchanged, NVIDIA Vulkan unchanged (the
+   driver holds 1 ms itself); machine-wide clock interrupts 1,000 → 64 a second where nothing else asks for 1 ms (a GL
+   app at rest on a quiet laptop). Unmeasurable while Steam holds 1 ms here. Small; Windows only; owned deadlines at
+   rest may fire up to 15.6 ms late.
 
 ### Waiting
 
@@ -97,112 +165,88 @@ Re-ranked by the next survey.
   NVDA and Orca; a silent move would mean moving focus to the selected item (needs the user's approval).
 - **junction-changes-leads** (6/7/8, reader behaviour, no perf number) — only the caret is told to a reader, not a
   multi-selection's other members; a reader's "select" on a folder row clicks it, which opens or closes the folder. (The
-  perf parts were examined by round 8: below the bars.)
+  perf parts were examined by round 8: below the bars.) Round 13: still so (round 12 touched no selection pattern).
 - **junction-review-old-path** (app bug, not perf; round 7 step 8a) — the review composer sends GitLab `old_path` = the
-  new path for a renamed file, because `GitFileDiff.OldPath` is never set (`RenamedFrom` now holds git's old path).
-  Decide whether review positions on renamed files should carry the old path.
+  new path for a renamed file, because `GitFileDiff.OldPath` is never set (JunctionApp.Changes.cs:122, 124;
+  GitRepository.cs:496, 511; `RenamedFrom` holds git's old path). Decide whether review positions on renamed files
+  should carry the old path. Reproduces in round 13.
 - **dropdown-follow-control-on-resize** (1, correctness, low) — a Dropdown list or DatePicker calendar stays at its
   opening point when a resize moves its control; anchoring changes how a press on the control behaves. Not perf.
-- **junction-leads (remaining)** (tests) — `SelectConflict` and a conflict row's right-click have no test of their own
-  (not perf).
-- **vesper-brief-filter-clear-reveal** (6/1, not perf; round 9 step 10) — clearing a filter with Backspace leaves
-  Brief's cursor column out of view (the scroll is clamped to the narrower filtered layout; the sideways reveal has
-  no apply-after-layout form like the vertical one); a full build does the same, no column goes blank. **Round 10
-  verified the scrollbar half, worse than noted → question 28:** the scrollbar sets the offset with no `ScrollEvent`
-  (Scrollbar.cs:161 track click, :190 thumb drag) and Brief makes columns only on one (CommanderApp.Views.cs:586): 400
-  files, a track click to offset 2,197 shows 4 of 4 columns blank, a thumb drag 7 of 8 moves with a blank column, 0
-  builds (r10-1).
-- **findbar-countonscreen-foreach** (4, nit) — `CountOnScreen` loops `foreach` over `bar.Children` (32 B on AOT, 0.4 %
-  of an 8 KB Enter); fix when FindBar is next touched. Round 12: still there (FindBar.cs:208–215), and 0ed79e8a's
-  `RewriteCount` is a second caller (once per switch with the bar open).
+- **junction-leads (remaining)** (tests) — `SelectConflict` (JunctionApp.Changes.cs:1477) and a conflict row's
+  right-click have no test of their own (not perf; still so in round 13).
+- **vesper-brief-filter-clear-reveal** (1, not perf; round 9 step 10) — clearing a filter with Backspace leaves Brief's
+  cursor column out of view (the scroll is clamped to the narrower filtered layout; the sideways reveal has no
+  apply-after-layout form like the vertical one). The scrollbar half was fixed by round 10 step 15 (`BriefScrolled`,
+  CommanderApp.Views.cs:616–625; r13-6).
+- **findbar-countonscreen-foreach** (4, nit) — `CountOnScreen` loops `foreach` over `bar.Children` (FindBar.cs:212; 32 B
+  on AOT, 0.4 % of an 8 KB Enter), and `RewriteCount` (:317–319) calls it once a switch with the bar open; fix when
+  FindBar is next touched.
 - **textarea-chunked-document** (5/4; the user chose option B on 2026-10-25) — parked: Meridian's 89k body typing is
-  ~238–241 KB/key, most of it the TextArea's new string; the user's 256k-character condition is unmet.
+  ~238–241 KB/key, most of it the TextArea's new string; the user's 256k-character condition is unmet (round 13: still).
 - **a11y-served-items-followups** — a live Orca check only (no desktop Orca here; optional).
-- **F16 kept drag targets** (3) — deferred since round 5's `nvlddmkm` errors; never repeat blind. Round 9: an F16 drag
-  frame allocates 2,136 B JIT / 2,040 AOT against 8-bit's 136/40 (the per-size wrap kept targets would remove), drag only.
-  Round 10: unchanged (~168 KB an 84-frame drag; the target's key includes the size, SkiaVulkanRenderSurface.cs:677–691).
 - **gl-threaded-optimization-profile** (3; the user's driver setting, information only) — the walk lands while the
   window rests; the setting would remove only the per-frame spin (round 9: mean 357 JIT / 344 AOT, max 456/578
-  `SwitchToThread` a paced frame; round 8: mean 340–387, max ≤ 986; round 10: mean 378/376, max 723/644).
-- **text-open-measures-every-line (full)** (5; user: not now, 2026-10-13).
-- **controls-menu-max-height-scroll** (1; not perf: no maximum height or scrolling; the Vulkan-drag half is gone since
-  f3302209, round 9 expert 2), **layout-virtuallist-spacer-stale** (1; invisible; with an audit).
-  Round 11 step 4: layout-virtuallist-spacer-stale confirmed wrong but invisible (the audit's 209 stale spacer
-  heights, 208 at 0, and 138 held-row gaps); not fixed — marking the spacer puts a real-height box under the main
-  pass and needs its own proof, and lists stay audit-unclean anyway (rows laid out as roots, 8.7k relative-Y diffs).
+  `SwitchToThread` a paced frame; round 10: mean 378/376, max 723/644).
+- **text-open-measures-every-line (full)** (5; user: not now, 2026-10-13). Round 13 (r13-5), stronger on real CJK text:
+  a 1 px drag step re-breaks every wrapped row of the document (Japanese at 1440: 1,040 prefix tables, 119,899
+  characters itemized and 84,495 fallback questions a frame; real window at 960 logical: 2,618 tables, 166,806
+  characters) with ~40 rows on screen; step 3 removes the shaping and bytes, not this O(document) itemizing.
+- **controls-menu-max-height-scroll** (1; not perf: no maximum height or scrolling), **layout-virtuallist-spacer-stale**
+  (1; invisible; round 11 step 4: confirmed wrong but invisible, 209 stale spacer heights; marking the spacer needs its
+  own proof).
 - **aperture-poster-as-hero**, **aperture-tmdb-size-fallback**, **junction-narrow-gitlab-glyphs**,
-  **meridian-pane-choice-not-persisted**, **meridian-min-width-wraps** (apps; not perf; round 9: the Meridian two and
-  junction-review-old-path still reproduce, the others' code is unchanged and was not exercised). Round 10: the same;
-  min-width wraps only after a send (760×540: "Headers 6" wraps, Send's keycap and the response bar's end cut off;
-  shots `r10-apps\drv\shots\min760*.png`).
-
-
-- **aperture-cursor-guard-textarea** (6, low; found in round 10 step 5) — Aperture's cursor-key guard tests only
-  `TextInputElement`, not `TextArea`; no harm seen in the issue reply. Check with the next Aperture keyboard change.
-
-- **a11y-label-under-named-button** (7, lead; found in round 10 step 10) — a label under a name-from-content button,
-  changed with no structure change, still builds a tree through the leaf patch (`NamedFromContentAbove`); it could fall
-  back to the walk now that a renamed node with children walks in place. Measure at the next survey.
-  Round 11 (r11-7): measured, 60 rows 16.74 → 0.08 KB a change, 1,000 rows 264.9 → 0.08 (trees 1 → 0, reader events
-  identical); no app pays it (Vesper's 432 such changes all land in frames that walk anyway, 0 refused). Prototype
-  `r11-a11y\apply-proto.py` ready (it fails the 4 `A11yLeafPatchTests` that pin the rebuild); build it when an app
-  has a button whose label changes alone. Round 12 (r12-7): one new case, Vesper's transfer overlay "Pause  P" /
-  "Resume  P" ghost button (P during a copy; rare; `TransferRateTests` toggles pause without drawing the overlay).
-
-
-- **syntax-shared-registry-rest** (5; found in round 10 step 12) — Typst (`.typ`/`.typc` reach 57 grammars), Julia
-  (9.2 MB), PHP, Razor (`.cshtml`) and HTML files still use the shared registry with a fixed set of grammars. Measure at
-  the next survey if an app opens them.
-  Round 11 (r11-5), first file in its own process, KB kept: `.typ`/`.typc` +42,419 (57 grammars, 117,238
-  allocated; the largest single retention now, ×1.4 Markdown's before step 12), `.jl` +9,183, `.php` +4,449,
-  `.cshtml` +4,567, `.html` +3,078. Typst is worth step 12's fence-scan route if the apps meet it → question 42;
-  the rest stay parked.
-  The user, 2026-11-11 (question 42): no Typst files — skip; the whole item stays parked.
-- **junction-chromeparttests-load** (tests; round 10 step 12) — two `ChromePartTests` failed once in a full run while a
-  four-way corpus scan loaded the machine; passed alone and on a quiet machine. Their build counts are load-sensitive:
-  watch at the full suite and in CI.
-
-
-- **fedora-local-dotnet** (environment) — remove `/usr/local/share/dotnet` and the `/usr/local/bin/dotnet` link in WSL
-  Fedora once Fedora ships the final `dotnet-sdk-11.0`; `wsl-test.sh` takes `DOTNET_ROOT` from the dotnet on PATH
-  since 67105a0b, so it follows.
-
-
-
-- **f16-held-drag-post-stall** (3; survey stall once, round 11 step 13's one approved re-run clean) — cause unknown.
-  The re-run opened on the 4K at 120 Hz; the stall was on the 1440p at 200 Hz. Another run needs a new approval
-  from the user and should place the window on the 200 Hz display. No fix: no evidence points to one. Round 12
-  (r12-3): 11 F16 drags and 64 one-shot rebuilds in Aperture and Reel ran clean on the 1440p at 200 Hz; the stall
-  needs a post waiting at every step, and the real apps post 0 times at rest (playback might): no run asked.
-
-- **Suite scenarios** (8; r12-8) — rows the suite lacks: an idle Vulkan window counting every thread's wakes (not only
-  the loop's); frames per key in a document-view walk under a real loop; an app-shaped shell resize (sidebar, list and
-  diff, 1440↔1200). The first two need a real window (the suite is headless): perhaps gated UiTests rows.
-- **findbar-count-not-announced** (7, reader behaviour, not perf; r12-7 Review) — a find bar's new "n of m" reaches the
-  bridge as a Name change on the count label; a reader speaks it only if it moves there (no `Announce`, no live
-  regions), before and after 0ed79e8a.
-- **vesper-start-focus-event** (7, lead; r12-7) — at start Vesper raised a focus-changed event and HasKeyboardFocus for a
-  window that never had the foreground, and refused 1 leaf patch (1 full tree build; the only refusal in 10 bridge-on
-  launches). Cause not isolated.
-- **meridian-hover-frames-real** (2, lead; r12-2) — Meridian's second hover pass draws 25 frames in a real window against
-  3 headless; unexplained (its animations run at the display's 200 Hz: the settle after an import is 40 frames with 37
-  bounded SaveLayers against 7 and 5 headless).
-- **hover-move-frames-nothing-shows** (1; found in round 12 step 1) — a mouse move over rows still draws a frame per
-  hover change even where nothing draws hover (c0ce9387 fixed only the settle after a build). Measure at the next
-  survey: frames a move in Junction, Vesper and Meridian lists against hover changes that draw.
-- **a11y-gate-on-client** (7; question 50: not yet) — build the tree and raise events only after a UIA client asks
-  for the window's root (in 15 real launches none did). Decide after a live check with Narrator and NVDA running (the
-  user runs them; it could go with the live-reader check of menus).
+  **meridian-pane-choice-not-persisted**, **meridian-min-width-wraps** (apps; not perf). Round 13 (r13-8):
+  meridian-pane-choice-not-persisted reproduces (MeridianApp.cs:148, flipped at :340, never saved); the min-width wrap
+  at 760×540 stands on Windows (46fccd88 keeps 448 / 1320); the others' code is unchanged.
+- **a11y-label-under-named-button** (7, lead; round 10 step 10) — a label under a name-from-content button, changed with
+  no structure change, still builds a tree through the leaf patch; round 11 measured 60 rows 16.74 → 0.08 KB a change,
+  and no app pays it (prototype `r11-a11y\apply-proto.py`); one rare case, Vesper's transfer overlay "Pause  P" /
+  "Resume  P". Round 13: no new case.
+- **syntax-shared-registry-rest** (5; parked) — Typst, Julia, PHP, Razor and HTML still use the shared registry (round
+  11: `.typ` +42,419 KB kept); the user (question 42): no Typst files; parked.
+- **junction-chromeparttests-load** (tests) — two `ChromePartTests` failed once under load (round 10). Round 13 (r13-6):
+  no recurrence; since b6c6eb6f one case (a remote added) arrives through the real FileSystemWatcher alone, a new
+  load-sensitive point. Watch at the full suite and in CI.
+- **fedora-local-dotnet** (environment) — once Fedora ships the final `dotnet-sdk-11.0`, remove
+  `/usr/local/share/dotnet` and both links, `/usr/local/bin/dotnet` and `/usr/local/sbin/dotnet` (`which` picks the sbin
+  one). Round 13 (r13-4): Fedora 44's updates have only 11.0.100~rc.3; `wsl-test.sh` follows the dotnet on PATH.
+- **f16-held-drag-post-stall** (3; one survey stall, round 11 step 13's approved re-run clean) — cause unknown. Round 13
+  (r13-3): the only F16 drag left is during HDR playback, where mpv posts every frame (the stall's precondition); a run
+  needs an HDR clip playing on the 1440p at 200 Hz and a new approval from the user.
+- **Suite scenarios** (8) — (a) an idle Vulkan window counting every thread's wakes: keep, low, only as a gated UiTests
+  guard of round 12 step 5 (116 against 212 a second). (b) frames per key under a real loop and (c) an app-shaped shell
+  resize: closed in round 13 (DiffFrameCountTests covers (b); (c) went with a11y-structural-walk-during-resize).
+- **findbar-count-not-announced** (7, reader behaviour, not perf) — a find bar's new "n of m" reaches the bridge as a
+  Name change on the count label; a reader speaks it only if it moves there (no `Announce`, no live regions).
+- **vesper-start-focus-event** (7, lead) — at start Vesper raises a focus-changed event for a window that never had the
+  foreground (round 13: 5 of 5 launches), and in 2 of 5 refuses a leaf patch and builds a second tree (~53 KB), start
+  only. Cause not isolated; not perf.
+- **a11y-gate-on-client** (7; question 50: not yet) — build the tree and raise events only after a UIA client asks for
+  the window's root. Round 13 (r13-7): 0 root asks in 22 launches; the bridge costs Junction +40 % UI bytes at start and
+  +29 % a commit-walk key, Vesper +29 % a drag. New risk evidence: a desktop-wide listener receives our bounds,
+  structure, name and focus events (13 provider calls each) without ever asking for the root; a gate would cut it off.
+  Decide after the user's live check with Narrator and NVDA (it could go with the menu check).
 - **after-layout-callback** (1; question 51: only if another app needs it) — a public hook after layout and before
-  render; Junction's resize guesses the diff's width instead (right in every measured case; the after-frame check
-  stays).
-- **a11y-structural-walk-during-resize** (7; round 12 step 3, DECISIONS.md) — after the debounce, a live drag's
-  remaining walks are structural (rows coming into view: Vesper 3, Junction 3, Meridian 1 a 60-step drag) and still
-  tell bounds (428/181/29 raises); deferring their bounds to the rest is the next lead.
-- **vk-format-switch-chained** (3; round 12 step 5) — switching F16 off rebuilds destroy-first: 325 ms in Reel (the
-  8-bit create alone 311 ms), 144 ms in the probe; a chained rebuild may be cheaper for a format switch (not tried).
-- **size-change-restore-second-frame** (1/3; round 12 step 1) — each restore in a size series draws a second small frame
-  (9 KB), before and after step 1; not attributed.
+  render. Round 13 (r13-1): Vesper's wrapped viewer also needs a laid-out width, but a width lead fixes it without a
+  hook (step 7); Aperture's and Junction's other after-frame reads are reveals or focus. Still not needed.
+- **text-cjk-row-start-suffix** (5, lead; r13-5) — after step 3 the largest HarfBuzz source: a row-start word read off
+  the line's word (Japanese 300 of 1,051 calls at 1000 px, 216 of 453 a drag; Chinese 201 of 1,165, 77 of 403). Needs
+  the slice's own script guess and safe cuts at both ends. Medium–large; up to ~20–30 % of a new width's calls.
+- **junction-git-optional-locks** (6, lead, not measured; r13-6) — Junction's read-only git with `GIT_OPTIONAL_LOCKS=0`:
+  `git status` then no longer takes `index.lock` and rewrites the index on the first status after each save (332 KB on
+  jrepo), so no lock contention with the user's own git (a 2026-11-09 test hit it), and the watcher could stop ignoring
+  index renames (a terminal `git add` or `restore --staged` is never heard today). Behaviour change: background reads no
+  longer refresh git's stat cache. Measure first, then ask the user.
+- **junction-commit-first-visit-frames** (8, lead; r13-1 REAL WINDOW) — in a real window a file's first visit in the
+  commit walk draws 2 frames (the key's build, then the async diff load's) plus an accessibility-only frame; headless
+  the load lands before the frame; revisits draw 1.
+- **junction-commit-detail-whole-patch** (8, lead; r13-4) — each commit-detail load reads the whole patch (two fixture
+  commits 6.1 M characters): History Down 357 KB on all threads a key against 29 KB on the UI thread, 3 loads after the
+  selection rests, off the UI thread.
+
+Closed from Waiting by the round 13 survey (→ Examined unless named): hover-move-frames-nothing-shows (→ step 2),
+vk-format-switch-chained (→ step 6 (c)), size-change-restore-second-frame, F16 kept drag targets,
+meridian-hover-frames-real, a11y-structural-walk-during-resize, aperture-cursor-guard-textarea.
 
 ## Landed
 
@@ -222,6 +266,48 @@ Round 12 (the round round 13's survey reviews; it moves to the archive at round 
 | 12 | 46fccd88 | meridian-editor-floor-measured (question 46: the measured floor) | Not perf. Meridian's editor floor is the larger of 448 and the measured width of an ordinary request's six sub-tabs (strip padding, gaps, each tab's padding and label, the open tab in medium where wider), measured once through `TextMeasure` and cached by font family, display scale and measure context (`EditorMinWidth`, `ForceBottomWindowWidth` now internal instance properties). Windows (Segoe UI): strip 445.2 (447.0) px, floor 448 → 448, breakpoint 1320 → 1320; Fedora (Noto Sans): strip 463.9 (465.2), floor 448 → 466, breakpoint 1320 → 1338 (the strip's 12 px end padding and the medium tab, beyond the 4.6 px cut); pinned DejaVu floor 484, breakpoint 1356. Images at 1320×760 and 1319×760 pixel-identical before and after on Windows; idle 0 B, a full build 127,562/127,596 B unchanged, 100,000 cached reads 0 B. `In_a_wider_face_the_editors_floor_is_the_sub_tab_strips_width` fails under a reverse edit; PartTests and `ResponseViewerTests.TheRightPaneWidensByItsInnerEdge…` read the floor from the app (the latter failed on Fedora, 662 vs 680). Meridian.Tests 678 + 4 skipped on Windows and on Fedora (`wsl-test.sh`). |
 
 ## Examined, not worth it
+
+From the round 13 surveys (details in `17-reports/r13-*`):
+
+- **Closed from Waiting:** size-change-restore-second-frame (1, 3: `SetWindowPos` from another thread draws 2 frames a
+  grow, round 5's trap; from the window's own thread, where drags, maximize and snap come from, 1; 9 KB, 0.3 ms render);
+  F16 kept drag targets (3: F16 is on only while an HDR video is on screen, ~2 KB a drag frame then);
+  meridian-hover-frames-real (2: the probe's pointer column sat in the map list's scrollbar band, whose 0.12 s expand
+  tween draws 16 frames at 120 Hz, 25 at 200 Hz, 3 headless); a11y-structural-walk-during-resize (7: the walks come at a
+  drag's first step, whose bounds are final, or at one breakpoint rebuild: 0 saved); aperture-cursor-guard-textarea (6:
+  the only TextArea is caught at ApertureApp.cs:500, which tests both types).
+- **The Vulkan apps' ~112 rest wakes** (3, 4, 8): four NVIDIA driver threads in nvoglv64 (~97, 10, 4 and 1 a second),
+  the busiest a 10 ms poll at the 1 ms resolution the device itself holds; a windowless console process with only a
+  Vulkan device shows the same. Not ours; unchanged by present mode, OBS's layer, a11y or SDL's hint. Aperture and Reel
+  on GL until a video plays would rest at ~10 a second, but that is a runtime renderer switch against the Vulkan-opt-in
+  decision.
+- **FIFO for 8-bit Vulkan** (3, 8): adds NVIDIA's DXGI threads (97 + 25 a second) and +37 MB local; MAILBOX stays.
+- **Replacing the VkSurfaceKHR at the switch to 8-bit** (3): NVIDIA keeps its DXGI path (identical threads and memory);
+  only a device rebuild is left (question 54).
+- **SDL's 1 ms timer at rest** (4, 8; expert 3's step 8): no own wake saved in any app; NVIDIA Vulkan holds 1 ms anyway;
+  the machine-wide effect is unmeasurable here. Kept as step 8 only under question 53.
+- **8-bit against F16 paint cost** (2): identical draws, layers, atlas and image textures; F16 adds a 22.8 MB offscreen
+  and larger swapchain images. GL's FBO 0 stencil (11.12 MB at 2160×1350) is accounting only, flat.
+- **Capping short UI tweens below the display's rate** (2): frames scale with refresh (a 0.12 s tween is 15 frames at
+  120 Hz, 24 at 200 Hz); a cap would change smoothness on high-refresh displays.
+- **A bigger or 2-way fallback front table** (5): misses are 0.5 % (ja) and 1.6 % (zh) of drag questions. Rank CJK work
+  on the real ja/zh fixtures, not round 12's generated one (its 11k new words a width thrash the 8,192-entry word cache
+  on their own, hiding step 3's effect: −2 % there).
+- **Skipping property raises for elements no client was ever given** (7): ~140 of a resize's 142 raises, ≤ 1,963 calls
+  and QIs once a resize after the debounce, 0 managed B; below every bar (a finer form of question 50).
+- **67fc0884's label array growth** (1, 4, 7): 24–40 B an item once an append, only with a reader (`GetItemLabel`
+  already resized so). **Wrapper lookup for items served on demand** (7): one uncontended lock and 2 map lookups, 0 B.
+  **Native pattern objects** (7): 70.4 KB native a 400-item warm walk, paced by the client, unchanged.
+- **Bytes per pointer move that draws nothing** (1): 0.15–0.85 KB on all threads, no frame.
+- **Junction History 1.10 frames a key with a pointer** (8): the hover tint really follows the scroll. **Aperture's
+  5-frame bursts** (8): posters landing, by design.
+- **Empty builds** (6): 0 in 31 headless walks of common actions in all five apps. Watcher misses both versions share
+  (index-only changes, a linked worktree's own switch) heal at the next event; pack-refs, gc and config reloads are
+  rare.
+- **apps-junction-drag-a11y-bytes** (8's lead): the bridge's third of Junction's drag-step bytes is the one structural
+  walk at the drag's first step (327 KB, final bounds); closed with a11y-structural-walk-during-resize.
+- **Word cache entry size** (4): 56 B × 8,192 = 458,776 B, 65 KB under the LOH line; a 64 B entry would put the array on
+  the LOH (keep in mind when the entry grows).
 
 From the round 12 surveys (details in `17-reports/r12-*`):
 
@@ -561,7 +647,28 @@ No question is open from rounds 1–12. Their answered questions are in the arch
 before asking anything an earlier round asked. Recommendations in brackets. Question 50 (a11y-gate-on-client)
 and 51 (after-layout-callback) were answered "not yet" and "only if another app needs it"; both are Waiting.
 
-Reminder (expert 8): Aperture signed in to jellyfin.home as device "aperture-survey" in earlier rounds and once in
+Round 13 questions (from the survey, 2026-11-13). Recommendations in brackets.
+
+52. **a11y-labels-kept-across-invalidaterows** (r13-7; step 5 (a)): a list's `InvalidateRows()` drops every kept reader
+    label, so Junction History makes its 1,000 labels again 4 times at start with a UIA client listening (keeping them:
+    −650 KB, −21 % of the start frames) and at every later row-shape change (−217 KB of 547). Option 1: an opt-in list
+    option or overload that keeps labels (public API). Option 2: `InvalidateRows` keeps labels by contract (the
+    documented behaviour in `VirtualListElement.cs:60–66` and ELEMENTS.md changes), and an app whose labels read other
+    state passes a new label delegate, as Meridian's history list would at a day change. A reader hears the same names.
+    [Option 2: no new API, one app line.]
+53. **gl-sdl-timer-resolution-at-rest** (r13-3; step 8): SDL holds Windows' timer at 1 ms for the app's whole life.
+    Asking only while frames are paced would let the machine's clock interrupt fall from 1,000 to 64 a second while a GL
+    HultUI app rests and nothing else asks (a laptop), with no change in the app's own wakes; experts 4 and 8 count it
+    not worth it here, because Steam already holds 1 ms on this machine. Building it needs a measurement with Steam (and
+    any browser video) closed for a few minutes, or `powercfg /energy` run as administrator. Build it, with the step
+    asking you for those minutes, or decline? [Build it, with a few minutes of Steam closed when the step asks; drop it
+    if the count shows nothing.]
+54. **What an HDR video leaves behind** (r13-3; step 6 (d)): after the first HDR video in a process, NVIDIA keeps its
+    DXGI threads (~125 wakes a second more) and ~47 MB more GPU memory until the app closes, even back on 8-bit; only
+    rebuilding the Vulkan device (the Skia context, every GPU resource, the mpv interop: large, may not work) could
+    return it. Document it in HDR.md, or try the device rebuild? [Document it.]
+
+Reminder (expert 8): Aperture signed in to jellyfin.home as device "aperture-survey" in earlier rounds, as "aperture-r13" in round 13, and once in
 round 12 as "aperture-r12"; the user should remove those devices and revoke the API key when the work is done.
 
 Standing notes (from earlier rounds):
@@ -690,3 +797,22 @@ From 2026-11-12 (round 12's survey); earlier entries are in the archive ([to 202
   are attached (the 4K at 150 % primary, the 1440p to its left). The eight experts survey round 12's build,
   5f1744ca..afc1ed40 (29 commits, one merge: round 12's own into main), in their own worktrees on this commit, in real
   windows too.
+- 2026-11-13: round 13 survey done (reports da6e72c8..8f01b6fd, `17-reports/r13-*`, ~75 min). .NET runtime satisfied;
+  the other seven not. Review objections: b6c6eb6f (a reftable repository's ref moves read as working-tree events, so
+  Junction stays stale after an outside checkout; correctness) → step 1; 34dbc7fc's DECISIONS.md note (measured on a
+  generated fixture only) → step 3; 053a35ef and b6c6eb6f +0.8 KB a Junction build (below the bar) → step 4 (c). Round
+  12 helped the real apps (67 walks geomean 1.003 headless; commit walk 1.00 frame a key from 2.00, Vesper navigation
+  1.30 from 2.37, Vulkan rest 110–118 wakes a second from 207). Real windows: ~104 guarded launches in ~23 holds of
+  `Global\HultUI-r13-desktop`, 0 foreground takes by the apps, 0 driver events, 0 screen reads. One disturbance: expert
+  2's first batch dot-sourced `driver.ps1.inc` (not a .ps1 name), so the shell opened it in Visual Studio on the user's
+  desktop; the user closed it, the batch failed before any window, and the helper is now `driver.inc.ps1`, checked
+  before the lock is taken (my Stop-Process of the waiting batch was refused by the permission check). Merged into an
+  8-step build order (one owner each; expert 2's stencil purge and expert 3's mpv wait in one Vulkan step; expert 8's
+  `SummaryFor` objection into expert 6's step 4; expert 8's Vesper bridge lead into expert 7's step 5), 7 Waiting items
+  closed, 4 added, questions 52–54 asked. For PERFORMANCE.md: an NVIDIA Vulkan device runs four polling threads and
+  holds 1 ms timer resolution for its life (a Vulkan app rests at ~112 wakes a second here, a GL app at ~10); SDL holds
+  1 ms for the app's life, so exclude probe threads from wake counts (a Sleep(5) loop wakes 170 a second at 1 ms); a
+  Vulkan window keeps a stencil for each size it drew at; posted mouse moves count only while the real cursor is inside
+  the window; mind the logical width (a 1,440 px window at 150 % is 960 logical); rank text work on real text, not
+  generated characters; dot-source only `.ps1` files. Round 14's survey reviews round 13's build, 8f01b6fd..(round 13's
+  release). Phase → build.
