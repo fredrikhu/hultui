@@ -869,6 +869,27 @@ and Changes; Vesper's panes; Aperture's grid) and 0 on Meridian's map. The two s
 Build it when a sideways strip turns up measured at a forced width: the rule is the column's with
 the axes swapped, and its width validity is `WidthRange.Any`.
 
+### A list's item nodes and their labels are made with the tree; a live resize's structure walks tell bounds (round 12)
+
+Plan 17's round 12, step 3 split what Junction's commit file walk pays a key with a reader in a real
+window (NativeAOT, 633 diff rows a file): 391 KB on the UI thread over the bridge off, of which the
+in-place walk 286.6 KB, the UIA bridge's wrappers 85.5 KB and the diff's id sets 30.6 KB; the raises
+0 B (5 a key, 65 provider calls and 65 QueryInterface calls). The bridge's two parts were cut
+(5d973076: 980 → 864 KB a key). The walk was examined and kept: it makes the next file's rows as item
+nodes (~144 B each), their labels (~220 B, the app's delegate) and the app's row records, which with
+no reader are made only for the rows on screen. They are what a reader is given: AT-SPI pushes every
+node's name with its cache-add, the walk compares kept labels to tell a relabel, and a list over 2,000
+items already serves its items on request, where a relabel is not told and AT-SPI's client keeps the
+names it fetched. Serving smaller lists that way, or naming item nodes on request, changes what a
+reader gets on both bridges: it needs the user, with a live check in Narrator, NVDA and Orca.
+
+The same step made a live resize wait for the size to rest before its layout refresh (a6bfb1fc). The
+walks a drag still makes are the ones its structure changes bring (rows coming into view: Vesper 3 and
+Junction 3 a drag of 60 steps, 428 and 181 bounds raised, from 1,645 and 599), told at once because a
+reader must hear what came and went. Holding their bounds back while the size changes would mean
+walking without writing the boxes and a second walk at rest; not built (2.8 to 5.4 ms of raises are
+left in a drag of about a second in Junction and Vesper).
+
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
 BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction
