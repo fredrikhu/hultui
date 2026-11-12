@@ -120,6 +120,10 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
         if (_disposed) return false;
         // Remembered so the target the surface lent this sink can be given back when it goes.
         _surface = surface;
+        // A surface whose swapchain follows its pictures hears what this one is on every draw,
+        // before there is anything to draw: a video still loading says it does not know yet.
+        if (surface is IPictureRangeSurface pictures)
+            pictures.PictureDrawn(_renderer is IPictureRangeSource source ? source.PictureRange : PictureRange.Sdr);
         if (_mode == GpuSinkMode.Undecided)
         {
             Decide(GpuSinkMode.Gpu);

@@ -53,6 +53,22 @@ internal static class VulkanSwapchainChoice
     }
 
     /// <summary>
+    /// Whether the half-float scRGB swapchain is wanted: on an HDR display while an HDR picture is
+    /// on screen, and otherwise not; <c>HULTUI_VULKAN_F16</c> (<paramref name="wideColorOverride"/>)
+    /// wins either way.
+    ///
+    /// <para><b>Not whenever the display is HDR, as until 2026-11-12.</b> Nothing but HDR video needs
+    /// the half-float swapchain, and at rest it cost the Vulkan apps: an NVIDIA (610) DXGI thread
+    /// woke about 96 times a second for it (Reel at rest 209 wakes a second against 112 on 8-bit),
+    /// three images took 31 MB where 8-bit takes 16, and its first replacement (a maximize, a snap)
+    /// kept about 26 MB more of non-local memory and 50 MB of private bytes for good, which 8-bit
+    /// gives back. The user approved drawing through 8-bit until an HDR picture is shown (plan 17,
+    /// round 12). What counts as shown is <c>HdrPictureFollower</c>'s rule.</para>
+    /// </summary>
+    internal static bool WantsWideColor(bool? wideColorOverride, bool displayIsHdr, bool hdrPictureShown) =>
+        wideColorOverride ?? (displayIsHdr && hdrPictureShown);
+
+    /// <summary>
     /// The swapchain format: scRGB half-float when asked for and allowed, otherwise the first
     /// plain 8-bit BGRA or RGBA in sRGB-nonlinear, otherwise whatever the surface lists first.
     /// The <c>_SRGB</c> formats are never preferred.

@@ -2043,6 +2043,11 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         }
         _perf.EndPresent();
 
+        // A Vulkan surface whose swapchain is rebuilt for what this frame showed (an HDR video came
+        // on screen or left it) draws the next frame on the new one, though nothing else changed.
+        if (PlatformWindow.Surface is IPictureRangeSurface pictures && pictures.TakeOwedFrame())
+            _root.MarkPaintDirty();
+
         // After the present, against the tree this frame drew: what it marks shows in the next.
         if (_hoverMayBeStale) SettleHover();
 

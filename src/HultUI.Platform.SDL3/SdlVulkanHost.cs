@@ -39,16 +39,17 @@ namespace HultUI.Platform.SDL3;
 /// one render target per image for the swapchain's life rather than wrap every frame (2,048
 /// bytes, an image view and a framebuffer a frame): see <see cref="SetSwapchainReleasing"/>.</para>
 /// </summary>
-internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDisposable
+internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IVulkanPictureHost, IDisposable
 {
     private const ulong NoTimeout = ulong.MaxValue;
 
     /// <summary>
     /// <c>HULTUI_VULKAN_F16</c> as an override rather than a switch: 1 forces the half-float
-    /// surface on, 0 forces it off, and unset leaves the decision to the display. Phase 3
-    /// makes the display the default answer; the override stays because a machine whose HDR
-    /// state is reported wrongly should still be drivable, and because forcing it on an SDR
-    /// display is how the conversion gets tested without changing monitor settings.
+    /// surface on, 0 forces it off, and unset leaves the decision to the display and what is on
+    /// it: half-float only while an HDR video is shown on an HDR display
+    /// (<see cref="VulkanSwapchainChoice.WantsWideColor"/>). The override stays because a machine
+    /// whose HDR state is reported wrongly should still be drivable, and because forcing it on an
+    /// SDR display is how the conversion gets tested without changing monitor settings.
     /// </summary>
     private static readonly bool? WideColorOverride =
         Environment.GetEnvironmentVariable("HULTUI_VULKAN_F16") switch
@@ -165,7 +166,38 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// the thing that can ask SDL, and refreshed when the window changes display.</summary>
     public bool DisplayIsHdr { get; set; }
 
-    private bool WantsWideColor => WideColorOverride ?? DisplayIsHdr;
+    /// <summary>Whether an HDR picture is on screen, as the renderer last said
+    /// (<see cref="SetHdrPictureShown"/>). None at start: a window opens on its chrome.</summary>
+    private bool _hdrPictureShown;
+
+    /// <summary>The wish changed the format, and the swapchain is rebuilt at the next acquire.</summary>
+    private bool _formatSwitchOwed;
+
+    /// <summary>The first present after such a rebuild is timed, for HULTUI_STARTUP.</summary>
+    private bool _timeSwitchPresent;
+
+    private bool WantsWideColor =>
+        VulkanSwapchainChoice.WantsWideColor(WideColorOverride, DisplayIsHdr, _hdrPictureShown);
+
+    /// <summary>
+    /// Whether an HDR picture is on screen now, from the renderer after a frame that changed it. A
+    /// change of wish that changes the format rebuilds the swapchain at the next acquire, so the
+    /// frame drawn next is the first on the new one, and returns true: that frame is owed. An SDR
+    /// display, or <c>HULTUI_VULKAN_F16</c>, wishes the same either way and asks the surface nothing.
+    /// </summary>
+    public bool SetHdrPictureShown(bool shown)
+    {
+        if (shown == _hdrPictureShown) return _formatSwitchOwed;
+        _hdrPictureShown = shown;
+        // No swapchain (a minimized window): the one built at the restore chooses with the new wish.
+        if (_disposed || _swapchain.IsNull) return false;
+        bool rebuild = !VulkanSwapchainChoice.FormatStillChosen(_formatChosenForWide, WantsWideColor)
+            && ChooseFormat(out _, trace: false) != _format;
+        _formatSwitchOwed = rebuild;
+        StartupTrace.Mark($"vulkan hdr picture {(shown ? "shown" : "gone")}: " +
+            (rebuild ? $"rebuilding for {(WantsWideColor ? "scRGB" : "sRGB")}" : "format unchanged"));
+        return rebuild;
+    }
 
     /// <summary>
     /// Whether the instance has <c>VK_EXT_swapchain_colorspace</c>. Without it
@@ -785,6 +817,8 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         _format = ChooseFormat(out var colorSpace);
         _colorSpace = colorSpace;
         _formatChosenForWide = WantsWideColor;
+        // Any build chooses with the wish as it is: a switch owed before it is done.
+        _formatSwitchOwed = false;
 
         // A surface that cannot offer these is one this renderer cannot draw on, and saying
         // so here beats a null surface three call frames later.
@@ -1141,6 +1175,16 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     public VulkanFrameTarget? AcquireNextImage()
     {
         if (_disposed) return null;
+        // An HDR picture came on screen or left it (SetHdrPictureShown): the frame about to be drawn
+        // is the first on a swapchain of the format that follows it. Destroyed first or handed over
+        // as any rebuild is (VulkanSwapchainChoice.DestroyBeforeReplacing).
+        if (_formatSwitchOwed && !_haveAcquired)
+        {
+            _formatSwitchOwed = false;
+            StartupTrace.Mark($"vulkan format switch to {(WantsWideColor ? "scRGB" : "sRGB")}");
+            Rebuild(_widthPx, _heightPx, force: true);
+            _timeSwitchPresent = StartupTrace.Enabled;
+        }
         // A window minimized and restored at the size it had gets no resize, so nothing else
         // asks for the swapchain its minimized surface went without (BuildSwapchain): without
         // this, acquire returned null for ever and the window never drew again.
@@ -1339,7 +1383,14 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             pSwapchains = &swapchain,
             pImageIndices = &index,
         };
+        long presentStart = _timeSwitchPresent ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
         var result = _vk.QueuePresent(_queue, &present);
+        if (_timeSwitchPresent)
+        {
+            _timeSwitchPresent = false;
+            StartupTrace.Mark($"vulkan first present after the format switch: " +
+                $"{System.Diagnostics.Stopwatch.GetElapsedTime(presentStart).TotalMilliseconds:0.0} ms, {result}");
+        }
         _haveAcquired = false;
         if (result is VkResult.Success or VkResult.SuboptimalKHR) CountPresentForRetired();
 

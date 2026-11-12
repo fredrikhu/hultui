@@ -614,6 +614,109 @@ public sealed class VulkanProbeTests
     }
 
     /// <summary>
+    /// On an HDR display the window draws through an 8-bit swapchain until an HDR video is on
+    /// screen, rebuilds to the half-float one once when it appears, keeps it while the video is
+    /// paused, and goes back to 8-bit once when it leaves (plan 17 round 12: at rest the half-float
+    /// swapchain kept an NVIDIA thread waking ~96 times a second). The frame after each switch is
+    /// drawn on the new swapchain without being asked for, and the video's highlights reach the
+    /// half-float one above the UI's white. The clip is tagged PQ through mpv's format filter. On an
+    /// SDR display nothing is rebuilt.
+    /// </summary>
+    [VulkanUiFact]
+    public void AnHdrVideo_SwitchesTheSwapchainToHalfFloat_OnceEachWay()
+    {
+        if (!OperatingSystem.IsWindows() || !HultUI.Media.Mpv.MpvBackend.IsAvailable) return;
+        string clip = Path.Combine(Path.GetTempPath(), $"hultui-vulkan-pq-{Guid.NewGuid():N}.y4m");
+        string capture = Path.Combine(Path.GetTempPath(), $"hultui-vulkan-pq-{Guid.NewGuid():N}.ppm");
+        try
+        {
+            WritePqPatchClip(clip);
+            var run = RunProbe(new()
+            {
+                ["HULTUI_STARTUP"] = "1",
+                ["HULTUI_VULKAN_CAPTURE"] = capture,
+                // Past the frames a new swapchain draws before mpv has confirmed linear light.
+                ["HULTUI_VULKAN_CAPTURE_FRAME"] = "40",
+                ["HULTUI_MPV_OPTIONS"] = "vf=format=colormatrix=bt.2020-ncl:primaries=bt.2020:gamma=pq",
+                ["HULTUI_VULKAN_F16"] = null,
+                ["HULTUI_VULKAN_PRESENT"] = null,
+                ["HULTUI_VULKAN_WHITE_SCALE"] = null,
+                ["HULTUI_VIDEO_HDR"] = null,
+                ["HULTUI_A11Y"] = "0",
+            }, $"--hdr-switch \"--clip={clip}\"");
+
+            Assert.True(run.ExitCode == 0, run.Output);
+            Assert.Contains("probe: done", run.Output);
+            Assert.Contains("mpv picture: transfer pq, Hdr", run.Output);
+            var builds = System.Text.RegularExpressions.Regex.Matches(run.Output, @"vulkan swapchain \d+x\d+ x\d+ (\w+)/")
+                .Select(m => m.Groups[1].Value).ToList();
+            if (!run.Output.Contains("hdrDisplay=on"))
+            {
+                Assert.True(builds.All(f => f != "R16G16B16A16Sfloat"), string.Join(", ", builds) + "\n" + run.Output);
+                return;
+            }
+
+            // The start-up swapchain, the half-float one for the video, and 8-bit again: nothing else.
+            Assert.True(builds.Count == 3 && builds[0] != "R16G16B16A16Sfloat" && builds[1] == "R16G16B16A16Sfloat"
+                && builds[2] == builds[0], string.Join(", ", builds) + "\n" + run.Output);
+            Assert.Single(System.Text.RegularExpressions.Regex.Matches(run.Output, "vulkan hdr picture shown: rebuilding for scRGB"));
+            Assert.Single(System.Text.RegularExpressions.Regex.Matches(run.Output, "vulkan hdr picture gone: rebuilding for sRGB"));
+            // In the trace's order (stderr): on with the video, kept while it is paused, off once it goes.
+            int At(string mark) => run.Output.IndexOf(mark, StringComparison.Ordinal);
+            int shown = At("probe: video shown"), toHalf = At("vulkan hdr picture shown"),
+                paused = At("probe: video paused"), gone = At("probe: video gone"), back = At("vulkan hdr picture gone");
+            Assert.True(shown >= 0 && shown < toHalf && toHalf < paused && paused < gone && gone < back, run.Output);
+
+            // The frame owed to the new swapchain came without being asked: the frame that took the
+            // video away, and the one drawn on the 8-bit swapchain after it.
+            var unasked = System.Text.RegularExpressions.Regex.Match(run.Output, @"probe: (\d+) frames unasked after the video went");
+            Assert.True(unasked.Success && int.Parse(unasked.Groups[1].Value) >= 2, run.Output);
+
+            // The half-float swapchain's capture, after mpv confirmed linear light: highlights above
+            // the UI's white, which an 8-bit or tone-mapped picture never has.
+            var white = System.Text.RegularExpressions.Regex.Match(run.Output, @"sdrWhite=(\d+)nits");
+            // In the probe's culture: a decimal comma here.
+            var range = System.Text.RegularExpressions.Regex.Match(run.Output, @"scRGB range: min -?[\d.,]+ max ([\d.,]+)");
+            Assert.True(white.Success && range.Success, run.Output);
+            double whiteScale = double.Parse(white.Groups[1].Value) / 80.0;
+            double max = double.Parse(range.Groups[1].Value.Replace(',', '.'), System.Globalization.CultureInfo.InvariantCulture);
+            Assert.True(max > whiteScale * 1.1, $"the half-float capture's brightest value was {max:0.00}, " +
+                $"the UI's white {whiteScale:0.00}:\n{run.Output}");
+        }
+        finally
+        {
+            File.Delete(clip);
+            foreach (var file in Directory.GetFiles(Path.GetTempPath(), Path.GetFileName(capture) + "*")) File.Delete(file);
+        }
+    }
+
+    /// <summary>
+    /// Twelve seconds at 30 frames a second, 320x180, as Y4M: the left half luma 235, which as PQ is
+    /// 10,000 nits, the right half 120 (about 75), neutral chroma. Untagged it is an ordinary
+    /// grey picture; tagged PQ, an HDR one whose left half tone-maps to the display's peak.
+    /// </summary>
+    private static void WritePqPatchClip(string path)
+    {
+        const int width = 320, height = 180, frames = 360;
+        using var file = File.Create(path);
+        file.Write(System.Text.Encoding.ASCII.GetBytes($"YUV4MPEG2 W{width} H{height} F30:1 Ip A1:1 C420jpeg\n"));
+        var luma = new byte[width * height];
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+                luma[y * width + x] = (byte)(x < width / 2 ? 235 : 120);
+        var chroma = new byte[width * height / 4];
+        Array.Fill(chroma, (byte)128);
+        var marker = System.Text.Encoding.ASCII.GetBytes("FRAME\n");
+        for (int i = 0; i < frames; i++)
+        {
+            file.Write(marker);
+            file.Write(luma);
+            file.Write(chroma);
+            file.Write(chroma);
+        }
+    }
+
+    /// <summary>
     /// Fifteen seconds of grey, 160x90 at 60 frames a second, as Y4M, from black (luma 16) to white
     /// (235) in equal steps: longer than the probe runs, and every frame brighter than the last.
     /// </summary>

@@ -82,6 +82,15 @@ using HultUI.WebView.WebView2;
 // per swapchain: the window is resized between them), two seconds or more apart (Windows). Exits 4
 // when there is no libmpv.
 //
+// --hdr-switch --clip=<file> draws a white and a grey bar for 45 forced frames, then the bars and the clip, played
+// through MpvBackend in the real loop for 4 s; then pauses it and forces 45 frames; then takes the video
+// away and runs the real loop for 1 s without forcing anything, then forces 45 frames. With
+// HULTUI_STARTUP=1 the trace carries a "probe frame N" mark for every frame and the probe's own phase
+// marks, among the swapchain builds; a capture (HULTUI_VULKAN_CAPTURE, one a swapchain) is moved to
+// <capture>.<n>.ppm as it appears. Prints the frames the loop drew unasked after the video went. A clip
+// that should be HDR is tagged so through HULTUI_MPV_OPTIONS (a Y4M carries no colour tags). Exits 4
+// when there is no libmpv.
+//
 // No window made here may become the foreground, whatever it does (Windows): see Foreground.
 
 internal static class Program
@@ -99,6 +108,8 @@ internal static class Program
         if (args.Contains("--first-thread")) return FirstThread(renderer, busyMs: 0);
         if (args.Contains("--video-frame-bytes"))
             return VideoFrameBytes(renderer, args.First(a => a.StartsWith("--clip="))["--clip=".Length..]);
+        if (args.Contains("--hdr-switch"))
+            return HdrSwitch(renderer, args.First(a => a.StartsWith("--clip="))["--clip=".Length..]);
         if (args.Contains("--minimize")) return MinimizeAndRestore(renderer);
         if (args.Contains("--minimized-video"))
             return MinimizedVideo(renderer, args.First(a => a.StartsWith("--clip="))["--clip=".Length..]);
@@ -836,6 +847,60 @@ internal static class Program
         Console.WriteLine(string.Create(System.Globalization.CultureInfo.InvariantCulture,
             $"probe: {least:0.0} bytes a video frame"));
         if (brightness.Count == 2) Console.WriteLine($"probe: video brightness {brightness[0]} then {brightness[1]}");
+        Console.WriteLine("probe: done");
+        return 0;
+    }
+
+    private static int HdrSwitch(RendererKind renderer, string clip)
+    {
+        if (!MpvBackend.IsAvailable) { Console.WriteLine("probe: no libmpv"); return 4; }
+        string? capture = Environment.GetEnvironmentVariable("HULTUI_VULKAN_CAPTURE");
+        using var app = Foreground.NoActivate(new Application("vulkan-probe", 480, 270, renderer: renderer,
+            displayColorEvents: true));
+        int frames = 0, captures = 0;
+        // White and mid-grey: what an SDR step between the two swapchains would show in.
+        HultUI.Core.Elements.Element Bar() => Flex.Row().Width(120f).Children(
+            Box.New().FlexGrow(1).Background(Color.FromHex("#FFFFFF")),
+            Box.New().FlexGrow(1).Background(Color.FromHex("#808080")));
+        HultUI.Core.Elements.Element Counter() => Canvas.New(_ => HultUI.Core.DevTools.StartupTrace.Mark($"probe frame {++frames}"))
+            .Width(1f).Height(1f);
+        void Mark(string what) => HultUI.Core.DevTools.StartupTrace.Mark("probe: " + what);
+        void Frame(bool force)
+        {
+            app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: force);
+            if (capture is null || !File.Exists(capture)) return;
+            try { File.Move(capture, $"{capture}.{++captures}.ppm", overwrite: true); }
+            catch (IOException) { captures--; }   // still being written: the next frame moves it
+        }
+
+        app.SetRoot(Flex.Row().FlexGrow(1).Background(Color.FromHex("#202020")).Children(Bar(), Counter()));
+        for (int i = 0; i < 45; i++) Frame(force: true);
+
+        Mark("video shown");
+        using (var player = new MediaPlayer(new MpvBackend()))
+        {
+            app.SetRoot(Flex.Row().FlexGrow(1).Background(Color.FromHex("#202020")).Children(
+                Bar(), VideoElement.New(player).FlexGrow(1), Counter()));
+            player.Open(MediaSource.FromFile(clip), autoPlay: true);
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            while (clock.Elapsed.TotalSeconds < 4)
+            {
+                if (player.Error is { } error) { Console.WriteLine("probe: the video failed: " + error); return 2; }
+                Frame(force: false);
+            }
+            Mark("video paused");
+            player.Pause();
+            for (int i = 0; i < 45; i++) Frame(force: true);
+
+            Mark("video gone");
+            app.SetRoot(Flex.Row().FlexGrow(1).Background(Color.FromHex("#202020")).Children(Bar(), Counter()));
+            int before = frames;
+            clock.Restart();
+            while (clock.Elapsed.TotalSeconds < 1) Frame(force: false);
+            Console.WriteLine($"probe: {frames - before} frames unasked after the video went");
+        }
+        for (int i = 0; i < 45; i++) Frame(force: true);
+        Console.WriteLine($"probe: {captures} captures");
         Console.WriteLine("probe: done");
         return 0;
     }

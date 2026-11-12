@@ -171,6 +171,17 @@ colours outside BT.709 kept as negative values, which the scRGB swapchain shows 
 they are. mpv takes these as target options, set asynchronously, and the backend labels a
 frame with the settings mpv has confirmed rather than the ones it was asked for.
 
+**That target is linear only while the window's swapchain is half-float, and the swapchain
+is half-float only while an HDR video is on screen on an HDR display** (2026-11-12; before,
+whenever the display was HDR, which kept an NVIDIA driver thread waking ~96 times a second at
+rest). So the first frame of an HDR video is drawn tone-mapped on the 8-bit swapchain; the window
+then rebuilds its swapchain once, and the video is HDR from its third frame, about 210 ms after
+its first picture. A paused video keeps the half-float swapchain; it goes back to 8-bit once the
+video leaves the screen or the next file says it is SDR. What counts as an HDR video is
+`MpvBackend`'s reading of the video's own transfer (PQ or HLG), never what it was asked to
+write; any other producer's picture counts as SDR. `HULTUI_VULKAN_F16=1` keeps the half-float
+swapchain all the time.
+
 A producer that ignores all this keeps working — it writes encoded pixels, reports a
 reference white of zero, and is composited as before. But a producer that renders into
 the lent target must read `GpuFrameTarget`: **its `InternalFormat` is not `GL_RGBA8`, and
