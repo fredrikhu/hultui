@@ -269,7 +269,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     // rebuilding the whole snapshot every frame of a drag floods assistive tech
     // and is O(total items) for a virtualized list. These changes are coalesced:
     // rebuild on the leading edge, then at most every A11yCoalesceMs, then once on
-    // the trailing edge — the batching browsers apply to a11y location updates.
+    // the trailing edge — the batching browsers apply to a11y location updates. A
+    // change of the window's size has no leading edge: the refresh waits until the
+    // size has rested (_lastA11ySizeMs).
     // Timed on the platform's clock, so a headless session's virtual time drives it.
     private bool _a11yLayoutRefreshPending;
     // The same for the open overlays alone (a layout of their own, a move, a scroll inside): only
@@ -281,6 +283,23 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     // frame) put off the window's own refresh for as long as it lasted.
     private long _lastA11yOverlayRebuildMs;
     private const long A11yCoalesceMs = 100;
+    // When the window's size last changed (OnWindowResized), on the same clock. While the size keeps
+    // changing — a live resize, a frame every step of the drag — both refreshes wait until it has
+    // rested A11yCoalesceMs, and then tell the bounds once: a refresh every 100 ms of the drag raised
+    // a BoundingRectangle change for every element that moved, each answered by 13 provider calls and
+    // 13 QueryInterface calls on the UI thread (Vesper: 1,596 raises, 20,930 calls a resize of ten
+    // steps). A reader is told the bounds the size came to rest at, not those it passed through.
+    private long _lastA11ySizeMs = long.MinValue / 2;
+
+    /// <summary>Whether the coalesced layout refresh, last made at <paramref name="lastMs"/>, may come
+    /// at <paramref name="nowMs"/>: 100 ms after the last one, and 100 ms after the size last
+    /// changed.</summary>
+    private bool A11yLayoutRested(long nowMs, long lastMs) =>
+        nowMs - lastMs >= A11yCoalesceMs && nowMs - _lastA11ySizeMs >= A11yCoalesceMs;
+
+    /// <summary>When, on the platform's clock in ms, a layout refresh last made at
+    /// <paramref name="lastMs"/> comes due (<see cref="A11yLayoutRested"/>).</summary>
+    private long A11yLayoutDueMs(long lastMs) => Math.Max(lastMs, _lastA11ySizeMs) + A11yCoalesceMs;
     // A value in a range (a slider's, a progress bar's) can move on every frame: a drag, a
     // download, a playing video's scrubber, a key held down. Each refresh rebuilds the whole tree,
     // so such changes are told on the leading edge, then at most every A11yRangeCoalesceMs, then
@@ -1526,8 +1545,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // A coalesced layout-driven a11y refresh is due — force the trailing frame
         // so the last resize/scroll position reaches the tree once the drag stops
         // (during the drag, layout dirty already keeps frames coming).
-        || (_a11yLayoutRefreshPending && A11yClockMs - _lastA11yRebuildMs >= A11yCoalesceMs)
-        || (_a11yOverlayRefreshPending && A11yClockMs - _lastA11yOverlayRebuildMs >= A11yCoalesceMs)
+        || (_a11yLayoutRefreshPending && A11yLayoutRested(A11yClockMs, _lastA11yRebuildMs))
+        || (_a11yOverlayRefreshPending && A11yLayoutRested(A11yClockMs, _lastA11yOverlayRebuildMs))
         // The same for a range value's trailing edge: the value it came to rest at.
         || (_a11yRangeRefreshPending && A11yClockMs - _lastA11yRangeMs >= A11yRangeCoalesceMs))
         // Asked last: on Windows it asks UI Automation whether a client listens.
@@ -1549,10 +1568,10 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         if ((_a11yLayoutRefreshPending || _a11yOverlayRefreshPending || _a11yRangeRefreshPending) && _accessibilityBridge.IsActive)
         {
             if (_a11yLayoutRefreshPending)
-                Application.Earliest(ref at, ref deadline, (_lastA11yRebuildMs + A11yCoalesceMs) * frequency / 1000,
+                Application.Earliest(ref at, ref deadline, A11yLayoutDueMs(_lastA11yRebuildMs) * frequency / 1000,
                     IdleDeadline.A11yLayout);
             if (_a11yOverlayRefreshPending)
-                Application.Earliest(ref at, ref deadline, (_lastA11yOverlayRebuildMs + A11yCoalesceMs) * frequency / 1000,
+                Application.Earliest(ref at, ref deadline, A11yLayoutDueMs(_lastA11yOverlayRebuildMs) * frequency / 1000,
                     IdleDeadline.A11yLayout);
             if (_a11yRangeRefreshPending)
                 Application.Earliest(ref at, ref deadline, (_lastA11yRangeMs + A11yRangeCoalesceMs) * frequency / 1000,
@@ -1582,6 +1601,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         float scale = PlatformWindow.DisplayScale;
         bool scaleChanged = scale != _displayScale;
         _displayScale = scale;
+        // The bounds a reader is told wait until the size rests (A11yLayoutRested).
+        _lastA11ySizeMs = A11yClockMs;
         if (_root is null) return;
         if (scaleChanged)
         {
@@ -1801,8 +1822,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         if (a11yActive && (overlayChanges & OverlayChanges.Bounds) != 0)
             _a11yOverlayRefreshPending = true;
         long nowMs = A11yClockMs;
-        bool a11yLayoutDue = a11yActive && _a11yLayoutRefreshPending
-            && nowMs - _lastA11yRebuildMs >= A11yCoalesceMs;
+        bool a11yLayoutDue = a11yActive && _a11yLayoutRefreshPending && A11yLayoutRested(nowMs, _lastA11yRebuildMs);
         bool a11yRangeDue = a11yActive && _a11yRangeRefreshPending
             && nowMs - _lastA11yRangeMs >= A11yRangeCoalesceMs;
         bool a11yRebuild = a11yImmediate;
@@ -1826,7 +1846,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             else a11yRebuild = true;
         }
         bool a11yOverlays = a11yActive && !a11yRebuild && !a11yRefreshed && ((overlayChanges & OverlayChanges.Structure) != 0
-            || (_a11yOverlayRefreshPending && nowMs - _lastA11yOverlayRebuildMs >= A11yCoalesceMs));
+            || (_a11yOverlayRefreshPending && A11yLayoutRested(nowMs, _lastA11yOverlayRebuildMs)));
         // What changed in an overlay whose part is built again is told by that part's diff.
         if (a11yOverlays) DropPatchTargetsInStaleOverlays();
         // A list's selection moved, a text's caret, a leaf's own property, or a range's refresh came
