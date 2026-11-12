@@ -28,7 +28,7 @@ namespace HultUI.Rendering.Skia;
 /// a call that finds them in use shapes with objects of its own and keeps nothing, as calls
 /// after <see cref="Dispose"/> do.</para>
 /// </summary>
-public sealed class SkiaTextShaper : ITextShaper, IDisposable
+public sealed class SkiaTextShaper : ITextShaper, IShapesWithCuts, IDisposable
 {
     // SKShaper's units: HarfBuzz positions at 512 per em, which size / 512 turns into pixels.
     private const int HarfBuzzScale = 512;
@@ -55,8 +55,15 @@ public sealed class SkiaTextShaper : ITextShaper, IDisposable
     /// <summary>How many HarfBuzz fonts the shaper holds: one per typeface it has shaped.</summary>
     internal int CachedShaperCount => _fonts.Count;
 
-    public ShapedRun Shape(string text, IResolvedFont font, float fontSize, bool rtl = false)
+    public ShapedRun Shape(string text, IResolvedFont font, float fontSize, bool rtl = false) =>
+        Shape(text, font, fontSize, rtl, wantCuts: false, out _);
+
+    ShapedRun IShapesWithCuts.Shape(string text, IResolvedFont font, float fontSize, out RunCuts? cuts) =>
+        Shape(text, font, fontSize, rtl: false, wantCuts: true, out cuts);
+
+    private ShapedRun Shape(string text, IResolvedFont font, float fontSize, bool rtl, bool wantCuts, out RunCuts? cuts)
     {
+        cuts = null;
         if (string.IsNullOrEmpty(text))
             return new ShapedRun(text, font, fontSize, 0, []);
 
@@ -78,11 +85,11 @@ public sealed class SkiaTextShaper : ITextShaper, IDisposable
                 if (text.Length > KeptBufferMaxChars)
                 {
                     using var own = new HbBuffer();
-                    return Shape(hbFont, own, _scaleX, _scaleY, text, font, fontSize, rtl);
+                    return Shape(hbFont, own, _scaleX, _scaleY, text, font, fontSize, rtl, wantCuts, out cuts);
                 }
                 var buffer = _buffer ??= new HbBuffer();
                 buffer.ClearContents();
-                return Shape(hbFont, buffer, _scaleX, _scaleY, text, font, fontSize, rtl);
+                return Shape(hbFont, buffer, _scaleX, _scaleY, text, font, fontSize, rtl, wantCuts, out cuts);
             }
             finally
             {
@@ -97,7 +104,7 @@ public sealed class SkiaTextShaper : ITextShaper, IDisposable
         using var transientBuffer = new HbBuffer();
         using var transientSizer = new SKFont();
         Scales(transientSizer, fontSize, out float scaleX, out float scaleY);
-        return Shape(transientFont, transientBuffer, scaleX, scaleY, text, font, fontSize, rtl);
+        return Shape(transientFont, transientBuffer, scaleX, scaleY, text, font, fontSize, rtl, wantCuts, out cuts);
     }
 
     /// <summary>
@@ -112,7 +119,7 @@ public sealed class SkiaTextShaper : ITextShaper, IDisposable
     }
 
     private static ShapedRun Shape(HbFont hbFont, HbBuffer buffer, float scaleX, float scaleY,
-        string text, IResolvedFont font, float fontSize, bool rtl)
+        string text, IResolvedFont font, float fontSize, bool rtl, bool wantCuts, out RunCuts? cuts)
     {
         buffer.AddUtf16(text);
         buffer.GuessSegmentProperties();
@@ -127,6 +134,16 @@ public sealed class SkiaTextShaper : ITextShaper, IDisposable
         var positions = buffer.GetGlyphPositionSpan();
         int count = infos.Length;
         var glyphs = new GlyphPosition[count];
+        // Where the run can be cut (RunCuts): each glyph's cluster start, unsafe or not, and the pen
+        // before it, read in the loop below. Left to right only (as asked and as guessed from the
+        // script: Hebrew asked left to right still shapes right to left), where clusters only grow.
+        int[]? starts = null;
+        float[]? pens = null;
+        if (wantCuts && count > 0 && buffer.Direction == HarfBuzzSharp.Direction.LeftToRight)
+        {
+            starts = new int[count];
+            pens = new float[count];
+        }
 
         // SKShaper's arithmetic, in its order: a glyph sits at the pen plus its offset (HarfBuzz's
         // y grows up, Skia's down), then the pen moves on by its advance. A glyph's advance is the
@@ -136,6 +153,12 @@ public sealed class SkiaTextShaper : ITextShaper, IDisposable
         float x = 0f, y = 0f;
         for (int i = 0; i < count; i++)
         {
+            if (starts is not null)
+            {
+                starts[i] = (int)infos[i].Cluster
+                    | ((infos[i].GlyphFlags & HarfBuzzSharp.GlyphFlags.UnsafeToBreak) != 0 ? RunCuts.Unsafe : 0);
+                pens![i] = penX;
+            }
             float nextX = penX + positions[i].XOffset * scaleX;
             float nextY = penY - positions[i].YOffset * scaleY;
             if (i > 0)
@@ -149,7 +172,27 @@ public sealed class SkiaTextShaper : ITextShaper, IDisposable
         if (count > 0)
             glyphs[count - 1] = new GlyphPosition(glyphId, x, y, penX - x);
 
+        cuts = starts is null ? null : new RunCuts(starts, pens!, FirstWithScript(text));
         return new ShapedRun(text, font, fontSize, penX, glyphs);
+    }
+
+    // Where the buffer's script was guessed from: the first character whose script is not
+    // Common, Inherited or Unknown (hb_buffer_guess_segment_properties), by HarfBuzz's own
+    // Unicode data; -1 when there is none.
+    private static int FirstWithScript(string text)
+    {
+        var unicode = HarfBuzzSharp.UnicodeFunctions.Default;
+        for (int i = 0; i < text.Length; i++)
+        {
+            int codepoint = char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1])
+                ? char.ConvertToUtf32(text[i], text[i + 1]) : text[i];
+            var script = unicode.GetScript(codepoint);
+            if (script != HarfBuzzSharp.Script.Common && script != HarfBuzzSharp.Script.Inherited
+                && script != HarfBuzzSharp.Script.Unknown)
+                return i;
+            if (codepoint > 0xFFFF) i++;
+        }
+        return -1;
     }
 
     private HbFont FontFor(SKTypeface typeface)

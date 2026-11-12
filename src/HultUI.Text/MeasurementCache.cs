@@ -40,7 +40,7 @@ internal readonly record struct ShapeKey(
 /// <see cref="LinkedList{T}"/> for the order. NativeAOT 11 calls that lookup's
 /// <see cref="IAlternateEqualityComparer{TAlternate, TOther}"/> through two interface dispatches,
 /// where 10 inlined it: a long document's 38,000 word lookups a step went from 15 to 27 ns each.
-/// Here the hash and the comparison are this class's own code. An entry is 48 bytes and its
+/// Here the hash and the comparison are this class's own code. An entry is 56 bytes and its
 /// bucket 4, where the dictionary's entry, bucket and linked-list node came to about 124 and an
 /// object.
 /// </remarks>
@@ -53,6 +53,7 @@ internal sealed class WordCache(int capacity, long maxWeight)
         public string? Word;
         public IResolvedFont? Font;
         public ShapedRun? Run;
+        public RunCuts? Cuts;   // where the run can be cut, when the shaper said (a long word's)
         public int Hash, Next, Newer, Older, Weight;
         public float Size;
     }
@@ -99,11 +100,26 @@ internal sealed class WordCache(int capacity, long maxWeight)
         return true;
     }
 
+    /// <summary>Where the run of <paramref name="word"/> can be cut, when the cache has the word and
+    /// was given its cuts; it becomes the most recently used, as <see cref="TryGet"/> makes it.</summary>
+    public RunCuts? CutsOf(ReadOnlySpan<char> word, IResolvedFont font, float fontSize, int fontHash)
+    {
+        int i = Find(word, font, fontSize, string.GetHashCode(word) ^ fontHash);
+        if (i < 0) return null;
+        if (i != _newest)
+        {
+            Unlink(i);
+            LinkNewest(i);
+        }
+        return _entries[i].Cuts;
+    }
+
     /// <summary>Puts <paramref name="run"/> under <paramref name="word"/>, <paramref name="font"/> and
     /// <paramref name="fontSize"/>, replacing what was there, as the most recently used entry, after
     /// the least recently used ones it leaves no room for. <paramref name="weight"/> counts towards
     /// the weight bound (the caller's estimate of the bytes the entry keeps alive).</summary>
-    public void Put(string word, IResolvedFont font, float fontSize, int fontHash, ShapedRun run, int weight)
+    public void Put(string word, IResolvedFont font, float fontSize, int fontHash, ShapedRun run, int weight,
+        RunCuts? cuts = null)
     {
         weight = weight <= maxWeight / 2 ? weight : (int)(maxWeight / 2);
         int hash = string.GetHashCode(word.AsSpan()) ^ fontHash;
@@ -127,7 +143,7 @@ internal sealed class WordCache(int capacity, long maxWeight)
             slot = _used++;
         }
         ref int bucket = ref _buckets[hash & (_buckets.Length - 1)];
-        _entries[slot] = new Entry { Word = word, Font = font, Run = run, Hash = hash, Next = bucket, Weight = weight, Size = fontSize };
+        _entries[slot] = new Entry { Word = word, Font = font, Run = run, Cuts = cuts, Hash = hash, Next = bucket, Weight = weight, Size = fontSize };
         bucket = slot + 1;
         LinkNewest(slot);
         _weight += weight;

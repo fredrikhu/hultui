@@ -149,7 +149,30 @@ public sealed class TextPipeline
     {
         _fonts = fonts;
         _shaper = shaper;
+        _cutShaper = shaper as IShapesWithCuts;
     }
+
+    // The shaper, when it can say where a run can be cut (RunCuts): a long word is shaped with its
+    // cuts, and a prefix table reads that word cut short from them.
+    private readonly IShapesWithCuts? _cutShaper;
+
+    /// <summary>
+    /// When false, a prefix of a word that a prefix table cuts short is shaped as a string of its
+    /// own, always: the reference. When true (the default), it is read off the whole word's run
+    /// where the shaper said a cut there is safe (<see cref="RunCuts"/>), the same width and glyph
+    /// count to the bit, and shaped only where it is not.
+    /// </summary>
+    internal bool PrefixesFromCuts { get; init; } = true;
+
+    // The shortest word a prefix table shapes with its cuts (FillPrefixTable: only its words are cut
+    // short). A table cuts long words (text without spaces: a row of CJK is one); a short one costs
+    // the cuts' bytes for few prefixes.
+    internal const int MinCutWord = 8;
+
+    // How many words cut short were read off cuts, and how many had to be shaped there (a word cache
+    // miss the cuts refused), for the tests; the reference path counts neither.
+    internal int PrefixesCut { get; private set; }
+    internal int PrefixesShaped { get; private set; }
 
     /// <summary>
     /// The metrics of the face <paramref name="style"/> resolves to, at its size. The vertical
@@ -1992,7 +2015,7 @@ public sealed class TextPipeline
                 bool isSpace = text[i] == ' ';
                 int start = i;
                 while (i < runEnd && (text[i] == ' ') == isSpace) i++;
-                var seg = ShapeSegment(text, start, i - start, font, style.FontSize, fontHash);
+                var seg = ShapeSegment(text, start, i - start, font, style.FontSize, fontHash, withCuts: true);
                 segments.Add(new PrefixSegment(start, x, seg.Width, glyphs, seg.Glyphs));
                 x += seg.Width;
                 glyphs += seg.Glyphs;
@@ -2081,10 +2104,34 @@ public sealed class TextPipeline
         }
         else
         {
-            var part = ShapeSegment(text, seg.Start, cut - seg.Start, run.Font, fontSize,
-                WordCache.FontHash(run.Font, fontSize));
-            width = part.Width;
-            glyphs = part.Glyphs;
+            int fontHash = WordCache.FontHash(run.Font, fontSize);
+            var part = text.AsSpan(seg.Start, cut - seg.Start);
+            if (!PrefixesFromCuts || DigitTableFor(part, run.Font, fontSize) is not null)
+            {
+                var shaped = ShapeSegment(text, seg.Start, cut - seg.Start, run.Font, fontSize, fontHash);
+                width = shaped.Width;
+                glyphs = shaped.Glyphs;
+            }
+            // As ShapeSegment would answer, but for a miss: the word cut short is in the word cache
+            // (a cut made at an earlier width or by the probe before), or is read off the whole
+            // word's cuts where a cut there is safe, or is shaped as a string of its own and kept.
+            else if (_wordShapeCache.TryGet(part, run.Font, fontSize, fontHash, out var known))
+            {
+                width = known.Width;
+                glyphs = known.Glyphs.Length;
+            }
+            else if (_wordShapeCache.CutsOf(text.AsSpan(seg.Start, end - seg.Start), run.Font, fontSize, fontHash) is { } cuts
+                     && cuts.TryPrefix(cut - seg.Start, out width, out glyphs))
+            {
+                PrefixesCut++;
+            }
+            else
+            {
+                var shaped = ShapeNewWord(text.Substring(seg.Start, cut - seg.Start), run.Font, fontSize, fontHash);
+                width = shaped.Width;
+                glyphs = shaped.Glyphs.Length;
+                PrefixesShaped++;
+            }
         }
 
         // ShapeByWords' running sum, then ShapeWithSpacing's letter spacing, then
@@ -2846,14 +2893,14 @@ public sealed class TextPipeline
     // segment is all of it) and keeps it under that string. fontHash is
     // WordCache.FontHash(font, fontSize), which the caller works out once per run.
     private WordShape ShapeSegment(string text, int start, int length, IResolvedFont font, float fontSize,
-        int fontHash)
+        int fontHash, bool withCuts = false)
     {
         var segment = text.AsSpan(start, length);
         if (DigitTableFor(segment, font, fontSize) is { } digits)
             return DigitSegment(segment, digits, start);
 
         if (!_wordShapeCache.TryGet(segment, font, fontSize, fontHash, out var run))
-            run = ShapeNewWord(text.Substring(start, length), font, fontSize, fontHash);
+            run = ShapeNewWord(text.Substring(start, length), font, fontSize, fontHash, withCuts);
         return new WordShape(run, null, start, run.Width, run.Glyphs.Length);
     }
 
@@ -2876,8 +2923,14 @@ public sealed class TextPipeline
         return new WordShape(null, digits, start, x, segment.Length);
     }
 
-    private ShapedRun ShapeNewWord(string word, IResolvedFont font, float fontSize, int fontHash)
+    private ShapedRun ShapeNewWord(string word, IResolvedFont font, float fontSize, int fontHash, bool withCuts = false)
     {
+        if (withCuts && _cutShaper is not null && word.Length >= MinCutWord && PrefixesFromCuts)
+        {
+            var cutRun = _cutShaper.Shape(word, font, fontSize, out var cuts);
+            _wordShapeCache.Put(word, font, fontSize, fontHash, cutRun, WordBytes(word, cutRun) + (cuts?.Bytes ?? 0), cuts);
+            return cutRun;
+        }
         var run = _shaper.Shape(word, font, fontSize);
         _wordShapeCache.Put(word, font, fontSize, fontHash, run, WordBytes(word, run));
         return run;
