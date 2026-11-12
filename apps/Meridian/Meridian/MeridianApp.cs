@@ -532,7 +532,7 @@ public partial class MeridianApp : Component, IDisposable
     internal void OpenRequest(string path, bool editUrl = false)
     {
         int existing = _tabs.FindIndex(t => string.Equals(t.Path, path, StringComparison.OrdinalIgnoreCase));
-        if (existing >= 0) { _activeTab = existing; MarkDirty(); return; }
+        if (existing >= 0) { _activeTab = existing; TabDirty(); return; }
         if (TryReadFile(path) is not { } text) { Flash($"Could not read {Path.GetFileName(path)}"); return; }
         _tabs.Add(new RequestTab(path, ReqDocument.Parse(text)) { UrlEditing = editUrl });
         _activeTab = _tabs.Count - 1;
@@ -638,7 +638,7 @@ public partial class MeridianApp : Component, IDisposable
         // and OAuth2 only fetches a token once everything else resolved.
         var cts = tab.Sending = new CancellationTokenSource();
         tab.SendStartedTs = System.Diagnostics.Stopwatch.GetTimestamp();
-        MarkDirty();
+        TabDirty();
         TickWhileSending(tab, cts);
         try
         {
@@ -671,7 +671,9 @@ public partial class MeridianApp : Component, IDisposable
         {
             tab.Sending = null;
             ForgetReplacedBodies(tab);
-            MarkDirty();
+            // The tree and the response panel show the send; the title bar and the rail nothing
+            // of it (what a send records goes to History and the map, which are views).
+            TabDirty();
         }
     }
 

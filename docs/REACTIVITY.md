@@ -601,6 +601,17 @@ the header, param and body editors −64…−70 %; a History key −35 %; a fin
 response rebuilds only the pane (no window build, −12 %). The time of a key and its frames moves
 less (−1…−7 % at 25 requests): at this size the frames, not the build, are most of it.
 
+**A change some parts show takes a revision only they read.** A switch between request tabs (a
+tab clicked, a request already open opened from the tree) and a send's start and end change what
+the tree (its lit row) and the response pane show, and nothing the title bar (the workspace and the
+environment) or the rail (the view) shows. They called `MarkDirty()`, so those two rebuilt on every
+switch. They now call `TabDirty()`, which writes a third signal only the tree and the pane read and
+rebuilds the view (round 12, step 2). Two sent tabs (an HTML and a JSON body), headless, JIT: a
+switch 227.5 → 192.5 KB (−15 %) and 5 → 3 builds, a send 369.4 → 299.4 KB (−19 %) and 11 → 7
+builds; in a real window (NativeAOT, clicks pushed into SDL's queue) 287.5 → 251.4 KB a switch and
+525.6 → 453.5 a send. Before giving a common path a part of its own, look at which of the kept
+parts its full rebuild builds that show nothing of it.
+
 A field holds the text typed into it, so a key needs a build only for what else on screen reads
 that text. On the Headers, Body and Auth sub-tabs the URL is read only by the Params and Chain
 counts: a URL character compares the two with what the last build showed, and builds nothing when

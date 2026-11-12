@@ -384,7 +384,7 @@ public partial class MeridianApp
                 close.On<ClickEvent>(e => { e.StopPropagation = true; CloseActiveTab(); });
                 t.AddChild(close);
             }
-            t.OnClick(_ => { _activeTab = index; MarkDirty(); });
+            t.OnClick(_ => { _activeTab = index; TabDirty(); });
             if (!active) t.HoverBg(Azimuth.Raised, Color.Transparent);
             bar.AddChild(t);
         }
