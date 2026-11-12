@@ -210,6 +210,34 @@ public class ExternalChangeTests
         });
     }
 
+    /// <summary>A reftable repository keeps HEAD's branch and every ref in .git/reftable, which
+    /// the watcher did not watch: a switch made outside reached it only as the working-tree files
+    /// it changed, a working-tree event, and the branch label, the branch list and the log kept
+    /// what they had until a commit (plan 17 round 13). It is a ref moving now.</summary>
+    [ReftableFact]
+    public void OnAReftableRepository_AnOutsideSwitch_ShowsTheNewBranch()
+    {
+        Hosted(repo =>
+        {
+            Commit(repo, "second");
+            repo.Git("branch", "other", "HEAD~1");
+        }, (repo, session, app) =>
+        {
+            var path = repo.Path;
+            session.Window.PressKey(KeyCode.Digit2);
+            PumpUntil(session, () => Commits(app, path) == 2 && SummaryMember(app, path, "Branch") is "main",
+                "the History view never loaded");
+            Quiet(session, app, path);
+            var log = LoadedKey(app, "_historyLoaders", path);
+
+            repo.Git("switch", "-q", "other");   // second.txt leaves the working tree too
+            PumpUntil(session, () => SummaryMember(app, path, "Branch") is "other",
+                "the switch made outside never reached the branch label");
+            PumpUntil(session, () => LoadedKey(app, "_historyLoaders", path) != log,
+                "the switch made outside did not read the log again");
+        }, reftable: true);
+    }
+
     /// <summary>Pumps until the repository's loads have landed and a quarter second has passed
     /// with no event, so what a test compares is not still moving.</summary>
     private static void Quiet(HeadlessSession session, JunctionApp app, string path)
@@ -349,9 +377,9 @@ public class ExternalChangeTests
         }
     }
 
-    private static void Hosted(Action<TempRepo> arrange, Action<TempRepo, HeadlessSession, JunctionApp> body)
+    private static void Hosted(Action<TempRepo> arrange, Action<TempRepo, HeadlessSession, JunctionApp> body, bool reftable = false)
     {
-        using var repo = TempRepo.CreateWithInitialCommit();
+        using var repo = TempRepo.CreateWithInitialCommit(reftable);
         arrange(repo);
 
         using var session = HeadlessSession.Create(1440, 900);

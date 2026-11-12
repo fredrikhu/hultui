@@ -49,6 +49,46 @@ public class GitWatcherTests
         Assert.True(File.GetLastWriteTimeUtc(Path.Combine(repo.Path, ".git", "index")) > index, "status did not write the index");
     }
 
+    /// <summary>A reftable repository keeps every ref, HEAD's branch included, in .git/reftable:
+    /// HEAD and refs/heads are stubs that never change. A branch made, a checkout and a reset
+    /// reached the watcher only through the working-tree files they changed, if any, and were
+    /// told as working-tree events, so the log and the branches kept what they had (plan 17
+    /// round 13: 8 of 9 outside operations left Junction stale).</summary>
+    [ReftableFact]
+    public void OnAReftableRepository_ARefMovingIsToldAsOne()
+    {
+        using var repo = TempRepo.CreateWithInitialCommit(reftable: true);
+        Assert.True(Directory.Exists(Path.Combine(repo.Path, ".git", "reftable")), "not a reftable repository");
+        repo.Git("branch", "other");
+        using var session = HeadlessSession.Create(400, 300);
+        var seen = new List<bool>();
+        using var watcher = new GitWatcher(repo.Path, refs => seen.Add(refs), debounceMs: 100);
+        var after = Observer(session, seen);
+
+        Assert.Equal([false], after(() => repo.Write("saved.txt", "x\n"), false));
+        Assert.Equal([true], after(() => repo.Git("branch", "delta"), false));
+        // The same commit: no file in the working tree changes, only the table HEAD's branch is in.
+        Assert.Contains(true, after(() => repo.Git("checkout", "-q", "other"), false));
+        Assert.Equal([true], after(() => repo.Git("branch", "-D", "delta"), false));
+        repo.Git("add", "-A");
+        repo.Git("commit", "-q", "-m", "second");
+        Pump(session, TimeSpan.FromMilliseconds(300));
+        Assert.Contains(true, after(() => repo.Git("reset", "-q", "--hard", "HEAD~1"), false));
+    }
+
+    /// <summary>Waits out what came before, runs the action, and returns what the watcher said
+    /// about it (a straggler in the same change included).</summary>
+    private static Func<Action, bool, List<bool>> Observer(HeadlessSession session, List<bool> seen) => (act, expectNone) =>
+    {
+        Pump(session, TimeSpan.FromMilliseconds(300));
+        seen.Clear();
+        act();
+        var until = DateTime.UtcNow + TimeSpan.FromSeconds(expectNone ? 1 : 5);
+        while (DateTime.UtcNow < until && seen.Count == 0) { session.PumpFrame(); Thread.Sleep(10); }
+        Pump(session, TimeSpan.FromMilliseconds(400));
+        return seen.ToList();
+    };
+
     private static void Pump(HeadlessSession session, TimeSpan time)
     {
         var until = DateTime.UtcNow + time;

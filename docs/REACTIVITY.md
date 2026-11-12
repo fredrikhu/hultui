@@ -1610,7 +1610,7 @@ UI thread, headless; over Changes, which shows the working tree, 19 → 11 comma
 1,611 KB; in a real window (NativeAOT) 4,502 → 236 KB and 647 → 172 KB an event. The same frames
 and accessibility trees.
 
-Two traps on the way, both in what a `FileSystemWatcher` on `.git` reports:
+Three traps on the way, all in what a `FileSystemWatcher` on `.git` reports:
 
 - Git writes HEAD, the config and the packed refs to a lock file and renames it over the old
   one. A watcher that listens for Changed and Created never hears them: a checkout that changed
@@ -1618,6 +1618,14 @@ Two traps on the way, both in what a `FileSystemWatcher` on `.git` reports:
 - `git status` replaces the index the same way when it refreshes it, which it did on three runs
   in a row on a fresh repository, unless optional locks are off (as in the tests). A watcher of
   the index's renames hears the app's own reads, reloads, and reads again.
+- A reftable repository (`git init --ref-format=reftable`, `git refs migrate`; git 3.0 plans it as
+  the default for new repositories) keeps every ref, the branch HEAD names included, in
+  `.git/reftable`. HEAD and `refs/heads` are stubs that never change, so a watcher of them heard a
+  checkout, a reset or a pull made outside only through the working-tree files it changed, as a
+  working-tree event, and the branch label, the branch list and the log kept what they had until
+  a commit (round 13: 8 of 9 outside operations left the app stale). Every committed ref
+  transaction writes a new table and renames `tables.list.lock` over `tables.list`; that rename
+  is the ref moving, and the watcher now hears it in that folder.
 
 ### What a build shows of files comes from what was read already
 

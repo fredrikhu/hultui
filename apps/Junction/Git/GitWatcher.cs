@@ -10,6 +10,7 @@ namespace Junction.Git;
 ///   • .git/HEAD           — branch switches, rebase
 ///   • .git/index          — staging changes from external commands
 ///   • .git/refs/**        — branch/tag creation, deletion, updates
+///   • .git/reftable       — every ref of a reftable repository
 ///   • Working tree        — file edits by external editors
 ///
 /// All events are debounced into a single callback with a configurable
@@ -24,6 +25,7 @@ public sealed class GitWatcher : IDisposable
     private readonly FileSystemWatcher _gitDirWatcher;
     private readonly FileSystemWatcher _refsWatcher;
     private readonly FileSystemWatcher _workTreeWatcher;
+    private readonly FileSystemWatcher? _reftableWatcher;
     private readonly Action<bool> _onChange;
     private readonly int _debounceMs;
     private CancellationTokenSource? _debounceCts;
@@ -66,6 +68,24 @@ public sealed class GitWatcher : IDisposable
         _refsWatcher.Deleted += OnFileChanged;
         _refsWatcher.Renamed += OnFileChanged;
 
+        // A reftable repository (`git init --ref-format=reftable`, `git refs migrate`) keeps every
+        // ref, the branch HEAD names included, in .git/reftable: HEAD and refs/heads are stubs that
+        // never change, so neither watcher above hears a checkout, a reset or a branch made. Each
+        // committed ref transaction (a ref, a reflog entry, a compaction) writes a new table and
+        // renames tables.list.lock over tables.list; one that writes nothing creates the lock and
+        // deletes it. Only that rename says a ref moved.
+        var reftableDir = Path.Combine(gitDir, "reftable");
+        if (Directory.Exists(reftableDir))
+        {
+            _reftableWatcher = new FileSystemWatcher(reftableDir)
+            {
+                NotifyFilter = NotifyFilters.FileName,
+                EnableRaisingEvents = true,
+                IncludeSubdirectories = false,
+            };
+            _reftableWatcher.Renamed += OnReftableRenamed;
+        }
+
         // Watch working tree — exclude .git/ directory
         _workTreeWatcher = new FileSystemWatcher(repoPath)
         {
@@ -100,6 +120,11 @@ public sealed class GitWatcher : IDisposable
 
     private static bool IsRefsFile(string name) =>
         name is "HEAD" or "MERGE_HEAD" or "REBASE_HEAD" or "COMMIT_EDITMSG" or "config" or "packed-refs";
+
+    private void OnReftableRenamed(object sender, RenamedEventArgs e)
+    {
+        if (e.Name == "tables.list") ScheduleRefresh(refs: true);
+    }
 
     private void OnWorkTreeChanged(object sender, FileSystemEventArgs e)
     {
@@ -149,9 +174,11 @@ public sealed class GitWatcher : IDisposable
         _gitDirWatcher.EnableRaisingEvents = false;
         _refsWatcher.EnableRaisingEvents = false;
         _workTreeWatcher.EnableRaisingEvents = false;
+        if (_reftableWatcher != null) _reftableWatcher.EnableRaisingEvents = false;
         _gitDirWatcher.Dispose();
         _refsWatcher.Dispose();
         _workTreeWatcher.Dispose();
+        _reftableWatcher?.Dispose();
         _debounceCts?.Cancel();
         _debounceCts?.Dispose();
     }
