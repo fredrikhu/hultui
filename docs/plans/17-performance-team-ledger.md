@@ -4,23 +4,26 @@ State of [the performance team](17-performance-team.md). The orchestrator update
 file after every step and commits it with the step's work. Full survey reports are in
 [`17-reports/`](17-reports/).
 
-- **Round:** 11
-- **Phase:** release — round 11 (full suite green on 06c701d4, 2026-11-12). The survey is done (reports `17-reports/r11-*`, 2026-11-11): experts 2 and 3 satisfied,
-  two review objections (the .NET 11 upgrade's AOT lookups, 207fbe25; Meridian's map item rows, 5e93a4fe). Step 0, the
-  .NET 11 upgrade, landed (6403f8fe..868e2ffc; not yet on main: it merges with the round). All 14 steps done; the round's full suite next (Windows, Fedora, docfx), then Phase release
-  (questions 37–45 answered 2026-11-11). Round
-  10 released: merged into main as cc55bdcc; CI run 42924747474 green. To resume in a fresh context, run in this
-  worktree: `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md, with state in
-  docs/plans/17-performance-team-ledger.md. Read both once per session (afterwards only the ledger's Phase and the part
-  the step needs), do the step the ledger's Phase calls for, record it in the ledger, and commit.` Before resuming,
-  `git fetch` and merge main if it moved. The common survey brief for round 11 is in session ec6d577c's scratchpad
-  `brief-r11-survey.md` (see Probe code); build steps use `scripts/perf/step-ab.ps1`. Open for the user, not blocking:
-  the live screen-reader check of menus. **Round 12's survey** measures in real windows too and ranks by real-app effect
-  (user, 2026-11-11; the brief's "Real windows too" and "Real apps first"): update the common survey brief for it. Older rounds are in [the archive](17-performance-team-ledger-archive.md)
+- **Round:** 12
+- **Phase:** survey — round 12, to start in a fresh context (the loop stopped 2026-11-12 after round 11's release).
+  Round 11 released: merged into main as b0dd1954; CI run 43121085428 green (test, test-linux, docs, meridian-keyring on
+  ubuntu-24.04 and macos-15: the first CI on .NET 11 and `global.json`). No app releases this round (the user did not
+  ask); the installers' new .NET 11 publish paths are first exercised by the next release tags. **Round 12's survey
+  measures in real windows too and ranks by real-app effect** (user, 2026-11-11; the brief's "Real windows too" and "Real
+  apps first"): write both into the common survey brief (start from session ec6d577c's scratchpad
+  `brief-r11-survey.md`). Round 12's survey archives round 10's Landed rows, round 11's build order and answered
+  questions 37–45, and round 10's log entries (2026-11-09 to its release on 2026-11-11). To resume in a fresh context,
+  run in this worktree: `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md, with
+  state in docs/plans/17-performance-team-ledger.md. Read both once per session (afterwards only the ledger's Phase and
+  the part the step needs), do the step the ledger's Phase calls for, record it in the ledger, and commit.` Before
+  resuming, `git fetch` and merge main if it moved; build steps use `scripts/perf/step-ab.ps1` (with `global.json` a base
+  tree picks its own SDK). Open for the user, not blocking: the live screen-reader check of menus; another F16
+  held-drag run (Waiting) only with a new approval. Older rounds are in [the archive](17-performance-team-ledger-archive.md)
   (search it, don't read it whole). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a
   pre-push hook refuses pushes built on the old history).
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`)
-- **Review commits since:** round 11's survey reviews round 10's build and the .NET 11 upgrade, f4d6050d..868e2ffc
+- **Review commits since:** round 12's survey reviews round 11's build, 5731ee58..b0dd1954 (the last survey report to the
+  round 11 release; it includes the .NET 11 upgrade's step 0 only as already reviewed). Earlier: round 11's survey reviewed round 10's build and the .NET 11 upgrade, f4d6050d..868e2ffc
   (the last survey report to the upgrade's captures; round 10's merge into main cc55bdcc is in the range). Earlier: round 10's survey reviewed round 9's build, 4919ac40..facced69 (the last survey report
   to the round 9 release; 82 commits, 81 not merges; no merge from main this round). Round 9's survey reviewed
   eaa1ec29..10acc8c0 (round 8's build, with main's merge 3a15b5b1); round 8's survey reviewed 17d4220a..df45b4a2.
@@ -939,3 +942,12 @@ From 2026-11-09 (round 10's survey); earlier entries are in the archive ([to 202
 - 2026-11-12: round 11 merged into main as b0dd1954 (detached origin/main merge in this worktree, tree identical to the
   tested branch; origin/main cc55bdcc was in the branch, so the push gate held). Primary checkout fast-forwarded behind
   the guard; branch reset to the merge and pushed. CI run 43121085428 started (the first on .NET 11).
+- 2026-11-12: CI run 43121085428 on b0dd1954 green: test (~21 min), test-linux, docs, meridian-keyring (ubuntu-24.04,
+  macos-15) — the first CI on .NET 11. Round 11 landed the .NET 11 upgrade (step 0) and 13 build steps (1–12, 14
+  measured; 13 a clean diagnostic): AOT text lookups −32 % (below .NET 10), a reader told off-screen item labels,
+  clock and order test fixes, a scroll column measured once per width (map click −16…−19 %), views let go (Aperture,
+  Meridian, Vesper), Meridian's kept response bodies (51 MB → 0.25 MB a switch back), the map list drawing its
+  selection (public `RowHighlight.BorderThickness`), the merged syntax theme (Dark+/Light+ = VS Code), public
+  `TokenizeDiff`, the dropped-rebuild rule documented, the find bar's stale count fixed, two document-switch suite
+  rows; the layout audit committed (`HULTUI_LAYOUT_AUDIT`). Round → 12, Phase → survey; the loop stops, and round 12
+  starts in a fresh context.
