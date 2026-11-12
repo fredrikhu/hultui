@@ -487,8 +487,10 @@ public partial class JunctionApp : Component, IDisposable
         bool scaleChanged = MathF.Abs(Ui.DisplayScale - scale) >= 0.001f;
         Ui.DisplayScale = scale;
         if (RecomputeResponsive() || scaleChanged || DiffWrapNeedsRemeasure()) Rerender();
-        // The diff takes the width the window gained or lost, and the build, if there is one,
-        // reads the width of the frame before: the pan reads it after the layout.
+        // The diff takes the width the window gained or lost, which the pan takes now, for the
+        // frame about to be laid out: a build reads the width of the frame before. The pan reads
+        // the width again after the layout.
+        LeadDiffWidth();
         FollowDiffWidthAfterFrame();
     }
 

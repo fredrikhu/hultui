@@ -42,6 +42,30 @@ public class DiffFrameCountTests
         });
     }
 
+    [Fact]
+    public void ASizeChangeWithADiffShown_DrawsOneFrame_WithTheThumbWhereItSettles()
+    {
+        Hosted((session, app) =>
+        {
+            var pan = Pan(app);
+            Assert.True(pan.CanPan, "nothing to pan: the fixture is not wide");
+            // Some of these cross the window's breakpoints and build (1,403, 1,181 and 1,440 px):
+            // a build reads the width of the frame before, so those are counted too.
+            foreach (int width in new[] { 1403, 1366, 1329, 1292, 1255, 1218, 1181, 1144, 1440 })
+            {
+                session.Window.SetClientSize(width, 900);
+                Assert.Equal(1, FramesDrawn(session));
+
+                // What a build makes of the width the frame laid out is what the frame drew.
+                var thumb = Thumb(pan);
+                float viewport = pan.ViewportWidth;
+                Rebuild(app);
+                session.PumpFrames(3);
+                Assert.Equal(viewport, pan.ViewportWidth);
+                Assert.Equal(thumb, Thumb(pan));
+            }
+        });
+    }
 
     // ── harness ──────────────────────────────────────────────────────────
 

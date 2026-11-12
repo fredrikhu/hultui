@@ -295,6 +295,9 @@ for after a build and on `Window.Resized`) and give it to whatever shows it in p
 `HorizontalPan.ViewportWidth` assigned then moves the thumb on screen with no build. Build only
 when the answer changes what the build makes (the scrollbar coming or going, an offset the
 cells were built at). Junction's scenes, 125 steps: 67 differed from a full build, none now.
+What is read after the frame shows a frame later, in a frame of its own; where the move is known
+before the layout (a column taking the window's slack moves by the window's change), give it in
+the `Resized` handler too and keep the read as the check (LAYOUT.md, "Nesting scroll views").
 
 ### A background callback that fires once per item posts one build at a time
 
