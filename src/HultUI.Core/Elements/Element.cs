@@ -521,6 +521,11 @@ public abstract class Element
     /// <summary>True while this element holds keyboard focus.</summary>
     public bool IsFocused => _focused;
 
+    /// <summary>Whether this element draws something from its children's <see cref="IsHovered"/>
+    /// (a list's tint under the row the pointer is on), so that a child's hover changes how it
+    /// looks with nothing marked dirty. See <c>PointerState.DrawnHoverChanges</c>.</summary>
+    internal virtual bool DrawsChildHover => false;
+
     internal void AddHoverStyle(Action<Element> style) => Interaction.OnHover += style;
     internal void AddPressedStyle(Action<Element> style) => Interaction.OnPressed += style;
     internal void AddFocusStyle(Action<Element> style) => Interaction.OnFocus += style;

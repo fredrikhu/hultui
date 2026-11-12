@@ -65,21 +65,59 @@ public sealed class TreeDiff
     private static List<ElementId?> CoalesceParents<T>(
         List<T> entries, Func<T, (ElementId Node, ElementId? Parent)> ids)
     {
-        var changed = new HashSet<ElementId>(entries.Count);
-        foreach (var entry in entries)
-            changed.Add(ids(entry).Node);
-
-        var seen = new HashSet<ElementId?>();
         var result = new List<ElementId?>();
-        foreach (var entry in entries)
+        if (entries.Count == 0) return result;
+        var changed = TakeIds(entries.Count);
+        var seen = t_seen ?? [];
+        t_seen = null;
+        try
         {
-            var parent = ids(entry).Parent;
-            if (parent is { } pid && changed.Contains(pid))
-                continue; // interior of a changed subtree — covered by its topmost boundary
-            if (seen.Add(parent))
-                result.Add(parent);
+            foreach (var entry in entries)
+                changed.Add(ids(entry).Node);
+
+            foreach (var entry in entries)
+            {
+                var parent = ids(entry).Parent;
+                if (parent is { } pid && changed.Contains(pid))
+                    continue; // interior of a changed subtree — covered by its topmost boundary
+                if (seen.Add(parent))
+                    result.Add(parent);
+            }
+            return result;
         }
-        return result;
+        finally
+        {
+            GiveBack(changed);
+            bool keep = seen.Count <= KeptIdsLimit;
+            seen.Clear();
+            if (keep) t_seen = seen;
+        }
+    }
+
+    // The ids of a diff's entries and the parents seen, for the searches here: kept per thread and
+    // emptied after each, so a diff that adds or removes a list's rows builds no set of them. Each key
+    // of Junction's commit file walk with a reader (a file's 633 rows out, the next file's in) built
+    // two sets of the rows, 30.6 KB, every key. A set that held more ids than this is let go after.
+    [ThreadStatic] private static HashSet<ElementId>? t_ids;
+    [ThreadStatic] private static HashSet<ElementId?>? t_seen;
+    private const int KeptIdsLimit = 4096;
+
+    /// <summary>The thread's set of ids, empty, with room for <paramref name="count"/>; taken until
+    /// <see cref="GiveBack"/>, so a call made meanwhile gets a set of its own.</summary>
+    private static HashSet<ElementId> TakeIds(int count)
+    {
+        var ids = t_ids;
+        t_ids = null;
+        if (ids is null) return new HashSet<ElementId>(count);
+        ids.EnsureCapacity(count);
+        return ids;
+    }
+
+    private static void GiveBack(HashSet<ElementId> ids)
+    {
+        bool keep = ids.Count <= KeptIdsLimit;
+        ids.Clear();
+        if (keep) t_ids = ids;
     }
 
     /// <summary>
@@ -109,19 +147,24 @@ public sealed class TreeDiff
     private static List<T> Boundary<T>(
         List<T> entries, Func<T, ElementId> id, Func<T, ElementId?> parentId)
     {
-        var changed = new HashSet<ElementId>(entries.Count);
-        foreach (var entry in entries)
-            changed.Add(id(entry));
-
         var result = new List<T>();
-        foreach (var entry in entries)
+        if (entries.Count == 0) return result;
+        var changed = TakeIds(entries.Count);
+        try
         {
-            var parent = parentId(entry);
-            if (parent is { } pid && changed.Contains(pid))
-                continue; // interior of a changed subtree — its parent's walk covers it
-            result.Add(entry);
+            foreach (var entry in entries)
+                changed.Add(id(entry));
+
+            foreach (var entry in entries)
+            {
+                var parent = parentId(entry);
+                if (parent is { } pid && changed.Contains(pid))
+                    continue; // interior of a changed subtree — its parent's walk covers it
+                result.Add(entry);
+            }
+            return result;
         }
-        return result;
+        finally { GiveBack(changed); }
     }
 }
 

@@ -384,7 +384,7 @@ public partial class MeridianApp
                 close.On<ClickEvent>(e => { e.StopPropagation = true; CloseActiveTab(); });
                 t.AddChild(close);
             }
-            t.OnClick(_ => { _activeTab = index; MarkDirty(); });
+            t.OnClick(_ => { _activeTab = index; TabDirty(); });
             if (!active) t.HoverBg(Azimuth.Raised, Color.Transparent);
             bar.AddChild(t);
         }
@@ -540,17 +540,18 @@ public partial class MeridianApp
     /// Params · Headers · Body · Auth · Assertions · Chain, each on one line and never
     /// truncated — the counts and the verdict ("Assertions 1/3✗") are what the labels are
     /// for. Beside the response pane the editor is at least EditorMinWidth (448px), which
-    /// holds the six of an ordinary request (~445px); longer labels ("Body json",
-    /// "Auth inherited", "Assertions 1/3✗") can still outgrow it, and then the strip
-    /// scrolls sideways under the wheel rather than wrapping its labels or holding the
+    /// holds the six of an ordinary request (~445px in Segoe UI), or the strip's measured width
+    /// for them where the face draws them wider (<see cref="SubTabStripWidth"/>); longer labels
+    /// ("Body json", "Auth inherited", "Assertions 1/3✗") can still outgrow it, and then the
+    /// strip scrolls sideways under the wheel rather than wrapping its labels or holding the
     /// editor wider than the pane allows. The scroll bar stays hidden: drawn, it covers the
     /// open tab's pill.
     /// </summary>
     private Element BuildSubTabs(RequestTab tab)
     {
-        var bar = ScrollView.Horizontal().Gap(Azimuth.S1).Height(32).FlexShrink(0)
+        var bar = ScrollView.Horizontal().Gap(SubTabGap).Height(32).FlexShrink(0)
             .AlignItems(AlignItems.Center)
-            .Padding(new Thickness(0, Azimuth.S3, 0, Azimuth.S3))
+            .Padding(new Thickness(0, SubTabStripPadX, 0, SubTabStripPadX))
             .BorderColor(Azimuth.Border).BorderWidth(new Thickness(0, 0, 1, 0))
             .AutomationId("subtabs");
         bar.ShowScrollbarX = false;
@@ -598,17 +599,46 @@ public partial class MeridianApp
         return failed == 0 ? $"Assertions {count}✓" : $"Assertions {failed}/{count}✗";
     }
 
+    // The strip's geometry, which its build and its measured width (SubTabStripWidth) share.
+    private const float SubTabStripPadX = Azimuth.S3;   // the strip's, at either end
+    private const float SubTabGap = Azimuth.S1;
+    private const float SubTabPadX = Azimuth.S3;        // a tab's, either side of its label
+    private const float SubTabFontSize = 12f;
+
+    /// <summary>The six sub-tabs of an ordinary request, which the editor's floor holds.</summary>
+    private static readonly string[] OrdinarySubTabs = ["Params 4", "Headers 1", "Body", "Auth", "Assertions 1", "Chain 3"];
+
+    /// <summary>
+    /// How wide the strip is with the six of an ordinary request in <paramref name="family"/>:
+    /// its padding, the gaps, each tab's padding and label, and the open tab's label in medium
+    /// where that is wider, whichever tab is open. Measured as the layout measures the labels
+    /// (<see cref="HultUI.Core.Rendering.TextMeasure"/>, the window's measure context), so in the
+    /// face the app gets; with no context the labels measure zero and the floor stays 448.
+    /// </summary>
+    private static float SubTabStripWidth(string family)
+    {
+        float width = 2 * SubTabStripPadX + (OrdinarySubTabs.Length - 1) * SubTabGap, medium = 0f;
+        foreach (var label in OrdinarySubTabs)
+        {
+            float regular = HultUI.Core.Rendering.TextMeasure.MeasureWidth(label, SubTabFontSize, family, FontWeight.Regular);
+            width += 2 * SubTabPadX + regular;
+            medium = MathF.Max(medium,
+                HultUI.Core.Rendering.TextMeasure.MeasureWidth(label, SubTabFontSize, family, FontWeight.Medium) - regular);
+        }
+        return width + medium;
+    }
+
     private Element SubTabButton(RequestTab tab, EditorTab which, string label)
     {
         bool active = tab.SubTab == which;
         var b = Box.New()
-            .Padding(new Thickness(5, Azimuth.S3, 5, Azimuth.S3))
+            .Padding(new Thickness(5, SubTabPadX, 5, SubTabPadX))
             .CornerRadius(Azimuth.Radius1)
             .FlexShrink(0)
             .Cursor(CursorType.Pointer)
             .AccessibleRole(AccessibilityRole.Button).AccessibleName(label.TrimEnd())
             .AutomationId("subtab-" + which.ToString().ToLowerInvariant())
-            .Children(Text.New(label.TrimEnd()).FontSize(12f).MaxLines(1)
+            .Children(Text.New(label.TrimEnd()).FontSize(SubTabFontSize).MaxLines(1)
                 .FontWeight(active ? FontWeight.Medium : FontWeight.Regular)
                 .TextColor(active ? Azimuth.Text : Azimuth.TextMuted));
         if (active) b.Background(Azimuth.Raised);

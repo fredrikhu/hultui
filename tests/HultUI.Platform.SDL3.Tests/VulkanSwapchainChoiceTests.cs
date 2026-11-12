@@ -198,6 +198,26 @@ public class VulkanSwapchainChoiceTests
         Assert.False(FormatStillChosen(formatChosenForWide: null, wantsWideColor: false));
     }
 
+    /// <summary>
+    /// The half-float swapchain only while an HDR picture is on screen on an HDR display (plan 17
+    /// round 12; until then whenever the display was HDR, which at rest cost Reel and Aperture an
+    /// NVIDIA thread waking ~96 times a second and 15 MB of swapchain). HULTUI_VULKAN_F16 wins.
+    /// </summary>
+    [Fact]
+    public void TheHalfFloatSwapchain_IsWanted_OnlyForAnHdrPictureOnAnHdrDisplay()
+    {
+        Assert.False(WantsWideColor(null, displayIsHdr: true, hdrPictureShown: false));
+        Assert.True(WantsWideColor(null, displayIsHdr: true, hdrPictureShown: true));
+        Assert.False(WantsWideColor(null, displayIsHdr: false, hdrPictureShown: true));
+        Assert.False(WantsWideColor(null, displayIsHdr: false, hdrPictureShown: false));
+        foreach (bool hdr in new[] { false, true })
+            foreach (bool picture in new[] { false, true })
+            {
+                Assert.True(WantsWideColor(true, hdr, picture));
+                Assert.False(WantsWideColor(false, hdr, picture));
+            }
+    }
+
     [Fact]
     public void TheFixedExtentOverride_DecidesAlone_AndOnlyWhereOneToOneIsOffered()
     {

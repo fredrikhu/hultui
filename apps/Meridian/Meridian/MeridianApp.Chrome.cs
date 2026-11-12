@@ -29,7 +29,10 @@ public partial class MeridianApp
     //    and Rerender in the app bumps.
     //
     // Safe by default, then: a rebuild builds the parts too. Only paths that change nothing a part
-    // shows say so, with MarkViewDirty — edits to the open request (DocEdited, unless the edit is
+    // shows say so. A tab switch (a request tab clicked, a request already open opened) and a send
+    // starting and ending change what the tree and the response panel show and nothing of the
+    // title bar's or the rail's: TabDirty, whose _tabRevision only those two read. Paths that
+    // change no part at all say MarkViewDirty — edits to the open request (DocEdited, unless the edit is
     // the one that makes the request unsaved: the tree marks that; a method picked too), the
     // sub-tabs, the URL box opening and closing, a popover opening and closing, History's search,
     // filters and row clicks, and the environment table's values. The response's own controls — its tabs, pretty/raw and the find bar — rebuild the
@@ -40,6 +43,7 @@ public partial class MeridianApp
     private readonly PartGroup _parts = new();
     private readonly Signal<int> _partRevision = new(0);
     private readonly Signal<int> _responseRevision = new(0);
+    private readonly Signal<int> _tabRevision = new(0);
     private Part? _titleBarPart, _railPart, _treePart, _responseRightPart, _responseBottomPart;
 
     /// <summary>Builds of the title bar, rail, tree and response panel so far, for tests.</summary>
@@ -73,6 +77,7 @@ public partial class MeridianApp
 
     private Part TreePart => _treePart ??= new(_parts, () =>
     {
+        _ = _tabRevision.Value;   // the lit row is the active tab's
         BeginTreeRows();
         // As in BuildResponsePart: a part can hear the revision before the app's rebuild takes
         // it out (outside an event, a signal write runs its effects at once).
@@ -94,6 +99,7 @@ public partial class MeridianApp
     private Element BuildResponsePart(bool bottom)
     {
         _ = _responseRevision.Value;
+        _ = _tabRevision.Value;
         _sendElapsed.Current = null;   // set again by the readout of a send in flight, if shown
         // A rebuild that leaves no tab to show takes the pane out; when the parts hear the
         // revision first (outside an event a signal write runs its effects at once, before
@@ -117,6 +123,16 @@ public partial class MeridianApp
     /// <summary><see cref="MarkDirty"/> for a change no part shows: the view on screen rebuilds,
     /// the title bar, rail, tree and response panel stay as they are.</summary>
     private void MarkViewDirty() => base.MarkDirty();
+
+    /// <summary><see cref="MarkDirty"/> for a change to the open tabs that the title bar and the
+    /// rail do not show — which tab is active, the active tab's send starting and ending: the view
+    /// rebuilds, and of the parts the tree (its lit row) and the response panel. They built for
+    /// every switch, 33 of the 228 KB a switch made (plan 17 round 12).</summary>
+    private void TabDirty()
+    {
+        _tabRevision.Value++;
+        base.MarkDirty();
+    }
 
     /// <summary>A change only the response panel shows — its tabs, pretty or raw, the find bar:
     /// the panel rebuilds alone.</summary>

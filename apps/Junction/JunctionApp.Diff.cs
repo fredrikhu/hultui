@@ -708,6 +708,7 @@ public partial class JunctionApp
     {
         if (_diffBodyRef.Current is not { IsHosted: true, Layout.AbsoluteContentBox.Width: > 0 } body) return false;
         _diffLaidOutWidth = body.Layout.AbsoluteContentBox.Width;
+        _diffLaidOutWindowWidth = _window.LayoutWidth;
         // Wrapped, the viewport is unbounded and nothing pans (UpdateDiffPan).
         if (_diffWrap) return false;
         _diffPan.ViewportWidth = CodeWidthFor(_diffLaidOutWidth);
@@ -730,6 +731,28 @@ public partial class JunctionApp
             _diffWidthFollowQueued = false;
             FollowDiffWidth();
         });
+    }
+
+    // The window's layout width when FollowDiffWidth last read the list; 0 before it ever did.
+    private float _diffLaidOutWindowWidth;
+
+    /// <summary>
+    /// A window resize that builds nothing hands the diff the width the window gained or lost,
+    /// and this gives the pan the viewport that width makes before the frame is laid out: the
+    /// frame draws the thumb at the size and place its layout gives it, and the check after it
+    /// (<see cref="FollowDiffWidth"/>) finds nothing to move. That check gave the thumb its
+    /// width a frame late, and drew every size change of a diff with a scrollbar twice (plan 17
+    /// round 12). It stays as the check: where the layout gives the diff some other width, it
+    /// corrects the pan after the frame as before. What needs a build (the scrollbar coming or
+    /// going, a wider viewport clamping the offset the rows were built at) is left to it too.
+    /// </summary>
+    private void LeadDiffWidth()
+    {
+        if (_diffWrap || _diffLaidOutWindowWidth <= 0 || _diffBodyRef.Current is not { IsHosted: true }) return;
+        float viewport = CodeWidthFor(_diffLaidOutWidth + _window.LayoutWidth - _diffLaidOutWindowWidth);
+        float maxOffset = Math.Max(0, _diffPan.ContentWidth - viewport);
+        if ((maxOffset > 0) != _diffBarBuilt || maxOffset < _diffRowShape.PanOffset) return;
+        _diffPan.ViewportWidth = viewport;
     }
 
     /// <summary>Tell the pan how wide the content and its window are. The width of one code

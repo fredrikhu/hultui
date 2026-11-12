@@ -126,7 +126,12 @@ element's opens after the usual delay. Nothing happens while a press holds the p
 capture, a drag, a text selection, a slider, an autoscroll): hover stays where it is until the
 release, as it does on a move, and the frame after the release settles it. Nothing happens
 when the pointer is outside the window or has never been in it, or when the build kept the
-hovered element. Until plan 17's round 9, hover stayed on the removed element until the
+hovered element. The settle draws a frame of its own only when something shows the new
+hover: a hover or pressed style (`.OnHover`), a list's tint under the row
+(`.HoverHighlight`), or an enter or leave handler, which may change what is drawn without
+marking it. Otherwise the frame that replaced the elements stands: Junction drew every key of
+its commit file walk twice while the pointer rested on the diff, the second frame the same
+pixels (plan 17 round 12). Until plan 17's round 9, hover stayed on the removed element until the
 pointer moved, and through its parents that element kept the whole old view alive: in
 Meridian with a 2,000-endpoint spec, 7.8 MB of a 28 MB heap after a key switched the view.
 
@@ -1683,7 +1688,12 @@ item where a label was kept, or none (past the items' new end), asks the frame's
 which names that item again, or tells it gone, with no tree built. The check is one comparison per
 kept label and makes nothing; with no reader no label is kept. Until plan 17 round 11 an item
 changed off screen kept its old name (Meridian's map said "seen 1×" for an endpoint seen again)
-until something else walked or built the tree.
+until something else walked or built the tree. Items added past the end are told the same way: a
+patch that brings more items than the labels kept, the first new one with no row (below the
+window), asks the walk, which makes their nodes; the labels kept grow to the items' number, so a
+list over 2,000 items (whose labels no walk asks for) asks once, not at every patch. Until plan 17
+round 12 a page appended below the window (Junction's History, Aperture's library) left a
+reader's list at its old length (200 items where a build made 201) until something else walked.
 
 **A scroll view of rows becomes a list.** A `ScrollView` over a padded `Flex.Column` of rows and
 headings can move onto a list with the same pixels (Meridian's Discovery map, plan 17 round 10

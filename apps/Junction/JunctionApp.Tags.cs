@@ -52,7 +52,7 @@ public partial class JunctionApp
     /// <summary>Starts (or reuses) the tag load for <paramref name="path"/> — from the view
     /// as it builds, or from the preload while another tab is showing.</summary>
     private void EnsureTagsLoaded(string path) =>
-        _tagsLoaders.For(path).Load($"{path}|{DataGen(path)}",
+        _tagsLoaders.For(path).Load($"{path}|{RefsGen(path)}",
             () => new TagsData(RepoFor(path).GetTags()),
             onLoaded: data => { if (PathEquals(path, _activeRepoPath)) ClampTagSel(data); });
 

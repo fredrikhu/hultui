@@ -166,6 +166,80 @@ public class HoverAfterRebuildTests
         Assert.Equal((red.R, red.G, red.B), (pixel.Red, pixel.Green, pixel.Blue));
     }
 
+    /// <summary>The settle draws a frame only for a hover something draws. It drew one every time:
+    /// Junction's commit file walk, with the pointer resting on the diff, drew each key twice, the
+    /// second frame the same pixels (plan 17 round 12).</summary>
+    [Fact]
+    public void ABuildUnderAStillPointer_DrawsOnce_WhenNothingDrawsTheHover()
+    {
+        using var session = HeadlessSession.Create(400, 300);
+        var host = Box.New().Children(Box.New().Width(200f).Height(100f));
+        session.Window.SetRoot(Flex.Column().AlignItems(AlignItems.FlexStart).Children(host));
+        session.PumpFrame();
+        session.Window.MoveMouse(50, 20);
+        session.PumpFrames(2);
+
+        var next = Box.New().Width(200f).Height(100f);
+        host.ReplaceChildren(next);
+
+        Assert.True(session.PumpFrame());    // the build's; its end hit-tests hover again
+        Assert.True(next.IsHovered);
+        Assert.False(session.PumpFrame());   // and nothing draws that hover
+    }
+
+    /// <summary>An app's enter handler may change what is drawn without marking it, so it gets the
+    /// frame an input that ran one would.</summary>
+    [Fact]
+    public void AnEnterHandler_GetsAFrameAfterTheSettle()
+    {
+        using var session = HeadlessSession.Create(400, 300);
+        var host = Box.New().Children(Box.New().Width(200f).Height(100f));
+        session.Window.SetRoot(Flex.Column().AlignItems(AlignItems.FlexStart).Children(host));
+        session.PumpFrame();
+        session.Window.MoveMouse(50, 20);
+        session.PumpFrames(2);
+
+        int entered = 0;
+        var next = Box.New().Width(200f).Height(100f).OnPointerEnter(_ => entered++);
+        host.ReplaceChildren(next);
+
+        Assert.True(session.PumpFrame());
+        Assert.Equal(1, entered);
+        Assert.True(session.PumpFrame());
+        Assert.False(session.PumpFrame());
+    }
+
+    /// <summary>A list draws its tint under the row the pointer is on from the row's hover, which
+    /// marks nothing: the row the settle finds under the pointer gets the frame that tints it.</summary>
+    [Fact]
+    public void AListsTintUnderTheRow_IsDrawnAfterTheSettle()
+    {
+        var tint = new Color(30, 150, 90);
+        using var session = HeadlessSession.Create(400, 300);
+        var list = VirtualListElement<string>.New().ItemHeight(24f)
+            .Items(Enumerable.Range(0, 20).Select(i => $"a{i}").ToList())
+            .RenderWith((item, _) => Flex.Row().Children(HultUI.Core.Builders.Text.New(item).FontSize(12f)))
+            .HoverHighlight(tint)
+            .FlexGrow(1);
+        session.Window.SetRoot(Flex.Column().Width(400f).Height(300f).Children(list));
+        session.PumpFrames(2);
+        session.Window.MoveMouse(200, 36);   // the second row
+        session.PumpFrames(2);
+        var hovered = list.Children.First(row => row.IsHovered);
+
+        list.Items(Enumerable.Range(0, 20).Select(i => $"b{i}").ToList());   // every row made again
+
+        Assert.True(session.PumpFrame());   // the new rows; the end of the frame hovers the new row
+        Assert.False(hovered.IsHovered);
+        Assert.Contains(list.Children, row => row.IsHovered && !ReferenceEquals(row, hovered));
+        Assert.True(session.PumpFrame());   // the tint under it
+        Assert.False(session.PumpFrame());
+        using var image = session.Window.CapturePixels();
+        using var bitmap = SKBitmap.FromImage(image);
+        var pixel = bitmap.GetPixel(380, 36);
+        Assert.Equal((tint.R, tint.G, tint.B), (pixel.Red, pixel.Green, pixel.Blue));
+    }
+
     [Fact]
     public void ACapturedPointer_KeepsHoverUntilTheRelease()
     {

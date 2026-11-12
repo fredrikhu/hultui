@@ -214,6 +214,9 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     }
     private RowHighlight? _hoverHighlight;
 
+    // The tint is drawn from the row's hover, which marks nothing: the window has to know.
+    internal override bool DrawsChildHover => _hoverHighlight is not null;
+
     /// <summary>
     /// The rows <see cref="HoverHighlight"/> is drawn under: null (the default) every row, otherwise
     /// those it is true for, so a row that took no tint of its own (a section's header, a line that
@@ -1634,7 +1637,8 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// again: a row made again asks the walk itself, at the time it always has. Each label would be made
     /// again when asked for anyway; let go, it does not ask for another walk at the next patch when none
     /// asks for the labels (a list over 2,000 items serves them from the list). O(n) comparisons,
-    /// nothing made.</summary>
+    /// nothing made. Says so too for items added past the labels kept when the first of them has no
+    /// row, and grows the labels kept to the items' number.</summary>
     private bool ForgetReplaced(ItemLabel[] told, IReadOnlyList<T> items, EqualityComparer<T> comparer)
     {
         bool ask = false;
@@ -1644,6 +1648,16 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             told[i] = default;
             if (!_activeElements.TryGetValue(i, out var row) || i < items.Count && comparer.Equals(row.Item, items[i]))
                 ask = true;
+        }
+        // Items added past the end of what a reader was given, the first of them with no row (below
+        // the window): no row is made, so nothing else asks for the walk, and a reader's list stayed
+        // short until something else walked or built the tree. The walk makes their nodes and tells
+        // them, as a build would. The labels kept grow to the items' number, so a list whose labels the
+        // walk does not ask for (over 2,000 items, served on demand) asks once, not at every patch.
+        if (told.Length < items.Count && !_activeElements.ContainsKey(told.Length))
+        {
+            Array.Resize(ref _labels, items.Count);
+            ask = true;
         }
         return ask;
     }

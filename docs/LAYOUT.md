@@ -684,6 +684,15 @@ and assign it then: with the scrollbar on screen, its thumb takes the new size a
 no build. Build again only for what the build itself shows: the scrollbar coming or going
 (`CanPan`), or an `Offset` a wider viewport clamped below the one the cells were built at.
 
+A width read after the frame reaches the screen a frame late, though: that frame drew the old
+thumb, and the follow draws a second one. Junction's diff drew every size change twice that
+way (plan 17 round 12). Where you know how the width moves before the layout — a column that
+takes the window's slack moves by what the window gained or lost — give the pan that width in
+the `Window.Resized` handler as well, from the width the column was last laid out at and the
+window's width then (Junction's `LeadDiffWidth`), and keep the read after the frame as the
+check: it finds nothing to move when the guess was right, and corrects it a frame later when
+it was not.
+
 ---
 
 **A rounded box clips round.** `Overflow.Hidden` on a box with a corner radius cuts its

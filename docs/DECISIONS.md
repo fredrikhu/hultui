@@ -869,6 +869,43 @@ and Changes; Vesper's panes; Aperture's grid) and 0 on Meridian's map. The two s
 Build it when a sideways strip turns up measured at a forced width: the rule is the column's with
 the axes swapped, and its width validity is `WidthRange.Any`.
 
+### A list's item nodes and their labels are made with the tree; a live resize's structure walks tell bounds (round 12)
+
+Plan 17's round 12, step 3 split what Junction's commit file walk pays a key with a reader in a real
+window (NativeAOT, 633 diff rows a file): 391 KB on the UI thread over the bridge off, of which the
+in-place walk 286.6 KB, the UIA bridge's wrappers 85.5 KB and the diff's id sets 30.6 KB; the raises
+0 B (5 a key, 65 provider calls and 65 QueryInterface calls). The bridge's two parts were cut
+(5d973076: 980 → 864 KB a key). The walk was examined and kept: it makes the next file's rows as item
+nodes (~144 B each), their labels (~220 B, the app's delegate) and the app's row records, which with
+no reader are made only for the rows on screen. They are what a reader is given: AT-SPI pushes every
+node's name with its cache-add, the walk compares kept labels to tell a relabel, and a list over 2,000
+items already serves its items on request, where a relabel is not told and AT-SPI's client keeps the
+names it fetched. Serving smaller lists that way, or naming item nodes on request, changes what a
+reader gets on both bridges: it needs the user, with a live check in Narrator, NVDA and Orca.
+
+The same step made a live resize wait for the size to rest before its layout refresh (a6bfb1fc). The
+walks a drag still makes are the ones its structure changes bring (rows coming into view: Vesper 3 and
+Junction 3 a drag of 60 steps, 428 and 181 bounds raised, from 1,645 and 599), told at once because a
+reader must hear what came and went. Holding their bounds back while the size changes would mean
+walking without writing the boxes and a second walk at rest; not built (2.8 to 5.4 ms of raises are
+left in a drag of about a second in Junction and Vesper).
+
+### A prefix table's own words are still shaped at every width (round 12)
+
+Plan 17's round 12, step 4 (7a753337) reads a word a prefix table cuts short off the whole word's
+cuts where HarfBuzz says the cut is safe. In Junction's Files view on a Japanese README, NativeAOT,
+a resize to 1000 px went from 14,105 HarfBuzz calls to 11,223 (frame 28.1 → 24.7 ms headless). What
+is left is mostly the tables' own words: in text without spaces a row's table starts at the row
+start, so its first word is a new string at every width, a slice from the middle of the line's word.
+Reading it off the line's word would need the script HarfBuzz guesses for the slice (from its own
+first character: in Japanese, kana and kanji start rows about equally, and Hiragana, Katakana and Han
+are three scripts), safe cuts at both ends, and the advances summed again from the slice's start
+(the pens hold sums from the word's start, which a difference of floats does not give back to the
+bit); not built. Two variants were measured and dropped: giving a word the cache holds without cuts
+(a line's width or a drawn row shaped it) its cuts the first time a table cuts it saved 7 calls of
+11,223; reading the cuts before looking the cut word up made a 40-frame drag 4 % slower (two
+lookups for every hit), so the lookup comes first.
+
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
 BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction

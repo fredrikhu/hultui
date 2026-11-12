@@ -26,6 +26,10 @@ public static class VirtualItemId
     internal static ElementId ForSlot(uint slot, int index)
         => new(Marker | ((ulong)slot << 32) | (uint)index);
 
+    /// <summary>Whether the id is an item's (a list's item node, or an item served on demand), from
+    /// its marker alone: no lookup of the owner.</summary>
+    internal static bool IsItem(ElementId id) => (id.Value & Marker) != 0;
+
     /// <summary>True (with the decoded owner + index) if the id is a virtual item. The owner is
     /// <c>default</c> when its list has unmounted since: the item is gone.</summary>
     public static bool TryDecode(ElementId id, out ElementId listId, out int index)

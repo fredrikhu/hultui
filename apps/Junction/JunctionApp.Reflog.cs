@@ -46,7 +46,7 @@ public partial class JunctionApp
 
     private Element BuildReflogPanel()
     {
-        _reflog.Load($"{_activeRepoPath}|{DataGen(_activeRepoPath)}", LoadReflog);
+        _reflog.Load($"{_activeRepoPath}|{RefsGen(_activeRepoPath)}", LoadReflog);
         var entries = _reflog.Value;
         var loading = _reflog.IsLoading && entries.Count == 0;
 

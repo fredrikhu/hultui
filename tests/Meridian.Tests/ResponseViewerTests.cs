@@ -292,8 +292,9 @@ public class ResponseViewerTests : IClassFixture<TestHttpServer>, IDisposable
     }
 
     /// <summary>Beside the editor the pane's inner edge drags: left widens it, up to the room the
-    /// editor's floor leaves (1440 − rail 48 − tree 264 − editor 448 = 680), and the arrow keys
-    /// move it too.</summary>
+    /// editor's floor leaves (1440 − rail 48 − tree 264 − editor 448 = 680 in Segoe UI; the floor
+    /// is wider in a face that draws the sub-tabs wider, 466 in Fedora's Noto Sans), and the arrow
+    /// keys move it too.</summary>
     [Fact]
     public void TheRightPaneWidensByItsInnerEdge_UpToTheEditorsFloor()
     {
@@ -305,8 +306,9 @@ public class ResponseViewerTests : IClassFixture<TestHttpServer>, IDisposable
             DragHandle(session, -90, 0);
             Assert.Equal(650, Box(session, "response-right").Width, 0.5);
 
-            DragHandle(session, -400, 0);   // held where the editor keeps its 448
-            Assert.Equal(680, Box(session, "response-right").Width, 0.5);
+            DragHandle(session, -400, 0);   // held where the editor keeps its floor
+            Assert.True(app.EditorMinWidth >= 448f, $"the editor's floor is {app.EditorMinWidth}, under 448");
+            Assert.Equal(1440 - 48 - 264 - app.EditorMinWidth, Box(session, "response-right").Width, 0.5);
 
             DragHandle(session, 300, 0);    // within the window: past its edge a headless pointer stops
             Assert.Equal(MeridianApp.ResponseMinWidth, Box(session, "response-right").Width, 0.5);

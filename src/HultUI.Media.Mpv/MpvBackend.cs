@@ -16,7 +16,7 @@ namespace HultUI.Media.Mpv;
 /// thread, or as pixels into the sink's ring from a worker, whichever the surface
 /// asked for first.
 /// </summary>
-public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
+public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictureRangeSource
 {
     private const ulong ObservePause = 1, ObservePosition = 2, ObserveDuration = 3, ObserveEof = 4,
         ObservePausedForCache = 5, ObserveCacheState = 6;
@@ -147,6 +147,7 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         ArgumentNullException.ThrowIfNull(source);
         _loaded = false;
         _eof = false;
+        _pictureRange = (int)PictureRange.Unknown;
         Raise(new BackendEvent.StateChanged(PlaybackState.Opening));
 
         string? target = source.Kind switch
@@ -282,6 +283,8 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
 
             case MPV_EVENT_FILE_LOADED:
                 ReadGeometry();
+                // Usually not known yet: the video's parameters come with its first decoded frame.
+                ReadPictureRange(unknownWithoutVideo: true);
                 Raise(new BackendEvent.DurationChanged(ReadDuration()));
                 RaiseGeometry();
                 RaiseTracks();
@@ -295,6 +298,7 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
                 if (_loaded)
                 {
                     ReadGeometry();
+                    ReadPictureRange(unknownWithoutVideo: false);
                     RaiseGeometry();
                     if (_mode == GpuSinkMode.Pixels) _swWake.Set();
                 }
@@ -368,6 +372,39 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         _height = (int)(GetInt64(_mpv, "video-params/h") ?? 0);
         _sampleAspect = GetDouble(_mpv, "video-params/par") is { } par && par > 0 ? par : 1;
     }
+
+    // Written on the event thread (and by Open), read on the render thread.
+    private volatile int _pictureRange = (int)PictureRange.Unknown;
+
+    /// <inheritdoc />
+    /// <remarks>The video's own transfer, never the target's: a Vulkan window draws through an
+    /// 8-bit swapchain until an HDR picture is on screen, and asks mpv for an encoded picture there,
+    /// so a range read from what mpv was asked to write would never say HDR.</remarks>
+    PictureRange IPictureRangeSource.PictureRange => (PictureRange)_pictureRange;
+
+    /// <summary>
+    /// Reads the video's transfer from mpv, on the event thread: what the picture mpv renders
+    /// starts from, after the video filters (<c>video-out-params</c>), so a clip tagged by a format
+    /// filter (<c>HULTUI_MPV_OPTIONS</c>, as the HDR tests do) says what it was tagged as.
+    /// </summary>
+    /// <param name="unknownWithoutVideo">Whether no parameters yet means not known (a file just
+    /// loaded, its first frame not decoded) rather than no picture (a reconfiguration without one).</param>
+    private void ReadPictureRange(bool unknownWithoutVideo)
+    {
+        string? gamma = GetString(_mpv, "video-out-params/gamma") ?? GetString(_mpv, "video-params/gamma");
+        if (gamma is null && unknownWithoutVideo) return;
+        var range = gamma is null ? PictureRange.Sdr : RangeOfTransfer(gamma);
+        if ((int)range == _pictureRange) return;
+        _pictureRange = (int)range;
+        StartupTrace.Mark($"mpv picture: transfer {gamma ?? "(none)"}, {range}");
+        // A window drawing the paused picture learns of it on its next frame.
+        _sink?.RequestRepaint();
+    }
+
+    /// <summary>Whether a transfer, as mpv names it in <c>video-params/gamma</c>, is a high
+    /// dynamic range one: PQ (HDR10, Dolby Vision's base layer) or HLG.</summary>
+    internal static PictureRange RangeOfTransfer(string gamma) =>
+        gamma is "pq" or "hlg" ? PictureRange.Hdr : PictureRange.Sdr;
 
     private void RaiseGeometry()
     {

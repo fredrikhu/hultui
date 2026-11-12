@@ -45,6 +45,12 @@
     <!-- A faded image draws itself at its alpha, without an offscreen group, through a context
          that can (IFadingImageContext): the Skia renderer is that context. -->
     <InternalsVisibleTo Include="HultUI.Rendering.Skia" />
+    <!-- A Vulkan window's swapchain follows the pictures on screen (PictureRange): mpv says whether
+         its video is HDR, the Skia surface hears it from each sink it draws, and its tests check
+         the rule. -->
+    <InternalsVisibleTo Include="HultUI.Media.Mpv" />
+    <InternalsVisibleTo Include="HultUI.Media.Backends.Tests" />
+    <InternalsVisibleTo Include="HultUI.Rendering.Skia.Tests" />
     <!-- The live-resize tests check that no earlier test left an image holding its own GPU source,
          or a sink nobody disposed, before they count frames (GpuFrameSink.MaySignalOnlyByPosting). -->
     <InternalsVisibleTo Include="HultUI.UiTests" />

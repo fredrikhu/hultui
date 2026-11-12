@@ -502,6 +502,73 @@ public class ChromePartTests
         });
     }
 
+    /// <summary>A watcher event over a repository that is as it was — an editor saving a file
+    /// with nothing git reports changed, git's own index refresh — reloads the repository's data
+    /// and builds the view, and builds no chrome: the summary and the worktrees land equal to what
+    /// is on screen, so the parts reading them do not hear them. Each such event built the title
+    /// bar, the sidebar and the toolbar seven times between them (plan 17 round 12: 578 KB and 10
+    /// builds an event on the UI thread, 274 KB and 2 builds now).</summary>
+    [Fact]
+    public void AWatcherEventOverAnUnchangedRepository_BuildsTheViewAndNoChrome()
+    {
+        Hosted(fx =>
+        {
+            var path = fx.A.Path;
+            void Event(string name, Action fire)
+            {
+                int gen = DataGen(fx.App, path), builds = fx.App.Builds, chrome = fx.App.ChromeBuilds;
+                fire();
+                fx.Session.PumpUntil(() => DataGen(fx.App, path) > gen, Wait);
+                // Both loads the chrome reads ran again, under the new generation, and landed.
+                fx.Session.PumpUntil(() => LoadedKey(fx.App, "_summaryLoaders", path) == $"{path}#{DataGen(fx.App, path)}"
+                    && LoadedKey(fx.App, "_worktreeLoaders", path) == $"{path}|{DataGen(fx.App, path)}", Wait);
+                Settle(fx);
+                Assert.True(fx.App.Builds > builds, $"{name} did not rebuild the view");
+                Assert.True(fx.App.ChromeBuilds == chrome, $"{name} built the chrome ({fx.App.ChromeBuilds - chrome} part builds)");
+                AssertChromeIsAFullBuild(fx, "after " + name);
+            }
+            Event("the watcher's callback", () => Invoke(fx.App, "OnExternalChange", path));
+            Event("README's write time touched", () => File.SetLastWriteTimeUtc(System.IO.Path.Combine(path, "README.md"), DateTime.UtcNow));
+        });
+    }
+
+    /// <summary>What a watcher event does change still reaches the chrome and the view, as a full
+    /// build shows it: a branch made (the summary carries the list the Branches view shows), a
+    /// remote added (the GitLab mark by the name) and a commit ahead of its upstream (the count on
+    /// Push and on the sidebar row).</summary>
+    [Fact]
+    public void RealChangesOnDisk_ReachTheChromeAndTheView()
+    {
+        Hosted(fx =>
+        {
+            var a = fx.A;
+            a.Git("branch", "delta");
+            Switch(fx, KeyCode.Digit5);
+            fx.Session.PumpUntil(() => HasText(Root(fx.Session), "delta"), Wait);
+            Settle(fx);
+            KeyViewOnly(fx);
+            AssertChromeIsAFullBuild(fx, "after a branch made");
+
+            // Git writes a new remote to its config alone, renaming a lock file over it, which the
+            // watcher reports as a ref moving: the remotes are read again.
+            a.Git("remote", "add", "origin", "https://gitlab.com/acme/core-api.git");
+            fx.Session.PumpUntil(() => ByIdIn(Part(fx, "titlebar"), "gitlab-mark") is not null, Wait);
+            Settle(fx);
+            KeyViewOnly(fx);
+            AssertChromeIsAFullBuild(fx, "after a remote added");
+
+            a.Git("update-ref", "refs/remotes/origin/main", "HEAD");
+            a.Git("branch", "-q", "--set-upstream-to=origin/main");
+            a.Write("ahead.txt", "1\n");
+            a.Git("add", "-A");
+            a.Git("commit", "-q", "-m", "ahead");
+            fx.Session.PumpUntil(() => HasText(PushButton(fx), "1") && HasText(RepoRow(fx, a.Path), "1"), Wait);
+            Settle(fx);
+            KeyViewOnly(fx);
+            AssertChromeIsAFullBuild(fx, "after a commit");
+        });
+    }
+
     /// <summary>The compact breakpoint: the title bar drops the branch and the search label,
     /// the toolbar its labels; and back.</summary>
     [Fact]
@@ -893,6 +960,17 @@ public class ChromePartTests
     private static int DataGen(JunctionApp app, string path) =>
         ((Dictionary<string, int>)typeof(JunctionApp).GetField("_dataGen", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(app)!).GetValueOrDefault(path);
+
+    /// <summary>The key a repository's loader in <paramref name="field"/> holds its value for.</summary>
+    private static string? LoadedKey(JunctionApp app, string field, string path)
+    {
+        var keyed = typeof(JunctionApp).GetField(field, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
+        var loader = keyed.GetType().GetMethod("For")!.Invoke(keyed, [path])!;
+        return loader.GetType().GetField("_loadedKey", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(loader) as string;
+    }
+
+    private static Element PushButton(Fixture fx) =>
+        Descendants(Part(fx, "toolbar")).First(e => e.TooltipText == "Push");
 
     private static void Switch(Fixture fx, KeyCode view)
     {

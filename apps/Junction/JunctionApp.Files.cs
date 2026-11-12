@@ -98,7 +98,8 @@ public partial class JunctionApp
 
         var reference = FilesRef;
         // The slot is the commit being browsed; the load key is that commit at the repo's
-        // current generation, so a change on disk reloads the tree in place with the old
+        // refs generation (HEAD and a branch move with it; an editor's save does not), so a
+        // ref moving on disk reloads the tree in place with the old
         // one up until the new one lands. With the generation in the slot key too, every
         // watcher tick opened a fresh, empty slot: the tree blanked for a frame, the
         // cursor fell back to the open file and the folders closed — for a commit whose
@@ -108,7 +109,7 @@ public partial class JunctionApp
 
         var loader = _treeLoaders.For(browsed);
         var repoPath = _activeRepoPath;
-        loader.Load($"{browsed}|{DataGen(repoPath)}",
+        loader.Load($"{browsed}|{RefsGen(repoPath)}",
             () => LoadOrRetry(repoPath, () => RepoFor(repoPath).GetTreeFiles(reference)),
             onLoaded: PickInitialTreeFile);
         var paths = loader.Value;

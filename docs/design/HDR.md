@@ -47,9 +47,27 @@ every such run a false negative. `HultUI.WinForms` hosts GL only.
 
 ### The swapchain (`SdlVulkanHost`)
 
-- **Format:** scRGB half-float (`R16G16B16A16_SFLOAT` with `EXTENDED_SRGB_LINEAR`) when the
-  display is in HDR mode and the instance enabled `VK_EXT_swapchain_colorspace`, otherwise 8-bit
-  `B8G8R8A8_UNORM` or `R8G8B8A8_UNORM` in sRGB-nonlinear. Never the `_SRGB` formats.
+- **Format:** scRGB half-float (`R16G16B16A16_SFLOAT` with `EXTENDED_SRGB_LINEAR`) while an HDR
+  video is on screen on a display in HDR mode, and the instance enabled `VK_EXT_swapchain_colorspace`;
+  otherwise 8-bit `B8G8R8A8_UNORM` or `R8G8B8A8_UNORM` in sRGB-nonlinear. Never the `_SRGB` formats.
+  Until 2026-11-12 the half-float swapchain was used whenever the display was HDR; see the format
+  switch below and [Defaults](#defaults).
+- **Format switch** (2026-11-12): an HDR video is one whose own transfer is PQ or HLG, as mpv reads
+  it from the video (`video-out-params/gamma`), never from what it is asked to write, so an 8-bit
+  swapchain, whose target asks for an encoded picture, still learns of it. Each GPU source says
+  what its picture is on every draw (`GpuFrameSink` → `IPictureRangeSurface`); after a frame,
+  `HdrPictureFollower` decides: an HDR picture drawn means shown, a video still loading leaves the
+  answer as it was (so the next HDR file keeps the swapchain), anything else means not shown. A
+  paused video is still drawn and keeps its swapchain: a switch on every pause would rebuild twice
+  and change the picture. A change that changes the format rebuilds the swapchain as the next frame
+  begins, and the window draws that frame though nothing else changed. Destroyed first or handed
+  over as any rebuild is (below). Measured on the RTX 4080 (610.88), Reel at 1920×1140: on, a
+  rebuild of 3 ms, then 98 ms in the first present (the half-float swapchain handed an 8-bit one);
+  the video's first frame is drawn tone-mapped on the 8-bit swapchain, the first on the new one
+  too (mpv confirms linear light after it is drawn), and the third is HDR, about 210 ms after the
+  first picture. Off, 325 ms (destroyed first: the 8-bit create took 311 ms; 144 ms in a 480×270
+  probe), then a 0.1 ms present. The HDR frame after the switch is pixel-identical to the
+  half-float-always one (`HULTUI_VULKAN_CAPTURE`, same frame of the same clip).
 - **Present mode:** MAILBOX, then IMMEDIATE, then FIFO. IMMEDIATE let the compositor stretch the
   previous image into a resized window.
 - **Resize:** while a drag sizes the window (Win32's modal size/move loop, from its first size
@@ -271,6 +289,9 @@ The rules the design depends on. Each one was broken once, and most failed silen
 - **A Win32 handle is closed by the caller; an fd is consumed by the import.**
 - **An app's request may fall back to GL; `HULTUI_RENDERER`'s may not.**
 - **A frame's colour label follows what mpv confirmed.**
+- **Whether a picture is HDR is read from the video, never from the target.** The target is
+  encoded until the swapchain is half-float, and the swapchain is half-float only once an HDR
+  picture is known to be on screen.
 - **The UI thread makes no synchronous libmpv call** once a render context exists.
 - **The natives never import `nvcuda` at load time.**
 
@@ -281,7 +302,7 @@ Every switch is described in [ENVIRONMENT.md](../ENVIRONMENT.md).
 | Decision | Default | Why | Switch |
 |---|---|---|---|
 | Renderer | GL; Vulkan per app | Vulkan costs start-up, memory and resize CPU that apps without HDR video would pay for nothing | `renderer:`, `HULTUI_RENDERER` |
-| Swapchain format | follows the display | enumeration lists the same formats in HDR and out | `HULTUI_VULKAN_F16` |
+| Swapchain format | 8-bit; half-float scRGB while an HDR video is on screen on an HDR display (2026-11-12, approved by the user) | only HDR video needs the half-float swapchain, and at rest it cost Reel and Aperture an NVIDIA thread waking ~96 times a second, three images twice the size, and ~26 MB more kept after its first replacement; the format follows the display and the picture, since enumeration lists the same formats in HDR and out | `HULTUI_VULKAN_F16` (1 always half-float, 0 always 8-bit) |
 | Present mode | MAILBOX | no resize stretch, and video level with GL | `HULTUI_VULKAN_PRESENT` |
 | Fixed extent | during a drag (Windows, MAILBOX) | a drag step without a rebuild; outside a drag it would cost 4K video about 70% | `HULTUI_VULKAN_FIXED_EXTENT` |
 | Scaled colour space | off | 0.10 ms a frame and no memory saved, on a path off Skia's usual one | `HULTUI_VULKAN_SCALED_SPACE` |
@@ -308,6 +329,16 @@ quantity; where HDR-LOG.md has several, these are the most careful.
 
 - **The Windows costs are 16-bit colour, not Vulkan.** An 8-bit Vulkan window starts within 30 ms
   of GL, resizes at GL's cost, and sits 5 MB above it.
+- **So the half-float swapchain waits for an HDR video** (2026-11-12, plan 17 round 12). At rest,
+  real Aperture (sign-in page, 2160×1350) and Reel (empty player, 1920×1140), NativeAOT, 4K at 150 %
+  and 120 Hz, two alternated launches each: wakes 212 → 116 and 215 → 116 a second (the NVIDIA DXGI
+  thread, `nvwgf2umx`, ~98 a second, is gone); DXGI local / non-local 228 / 14 → 69 / 25 MB and
+  171 / 14 → 54 / 22 MB; private bytes 148 → 106 and 150 → 106 MB; 43 → 25 threads. After one
+  maximize-sized grow and its restore, 20 s on: the half-float window had kept +25 MB non-local,
+  +22–28 MB local and +46 MB private and woke 249–250 times a second; the 8-bit one kept nothing
+  (115–116). Loop at rest: 0 frames, 0 passes, 0 wakes either way. The chrome reads back the same
+  but for blending: white, background and accent identical, a 3-level step on Aperture's card
+  surface, 1–3 levels on glyph edges (the 8-bit swapchain blends as GL does).
 - **On NVIDIA Linux F16 is nearly free.** There the fixed costs are the API's: about +95 ms of
   start-up and +23 MB, with or without F16.
 - **Over-allocating during a drag** (2026-10-11): a step of an 80-step drag went from 32.9–38.1

@@ -295,6 +295,9 @@ for after a build and on `Window.Resized`) and give it to whatever shows it in p
 `HorizontalPan.ViewportWidth` assigned then moves the thumb on screen with no build. Build only
 when the answer changes what the build makes (the scrollbar coming or going, an offset the
 cells were built at). Junction's scenes, 125 steps: 67 differed from a full build, none now.
+What is read after the frame shows a frame later, in a frame of its own; where the move is known
+before the layout (a column taking the window's slack moves by the window's change), give it in
+the `Resized` handler too and keep the read as the check (LAYOUT.md, "Nesting scroll views").
 
 ### A background callback that fires once per item posts one build at a time
 
@@ -597,6 +600,17 @@ where the tree had cost about 4.4 KB a request on every key, 938 → 72 KB and t
 the header, param and body editors −64…−70 %; a History key −35 %; a find character in the
 response rebuilds only the pane (no window build, −12 %). The time of a key and its frames moves
 less (−1…−7 % at 25 requests): at this size the frames, not the build, are most of it.
+
+**A change some parts show takes a revision only they read.** A switch between request tabs (a
+tab clicked, a request already open opened from the tree) and a send's start and end change what
+the tree (its lit row) and the response pane show, and nothing the title bar (the workspace and the
+environment) or the rail (the view) shows. They called `MarkDirty()`, so those two rebuilt on every
+switch. They now call `TabDirty()`, which writes a third signal only the tree and the pane read and
+rebuilds the view (round 12, step 2). Two sent tabs (an HTML and a JSON body), headless, JIT: a
+switch 227.5 → 192.5 KB (−15 %) and 5 → 3 builds, a send 369.4 → 299.4 KB (−19 %) and 11 → 7
+builds; in a real window (NativeAOT, clicks pushed into SDL's queue) 287.5 → 251.4 KB a switch and
+525.6 → 453.5 a send. Before giving a common path a part of its own, look at which of the kept
+parts its full rebuild builds that show nothing of it.
 
 A field holds the text typed into it, so a key needs a build only for what else on screen reads
 that text. On the Headers, Body and Auth sub-tabs the URL is read only by the Params and Chain
@@ -1555,6 +1569,55 @@ The discipline in one line: **`Refresh()` bumps the generation (data changed →
 ### Stable content across reloads
 
 Because `Build()` renders from the cached `Value`, you can keep the previous result on screen while the next one loads instead of blanking to a spinner — gate the placeholder on "have we ever loaded anything" rather than "is a load in flight." Since the result is applied in a single batch, the view swaps from old to new in one frame with no empty state in between.
+
+### A reload that finds the same hands back what is shown
+
+A loader's readers rebuild when its value changes, and `Signal<T>` compares values with the
+type's own equality: a new list is a change even when every item is the same, and so is a record
+that holds a list, since a record compares a list member by reference. Junction's repository
+watcher reloads a repository's summary and worktrees on every event, an editor's save included,
+and each reload landed a new value: the title bar, the sidebar and the toolbar built again for a
+repository that had not changed (round 12, step 2). The producer now compares what it read with
+the value on screen, taken on the UI thread when the load starts, and hands that back when they
+are the same:
+
+```csharp
+var shown = loader.Value;   // on the UI thread, as Load is
+loader.Load(key, () => Read() is var loaded && loaded.SameAs(shown) ? shown : loaded);
+```
+
+The watcher's handler also stopped building the chrome to start those loads: the loaders are the
+same objects from one generation to the next, so the parts already hear them, and starting the
+loads from the handler is all the chrome's build did. A file created and deleted in the
+repository, headless (JIT): 581 → 414 KB on the UI thread an event over History and 10 → 6
+builds; a file whose write time moved and nothing else 578 → 274 KB and 10 → 2 builds, no part;
+the Changes view 497 → 315 KB; in a real window (NativeAOT) 816 → 647 KB and 10 → 6 builds. The
+same frames and accessibility trees. (An `AsyncLoader` constructor taking an
+`IEqualityComparer<T>` would do this in the framework; it would be new public API.)
+
+### Key each load on what can change it
+
+One generation for everything an entity holds reloads everything on every change. Junction kept
+one per repository, and its watcher bumped it for a file saved in the working tree, so an editor's
+save read the log, the selected commit's files, the branches, the tags, the version and the
+remotes again, none of which a change to the working tree can move: 14 git commands and 4.3 MB on
+all threads an event over History. The watcher now says whether HEAD, a ref, the config or the
+packed refs changed in its window. The loads of what those say key on a second generation
+(`RefsGen`) that an event in the working tree or the index leaves alone, and the summary reads its
+status again and keeps the rest (round 12, step 2). Over History an event now runs `git status`
+and `git worktree list`, and makes 4,268 → 226 KB on all threads (−95 %) and 414 → 162 KB on the
+UI thread, headless; over Changes, which shows the working tree, 19 → 11 commands and 5,236 →
+1,611 KB; in a real window (NativeAOT) 4,502 → 236 KB and 647 → 172 KB an event. The same frames
+and accessibility trees.
+
+Two traps on the way, both in what a `FileSystemWatcher` on `.git` reports:
+
+- Git writes HEAD, the config and the packed refs to a lock file and renames it over the old
+  one. A watcher that listens for Changed and Created never hears them: a checkout that changed
+  no file in the working tree, and a remote added, went unseen until something else changed.
+- `git status` replaces the index the same way when it refreshes it, which it did on three runs
+  in a row on a fresh repository, unless optional locks are off (as in the tests). A watcher of
+  the index's renames hears the app's own reads, reloads, and reads again.
 
 ### What a build shows of files comes from what was read already
 

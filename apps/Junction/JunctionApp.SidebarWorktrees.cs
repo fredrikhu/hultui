@@ -40,12 +40,15 @@ public partial class JunctionApp
 
     /// <summary>A repository's worktrees, loaded off the UI thread and cached per repo and
     /// per data generation — the same loader (and so the same result) the worktrees panel
-    /// uses. Mirrors <see cref="SummaryFor"/>, which the sidebar already calls per row.</summary>
+    /// uses. Mirrors <see cref="SummaryFor"/>, which the sidebar already calls per row: a
+    /// reload that finds the same worktrees hands back the list on screen, so the sidebar
+    /// does not build again for a new list with nothing new in it.</summary>
     private IReadOnlyList<GitWorktree> WorktreesFor(string path)
     {
         if (string.IsNullOrEmpty(path)) return [];
         var loader = _worktreeLoaders.For(path);
-        loader.Load($"{path}|{DataGen(path)}", () => RepoFor(path).GetWorktrees());
+        var shown = loader.Value;
+        loader.Load($"{path}|{DataGen(path)}", () => RepoFor(path).GetWorktrees() is var loaded && loaded.SequenceEqual(shown) ? shown : loaded);
         return loader.Value;
     }
 

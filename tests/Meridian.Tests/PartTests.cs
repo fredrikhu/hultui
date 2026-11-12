@@ -380,6 +380,47 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    /// <summary>A tab switch — a request tab clicked, a request already open opened from the tree —
+    /// and a send's start and end build the tree and the response panel with the view, and not the
+    /// title bar or the rail, which show nothing of the open tabs (plan 17 round 12: they were 33 of
+    /// the 228 KB a switch made). What the tree and the panel show follows.</summary>
+    [Fact]
+    public void ATabSwitchOrASend_BuildsNoTitleBarOrRail()
+    {
+        Hosted(fx =>
+        {
+            var s = fx.Session;
+            Click(fx, "req-login");
+            Click(fx, "req-two");
+            void TabsOnly(string name, Action act, Func<bool>? until = null)
+            {
+                int title = PartBuildsOf(fx, "_titleBarPart"), rail = PartBuildsOf(fx, "_railPart");
+                int tree = PartBuildsOf(fx, "_treePart"), builds = fx.App.Builds;
+                act();
+                if (until != null) s.PumpUntil(until, Wait);
+                s.PumpFrames(3);
+                Assert.True(fx.App.Builds > builds, $"{name} did not rebuild the window");
+                Assert.True(PartBuildsOf(fx, "_treePart") > tree, $"{name} did not build the tree");
+                Assert.True(PartBuildsOf(fx, "_titleBarPart") == title, $"{name} built the title bar");
+                Assert.True(PartBuildsOf(fx, "_railPart") == rail, $"{name} built the rail");
+                AssertPartsAreAFullBuild(fx, "after " + name);
+            }
+            TabsOnly("a request tab clicked", () => Click(fx, "request-tab-0"));
+            Assert.True(Lit(TreeRow(fx, "req-login")));
+            Assert.False(Lit(TreeRow(fx, "req-two")));
+            TabsOnly("a request already open opened", () => Click(fx, "req-two"));
+            Assert.True(Lit(TreeRow(fx, "req-two")));
+            Assert.True(HasText(Part(fx, "response-right"), "never sent"));
+            TabsOnly("a send", () => Click(fx, "send"), () => s.Window.FindByAutomationId("response-body") is not null);
+            Assert.True(HasText(Part(fx, "response-right"), "✓ 200 OK"));
+            TabsOnly("back to the tab never sent", () => Click(fx, "request-tab-0"));
+            Assert.True(HasText(Part(fx, "response-right"), "never sent"));
+        });
+    }
+
+    private static int PartBuildsOf(Fixture fx, string field) =>
+        ((Part)typeof(MeridianApp).GetField(field, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(fx.App)!).Builds;
+
     /// <summary>Another view lets the Requests view go (plan 17 round 10). The tree's kept rows hold
     /// their elements weakly (KeptElements), and a build that shows no response panel or URL field
     /// empties the refs into them: the open response tab, the body, the URL field. Each of them held
@@ -732,7 +773,7 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
             AssertBox(fx, "titlebar", 0, 0, w, 40);
             AssertBox(fx, "rail", 0, 40, Azimuth.RailWidth, body);
             AssertBox(fx, "tree", Azimuth.RailWidth, 40, Azimuth.TreeWidth, body);
-            if (width >= MeridianApp.ForceBottomWindowWidth)
+            if (width >= fx.App.ForceBottomWindowWidth)
             {
                 AssertBox(fx, "response-right", w - Azimuth.ResponseRight, 40, Azimuth.ResponseRight, body);
                 s.Window.PressKey(KeyCode.Backslash, KeyModifiers.Ctrl);

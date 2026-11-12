@@ -639,6 +639,8 @@ public class VirtualListItemRowTests
     [InlineData("on screen", 5)]
     [InlineData("off screen", 150)]
     [InlineData("the last gone", 199)]
+    [InlineData("one appended", 200)]
+    [InlineData("three appended", 200)]
     public void AChangedItem_IsToldToAReader_OnScreenOrNot_WithNoTreeBuilt(string change, int index)
     {
         var (session, pane) = Mount(itemRows: true);
@@ -652,7 +654,9 @@ public class VirtualListItemRowTests
         int trees = window.AccessibilityTreesBuilt, walks = window.AccessibilityLayoutRefreshesInPlace;
 
         var items = pane.Items.ToList();
+        int appended = change switch { "one appended" => 1, "three appended" => 3, _ => 0 };
         if (change == "the last gone") items.RemoveAt(index);
+        else if (appended > 0) items.AddRange(Enumerable.Range(index, appended).Select(i => new Entry(i, $"entry {i}")));
         else items[index] = new Entry(index, $"entry {index} renamed");
         pane.Items = items;
         pane.Rebuild();
@@ -665,8 +669,10 @@ public class VirtualListItemRowTests
         var after = session.Window.AccessibilityTree;
         Assert.Equal(Items(after), Items(bridge.CurrentTree!));
         Assert.Equal(Told([AccessibilityTreeDiffer.Diff(before, after)]), Told(bridge.Diffs));
-        Assert.Equal([change == "the last gone" ? $"- ListItem entry {index}" : $"Name ListItem entry {index} renamed"],
-            Told(bridge.Diffs));
+        List<string> expected = change == "the last gone" ? [$"- ListItem entry {index}"]
+            : appended > 0 ? [.. Enumerable.Range(index, appended).Select(i => $"+ ListItem entry {i}")]
+            : [$"Name ListItem entry {index} renamed"];
+        Assert.Equal(expected, Told(bridge.Diffs));
 
         static List<string> Told(IEnumerable<TreeDiff> diffs) =>
         [
@@ -674,6 +680,49 @@ public class VirtualListItemRowTests
                 .Concat(d.Added.Select(a => $"+ {a.Node.Role} {a.Node.Name}"))
                 .Concat(d.Removed.Select(r => $"- {r.Node.Role} {r.Node.Name}"))),
         ];
+    }
+
+    /// <summary>
+    /// An item appended to a list over 2,000 items, which serves its items on demand, is told as its
+    /// items' new number by one walk, with no tree built; the next patch, with the same items, asks for
+    /// no walk. Such a list kept the labels read while it had 2,000 items or fewer (here: one read on
+    /// the UI thread), and no walk asks it for more, so the labels kept grow to the items' number.
+    /// </summary>
+    [Fact]
+    public void AnItemAppendedToAListServedOnDemand_IsToldByOneWalk_AndTheNextPatchAsksForNone()
+    {
+        var (session, pane) = Mount(itemRows: true, count: 2100);
+        using var _ = session;
+        var window = session.Window.Window;
+        var bridge = session.Window.InstallAccessibilityBridge();
+        session.PumpFrames(2);
+        session.PumpFrame(TimeSpan.FromMilliseconds(300));
+        var source = (IAccessibleItemSource)pane.List.Current!;
+        Assert.Equal("entry 0", source.GetItemLabel(0));
+        bridge.ClearDiffs();
+        int trees = window.AccessibilityTreesBuilt, walks = window.AccessibilityLayoutRefreshesInPlace;
+
+        pane.Items = [.. pane.Items, new Entry(2100, "entry 2100")];
+        pane.Rebuild();
+        Pump();
+        Assert.Equal(0, window.AccessibilityTreesBuilt - trees);
+        Assert.Equal(1, window.AccessibilityLayoutRefreshesInPlace - walks);
+        var told = Assert.Single(bridge.Diffs.SelectMany(d => d.PropertyChanged),
+            c => c.PropertyName == AccessibilityProperties.ItemCount);
+        Assert.Equal(2101, told.Node.Served.Count);
+
+        pane.Items = [.. pane.Items];
+        pane.Rebuild();
+        Pump();
+        Assert.Equal(1, window.AccessibilityLayoutRefreshesInPlace - walks);
+        Assert.Equal(0, window.AccessibilityTreesBuilt - trees);
+
+        void Pump()
+        {
+            session.PumpFrame(TimeSpan.FromMilliseconds(16));
+            session.PumpFrame(TimeSpan.FromMilliseconds(120));
+            session.PumpFrame(TimeSpan.FromMilliseconds(120));
+        }
     }
 
     private static List<(string? Name, bool? Selected)> Items(AccessibilityNode root)

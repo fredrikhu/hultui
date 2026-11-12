@@ -223,4 +223,47 @@ public class TreeDiffCoalescingTests
         Assert.Empty(diff.BoundaryAdded());
         Assert.Empty(diff.BoundaryRemoved());
     }
+
+    /// <summary>
+    /// The searches build no set of the diff's ids each time: a diff that brought 633 rows and took
+    /// 633 (a key of Junction's commit file walk with a reader) built four sets of them, 30.6 KB a key
+    /// with UI Automation (plan 17 round 12 step 3). Each search makes its result alone, the same
+    /// result, on every thread.
+    /// </summary>
+    [Fact]
+    public void TheSearches_BuildNoSetOfTheIds_WhenTheThreadHasSearchedBefore()
+    {
+        var root = AppRoot();
+        var before = Build(root);
+        // A list of rows, as a list of item nodes comes: one container, 633 nodes under it.
+        var list = BoxElement.New();
+        list.Role = AccessibilityRole.List;
+        for (int i = 0; i < 211; i++)
+            list.AddChild(Row($"row {i}"));
+        root.AddChild(list);
+        var after = Build(root);
+        var added = AccessibilityTreeDiffer.Diff(before, after);
+        var removed = AccessibilityTreeDiffer.Diff(after, before);
+        Assert.Equal(634, added.Added.Count);
+        Assert.Equal(634, removed.Removed.Count);
+
+        // Once to warm the thread's sets, then measured.
+        Search();
+        long start = GC.GetAllocatedBytesForCurrentThread();
+        var (parents, gone, boundary, boundaryGone) = Search();
+        long bytes = GC.GetAllocatedBytesForCurrentThread() - start;
+
+        Assert.True(bytes < 1024, $"{bytes} B for four searches over 634 ids");
+        Assert.Equal(after.ElementId, Assert.Single(parents));
+        Assert.Equal(after.ElementId, Assert.Single(gone));
+        Assert.Equal(list.Id, Assert.Single(boundary).Node.ElementId);
+        Assert.Equal(list.Id, Assert.Single(boundaryGone).Node.ElementId);
+        // On another thread: the same answers, from sets of its own.
+        var other = Task.Run(Search).Result;
+        Assert.Equal(parents, other.Parents);
+        Assert.Equal(boundary.Select(b => b.Node.ElementId), other.Boundary.Select(b => b.Node.ElementId));
+
+        (List<ElementId?> Parents, List<ElementId?> Gone, List<AddedNode> Boundary, List<RemovedNode> BoundaryGone) Search() =>
+            (added.CoalescedAddedParents(), removed.CoalescedRemovedParents(), added.BoundaryAdded(), removed.BoundaryRemoved());
+    }
 }

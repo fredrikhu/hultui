@@ -178,6 +178,20 @@ additions and removals; the bridge keeps its wrapper, where it used to drop it
 after adding it, and on AT-SPI sends it no cache-remove, which libatspi takes
 for a dispose.
 
+A list's item node gets its UIA wrapper when something first asks for it (plan 17 round 12 step 3):
+a client's navigation, a hit test, a lookup by its id, an event it raises (a selection move, a new
+label). The wrapper is made from the item's node in the list's node (an item's id is its list and its
+place), under a lock the apply holds while it changes the map and moves the wrappers to the new tree,
+so a client's thread makes it from the tree before an apply or after it; from then on it is moved with
+the tree and let go with its item as any other. Elements' nodes keep theirs from the diff that adds
+them, and the providers an apply lets go are told to UI Automation after it has let go of the lock.
+The diff's searches for the parents to raise on (and AT-SPI's for its boundary children) keep their
+sets of ids per thread. Junction's commit file walk with a reader, a real window on NativeAOT (633 diff
+rows a file): 633 wrappers made and let go a key → 3, the bridge 116.1 → 0.6 KB a key, the UI thread
+980.0 → 864.4 KB a key at a 33 ms key pace; the same raises (4 structure events and a Name a key, 65
+provider calls and 65 QueryInterface calls, 18–20 µs a raise). What a key still costs with a reader is
+the walk, 287 KB: the next file's rows as nodes, their labels and the app's row records.
+
 A focus move rebuilds no tree. The window marks it on the applied tree in place
 (`IsFocused` on the node that had the focus and on the one that has it) and hands
 the bridge both nodes (`NotifyFocusChanged(focused, previous)`): the UIA wrappers
@@ -253,6 +267,21 @@ it moved (its own and its neighbours') are told by the coalesced layout refresh,
 move is — or by its leading edge at once, when no refresh came in the last 100 ms. Two
 consequences, both of the coalescing: a reader asking within 100 ms reads the old bounds, and a
 node removed within the wait never had its new bounds told.
+
+A change of the window's size has no leading edge (plan 17 round 12 step 3; the user's yes to question
+47). While the size keeps changing — a live resize, a size a frame — the layout refresh and the open
+overlays' wait until it has rested 100 ms (`Window._lastA11ySizeMs`), and tell the bounds once; a
+single change (a maximize, a snap) is told 100 ms after it. A refresh every 100 ms of a drag raised a
+BoundingRectangle change for every element that moved, each answered on the UI thread by 13 provider
+calls and 13 QueryInterface calls (10–15 µs a raise in a real window). Real windows on NativeAOT, a
+drag of 60 steps a frame (16 ms) apart and back, before → after: layout and structure walks Vesper
+12 → 3, Junction 11 → 3, Meridian 11 → 1; BoundingRectangle raises 1,645 → 428, 599 → 181, 319 → 29;
+provider calls (and as many QIs) 21,619 → 5,798, 8,567 → 3,133, 4,147 → 377; time in the raises 19.8 →
+5.4, 9.9 → 2.8, 5.6 → 0.4 ms; bytes and frames the same. The walks left are the drag's structure changes
+(rows coming into view, Junction's 33 structure events), told at once as before, with every box they
+moved. A resize in steps 100 ms apart rests at every step and is told at every step, as before (Vesper
+13 → 11.5 walks, 1,596 → 1,524 raises). A reader asking during the drag reads the bounds told before
+it, and is told those the size came to rest at.
 
 A dialog's backdrop is no button (2026-10-27, plan 17 round 6; the user approved what a reader
 hears). A box with a click is inferred to be a button, named from its content, but not a box
@@ -442,7 +471,12 @@ with the applied children not found yet in a dictionary the refresh keeps). A ch
 does not have is built as a build builds it, and only that subtree; an applied child the elements no
 longer have is removed; children that stay in another order mark the parent reordered. Items added
 to or gone from a list's end (an item's id is its place), and the focused row an item holds, are
-taken the same way. The refresh hands the bridge `ApplyChanges` with the diff a build would make, in
+taken the same way. Items added past the end with no row (below the window) change no element, so an
+item-rows patch asks for the walk itself when the list has more items than labels it kept for a
+reader and the first new one has no row (plan 17 round 12 step 3, a bug fix the user approved,
+question 48): 1 or 3 items appended to a 200-item list were not told (the reader's tree 200 items, a
+build 201 or 203, no walk after 360 ms); now in the patch's frame, by 1 walk and no tree. The labels
+kept grow to the items' number, so a list served on demand asks once per append. The refresh hands the bridge `ApplyChanges` with the diff a build would make, in
 its order: the nodes added, each subtree in order; the nodes removed, deepest first, the top one's
 parent a stand-in that keeps the children it had (`AccessibilityNode.ChildrenStandIn`), where AT-SPI
 reads the child's old index for its `children-changed:remove`; the parents reordered; the property

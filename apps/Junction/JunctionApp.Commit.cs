@@ -93,7 +93,7 @@ public partial class JunctionApp
 
     // The ignore-whitespace flag is part of the key so toggling it reloads the diff.
     private string RangeDetailKey((string BaseHash, string HeadHash) range) =>
-        $"{_activeRepoPath}|{range.BaseHash}..{range.HeadHash}|{DataGen(_activeRepoPath)}|w{_settings.Git.IgnoreWhitespace}";
+        $"{_activeRepoPath}|{range.BaseHash}..{range.HeadHash}|{RefsGen(_activeRepoPath)}|w{_settings.Git.IgnoreWhitespace}";
 
     private void PrefetchRangeDetail((string BaseHash, string HeadHash) range)
     {
@@ -209,7 +209,7 @@ public partial class JunctionApp
     }
 
     private string CommitDetailKey(string hash) =>
-        $"{_activeRepoPath}|{hash}|{DataGen(_activeRepoPath)}|w{_settings.Git.IgnoreWhitespace}";
+        $"{_activeRepoPath}|{hash}|{RefsGen(_activeRepoPath)}|w{_settings.Git.IgnoreWhitespace}";
 
     /// <summary>Eagerly loads a commit's files+diff into <see cref="_commitDetail"/>.
     /// Called both when a commit is selected in History (prefetch) and when the

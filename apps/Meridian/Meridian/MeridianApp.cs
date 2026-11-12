@@ -96,13 +96,35 @@ public partial class MeridianApp : Component, IDisposable
     // The breakpoint is the narrowest window that leaves the editor EditorMinWidth beside
     // the pane: rail 48 + tree 264 + editor 448 + pane 560 = 1320 dip. 448 holds the six
     // sub-tabs of a request with counts ("Params 4 · Headers 1 · Body · Auth · Assertions 1 ·
-    // Chain 3", 445 px with the strip's padding) without scrolling them, and leaves the URL
-    // box 227 px beside GET and 203 beside OPTIONS: the URL bar's floor is the method chip
-    // (46 px for GET, 70 for OPTIONS), Send with its Ctrl+Enter keycap (135) and 40 px of
+    // Chain 3", 445 px with the strip's padding in Segoe UI) without scrolling them, and leaves
+    // the URL box 227 px beside GET and 203 beside OPTIONS: the URL bar's floor is the method
+    // chip (46 px for GET, 70 for OPTIONS), Send with its Ctrl+Enter keycap (135) and 40 px of
     // padding and gaps. It was 1100 until 2026-10-08, when the user approved the move: that
     // left the editor 228 px, the URL bar's floor with almost no URL beside Send.
-    internal const float EditorMinWidth = 448f;
-    internal const float ForceBottomWindowWidth =
+    //
+    // A face that draws those six wider moves the floor out to the strip's measured width
+    // (SubTabStripWidth), and the breakpoint with it: Noto Sans, a Fedora desktop's UI face,
+    // cut the chain tab 4.6 px short at 1320 (2026-11-12). Measured once for the face, the
+    // scale and the measure context the window has, not every build.
+    private const float EditorDesignedMinWidth = 448f;
+    private float _editorMinWidth;
+    private (HultUI.Core.Rendering.IMeasureContext? Context, string? Family, float Scale) _editorMinWidthFor;
+
+    internal float EditorMinWidth
+    {
+        get
+        {
+            var key = (HultUI.Core.Rendering.TextMeasure.Context, _app.Theme.FontFamily, _window.DisplayScale);
+            if (key != _editorMinWidthFor)
+            {
+                _editorMinWidthFor = key;
+                _editorMinWidth = MathF.Max(EditorDesignedMinWidth, MathF.Ceiling(SubTabStripWidth(key.FontFamily)));
+            }
+            return _editorMinWidth;
+        }
+    }
+
+    internal float ForceBottomWindowWidth =>
         Azimuth.RailWidth + Azimuth.TreeWidth + EditorMinWidth + Azimuth.ResponseRight;
 
     // At the bottom the pane is its designed 380 dip wherever the window leaves the editor
@@ -532,7 +554,7 @@ public partial class MeridianApp : Component, IDisposable
     internal void OpenRequest(string path, bool editUrl = false)
     {
         int existing = _tabs.FindIndex(t => string.Equals(t.Path, path, StringComparison.OrdinalIgnoreCase));
-        if (existing >= 0) { _activeTab = existing; MarkDirty(); return; }
+        if (existing >= 0) { _activeTab = existing; TabDirty(); return; }
         if (TryReadFile(path) is not { } text) { Flash($"Could not read {Path.GetFileName(path)}"); return; }
         _tabs.Add(new RequestTab(path, ReqDocument.Parse(text)) { UrlEditing = editUrl });
         _activeTab = _tabs.Count - 1;
@@ -638,7 +660,7 @@ public partial class MeridianApp : Component, IDisposable
         // and OAuth2 only fetches a token once everything else resolved.
         var cts = tab.Sending = new CancellationTokenSource();
         tab.SendStartedTs = System.Diagnostics.Stopwatch.GetTimestamp();
-        MarkDirty();
+        TabDirty();
         TickWhileSending(tab, cts);
         try
         {
@@ -671,7 +693,9 @@ public partial class MeridianApp : Component, IDisposable
         {
             tab.Sending = null;
             ForgetReplacedBodies(tab);
-            MarkDirty();
+            // The tree and the response panel show the send; the title bar and the rail nothing
+            // of it (what a send records goes to History and the map, which are views).
+            TabDirty();
         }
     }
 

@@ -385,9 +385,56 @@ public class GpuFrameSinkTests
         pixels.Dispose();
     }
 
-    /// <summary>A surface that hands out a target of its own, resolving no GL at all.</summary>
-    private sealed class LendingSurface : IExternalGLSurface
+    /// <summary>
+    /// A Vulkan surface draws through an 8-bit swapchain until an HDR picture is on screen, so it
+    /// hears, on every draw of a source, what that source's picture is: while it loads (nothing to
+    /// draw yet, and the swapchain stays as it is), and once it draws HDR into a target that asked
+    /// for an encoded picture — the 8-bit swapchain's, which a range read from the target would
+    /// never call HDR. A source that says nothing of its picture (a web page) is an ordinary one.
+    /// </summary>
+    [Fact]
+    public void ASurfaceThatFollowsItsPictures_HearsEveryDrawOfTheSource_LoadingOrNot()
     {
+        var counting = new CountingRenderer { HasSize = false };
+        var ranged = new RangedRenderer(counting) { Range = PictureRange.Unknown };
+        var video = new GpuFrameSink(new PixelFrameSink(), ranged);
+        var surface = new LendingSurface(framebuffer: 7, texture: 9, internalFormat: 0x881A);
+
+        Assert.False(video.TryRenderFrame(surface, out _));
+        counting.HasSize = true;
+        ranged.Range = PictureRange.Hdr;
+        Assert.True(video.TryRenderFrame(surface, out _));
+        Assert.False(counting.LastWantedLinear);
+
+        var page = new GpuFrameSink(new PixelFrameSink(), new CountingRenderer());
+        Assert.True(page.TryRenderFrame(surface, out _));
+
+        Assert.Equal([PictureRange.Unknown, PictureRange.Hdr, PictureRange.Sdr], surface.Pictures);
+    }
+
+    /// <summary>A renderer that says what its picture is (<see cref="Range"/>), counting through another.</summary>
+    private sealed class RangedRenderer(CountingRenderer inner) : IGpuFrameRenderer, IPictureRangeSource
+    {
+        public PictureRange Range { get; set; }
+        PictureRange IPictureRangeSource.PictureRange => Range;
+        public void OnModeDecided(GpuSinkMode mode) => inner.OnModeDecided(mode);
+        public void PrepareGL(Func<string, nint> getProcAddress) => inner.PrepareGL(getProcAddress);
+        public bool TryGetFrameSize(out int width, out int height) => inner.TryGetFrameSize(out width, out height);
+        public bool RendersBottomUp => false;
+        public bool Render(Func<string, nint> getProcAddress, in GpuFrameTarget target, int width, int height) =>
+            inner.Render(getProcAddress, target, width, height);
+        public void ReleaseGL() => inner.ReleaseGL();
+    }
+
+    /// <summary>A surface that hands out a target of its own, resolving no GL at all, and hears
+    /// the pictures drawn on it as a Vulkan one does.</summary>
+    private sealed class LendingSurface : IExternalGLSurface, IPictureRangeSurface
+    {
+        /// <summary>What each draw of a source said its picture was, in order.</summary>
+        public List<PictureRange> Pictures { get; } = [];
+        public void PictureDrawn(PictureRange range) => Pictures.Add(range);
+        public bool TakeOwedFrame() => false;
+
         private readonly uint _framebuffer, _texture, _internalFormat;
         private readonly bool _lends, _linear, _record;
         private readonly float _peakNits;

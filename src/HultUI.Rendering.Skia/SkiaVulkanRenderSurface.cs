@@ -9,9 +9,9 @@ namespace HultUI.Rendering.Skia;
 ///
 /// <para>Phase 1 of <c>docs/design/HDR.md</c>. It exists because HDR needs an HDR-capable
 /// swapchain and OpenGL on Windows cannot ask for one; Vulkan can, on Windows and Linux
-/// both. On an SDR display it draws 8-bit sRGB, indistinguishable from
-/// <see cref="SkiaGLRenderSurface"/>; on an HDR display it draws scRGB, with the UI's white
-/// at the display's SDR white and video carrying its HDR range.</para>
+/// both. It draws 8-bit sRGB, indistinguishable from <see cref="SkiaGLRenderSurface"/>, except
+/// while an HDR video is on screen on an HDR display: then scRGB, with the UI's white at the
+/// display's SDR white and video carrying its HDR range (<see cref="HdrPictureFollower"/>).</para>
 ///
 /// <para><b>How it differs from the GL surface.</b> A GL frame has no beginning: Skia draws
 /// into framebuffer 0 whenever it likes and the platform swaps buffers afterwards. A Vulkan
@@ -22,9 +22,20 @@ namespace HultUI.Rendering.Skia;
 /// <para>This assembly knows nothing about Vulkan beyond what SkiaSharp needs, which is
 /// handles and integers. <see cref="IVulkanSurfaceHost"/> is the whole of the contract.</para>
 /// </summary>
-public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurface, ISkiaFrameCapture
+public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurface, ISkiaFrameCapture,
+    IPictureRangeSurface
 {
     private readonly IVulkanSurfaceHost _host;
+
+    /// <summary>Whether an HDR picture is on screen, which the host's swapchain format follows.</summary>
+    private readonly HdrPictureFollower _pictures = new();
+
+    /// <summary>The host, when its swapchain follows the pictures on screen.</summary>
+    private readonly IVulkanPictureHost? _pictureHost;
+
+    /// <summary>The host rebuilds its swapchain as the next frame begins, for what this one showed:
+    /// that frame is owed (<see cref="IPictureRangeSurface.TakeOwedFrame"/>).</summary>
+    private bool _frameOwed;
     private readonly GRVkExtensions _extensions;
     private readonly GRVkBackendContext _backend;
     private readonly GRContext _grContext;
@@ -228,6 +239,16 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         _renderContext.SetGLSurface(this);
 
         _keepTargets = host.SetSwapchainReleasing(DropSwapchainTargets);
+        _pictureHost = host as IVulkanPictureHost;
+    }
+
+    void IPictureRangeSurface.PictureDrawn(PictureRange range) => _pictures.Drawn(range);
+
+    bool IPictureRangeSurface.TakeOwedFrame()
+    {
+        bool owed = _frameOwed;
+        _frameOwed = false;
+        return owed;
     }
 
     // ──── Foreign GL inside the frame: phase 4 of docs/design/HDR.md ────
@@ -519,6 +540,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         _frameOpen = true;
         _lentThisFrame.Clear();
         _lent.Clear();
+        _pictures.BeginFrame();
         return true;
     }
 
@@ -561,6 +583,11 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         if (_capturing) Capture(null);
         _host.PresentAcquiredImage();
         _frameOpen = false;
+
+        // An HDR picture came on screen or left it: the host rebuilds its swapchain as the next
+        // frame begins, if the format changes, and that frame is owed even if nothing else is.
+        if (_pictures.EndFrame(HdrVideoEnabled) && _pictureHost?.SetHdrPictureShown(_pictures.Shown) == true)
+            _frameOwed = true;
 
         int disposals = SkiaImageSource.DrawnDisposals;
         bool images = _imagePurge.HasNew(disposals)
@@ -778,7 +805,8 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     /// <c>HULTUI_VULKAN_INTEROP=0</c> exists. Nothing else is affected: a producer that does
     /// not understand the request keeps writing encoded pixels and says so through
     /// <see cref="GpuFrame.ReferenceWhiteNits"/>, and this asks only on an scRGB
-    /// swapchain.</para>
+    /// swapchain. Off, no picture counts as HDR, so the swapchain stays 8-bit
+    /// (<see cref="HdrPictureFollower"/>).</para>
     /// </summary>
     private static readonly bool HdrVideoEnabled =
         Environment.GetEnvironmentVariable("HULTUI_VIDEO_HDR") != "0";

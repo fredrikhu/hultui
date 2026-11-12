@@ -42,6 +42,9 @@ public partial class JunctionApp : Component, IDisposable
     // action here, or an external change the watcher reports). Unrelated repos
     // keep their cached values, which is what makes switching between them fast.
     private readonly Dictionary<string, int> _dataGen = new();
+    // The generation of what HEAD, the refs and the config say: moves with the data's, but
+    // for a watcher event in the working tree or the index alone (see RefsGen).
+    private readonly Dictionary<string, int> _refsGen = new();
 
     // One filesystem watcher per repo in the active workspace, so commits, pushes
     // and edits made by other git clients are noticed and the affected repo's
@@ -303,6 +306,13 @@ public partial class JunctionApp : Component, IDisposable
         /// <summary>Unmerged files, counted from the same status the dirty count comes from.</summary>
         public int Conflicts { get; init; }
         public bool InSequencer => Op != SequencerOp.None;
+
+        /// <summary>The same summary by content: the lists compared item by item, where the
+        /// record's own equality compares them by reference.</summary>
+        public bool SameAs(RepoSummary other) =>
+            Branch == other.Branch && Ahead == other.Ahead && Behind == other.Behind && Dirty == other.Dirty
+            && Version == other.Version && Op == other.Op && Conflicts == other.Conflicts
+            && Branches.SequenceEqual(other.Branches) && Remotes.SequenceEqual(other.Remotes);
     }
 
     /// <summary>The commit list itself. The per-commit +/- counts are deliberately not
@@ -311,7 +321,7 @@ public partial class JunctionApp : Component, IDisposable
     /// a few hundred commits), so they load behind the list in <see cref="_historyStatLoaders"/>
     /// and fill in once the rows are already on screen.</summary>
     /// <param name="Key">The log this window of commits belongs to — repository, include set,
-    /// content search and data generation. The next page is appended only onto data with the
+    /// content search and refs generation. The next page is appended only onto data with the
     /// same key; anything else is reloaded from the top (see EnsureHistoryLoaded).</param>
     /// <param name="Depth">How many commits were asked for.</param>
     /// <param name="Exhausted">True when git had fewer commits than were asked for — there is
@@ -487,8 +497,10 @@ public partial class JunctionApp : Component, IDisposable
         bool scaleChanged = MathF.Abs(Ui.DisplayScale - scale) >= 0.001f;
         Ui.DisplayScale = scale;
         if (RecomputeResponsive() || scaleChanged || DiffWrapNeedsRemeasure()) Rerender();
-        // The diff takes the width the window gained or lost, and the build, if there is one,
-        // reads the width of the frame before: the pan reads it after the layout.
+        // The diff takes the width the window gained or lost, which the pan takes now, for the
+        // frame about to be laid out: a build reads the width of the frame before. The pan reads
+        // the width again after the layout.
+        LeadDiffWidth();
         FollowDiffWidthAfterFrame();
     }
 
@@ -564,9 +576,26 @@ public partial class JunctionApp : Component, IDisposable
     private RepoSummary SummaryFor(string path)
     {
         var loader = _summaryLoaders.For(path);
-        loader.Load($"{path}#{DataGen(path)}", () => LoadSummary(path));
+        // A reload that finds the repository as it was hands back the summary on screen: a new
+        // one with equal content would still notify every reader, since a record struct
+        // compares its branch and remote lists by reference (and BranchesFor's sort is
+        // memoized on that reference too).
+        var shown = loader.Value;
+        // The branch, the branches, the version and the remotes on screen were read at a refs
+        // generation; while it stands, a reload reads only the status (see RefsGen). The list is
+        // the check that the value on screen is the one read then, not a slot made anew.
+        int refsGen = RefsGen(path);
+        RepoSummary? refs = _summaryRefsRead.TryGetValue(path, out var read) && read.Gen == refsGen
+            && ReferenceEquals(read.Branches, shown.Branches) ? shown : null;
+        loader.Load($"{path}#{DataGen(path)}",
+            () => LoadSummary(path, refs) is var loaded && loaded.SameAs(shown) ? shown : loaded,
+            onLoaded: landed => _summaryRefsRead[path] = (refsGen, landed.Branches));
         return loader.Value;
     }
+
+    /// <summary>The refs generation each repository's summary on screen was read at, and its
+    /// branch list (see SummaryFor).</summary>
+    private readonly Dictionary<string, (int Gen, IReadOnlyList<GitBranch> Branches)> _summaryRefsRead = new(PathComparer);
 
     // ── Per-repo caching + change detection ──────────────────────────────
 
@@ -574,6 +603,13 @@ public partial class JunctionApp : Component, IDisposable
         OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
     private int DataGen(string path) => _dataGen.GetValueOrDefault(path);
+
+    /// <summary>The generation of what a repo's HEAD, refs and config say — the log, the
+    /// branches, the tags, the remotes, a commit's files. Moves with <see cref="DataGen"/>,
+    /// except on a watcher event that changed only the working tree or the index (an editor's
+    /// save, a build's output), which cannot change any of them: the loaders keyed on it then
+    /// keep what they have, rather than run git a dozen times to read it again.</summary>
+    private int RefsGen(string path) => _refsGen.GetValueOrDefault(path);
 
     /// <summary>Invalidate a repo's cached data (views + summary) so it reloads
     /// on next display. Called by our own git actions and by the change watcher.</summary>
@@ -585,7 +621,11 @@ public partial class JunctionApp : Component, IDisposable
         _loadRetries.Remove(path);
     }
 
-    private void Invalidate(string path) => _dataGen[path] = DataGen(path) + 1;
+    private void Invalidate(string path)
+    {
+        _dataGen[path] = DataGen(path) + 1;
+        _refsGen[path] = RefsGen(path) + 1;
+    }
 
     // ── Refused loads ────────────────────────────────────────────────────
     //
@@ -701,46 +741,83 @@ public partial class JunctionApp : Component, IDisposable
         foreach (var path in desired)
         {
             if (_watchers.ContainsKey(path)) continue;
-            try { _watchers[path] = new GitWatcher(path, () => OnExternalChange(path)); }
+            try
+            {
+                _watchers[path] = new GitWatcher(path, refs =>
+                {
+                    if (refs) OnExternalChange(path);
+                    else OnWorkingTreeChange(path);
+                });
+            }
             catch { /* not a plain git dir (missing/submodule/worktree) — skip watching it */ }
         }
     }
 
     /// <summary>A watched repo changed on disk (another git client committed,
-    /// pushed, staged, switched branch, or an editor saved a file). Invalidate its
-    /// cache; if it's the one on screen, the rebuild reloads it. Runs on the UI
-    /// thread (GitWatcher marshals the callback).</summary>
+    /// pushed, switched branch, added a remote). Invalidate its cache; if it's the
+    /// one on screen, the rebuild reloads it. Runs on the UI thread (GitWatcher
+    /// marshals the callback).</summary>
     private void OnExternalChange(string path)
     {
         BumpDataGen(path);
+        Reload(path);
+    }
+
+    /// <summary>Only the working tree or the index of a watched repo changed (an editor
+    /// saved a file, a build wrote its output, something was staged): what reads them
+    /// reloads — the status and the dirty count, the Changes view, the worktrees — and what
+    /// HEAD, the refs and the config say stays (see <see cref="RefsGen"/>). Such an event ran
+    /// fourteen git commands on History, twelve of them for a log, a commit's files, the
+    /// branches, the tags and the remotes that it cannot have changed.</summary>
+    private void OnWorkingTreeChange(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return;
+        _dataGen[path] = DataGen(path) + 1;
+        _loadRetries.Remove(path);
+        Reload(path);
+    }
+
+    private void Reload(string path)
+    {
         // Re-warm the cheap views of the repo on screen. Not the full set: the working
         // tree watcher fires on every editor save, and the numstat pass and the
         // working-tree diffs are the expensive loads — those wait for their tab.
         if (PathEquals(path, _activeRepoPath)) RequestPreload(path, full: false);
-        // Rerender, not MarkDirty: bumping the generation changes every loader key
-        // for this repo, so the next build activates NEW AsyncLoader instances. A
-        // MarkDirty rebuild is untracked, so the Effect would never subscribe to
-        // them and their async completions would go unobserved — the view sits on
-        // its loading placeholder until some other tracked rebuild (e.g. switching
-        // tabs) happens to re-subscribe. See RefreshAll, which already does this.
-        Rerender();
+        // The chrome reads two of this repo's loaders, its summary and its worktrees, and
+        // nothing else the watcher changes. Both are the same objects from one generation to
+        // the next (one per repository), so the parts already hear them: starting their loads
+        // here is all a chrome build would have done, and a part builds again only when a
+        // value it shows lands changed (SummaryFor and WorktreesFor hand back the one on
+        // screen when a reload finds the same). An editor's save used to build the title bar,
+        // the sidebar and the toolbar two or three times each for nothing.
+        _ = SummaryFor(path);
+        _ = WorktreesFor(path);
+        // RerenderView, not MarkViewDirty: the view's own loaders are re-keyed by the
+        // generation, and a tracked rebuild is what subscribes to the new ones (see RefreshAll).
+        RerenderView();
     }
 
-    // Runs off the UI thread — no UI / reactive access.
-    private RepoSummary LoadSummary(string path)
+    // Runs off the UI thread — no UI / reactive access. With <paramref name="refs"/>, a summary
+    // whose HEAD, refs and config have not moved since it was read: only the status is read again.
+    private RepoSummary LoadSummary(string path, RepoSummary? refs = null)
     {
         var repo = RepoFor(path);
-        var branch = repo.GetCurrentBranch();
-        var branches = repo.GetBranches();
-        var info = branches.FirstOrDefault(b => b.IsCurrent || b.Name == branch);
         // One status, read twice: the dirty count and — when git is half way through a
         // sequencer operation — how many of those entries are unmerged. Counting conflicts
-        // only inside an operation matches what the Changes view lists (LoadChanges).
+        // only inside an operation matches what the Changes view lists (LoadChanges). The
+        // operation is four File.Exists calls, read every time: a cherry-pick or a revert
+        // stopping writes no file the watcher reports as a ref moving.
         var status = repo.GetStatus();
         var op = repo.GetSequencerOp();
         var conflicts = op == SequencerOp.None
             ? 0
             : status.Count(f => f.Kind == FileChangeKind.Conflicted);
+        if (refs is { } known)
+            return known with { Dirty = status.Count, Op = op, Conflicts = conflicts };
+
+        var branch = repo.GetCurrentBranch();
+        var branches = repo.GetBranches();
+        var info = branches.FirstOrDefault(b => b.IsCurrent || b.Name == branch);
         var version = repo.GetDescribeVersion();
         var remotes = repo.GetRemotesDetailed();
         return new RepoSummary(branch, info?.AheadCount ?? 0, info?.BehindCount ?? 0, status.Count, version)

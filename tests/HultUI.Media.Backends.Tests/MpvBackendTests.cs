@@ -182,4 +182,50 @@ public class MpvBackendTests : IDisposable
             && Math.Abs(f.Backend.Peek("volume") - 50) < 0.01
             && f.Backend.PeekString("mute") == "yes");
     }
+
+    /// <summary>
+    /// Whether a video's picture is HDR comes from its own transfer, never from what mpv is asked to
+    /// write: a Vulkan window draws through an 8-bit swapchain, whose target asks for an encoded
+    /// picture, until it learns an HDR picture is on screen. Here the target is the pixel path's,
+    /// always encoded, and a clip tagged PQ (by mpv's format filter, as the HDR checks tag a Y4M,
+    /// which carries no colour tags) still says HDR; the same clip untagged says SDR. Not known
+    /// before anything is open, or while it loads.
+    /// </summary>
+    [MpvFact]
+    public void AVideosPictureRange_ComesFromItsOwnTransfer_NotFromTheTarget()
+    {
+        Assert.Equal(PictureRange.Sdr, RangeOfClip(null));
+        Assert.Equal(PictureRange.Hdr, RangeOfClip("vf=format=colormatrix=bt.2020-ncl:primaries=bt.2020:gamma=pq"));
+    }
+
+    private PictureRange RangeOfClip(string? mpvOptions)
+    {
+        // Read once, in the constructor: this collection runs alone, so setting it around that is safe.
+        string? before = Environment.GetEnvironmentVariable("HULTUI_MPV_OPTIONS");
+        Environment.SetEnvironmentVariable("HULTUI_MPV_OPTIONS", mpvOptions);
+        MpvBackend backend;
+        try { backend = new MpvBackend(); }
+        finally { Environment.SetEnvironmentVariable("HULTUI_MPV_OPTIONS", before); }
+
+        using var session = HeadlessSession.Create(300, 200);
+        using var player = new MediaPlayer(backend);
+        session.Application.SetRoot(Box.New().Children(Video.New(player)));
+        session.PumpFrame();
+        var picture = (IPictureRangeSource)backend;
+        Assert.Equal(PictureRange.Unknown, picture.PictureRange);
+
+        player.Open(Clip, autoPlay: true);
+        session.PumpUntil(() => picture.PictureRange != PictureRange.Unknown, Wait);
+        Assert.Equal(GpuSinkMode.Pixels, player.SinkMode);
+        return picture.PictureRange;
+    }
+
+    [Fact]
+    public void OnlyPqAndHlg_AreHighDynamicRangeTransfers()
+    {
+        Assert.Equal(PictureRange.Hdr, MpvBackend.RangeOfTransfer("pq"));
+        Assert.Equal(PictureRange.Hdr, MpvBackend.RangeOfTransfer("hlg"));
+        foreach (var sdr in new[] { "bt.1886", "srgb", "linear", "gamma2.2", "auto" })
+            Assert.Equal(PictureRange.Sdr, MpvBackend.RangeOfTransfer(sdr));
+    }
 }
