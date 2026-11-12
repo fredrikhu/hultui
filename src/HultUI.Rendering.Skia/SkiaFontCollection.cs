@@ -1,3 +1,4 @@
+using System.Globalization;
 using HultUI.Core.Styling;
 using HultUI.Text;
 using SkiaSharp;
@@ -51,6 +52,7 @@ public sealed class SkiaFontCollection : IFontCollection
         _registered.Add(typeface);
         _fontCache.Clear();
         _fallbackCache.Clear();
+        _front = null;
         _emojiCache.Clear();
     }
 
@@ -176,13 +178,50 @@ public sealed class SkiaFontCollection : IFontCollection
 
     public IResolvedFont? MatchCharacter(int codepoint, FontWeight weight, FontSlant slant, string? hanContext)
     {
-        // The language is part of the key because it can change under a codepoint: Han
-        // follows the paragraph (kana beside it) or else the UI culture, and the same
-        // ideograph must not keep the first answer's glyphs.
         // Pinned, nothing comes from the OS: a character the faces lack draws as their
         // missing-glyph box, the same on every machine.
         if (_pinned) return null;
 
+        // The last answer for the code point's slot, if it was asked with the same style, paragraph
+        // context and UI culture: everything the answer below depends on. A hit is a few compares
+        // (5 ns, JIT) where working out the script's language through ICU and looking the record
+        // key up took 87: paid for every character of every itemize that the primary face lacks,
+        // and a wrapped CJK document itemizes its lines again at every width (Junction's Files view
+        // on a 79,029-character Japanese README: 114,717 questions in one resize frame, 96 % of them
+        // answered here). Made at the first question, so text the primary face covers keeps nothing.
+        var culture = CultureInfo.CurrentUICulture;
+        var front = _front ??= new FrontAnswer[FrontSlots];
+        ref var slot = ref front[codepoint & (FrontSlots - 1)];
+        if (slot.Codepoint == codepoint && slot.Weight == weight && slot.Slant == slant
+            && ReferenceEquals(slot.HanContext, hanContext) && ReferenceEquals(slot.Culture, culture))
+            return slot.Font;
+
+        var answer = MatchKeyed(codepoint, weight, slant, hanContext);
+        slot = new FrontAnswer(codepoint, weight, slant, hanContext, culture, answer);
+        return answer;
+    }
+
+    // The table in front of the keyed lookup: one answer a slot, the code point's low bits the slot.
+    // 32 bytes a slot (128 KB), no objects of its own, so a miss that replaces a slot allocates
+    // nothing. An empty slot has no culture, and never matches. Used from one thread at a time, as
+    // the dictionaries behind it are.
+    private const int FrontSlots = 4096;
+    private FrontAnswer[]? _front;
+
+    private readonly record struct FrontAnswer(int Codepoint, FontWeight Weight, FontSlant Slant,
+        string? HanContext, CultureInfo? Culture, SkiaResolvedFont? Font);
+
+    // How many questions the table in front did not answer, and whether it is made yet, for the
+    // tests that hold it.
+    internal int KeyedLookups { get; private set; }
+    internal bool HasFrontTable => _front is not null;
+
+    private SkiaResolvedFont? MatchKeyed(int codepoint, FontWeight weight, FontSlant slant, string? hanContext)
+    {
+        // The language is part of the key because it can change under a codepoint: Han
+        // follows the paragraph (kana beside it) or else the UI culture, and the same
+        // ideograph must not keep the first answer's glyphs.
+        KeyedLookups++;
         string? language = ScriptLanguage.ForCodepoint(codepoint, hanContext);
         var key = new FallbackKey(codepoint, weight, slant, language);
         if (_fallbackCache.TryGetValue(key, out var cached))
