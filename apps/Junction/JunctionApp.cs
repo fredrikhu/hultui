@@ -303,6 +303,13 @@ public partial class JunctionApp : Component, IDisposable
         /// <summary>Unmerged files, counted from the same status the dirty count comes from.</summary>
         public int Conflicts { get; init; }
         public bool InSequencer => Op != SequencerOp.None;
+
+        /// <summary>The same summary by content: the lists compared item by item, where the
+        /// record's own equality compares them by reference.</summary>
+        public bool SameAs(RepoSummary other) =>
+            Branch == other.Branch && Ahead == other.Ahead && Behind == other.Behind && Dirty == other.Dirty
+            && Version == other.Version && Op == other.Op && Conflicts == other.Conflicts
+            && Branches.SequenceEqual(other.Branches) && Remotes.SequenceEqual(other.Remotes);
     }
 
     /// <summary>The commit list itself. The per-commit +/- counts are deliberately not
@@ -566,7 +573,12 @@ public partial class JunctionApp : Component, IDisposable
     private RepoSummary SummaryFor(string path)
     {
         var loader = _summaryLoaders.For(path);
-        loader.Load($"{path}#{DataGen(path)}", () => LoadSummary(path));
+        // A reload that finds the repository as it was hands back the summary on screen: a new
+        // one with equal content would still notify every reader, since a record struct
+        // compares its branch and remote lists by reference (and BranchesFor's sort is
+        // memoized on that reference too).
+        var shown = loader.Value;
+        loader.Load($"{path}#{DataGen(path)}", () => LoadSummary(path) is var loaded && loaded.SameAs(shown) ? shown : loaded);
         return loader.Value;
     }
 
@@ -719,13 +731,18 @@ public partial class JunctionApp : Component, IDisposable
         // tree watcher fires on every editor save, and the numstat pass and the
         // working-tree diffs are the expensive loads — those wait for their tab.
         if (PathEquals(path, _activeRepoPath)) RequestPreload(path, full: false);
-        // Rerender, not MarkDirty: bumping the generation changes every loader key
-        // for this repo, so the next build activates NEW AsyncLoader instances. A
-        // MarkDirty rebuild is untracked, so the Effect would never subscribe to
-        // them and their async completions would go unobserved — the view sits on
-        // its loading placeholder until some other tracked rebuild (e.g. switching
-        // tabs) happens to re-subscribe. See RefreshAll, which already does this.
-        Rerender();
+        // The chrome reads two of this repo's loaders, its summary and its worktrees, and
+        // nothing else the watcher changes. Both are the same objects from one generation to
+        // the next (one per repository), so the parts already hear them: starting their loads
+        // here is all a chrome build would have done, and a part builds again only when a
+        // value it shows lands changed (SummaryFor and WorktreesFor hand back the one on
+        // screen when a reload finds the same). An editor's save used to build the title bar,
+        // the sidebar and the toolbar two or three times each for nothing.
+        _ = SummaryFor(path);
+        _ = WorktreesFor(path);
+        // RerenderView, not MarkViewDirty: the view's own loaders are re-keyed by the
+        // generation, and a tracked rebuild is what subscribes to the new ones (see RefreshAll).
+        RerenderView();
     }
 
     // Runs off the UI thread — no UI / reactive access.

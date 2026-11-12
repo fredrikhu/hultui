@@ -1559,6 +1559,31 @@ The discipline in one line: **`Refresh()` bumps the generation (data changed →
 
 Because `Build()` renders from the cached `Value`, you can keep the previous result on screen while the next one loads instead of blanking to a spinner — gate the placeholder on "have we ever loaded anything" rather than "is a load in flight." Since the result is applied in a single batch, the view swaps from old to new in one frame with no empty state in between.
 
+### A reload that finds the same hands back what is shown
+
+A loader's readers rebuild when its value changes, and `Signal<T>` compares values with the
+type's own equality: a new list is a change even when every item is the same, and so is a record
+that holds a list, since a record compares a list member by reference. Junction's repository
+watcher reloads a repository's summary and worktrees on every event, an editor's save included,
+and each reload landed a new value: the title bar, the sidebar and the toolbar built again for a
+repository that had not changed (round 12, step 2). The producer now compares what it read with
+the value on screen, taken on the UI thread when the load starts, and hands that back when they
+are the same:
+
+```csharp
+var shown = loader.Value;   // on the UI thread, as Load is
+loader.Load(key, () => Read() is var loaded && loaded.SameAs(shown) ? shown : loaded);
+```
+
+The watcher's handler also stopped building the chrome to start those loads: the loaders are the
+same objects from one generation to the next, so the parts already hear them, and starting the
+loads from the handler is all the chrome's build did. A file created and deleted in the
+repository, headless (JIT): 581 → 414 KB on the UI thread an event over History and 10 → 6
+builds; a file whose write time moved and nothing else 578 → 274 KB and 10 → 2 builds, no part;
+the Changes view 497 → 315 KB; in a real window (NativeAOT) 816 → 647 KB and 10 → 6 builds. The
+same frames and accessibility trees. (An `AsyncLoader` constructor taking an
+`IEqualityComparer<T>` would do this in the framework; it would be new public API.)
+
 ### What a build shows of files comes from what was read already
 
 A small read in `Build()` does not freeze anything a person would notice; it allocates on every
