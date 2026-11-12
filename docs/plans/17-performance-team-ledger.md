@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 12
-- **Phase:** release — round 12 (steps 1–6 landed and the full suite green on 3131ed8e: merge into main, push, wait for CI; six steps in "Round 12 build order"; the user answered
+- **Phase:** release — round 12 merged into main as afc1ed40 and pushed; wait for CI on afc1ed40 (steps 1–6 landed, the full suite green on 3131ed8e; six steps in "Round 12 build order"; the user answered
   questions 46–51 on 2026-11-12: steps 3 (b), 3 (c), 5 and 6 approved; 50 waits for a live reader check). Each build step measures its real-app case in a guarded
   real window as well as by step-ab (the survey's real-window harnesses and the desktop lock `Global\HultUI-r12-desktop`
   are in session 0bab04ae's scratchpad `r12-<area>\`). Round 11 released: merged into main as b0dd1954; CI run
@@ -859,3 +859,6 @@ From 2026-11-11 (after round 10's release); earlier entries are in the archive (
   405, Text 302, Syntax 121, Media 87, Reel 51, Fluent 34; UiTests 25 + 101 skipped, gate off); Fedora `wsl-test.sh` 22
   projects, 0 failures (Core 5,084 + 1, Headless 1,398 + 88, Vesper 913 + 20); docfx `--warningsAsErrors` 0 warnings, 0
   errors (~13 min, `fullsuite-r12.sh`). Phase → release.
+- 2026-11-12: round 12 merged into main as afc1ed40 (detached origin/main merge in this worktree, tree identical to the
+  tested branch; origin/main b0dd1954 was in the branch and had not moved, so the push gate held). Primary checkout
+  fast-forwarded behind the guard; branch reset to the merge and pushed. CI on afc1ed40 next.
