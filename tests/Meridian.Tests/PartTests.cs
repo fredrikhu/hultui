@@ -773,7 +773,7 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
             AssertBox(fx, "titlebar", 0, 0, w, 40);
             AssertBox(fx, "rail", 0, 40, Azimuth.RailWidth, body);
             AssertBox(fx, "tree", Azimuth.RailWidth, 40, Azimuth.TreeWidth, body);
-            if (width >= MeridianApp.ForceBottomWindowWidth)
+            if (width >= fx.App.ForceBottomWindowWidth)
             {
                 AssertBox(fx, "response-right", w - Azimuth.ResponseRight, 40, Azimuth.ResponseRight, body);
                 s.Window.PressKey(KeyCode.Backslash, KeyModifiers.Ctrl);

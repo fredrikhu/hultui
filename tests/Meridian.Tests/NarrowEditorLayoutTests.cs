@@ -13,11 +13,13 @@ namespace Meridian.Tests;
 /// deep, over the URL bar — and their words held the editor wide enough to push the
 /// response pane off the window. Below the breakpoint the pane sits under the editor, and
 /// in a short window the two share the height (2026-10-09; the pane was a fixed 380).
+/// Where the face draws the six sub-tabs wider than 448 (Noto Sans on Fedora), the editor's
+/// floor is their measured width and the breakpoint moves out with it (2026-11-12).
 /// </summary>
 public class NarrowEditorLayoutTests : IClassFixture<TestHttpServer>, IDisposable
 {
-    /// <summary>The narrowest window with the response pane beside the editor: rail 48 +
-    /// tree 264 + editor 448 + pane 560.</summary>
+    /// <summary>The narrowest window with the response pane beside the editor in Segoe UI: rail
+    /// 48 + tree 264 + editor 448 + pane 560. A wider face moves it out (<see cref="Breakpoint"/>).</summary>
     private const int SideBySide = 1320;
 
     /// <summary>Meridian's title bar, above the editor and the pane.</summary>
@@ -71,9 +73,9 @@ public class NarrowEditorLayoutTests : IClassFixture<TestHttpServer>, IDisposabl
     private void Hosted(int width, int height, Action<HeadlessSession> body) =>
         Hosted(width, height, (session, _) => body(session));
 
-    private void Hosted(int width, int height, Action<HeadlessSession, MeridianApp> body)
+    private void Hosted(int width, int height, Action<HeadlessSession, MeridianApp> body, HeadlessOptions? options = null)
     {
-        using var session = HeadlessSession.Create(width, height);
+        using var session = HeadlessSession.Create(width, height, options: options);
         MeridianApp? app = null;
         try
         {
@@ -88,6 +90,20 @@ public class NarrowEditorLayoutTests : IClassFixture<TestHttpServer>, IDisposabl
             app?.Dispose();
         }
     }
+
+    /// <summary>The narrowest window with the pane beside the editor, as the app measured it:
+    /// <see cref="SideBySide"/> in Segoe UI, wider in a face that draws the six sub-tabs wider.</summary>
+    private static int Breakpoint(MeridianApp app) => (int)MathF.Ceiling(app.ForceBottomWindowWidth);
+
+    /// <summary>Hosted at the breakpoint, 760 tall: the window opens at <see cref="SideBySide"/>
+    /// and, where the app's breakpoint is wider, is widened to it before the body runs.</summary>
+    private void AtBreakpoint(Action<HeadlessSession, MeridianApp, int> body, HeadlessOptions? options = null) =>
+        Hosted(SideBySide, 760, (session, app) =>
+        {
+            int width = Breakpoint(app);
+            if (width != SideBySide) Resize(session, width, 760);
+            body(session, app, width);
+        }, options);
 
     private static HeadlessElement Get(HeadlessSession session, string automationId) =>
         session.Window.FindByAutomationId(automationId)
@@ -143,7 +159,7 @@ public class NarrowEditorLayoutTests : IClassFixture<TestHttpServer>, IDisposabl
     [Fact]
     public void Tab_titles_and_sub_tabs_stay_on_one_line_and_the_response_pane_stays_in_the_window()
     {
-        Hosted(SideBySide, 760, session =>
+        AtBreakpoint((session, _, side) =>
         {
             Click(session, "req-login");
             Click(session, "req-search");
@@ -166,14 +182,14 @@ public class NarrowEditorLayoutTests : IClassFixture<TestHttpServer>, IDisposabl
             // sub-tabs of an ordinary request (counts and all) without scrolling them.
             AssertSubTabsAllInView(session);
 
-            AssertEditorLeavesThePaneAlone(session, SideBySide);
+            AssertEditorLeavesThePaneAlone(session, side);
         });
     }
 
     [Fact]
     public void Five_open_tabs_share_the_strip_and_stay_out_of_the_response_pane()
     {
-        Hosted(SideBySide, 760, session =>
+        AtBreakpoint((session, _, side) =>
         {
             // The last one open is the PATCH: "PATCH ▾" and Send are the widest common floor
             // the URL bar has, and the editor holds them with room for the URL.
@@ -191,34 +207,74 @@ public class NarrowEditorLayoutTests : IClassFixture<TestHttpServer>, IDisposabl
                         $"tab {i}'s \"{label.Content}\" reaches y={box.Y + box.Height:0.#}, into the URL bar at y={url.Y:0.#}");
                 }
 
-            AssertEditorLeavesThePaneAlone(session, SideBySide);
+            AssertEditorLeavesThePaneAlone(session, side);
             Assert.True(url.Width >= 180f, $"the URL gets {url.Width:0.#}px beside \"PATCH ▾\" and Send");
         });
     }
 
     /// <summary>
-    /// The breakpoint, pinned: the pane sits beside the editor from 1320 px (the editor keeps
-    /// 448) and under it below that, re-evaluated as the window is resized across it. It was
-    /// 1100 until 2026-10-08, which left the editor 228 px — the method chip and Send with
-    /// almost no URL between them.
+    /// The breakpoint, pinned: the pane sits beside the editor from 1320 px in Segoe UI (the
+    /// editor keeps 448, more where the face draws the sub-tabs wider) and under it below that,
+    /// re-evaluated as the window is resized across it. It was 1100 until 2026-10-08, which
+    /// left the editor 228 px — the method chip and Send with almost no URL between them.
     /// </summary>
     [Fact]
-    public void The_pane_sits_beside_the_editor_from_1320_px_and_under_it_below()
+    public void The_pane_sits_beside_the_editor_from_the_breakpoint_and_under_it_below()
     {
-        Hosted(SideBySide, 760, (session, app) =>
+        AtBreakpoint((session, app, side) =>
         {
             Click(session, "req-search");
 
-            AssertSide(session, app, SideBySide);
+            Assert.True(side >= SideBySide, $"the breakpoint is {side}px, under the {SideBySide} that leaves the editor 448");
+            AssertSide(session, app, side);
             Rect editor = Editor(session, "response-right").WindowBorderBox;
             Assert.True(editor.Width >= 448f - 0.5f, $"the editor beside the pane is {editor.Width:0.#}px, short of 448");
 
-            Resize(session, SideBySide - 1, 760);
-            AssertBottom(session, app, SideBySide - 1);
+            Resize(session, side - 1, 760);
+            AssertBottom(session, app, side - 1);
 
-            Resize(session, SideBySide, 760);
-            AssertSide(session, app, SideBySide);
+            Resize(session, side, 760);
+            AssertSide(session, app, side);
         });
+    }
+
+    /// <summary>
+    /// The floor follows the strip: in a face that draws the six sub-tabs wider than Segoe UI
+    /// does (the pinned DejaVu Sans: 483 px with the strip's padding) the editor's floor is the
+    /// strip's width, the breakpoint moves out with it, and there all six show whole. With the
+    /// floor fixed at 448 the chain tab showed 46.6 of its 69.8 px at 1320.
+    /// </summary>
+    [Fact]
+    public void In_a_wider_face_the_editors_floor_is_the_sub_tab_strips_width()
+    {
+        AtBreakpoint((session, app, side) =>
+        {
+            Click(session, "req-search");
+
+            float strip = SubTabStripWidth(session);
+            Assert.True(strip > 448f + 1f, $"the six sub-tabs take {strip:0.#}px in the pinned face, which a 448 floor holds: this proves nothing");
+            Assert.True(app.EditorMinWidth >= strip - 0.01f && app.EditorMinWidth < strip + 2f,
+                $"the editor's floor is {app.EditorMinWidth:0.#}px for a strip of {strip:0.#}");
+            Assert.True(side > SideBySide, $"the breakpoint stayed at {side}px for a strip of {strip:0.#}");
+
+            AssertSide(session, app, side);
+            Rect editor = Editor(session, "response-right").WindowBorderBox;
+            Assert.True(editor.Width >= strip - 0.5f, $"the editor beside the pane is {editor.Width:0.#}px, short of the strip's {strip:0.#}");
+            AssertSubTabsAllInView(session);
+            AssertEditorLeavesThePaneAlone(session, side);
+
+            Resize(session, side - 1, 760);
+            AssertBottom(session, app, side - 1);
+        }, HeadlessOptions.Golden());
+    }
+
+    /// <summary>The six sub-tabs laid side by side with the strip's padding at either end
+    /// (12 each): the strip's whole width, scrolled or not.</summary>
+    private static float SubTabStripWidth(HeadlessSession session)
+    {
+        Rect first = Get(session, "subtab-params").Element.WindowBorderBox;
+        Rect last = Get(session, "subtab-chain").Element.WindowBorderBox;
+        return last.X + last.Width - first.X + 2 * 12f;
     }
 
     /// <summary>
