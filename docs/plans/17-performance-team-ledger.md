@@ -5,8 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 12
-- **Phase:** build — round 12, step 1 next (the survey is merged: reports `17-reports/r12-*`; six steps in "Round 12
-  build order"; questions 46–50 asked, none blocks step 1). Each build step measures its real-app case in a guarded
+- **Phase:** build — round 12, step 2 next (step 1 landed; six steps in "Round 12 build order"; questions 46–51 open:
+  47 and 48 shape step 3, 49 step 5, 46 step 6). Each build step measures its real-app case in a guarded
   real window as well as by step-ab (the survey's real-window harnesses and the desktop lock `Global\HultUI-r12-desktop`
   are in session 0bab04ae's scratchpad `r12-<area>\`). Round 11 released: merged into main as b0dd1954; CI run
   43121085428 green. No app releases this round (the user did not ask). To resume in a fresh context, run in this
@@ -239,6 +239,11 @@ Re-ranked by the next survey.
   bounded SaveLayers against 7 and 5 headless).
 - **meridian-send-markdirty** (6; r12-6, with step 2 (b)) — a send calls `MarkDirty` at its start and end
   (MeridianApp.cs:670), so it likely rebuilds title bar and rail twice (~33 KB each); unmeasured.
+- **hover-move-frames-nothing-shows** (1; found in round 12 step 1) — a mouse move over rows still draws a frame per
+  hover change even where nothing draws hover (c0ce9387 fixed only the settle after a build). Measure at the next
+  survey: frames a move in Junction, Vesper and Meridian lists against hover changes that draw.
+- **size-change-restore-second-frame** (1/3; round 12 step 1) — each restore in a size series draws a second small frame
+  (9 KB), before and after step 1; not attributed.
 
 Closed from Waiting by the round 12 survey: terminal-noop-scrollback-wheel and terminal-row-strings-by-content,
 vesper-folder-nudge-stale, junction-held-key-bigfiles (→ Examined), a11y-item-added-past-end-offscreen (→ step 3 (c),
@@ -246,7 +251,7 @@ question 48), meridian-narrow-editor-fedora-fonts (→ step 6, question 46).
 
 ## Landed
 
-Round 11 (the round round 12's survey reviews; it moves to the archive at round 13's survey). Rounds 1–10 are in
+Round 11 (the round round 12's survey reviews; it moves to the archive at round 13's survey) and round 12. Rounds 1–10 are in
 [the archive](17-performance-team-ledger-archive.md#landed-rounds-14) ([round 5](17-performance-team-ledger-archive.md#landed-round-5),
 [round 6](17-performance-team-ledger-archive.md#landed-round-6), [round 7](17-performance-team-ledger-archive.md#landed-round-7),
 [round 8](17-performance-team-ledger-archive.md#landed-round-8), [round 9](17-performance-team-ledger-archive.md#landed-round-9),
@@ -269,6 +274,7 @@ Round 11 (the round round 12's survey reviews; it moves to the archive at round 
 | 11 | 4016e20b, 18772928 | suite-document-switch | Two suite rows (`Scenarios.DocumentSwitch.cs`; README; 232 scenarios, 205 off Windows): `component/cursor key over a 200-file list beside its document, text landing a frame later` (a VirtualList of 200 files and a read-only coloured TextArea of 180–420 lines through a KeyedAsyncLoader; the key posted so it lands inside the step's frame) and its twin `…, text in hand`. JIT, two idle-gated runs: landing 1.85/1.84 ms min, 198.4 KB, 2.0 builds; in hand 1.38/1.37 ms, 167.9 KB, 1.0 build — the second build and its frame ≈ 0.47 ms and 30.5 KB a key; AOT 1.86 / 1.42 ms, 198.1 / 167.8 KB; render 94–97 % (the new TextArea's first draw). Per-step checks (build count, a laid-out "Loading…" frame, text, spans, key, one row filled, a quiet next frame), each seen failing when broken. About twice Junction's Files walk a key (86.2 KB, 1.23 builds), since every key here opens an unseen file. Other rows unmoved (JIT 0/0; AOT one outlier row cleared by two more pairs). |
 | 11 | (none) | f16-held-drag-post-stall, one diagnostic run (question 37: yes, one run) | **Not reproduced.** The one approved launch (JIT, Vulkan F16, a post waiting at every step) ran clean: exit 0 in 14 s, graceful WM_CLOSE, guards never fired, no dump. It opened on the 4K (scale 1.5, 120 Hz, 1200×800 px), where every survey run including the stall opened on the 1440p (scale 1, 200 Hz, 800×533) — the one visible difference. Step 0 274 ms (268 ms the first over-allocated F16 swapchain build, 1224×816 into 1280×1024); all 80 steps one frame each (median 3.6 ms), acquire, fence wait and present returning at once; 3 bucket builds (30–33 ms) and the exact-size build at the end (30 ms). Held 1 s without a post: 60 timer events, 0 frames; with a post: 63 events, 1 frame 15 ms after it (present SuboptimalKHR, the over-allocated swapchain kept, as designed). 0 `nvlddmkm`/System/Application events. Logging-only probe edits reverse-edited; nothing committed. Files `r11b13\runs\`. |
 | 11 | (none) | atspi-aot (question 44: yes) | clang and lld 22.1.8-4.fc44 installed in FedoraLinux-44 (dnf added 21 packages, among them gcc/gcc-c++ 16.2.1, binutils 2.46.1, glibc-devel, make, and upgraded 13 to match: glibc 2.43-2 → 2.43-9, libgcc/libstdc++/libgomp 16.0.1 → 16.2.1, elfutils 0.194 → 0.197). The D-Bus probe publishes as NativeAOT on .NET 11 (linux-x64, 3.0 MB); no trim/AOT warnings from Tmds.DBus.Protocol 0.92.0 or HultUI.Platform.Accessibility.Linux rooted whole. Bytes a signal AOT (two runs) vs JIT: PropertyChange 169/168 vs 179–181, ChildrenChanged 175/180 vs 190, AddAccessible 226 vs 237–240, StateChanged 98/99 vs 101–104 (AOT 3–15 B less); handler side Properties.Get 1,152 vs 1,104 (+4 %, per client query), GetRole 888 vs 896; `CallMethodAsync` 504 both. 16/16 signals arrive and parse, 20/20 calls answer, an unknown path returns UnknownObject. No candidate. WSL probe folders deleted. |
+| 12 | c0ce9387, 3f93d54c, 183312fc | junction-diff-second-frame | Two causes. (a) The commit file walk's second frame was ff6125a6's hover settle, not the width follow: the OS cursor rests inside the window, each key replaced the diff rows, and `SettleHover` marked the root for paint though nothing in the diff draws hover (headless had no pointer, so 1 frame). The settle now asks for a frame only when an enter/leave handler ran, a `HoverHighlight` list's row hover changed, or DevTools is open (internal `Element.DrawsChildHover`, `PointerState.DrawnHoverChanges`; hover styles already mark their own element). (b) The resize's second frame was 7ca2b3db's after-frame width follow: Junction's resize handler now gives the pan its viewport before layout (`LeadDiffWidth`: the list's last laid-out width plus what the window gained or lost, after a breakpoint rebuild too); the after-frame follow stays as a check and changed nothing in 18 real and 9 headless size changes. Real window, NativeAOT, a11y on, guarded, idle-gated, alternated ×2 (before = the old behaviour behind a probe switch in the same binary): commit walk frames a key 2.00 → 1.00 (33 and 100 ms pace), UI frame ms a key 2.454 / 2.419 → 1.749 / 1.628 (−29 / −33 %); size changes 2.11 → 1.11 frames a change (38 → 20 per 18), render+flush+present 7.36 / 7.09 → 4.61 / 4.73 ms. Headless 2 → 1 frame a key and a size change; settled pixels identical; the first frame after a size change used to draw the old thumb (106–790 px in the scrollbar band) and now equals the settled frame. step-ab `-Pairs 2` JIT + AOT: AOT 0/0, JIT pair 1 one row (video bar fade +16 %, the same in its A/A: noise), pair 2 clean; no allocation moved (captures 183312fc). `HoverAfterRebuildTests` 3, `DiffFrameCountTests` 2 (reverse edits fail but the enter-handler test, which pins existing behaviour); Core 5,084, Headless 1,562, Junction 1,095 pass. ELEMENTS.md, LAYOUT.md, REACTIVITY.md. Probes `r12b1\` (b1-summary.txt). |
 
 ## Examined, not worth it
 
@@ -631,6 +637,11 @@ Round 12 questions (from the survey, 2026-11-12). Recommendations in brackets.
     and raising events only after a client asks would remove all bridge work here (Junction's commit file walk −40 % UI
     bytes). The risk: a client subscribed desktop-wide that acts on events alone could miss events. [Not yet: decide
     after a live check with Narrator and NVDA running, which you would run (it could go with the menu check).]
+51. **after-layout-callback** (round 12 step 1): Junction's resize now guesses the diff's width before layout (the list's
+    last width plus what the window gained or lost), because no public hook runs after layout and before render. Add
+    a public `Window.RequestAfterLayoutCallback` (or similar) so an app can set a value from the laid-out tree in the
+    same frame, and move Junction to it? [Yes if another app needs it; today the guess is right in every measured
+    case, and the after-frame check stays.]
 
 Reminder (expert 8): Aperture signed in to jellyfin.home as device "aperture-survey" in earlier rounds and once in
 round 12 as "aperture-r12"; the user should remove those devices and revoke the API key when the work is done.
@@ -789,3 +800,10 @@ From 2026-11-11 (after round 10's release); earlier entries are in the archive (
   headless clock overstates held-key costs; SDL ignores keys posted to an unfocused window (mouse moves are taken);
   OBS's `graphics-hook64.dll` is an implicit Vulkan layer on this machine. Round 13's survey reviews round 12's build,
   5f1744ca..(round 12's release). Phase → build.
+- 2026-11-12: round 12 step 1 landed (c0ce9387, 3f93d54c; captures 183312fc): two causes of Junction's second frame.
+  The hover settle after a build asked for a frame though nothing drew hover (the OS cursor rests in the window; a
+  headless host has no pointer, so it never showed); now only when a handler ran or a `HoverHighlight` row changed.
+  The resize gives the diff's pan its width before layout. Real window: commit walk 2.00 → 1.00 frames a key and
+  −29…−33 % UI time a key; size changes 2.11 → 1.11 frames. Question 51 (a public after-layout hook) asked; lead
+  hover-move-frames-nothing-shows to Waiting. For PERFORMANCE.md: a real pointer resting over the window makes every
+  rebuild re-hit hover; test frame counts with a pointer. Next: step 2.
