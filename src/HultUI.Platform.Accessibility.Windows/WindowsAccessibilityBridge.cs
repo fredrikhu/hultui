@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
@@ -42,6 +43,13 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     // every apply reads, takes them all. A default map grows its locks with its table,
     // to 1,024–2,047 of them at a few hundred wrappers (17 µs a Count on a 28-thread desk).
     private readonly ConcurrentDictionary<ElementId, UiaFragment> _wrappers = new(concurrencyLevel: 1, capacity: 31);
+    // Held by an apply while it changes the map and moves the wrappers to the new tree, and by a
+    // client's thread making an item node's wrapper (TryMakeItemWrapper). Never across a call into UI
+    // Automation: the providers an apply lets go are told after (_disconnects).
+    private readonly object _applyLock = new();
+    // The elements an apply let go of, with their native objects, told to UI Automation once it has
+    // let go of the lock. UI thread only.
+    private readonly List<(ElementId Id, IntPtr Native)> _disconnects = [];
     private IntPtr _hostProviderPtr;
     private AccessibilityNode? _rootNode;
     // ElementId? (nullable ulong) isn't torn-read-safe across threads; store the
@@ -142,7 +150,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     /// or Zero if it has no wrapper.</summary>
     private IntPtr ElementRef(ElementId id, NativeProvider.As which)
     {
-        if (!_wrappers.TryGetValue(id, out var wrapper)) return IntPtr.Zero;
+        if (!TryWrapper(id, out var wrapper)) return IntPtr.Zero;
         lock (_nativeLock)
         {
             if (!_nativeByElement.TryGetValue(id, out var p))
@@ -244,7 +252,49 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     // (AccessibilityNode.ItemSource), not found.
 
     /// <summary>The element's node in the current tree, or null when it has none.</summary>
-    private AccessibilityNode? NodeOf(ElementId id) => _wrappers.TryGetValue(id, out var w) ? w.Node : null;
+    private AccessibilityNode? NodeOf(ElementId id) => TryWrapper(id, out var w) ? w.Node : null;
+
+    /// <summary>
+    /// The wrapper of the node <paramref name="id"/> names in the current tree. A list's item node
+    /// gets one when something first asks for it — a client's navigation to it, a hit test, an event
+    /// it raises — not when the tree adds it: a diff that brought a list of item nodes made a wrapper
+    /// for every item (135 B each with its entry in the map), which nothing asked for unless a client
+    /// walked the list. Each key of Junction's commit file walk made 633 and let 633 go, 85.5 KB.
+    /// A wrapper made late takes its node as it is then, which is what one made with the tree would
+    /// hold by then (every change it was told came from the node it took), and is kept and moved
+    /// with the tree from then on, as any other.
+    /// </summary>
+    private bool TryWrapper(ElementId id, [NotNullWhen(true)] out UiaFragment? wrapper)
+    {
+        if (_wrappers.TryGetValue(id, out wrapper)) return true;
+        if (!VirtualItemId.IsItem(id)) return false;
+        return TryMakeItemWrapper(id, out wrapper);
+    }
+
+    /// <summary>
+    /// Makes the wrapper of an item node a list's node holds now, at the item's index: under the
+    /// lock the apply takes while it changes the map and moves the wrappers (<see cref="ApplyChanges"/>),
+    /// so a wrapper made on a client's thread is made from the tree before an apply or after it, and
+    /// one made before it is moved to the new tree or let go with it as any other.
+    /// </summary>
+    private bool TryMakeItemWrapper(ElementId id, [NotNullWhen(true)] out UiaFragment? wrapper)
+    {
+        wrapper = null;
+        if (!VirtualItemId.TryDecode(id, out var listId, out int index) || listId == default) return false;
+        lock (_applyLock)
+        {
+            if (_disposed) return false;
+            if (_wrappers.TryGetValue(id, out wrapper)) return true;
+            if (!_wrappers.TryGetValue(listId, out var list) || list.Node is not { IsVirtualItemContainer: false } listNode)
+                return false;
+            var items = listNode.Children;
+            if ((uint)index >= (uint)items.Count || items[index] is not { } node || node.ElementId != id) return false;
+            // Generation 0: no apply's. The next apply moves it to its node there, or lets it go.
+            wrapper = new UiaFragment(this, node);
+            _wrappers[id] = wrapper;
+            return true;
+        }
+    }
 
     /// <summary>The list a list's node stands for, read for what it serves on demand.</summary>
     private IAccessibleItemSource? ItemsOf(ElementId listId) => NodeOf(listId)?.ItemSource;
@@ -320,7 +370,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
             selected = false;
             return false;
         }
-        if (_wrappers.TryGetValue(itemId, out var item))
+        if (TryWrapper(itemId, out var item))
             selected = item.Selected == true;
         else if (NodeOf(listId) is { IsVirtualItemContainer: true } list)
             selected = list.Served.IsSelected(index);
@@ -351,7 +401,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
         if (NodeOf(listId) is not { IsVirtualItemContainer: false } list) return null;
         var items = list.Children;
         if ((uint)index >= (uint)items.Count) return null;
-        return _wrappers.TryGetValue(items[index].ElementId, out var item) ? item : null;
+        return TryWrapper(items[index].ElementId, out var item) ? item : null;
     }
 
     /// <summary>Whether item <paramref name="index"/> of a list is gone: the list has no node any
@@ -366,14 +416,14 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     internal IntPtr ItemSelectionContainer(ElementId itemId)
     {
         if (TryResolveItem(itemId, out var listId, out _)) return NativeFragmentSimple(listId);
-        return _wrappers.TryGetValue(itemId, out var w) && w.Node.Parent is { Role: AccessibilityRole.TabList or AccessibilityRole.Menu } strip
+        return TryWrapper(itemId, out var w) && w.Node.Parent is { Role: AccessibilityRole.TabList or AccessibilityRole.Menu } strip
             ? NativeFragmentSimple(strip.ElementId)
             : IntPtr.Zero;
     }
 
     /// <summary>The snapshot selected state of a node that is not a list item — a radio
     /// button, a tab — or null for one that has none.</summary>
-    internal bool? GetSelected(ElementId id) => _wrappers.TryGetValue(id, out var w) ? w.Selected : null;
+    internal bool? GetSelected(ElementId id) => TryWrapper(id, out var w) ? w.Selected : null;
 
     /// <summary>
     /// Resolves an <c>ItemContainer.FindItemByProperty</c> <c>pStartAfter</c>
@@ -539,7 +589,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     internal void SetRangeValue(ElementId id, double value) => _host.SetRangeValue(id, value);
 
     /// <summary>Snapshot expand state of a node (null = not expandable), for ExpandCollapse.</summary>
-    internal bool? GetExpanded(ElementId id) => _wrappers.TryGetValue(id, out var w) ? w.Expanded : null;
+    internal bool? GetExpanded(ElementId id) => TryWrapper(id, out var w) ? w.Expanded : null;
 
     internal bool TryGetVirtualItemScreenRect(ElementId listId, int index, out Rect screen)
     {
@@ -569,47 +619,56 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
         // Always track the current full tree — ElementProviderFromPoint hit-tests
         // against it, and it must reflect deep changes even when the root node's
         // own properties didn't change.
-        Volatile.Write(ref _rootNode, root);
-        int generation = ++_generation;
-
-        // 1) Materialise/refresh wrappers for added nodes (no parent refresh yet).
-        foreach (var added in diff.Added)
+        lock (_applyLock)
         {
-            // Keep the wrapper stable per ElementId so the cached native object
-            // (which wraps it) stays valid; only create one the first time.
-            if (_wrappers.TryGetValue(added.Node.ElementId, out var existing))
-                existing.UpdateFrom(added.Node);
-            else
-                _wrappers[added.Node.ElementId] = existing = new UiaFragment(this, added.Node);
-            existing.Generation = generation;
+            Volatile.Write(ref _rootNode, root);
+            int generation = ++_generation;
+
+            // 1) Materialise/refresh wrappers for added nodes (no parent refresh yet). A list's
+            //    item node gets none until something asks for it (TryWrapper).
+            foreach (var added in diff.Added)
+            {
+                // Keep the wrapper stable per ElementId so the cached native object
+                // (which wraps it) stays valid; only create one the first time.
+                var id = added.Node.ElementId;
+                if (_wrappers.TryGetValue(id, out var existing))
+                    existing.UpdateFrom(added.Node);
+                else if (VirtualItemId.IsItem(id))
+                    continue;
+                else
+                    _wrappers[id] = existing = new UiaFragment(this, added.Node);
+                existing.Generation = generation;
+            }
+
+            // 2) Drop wrappers (and cached native objects) for removed nodes — except an element
+            //    this same diff added again: it moved to another parent (a box that gained a name
+            //    takes its children), and step 1 already pointed its wrapper at its new place.
+            //    Dropping it left the element with no wrapper, so navigation to it found nothing.
+            foreach (var removed in diff.Removed)
+            {
+                var id = removed.Node.ElementId;
+                if (_wrappers.TryGetValue(id, out var wrapper) && wrapper.Generation == generation)
+                    continue;
+                Unlink(id);
+            }
+
+            // 3) Apply property changes to surviving wrappers.
+            foreach (var change in diff.PropertyChanged)
+                if (_wrappers.TryGetValue(change.Node.ElementId, out var wrapper))
+                    wrapper.UpdateFrom(change.Node);
+
+            // 4) Point every other wrapper at its node in this tree too. The diff names
+            //    only what changed, but every rebuild is a new tree, and a node reaches
+            //    its whole tree through Parent and Children: a wrapper left on an old
+            //    node kept that tree alive (one tree per diff, ~170 KB at 1,001 nodes)
+            //    and navigated its siblings in it. One lookup per node and nothing
+            //    allocated; each swap is one reference write, so a UIA thread reading a
+            //    wrapper meanwhile walks its old tree or its new one, either consistent.
+            if (Rebase(root, generation) != _wrappers.Count)
+                DropStale(generation);
         }
-
-        // 2) Drop wrappers (and cached native objects) for removed nodes — except an element
-        //    this same diff added again: it moved to another parent (a box that gained a name
-        //    takes its children), and step 1 already pointed its wrapper at its new place.
-        //    Dropping it left the element with no wrapper, so navigation to it found nothing.
-        foreach (var removed in diff.Removed)
-        {
-            var id = removed.Node.ElementId;
-            if (_wrappers.TryGetValue(id, out var wrapper) && wrapper.Generation == generation)
-                continue;
-            Drop(id);
-        }
-
-        // 3) Apply property changes to surviving wrappers.
-        foreach (var change in diff.PropertyChanged)
-            if (_wrappers.TryGetValue(change.Node.ElementId, out var wrapper))
-                wrapper.UpdateFrom(change.Node);
-
-        // 4) Point every other wrapper at its node in this tree too. The diff names
-        //    only what changed, but every rebuild is a new tree, and a node reaches
-        //    its whole tree through Parent and Children: a wrapper left on an old
-        //    node kept that tree alive (one tree per diff, ~170 KB at 1,001 nodes)
-        //    and navigated its siblings in it. One lookup per node and nothing
-        //    allocated; each swap is one reference write, so a UIA thread reading a
-        //    wrapper meanwhile walks its old tree or its new one, either consistent.
-        if (Rebase(root, generation) != _wrappers.Count)
-            DropStale(generation);
+        // UI Automation is told of the providers let go once the lock is free.
+        Disconnect();
 
         // 5) Now that every wrapper exists (adds) or is gone (removes) and points
         //    into the new tree, refresh each affected parent's snapshot and raise
@@ -667,7 +726,8 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     {
         foreach (var change in changes)
         {
-            if (!_wrappers.TryGetValue(change.Node.ElementId, out var wrapper)) continue;
+            // An item node's wrapper is made here when it has none yet, from its node in the tree.
+            if (!TryWrapper(change.Node.ElementId, out var wrapper)) continue;
             if (change.PropertyName == AccessibilityProperties.ScrollPosition)
                 RaiseScrolled(wrapper, change.Previous, change.Node);
             else if (change.PropertyName == AccessibilityProperties.RangeValue)
@@ -757,35 +817,49 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
         foreach (var (id, wrapper) in _wrappers)
         {
             if (wrapper.Generation == generation) continue;
-            Drop(id);
+            Unlink(id);
         }
     }
 
     /// <summary>
-    /// Drops an element that left the tree: its wrapper, and its native object, which a client
-    /// may still hold. UI Automation is told the provider is gone (UiaDisconnectProvider), and the
-    /// object is cut from its wrapper: every call a client makes on it, or on a pattern or a text
-    /// range of the element, answers UIA_E_ELEMENTNOTAVAILABLE, not the name, value or text it
-    /// showed, and it no longer keeps the old tree alive. A locked screen that replaced a
-    /// person's details left them readable from every element a client had held.
+    /// Lets go of an element that left the tree: its wrapper, and its native object, which a client
+    /// may still hold, kept for <see cref="Disconnect"/>. Under the apply's lock; tells UI
+    /// Automation nothing.
     /// </summary>
-    private void Drop(ElementId id)
+    private void Unlink(ElementId id)
     {
         _wrappers.TryRemove(id, out _);
         IntPtr native;
         lock (_nativeLock)
             if (!_nativeByElement.TryRemove(id, out native)) return;
-
-        // Told while the object still answers: UI Automation may ask it for its runtime id.
-        IntPtr simple = NativeProvider.Tearoff(native, NativeProvider.As.Simple);
-        try { UiaInterop.UiaDisconnectProvider(simple); }
-        finally { Marshal.Release(simple); }
-        NativeProvider.Detach(native);
-        Marshal.Release(native);
-        ProviderDisconnected?.Invoke(id);
+        _disconnects.Add((id, native));
     }
 
-    /// <summary>For tests: told of each element whose provider the bridge disconnected (<see cref="Drop"/>).</summary>
+    /// <summary>
+    /// Tells UI Automation of the elements the apply let go of that a client may hold: each one's
+    /// provider is gone (UiaDisconnectProvider), and its object is cut from its wrapper: every call
+    /// a client makes on it, or on a pattern or a text range of the element, answers
+    /// UIA_E_ELEMENTNOTAVAILABLE, not the name, value or text it showed, and it no longer keeps the
+    /// old tree alive. A locked screen that replaced a person's details left them readable from every
+    /// element a client had held.
+    /// </summary>
+    private void Disconnect()
+    {
+        if (_disconnects.Count == 0) return;
+        foreach (var (id, native) in _disconnects)
+        {
+            // Told while the object still answers: UI Automation may ask it for its runtime id.
+            IntPtr simple = NativeProvider.Tearoff(native, NativeProvider.As.Simple);
+            try { UiaInterop.UiaDisconnectProvider(simple); }
+            finally { Marshal.Release(simple); }
+            NativeProvider.Detach(native);
+            Marshal.Release(native);
+            ProviderDisconnected?.Invoke(id);
+        }
+        _disconnects.Clear();
+    }
+
+    /// <summary>For tests: told of each element whose provider the bridge disconnected (<see cref="Disconnect"/>).</summary>
     internal Action<ElementId>? ProviderDisconnected;
 
     /// <summary>Whether a provider's element left the tree (or the bridge is gone): a node's
@@ -1045,12 +1119,12 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     // ── Actions routed back to the app ──
 
     /// <summary>A node's text as it is now (seam A1), or null when it has none.</summary>
-    internal AccessibleText? GetText(ElementId id) => _wrappers.TryGetValue(id, out var w) ? w.Text : null;
+    internal AccessibleText? GetText(ElementId id) => TryWrapper(id, out var w) ? w.Text : null;
 
     /// <summary>A node's box in layout units, scroll applied.</summary>
     internal bool TryGetBounds(ElementId id, out Rect bounds)
     {
-        bool found = _wrappers.TryGetValue(id, out var w);
+        bool found = TryWrapper(id, out var w);
         bounds = found ? w!.Bounds : default;
         return found;
     }
@@ -1075,7 +1149,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     /// <summary>A node's toggle state for the Toggle pattern, as its ToggleState property answers:
     /// a check box's, a switch's (which the element read gave as indeterminate), a toolbar toggle's,
     /// a menu choice's.</summary>
-    internal bool? GetToggleState(ElementId id) => _wrappers.TryGetValue(id, out var w) ? w.Toggled : null;
+    internal bool? GetToggleState(ElementId id) => TryWrapper(id, out var w) ? w.Toggled : null;
     internal void RequestFocus(ElementId id) => _host.RequestFocus(id);
 
     /// <summary>For tests: told of the window when the bridge tells UI Automation its providers
@@ -1109,7 +1183,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
         // torn down; the window itself is destroyed after its bridge, so it still exists here.
         ReleaseProviders();
 
-        _wrappers.Clear();
+        lock (_applyLock) _wrappers.Clear();
 
         // Drop the bridge's references to cached native objects.
         lock (_nativeLock)

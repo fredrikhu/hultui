@@ -178,6 +178,20 @@ additions and removals; the bridge keeps its wrapper, where it used to drop it
 after adding it, and on AT-SPI sends it no cache-remove, which libatspi takes
 for a dispose.
 
+A list's item node gets its UIA wrapper when something first asks for it (plan 17 round 12 step 3):
+a client's navigation, a hit test, a lookup by its id, an event it raises (a selection move, a new
+label). The wrapper is made from the item's node in the list's node (an item's id is its list and its
+place), under a lock the apply holds while it changes the map and moves the wrappers to the new tree,
+so a client's thread makes it from the tree before an apply or after it; from then on it is moved with
+the tree and let go with its item as any other. Elements' nodes keep theirs from the diff that adds
+them, and the providers an apply lets go are told to UI Automation after it has let go of the lock.
+The diff's searches for the parents to raise on (and AT-SPI's for its boundary children) keep their
+sets of ids per thread. Junction's commit file walk with a reader, a real window on NativeAOT (633 diff
+rows a file): 633 wrappers made and let go a key → 3, the bridge 116.1 → 0.6 KB a key, the UI thread
+980.0 → 864.4 KB a key at a 33 ms key pace; the same raises (4 structure events and a Name a key, 65
+provider calls and 65 QueryInterface calls, 18–20 µs a raise). What a key still costs with a reader is
+the walk, 287 KB: the next file's rows as nodes, their labels and the app's row records.
+
 A focus move rebuilds no tree. The window marks it on the applied tree in place
 (`IsFocused` on the node that had the focus and on the one that has it) and hands
 the bridge both nodes (`NotifyFocusChanged(focused, previous)`): the UIA wrappers
