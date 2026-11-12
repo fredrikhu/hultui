@@ -5,8 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 12
-- **Phase:** build — round 12, step 2 next (step 1 landed; six steps in "Round 12 build order"; questions 46–51 open:
-  47 and 48 shape step 3, 49 step 5, 46 step 6). Each build step measures its real-app case in a guarded
+- **Phase:** build — round 12, step 2 running (step 1 landed; six steps in "Round 12 build order"; the user answered
+  questions 46–51 on 2026-11-12: steps 3 (b), 3 (c), 5 and 6 approved; 50 waits for a live reader check). Each build step measures its real-app case in a guarded
   real window as well as by step-ab (the survey's real-window harnesses and the desktop lock `Global\HultUI-r12-desktop`
   are in session 0bab04ae's scratchpad `r12-<area>\`). Round 11 released: merged into main as b0dd1954; CI run
   43121085428 green. No app releases this round (the user did not ask). To resume in a fresh context, run in this
@@ -131,8 +131,8 @@ as by step-ab.
    (`GlyphInfo.GlyphFlags`) instead of shaping it again (14,105 HarfBuzz calls at a new width); otherwise record the
    numbers. Small (a), medium (b); no API.
 5. **vk-chrome-8bit-until-hdr** (3; r12-8 Candidate 1, r12-3 F16 retained memory, r12-4 Candidate 1) **(question 49:
-   images first)** — Aperture and Reel draw through an 8-bit swapchain while no HDR picture is on screen and rebuild to
-   F16 when one appears: rest wakes 209 → ~112 a second, swapchain 31.1 → 15.6 MB, and the first resize's kept +50 MB
+   yes — F16 only while an HDR video plays)** — Aperture and Reel draw through an 8-bit swapchain unless an HDR video is
+   playing, and rebuild to F16 when one starts (back to 8-bit when it stops): rest wakes 209 → ~112 a second, swapchain 31.1 → 15.6 MB, and the first resize's kept +50 MB
    private / +26 MB DXGI gone (8-bit returns everything). Medium; pixels (SDR brightness on an HDR display), one
    rebuild a switch.
 6. **meridian-editor-floor-measured** (5 with 8; r12-5 Waiting) **(question 46)** — the editor's floor is the larger of
@@ -242,6 +242,12 @@ Re-ranked by the next survey.
 - **hover-move-frames-nothing-shows** (1; found in round 12 step 1) — a mouse move over rows still draws a frame per
   hover change even where nothing draws hover (c0ce9387 fixed only the settle after a build). Measure at the next
   survey: frames a move in Junction, Vesper and Meridian lists against hover changes that draw.
+- **a11y-gate-on-client** (7; question 50: not yet) — build the tree and raise events only after a UIA client asks
+  for the window's root (in 15 real launches none did). Decide after a live check with Narrator and NVDA running (the
+  user runs them; it could go with the live-reader check of menus).
+- **after-layout-callback** (1; question 51: only if another app needs it) — a public hook after layout and before
+  render; Junction's resize guesses the diff's width instead (right in every measured case; the after-frame check
+  stays).
 - **size-change-restore-second-frame** (1/3; round 12 step 1) — each restore in a size series draws a second small frame
   (9 KB), before and after step 1; not attributed.
 
@@ -620,28 +626,30 @@ Round 12 questions (from the survey, 2026-11-12). Recommendations in brackets.
 46. **meridian-editor-floor-measured** (r12-5; step 6): Meridian's editor keeps a floor of 448 px tuned to Segoe UI, so
     on Fedora (Noto Sans) the chain sub-tab is cut by 4.6 px and `NarrowEditorLayoutTests` fails there. Take the floor
     from the measured sub-tab strip (on Linux the response pane moves under the editor ~5 px sooner; Windows unchanged),
-    or keep 448 and let the test check only the Windows face? [The measured floor.]
+    or keep 448 and let the test check only the Windows face? [The measured floor.] → **the measured floor** (2026-11-12; step 6).
 47. **a11y-resize-walk-debounce** (r12-7; step 3 (b)): during a live resize a reader would be told element bounds once
     the size has rested 100 ms, not every 100 ms of the drag (today they already arrive up to 100 ms late). Vesper
-    1,596 → ~125 raises a resize, ~11 fewer frames. Accept this as coalescing? [Yes.]
+    1,596 → ~125 raises a resize, ~11 fewer frames. Accept this as coalescing? [Yes.] → **yes** (2026-11-12; step 3 (b)).
 48. **a11y-item-added-past-end-offscreen** (r12-7; step 3 (c)): a reader then hears items appended below the visible rows
     (Junction History paging, Aperture library paging, a Vesper file that sorts last); today its list stays short until
-    something else walks. Fix it as a bug, like question 38? [Yes.]
+    something else walks. Fix it as a bug, like question 38? [Yes.] → **yes** (2026-11-12; step 3 (c)).
 49. **vk-chrome-8bit-until-hdr** (r12-8, r12-3, r12-4; step 5): Aperture and Reel at rest on an HDR display wake ~207
     times a second (an NVIDIA interop thread at ~96/s exists only with the F16 swapchain) and keep +50 MB private and
     +26 MB GPU memory after their first resize. Draw them through an 8-bit swapchain while no HDR picture is on screen
     and rebuild to F16 when HDR video appears (one rebuild a switch; possibly a visible step in SDR brightness)?
     Before/after images can be read in-process (`HULTUI_VULKAN_CAPTURE` with `HULTUI_VULKAN_F16=0` and `=1`). [Images
-    first, then decide.]
+    first, then decide.] → **yes** (2026-11-12): the HDR (F16) swapchain only while an HDR video is playing; 8-bit
+    otherwise (step 5; the before/after images still go to the user as a check).
 50. **a11y-gate-on-client** (r12-7): in 15 real launches no UIA client ever asked for an app's root, so building the tree
     and raising events only after a client asks would remove all bridge work here (Junction's commit file walk −40 % UI
     bytes). The risk: a client subscribed desktop-wide that acts on events alone could miss events. [Not yet: decide
-    after a live check with Narrator and NVDA running, which you would run (it could go with the menu check).]
+    after a live check with Narrator and NVDA running, which you would run (it could go with the menu check).] → **not
+    yet** (2026-11-12): decide after the live reader check (Waiting).
 51. **after-layout-callback** (round 12 step 1): Junction's resize now guesses the diff's width before layout (the list's
     last width plus what the window gained or lost), because no public hook runs after layout and before render. Add
     a public `Window.RequestAfterLayoutCallback` (or similar) so an app can set a value from the laid-out tree in the
     same frame, and move Junction to it? [Yes if another app needs it; today the guess is right in every measured
-    case, and the after-frame check stays.]
+    case, and the after-frame check stays.] → **only if another app needs it** (2026-11-12; Waiting).
 
 Reminder (expert 8): Aperture signed in to jellyfin.home as device "aperture-survey" in earlier rounds and once in
 round 12 as "aperture-r12"; the user should remove those devices and revoke the API key when the work is done.
@@ -807,3 +815,6 @@ From 2026-11-11 (after round 10's release); earlier entries are in the archive (
   −29…−33 % UI time a key; size changes 2.11 → 1.11 frames. Question 51 (a public after-layout hook) asked; lead
   hover-move-frames-nothing-shows to Waiting. For PERFORMANCE.md: a real pointer resting over the window makes every
   rebuild re-hit hover; test frame counts with a pointer. Next: step 2.
+- 2026-11-12: the user answered questions 46–51 with the recommendations: 46 the measured floor (step 6), 47 yes (step
+  3 (b)), 48 yes (step 3 (c)), 50 not yet (after a live reader check; Waiting), 51 only if another app needs it
+  (Waiting); and 49 **yes**: Aperture and Reel use the HDR (F16) swapchain only while an HDR video is playing (step 5).
