@@ -4,22 +4,26 @@ State of [the performance team](17-performance-team.md). The orchestrator update
 file after every step and commits it with the step's work. Full survey reports are in
 [`17-reports/`](17-reports/).
 
-- **Round:** 12
-- **Phase:** release — round 12 merged into main as afc1ed40 and pushed; wait for CI on afc1ed40 (steps 1–6 landed, the full suite green on 3131ed8e; six steps in "Round 12 build order"; the user answered
-  questions 46–51 on 2026-11-12: steps 3 (b), 3 (c), 5 and 6 approved; 50 waits for a live reader check). Each build step measures its real-app case in a guarded
-  real window as well as by step-ab (the survey's real-window harnesses and the desktop lock `Global\HultUI-r12-desktop`
-  are in session 0bab04ae's scratchpad `r12-<area>\`). Round 11 released: merged into main as b0dd1954; CI run
-  43121085428 green. No app releases this round (the user did not ask). To resume in a fresh context, run in this
-  worktree: `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md, with
-  state in docs/plans/17-performance-team-ledger.md. Read both once per session (afterwards only the ledger's Phase and
-  the part the step needs), do the step the ledger's Phase calls for, record it in the ledger, and commit.` Before
-  resuming, `git fetch` and merge main if it moved; build steps use `scripts/perf/step-ab.ps1` (with `global.json` a base
-  tree picks its own SDK). Open for the user, not blocking: the live screen-reader check of menus; another F16
-  held-drag run (Waiting) only with a new approval. Older rounds are in [the archive](17-performance-team-ledger-archive.md)
-  (search it, don't read it whole). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a
-  pre-push hook refuses pushes built on the old history).
+- **Round:** 13
+- **Phase:** survey — round 13, to start in a fresh context (the loop stopped 2026-11-12 after round 12's release).
+  Round 12 released: merged into main as afc1ed40; CI run 43269911874 green on attempt 2 (attempt 1's Windows test job
+  failed one timing test, `HighlighterConcurrencyTests.ACancelledTokenizeStopsAndTheNextOneRuns`, 387 ms after a cancel
+  against a 269 ms bound, with no Syntax change in the round: a flake, now in memory `ci-red-findings`). No app releases
+  this round (the user did not ask). Round 13's survey measures in real windows too and ranks by real-app effect, as
+  round 12 did: start the common brief from session 0bab04ae's scratchpad `brief-r12-survey.md` (the desktop lock
+  `Global\HultUI-r12-desktop`, the guards, expert 8's shared AOT publishes first; the 4K at 150 % is attached again).
+  Round 13's survey archives round 11's Landed rows, round 12's build order and answered questions 46–51, and round 11's
+  log entries (2026-11-11 after round 10's release to round 11's release on 2026-11-12); use `archive_r12.py` in session
+  0bab04ae's scratchpad as the model. To resume in a fresh context, run in this worktree: `/loop Run the next step of
+  the performance team: follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
+  Read both once per session (afterwards only the ledger's Phase and the part the step needs), do the step the ledger's
+  Phase calls for, record it in the ledger, and commit.` Before resuming, `git fetch` and merge main if it moved; build
+  steps use `scripts/perf/step-ab.ps1`. Open for the user, not blocking: the live screen-reader check of menus (with
+  question 50's bridge gate); another F16 held-drag run (Waiting) only with a new approval. Older rounds are in
+  [the archive](17-performance-team-ledger-archive.md) (search it, don't read it whole). History note: rewritten
+  2026-10-25 (every commit after 3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history).
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`)
-- **Review commits since:** round 12's survey reviews round 11's build, 5731ee58..b0dd1954 (the last survey report to the
+- **Review commits since:** round 13's survey reviews round 12's build, 5f1744ca..afc1ed40 (the last survey report to the round 12 release; the one merge is round 12's own into main). Earlier: round 12's survey reviewed round 11's build, 5731ee58..b0dd1954 (the last survey report to the
   round 11 release; it includes the .NET 11 upgrade's step 0 only as already reviewed). Earlier: round 11's survey reviewed round 10's build and the .NET 11 upgrade, f4d6050d..868e2ffc
   (the last survey report to the upgrade's captures; round 10's merge into main cc55bdcc is in the range). Earlier: round 10's survey reviewed round 9's build, 4919ac40..facced69 (the last survey report
   to the round 9 release; 82 commits, 81 not merges; no merge from main this round). Round 9's survey reviewed
@@ -862,3 +866,16 @@ From 2026-11-11 (after round 10's release); earlier entries are in the archive (
 - 2026-11-12: round 12 merged into main as afc1ed40 (detached origin/main merge in this worktree, tree identical to the
   tested branch; origin/main b0dd1954 was in the branch and had not moved, so the push gate held). Primary checkout
   fast-forwarded behind the guard; branch reset to the merge and pushed. CI on afc1ed40 next.
+- 2026-11-12: CI run 43269911874 on afc1ed40: attempt 1 red — the Windows test job failed
+  `HighlighterConcurrencyTests.ACancelledTokenizeStopsAndTheNextOneRuns` (the tokenize ran on 387 ms after its cancel,
+  bound 1,078 / 4 = 269 ms; the macOS keyring job cancelled with it); round 12 changed no Syntax file and the full local
+  suite passed it, so `gh run rerun --failed` once: attempt 2 green (test, test-linux, docs, meridian-keyring on
+  ubuntu-24.04 and macos-15). A 2-core-runner timing flake; memory `ci-red-findings` updated. Round 12 landed six steps in
+  ~25 commits, measured in real windows as well as headless: Junction draws one frame a key and per size change (the
+  hover settle after a build, the diff pan's width before layout; −29…−33 % UI time a key), its watcher builds no chrome
+  for an unchanged repo and re-reads no log or refs for a working-tree change (−95 % all-thread bytes an event),
+  Meridian's tab switch and send build no title bar or rail (−15…−19 %), UIA wrappers made on demand and a live resize
+  telling bounds once it rests (−74…−91 % raises a drag), off-screen appends told to a reader, a font fallback table and
+  CJK cuts read off their run (CJK resize −15 % in a real window), Aperture and Reel on 8-bit until an HDR video is on
+  screen (rest wakes −45 %, GPU memory −70 %), and Meridian's measured editor floor. Round → 13, Phase → survey; the loop
+  stops, and round 13 starts in a fresh context.
