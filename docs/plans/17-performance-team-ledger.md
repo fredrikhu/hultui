@@ -9,7 +9,8 @@ file after every step and commits it with the step's work. Full survey reports a
   Round 12 released: merged into main as afc1ed40; CI run 43269911874 green on attempt 2 (attempt 1's Windows test job
   failed one timing test, `HighlighterConcurrencyTests.ACancelledTokenizeStopsAndTheNextOneRuns`, 387 ms after a cancel
   against a 269 ms bound, with no Syntax change in the round: a flake, now in memory `ci-red-findings`). No app releases
-  this round (the user did not ask). Round 13's survey measures in real windows too and ranks by real-app effect, as
+  this round's build; after its release the user asked for them: junction-v1.26.0, vesper-v1.26.0, meridian-v1.9.0,
+  aperture-v1.24.0, reel-v1.10.0 on afc1ed40, all released (see the Log). Round 13's survey measures in real windows too and ranks by real-app effect, as
   round 12 did: start the common brief from session 0bab04ae's scratchpad `brief-r12-survey.md` (the desktop lock
   `Global\HultUI-r12-desktop`, the guards, expert 8's shared AOT publishes first; the 4K at 150 % is attached again).
   Round 13's survey archives round 11's Landed rows, round 12's build order and answered questions 46–51, and round 11's
@@ -879,3 +880,9 @@ From 2026-11-11 (after round 10's release); earlier entries are in the archive (
   CJK cuts read off their run (CJK resize −15 % in a real window), Aperture and Reel on 8-bit until an HDR video is on
   screen (rest wakes −45 %, GPU memory −70 %), and Meridian's measured editor floor. Round → 13, Phase → survey; the loop
   stops, and round 13 starts in a fresh context.
+- 2026-11-12: the user asked for app releases after round 12: junction-v1.26.0, vesper-v1.26.0, meridian-v1.9.0,
+  aperture-v1.24.0, reel-v1.10.0 cut on afc1ed40 (CI green), pushed 3 + 2 (annotated, messages from files). The first
+  installer runs on .NET 11's publish paths: Vesper, Meridian, Aperture and Reel green on the first attempt and
+  published; Junction's Windows test job failed `HultUI.Headless.Tests.SingleInstanceTests.ABurstOfLaunches_AllArrive`
+  (PumpUntil 15 s; no SingleInstance change since cc55bdcc; passed in CI on the same commit) → `gh run rerun --failed`
+  once: green, Junction-Setup-1.26.0.exe published. Memory `ci-red-findings` and `release-tagging` updated.
