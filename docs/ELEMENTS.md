@@ -1688,7 +1688,12 @@ item where a label was kept, or none (past the items' new end), asks the frame's
 which names that item again, or tells it gone, with no tree built. The check is one comparison per
 kept label and makes nothing; with no reader no label is kept. Until plan 17 round 11 an item
 changed off screen kept its old name (Meridian's map said "seen 1×" for an endpoint seen again)
-until something else walked or built the tree.
+until something else walked or built the tree. Items added past the end are told the same way: a
+patch that brings more items than the labels kept, the first new one with no row (below the
+window), asks the walk, which makes their nodes; the labels kept grow to the items' number, so a
+list over 2,000 items (whose labels no walk asks for) asks once, not at every patch. Until plan 17
+round 12 a page appended below the window (Junction's History, Aperture's library) left a
+reader's list at its old length (200 items where a build made 201) until something else walked.
 
 **A scroll view of rows becomes a list.** A `ScrollView` over a padded `Flex.Column` of rows and
 headings can move onto a list with the same pixels (Meridian's Discovery map, plan 17 round 10

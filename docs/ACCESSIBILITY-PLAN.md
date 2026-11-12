@@ -442,7 +442,12 @@ with the applied children not found yet in a dictionary the refresh keeps). A ch
 does not have is built as a build builds it, and only that subtree; an applied child the elements no
 longer have is removed; children that stay in another order mark the parent reordered. Items added
 to or gone from a list's end (an item's id is its place), and the focused row an item holds, are
-taken the same way. The refresh hands the bridge `ApplyChanges` with the diff a build would make, in
+taken the same way. Items added past the end with no row (below the window) change no element, so an
+item-rows patch asks for the walk itself when the list has more items than labels it kept for a
+reader and the first new one has no row (plan 17 round 12 step 3, a bug fix the user approved,
+question 48): 1 or 3 items appended to a 200-item list were not told (the reader's tree 200 items, a
+build 201 or 203, no walk after 360 ms); now in the patch's frame, by 1 walk and no tree. The labels
+kept grow to the items' number, so a list served on demand asks once per append. The refresh hands the bridge `ApplyChanges` with the diff a build would make, in
 its order: the nodes added, each subtree in order; the nodes removed, deepest first, the top one's
 parent a stand-in that keeps the children it had (`AccessibilityNode.ChildrenStandIn`), where AT-SPI
 reads the child's old index for its `children-changed:remove`; the parents reordered; the property
