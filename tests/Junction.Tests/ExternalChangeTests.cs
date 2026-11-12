@@ -168,6 +168,90 @@ public class ExternalChangeTests
         });
     }
 
+    // ── What an event reads again ────────────────────────────────────────
+
+    /// <summary>A file saved in the working tree, as the real watcher reports it, reloads what
+    /// reads the working tree — the status, the dirty count — and reads no log, no tags and no
+    /// branches again: their loaders keep the key they hold, and the summary keeps the branch
+    /// list it had (plan 17 round 12: such an event ran 14 git commands on History, 2 now). A
+    /// ref moving reloads all of them.</summary>
+    [Fact]
+    public void AWorkingTreeEvent_ReadsNoLogOrRefs_AndARefMovingDoes()
+    {
+        Hosted(repo =>
+        {
+            Commit(repo, "second");
+            repo.Git("tag", "v1");
+        }, (repo, session, app) =>
+        {
+            var path = repo.Path;
+            session.Window.PressKey(KeyCode.Digit2);
+            PumpUntil(session, () => Commits(app, path) == 2 && LoadedKey(app, "_tagsLoaders", path) != null
+                && SummaryMember(app, path, "Branch") is "main", "the History view never loaded");
+            Quiet(session, app, path);
+            var log = LoadedKey(app, "_historyLoaders", path);
+            var tags = LoadedKey(app, "_tagsLoaders", path);
+            var branches = SummaryMember(app, path, "Branches");
+            int gen = DataGeneration(app, path);
+
+            repo.Write("edited.txt", "x\n");
+            PumpUntil(session, () => DataGeneration(app, path) > gen && SummaryMember(app, path, "Dirty") is 1,
+                "the saved file never reached the summary");
+            Quiet(session, app, path);
+            Assert.Equal(log, LoadedKey(app, "_historyLoaders", path));
+            Assert.Equal(tags, LoadedKey(app, "_tagsLoaders", path));
+            Assert.Same(branches, SummaryMember(app, path, "Branches"));
+
+            repo.Git("branch", "zeta");
+            PumpUntil(session, () => ((IEnumerable)SummaryMember(app, path, "Branches")!).Cast<object>()
+                .Any(b => (string)b.GetType().GetProperty("Name")!.GetValue(b)! == "zeta"), "the new branch never showed");
+            PumpUntil(session, () => LoadedKey(app, "_historyLoaders", path) != log && LoadedKey(app, "_tagsLoaders", path) != tags,
+                "a ref moving did not read the log and the tags again");
+        });
+    }
+
+    /// <summary>Pumps until the repository's loads have landed and a quarter second has passed
+    /// with no event, so what a test compares is not still moving.</summary>
+    private static void Quiet(HeadlessSession session, JunctionApp app, string path)
+    {
+        int last = DataGeneration(app, path);
+        var quietSince = DateTime.UtcNow;
+        var until = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (DateTime.UtcNow < until)
+        {
+            session.PumpFrame();
+            Thread.Sleep(5);
+            int now = DataGeneration(app, path);
+            if (now != last) { last = now; quietSince = DateTime.UtcNow; }
+            else if (DateTime.UtcNow - quietSince > TimeSpan.FromMilliseconds(600) && !Loading(app, path)) return;
+        }
+    }
+
+    private static bool Loading(JunctionApp app, string path) =>
+        new[] { "_summaryLoaders", "_historyLoaders", "_tagsLoaders", "_worktreeLoaders" }.Any(f =>
+        {
+            var keyed = Field(app, f)!;
+            var loader = keyed.GetType().GetMethod("For")!.Invoke(keyed, [path])!;
+            return (bool)loader.GetType().GetProperty("IsLoading")!.GetValue(loader)!;
+        });
+
+    private static int DataGeneration(JunctionApp app, string path) =>
+        ((Dictionary<string, int>)Field(app, "_dataGen")!).GetValueOrDefault(path);
+
+    /// <summary>The key a repository's loader in <paramref name="loaders"/> holds its value for.</summary>
+    private static string? LoadedKey(JunctionApp app, string loaders, string path)
+    {
+        var keyed = Field(app, loaders)!;
+        var loader = keyed.GetType().GetMethod("For")!.Invoke(keyed, [path])!;
+        return loader.GetType().GetField("_loadedKey", Priv)!.GetValue(loader) as string;
+    }
+
+    private static object? SummaryMember(JunctionApp app, string path, string member)
+    {
+        var summary = LoaderValue(app, "_summaryLoaders", path);
+        return summary.GetType().GetProperty(member)!.GetValue(summary);
+    }
+
     // ── Harness ──────────────────────────────────────────────────────────
 
     private static string OpenHistoryOnTheSecondCommit(TempRepo repo, HeadlessSession session, JunctionApp app)

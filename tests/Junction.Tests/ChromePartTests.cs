@@ -549,10 +549,9 @@ public class ChromePartTests
             KeyViewOnly(fx);
             AssertChromeIsAFullBuild(fx, "after a branch made");
 
-            // Git writes a new remote to its config alone, which the watcher does not watch: the
-            // next event (here the watcher's callback itself) is what reads it.
+            // Git writes a new remote to its config alone, renaming a lock file over it, which the
+            // watcher reports as a ref moving: the remotes are read again.
             a.Git("remote", "add", "origin", "https://gitlab.com/acme/core-api.git");
-            Invoke(fx.App, "OnExternalChange", a.Path);
             fx.Session.PumpUntil(() => ByIdIn(Part(fx, "titlebar"), "gitlab-mark") is not null, Wait);
             Settle(fx);
             KeyViewOnly(fx);

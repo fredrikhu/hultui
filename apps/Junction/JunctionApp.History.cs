@@ -193,7 +193,9 @@ public partial class JunctionApp
         var contentRegex = _contentRegex;
         var scope = $"{path}|{string.Join(",", includeList)}"
                   + (content.Length > 0 ? $"|{(contentRegex ? "G" : "S")}:{content}" : "");
-        var key = $"{scope}|{DataGen(path)}";
+        // The refs generation, not the data's: the log and its graph are HEAD's and the refs',
+        // which an editor saving a file does not move (see RefsGen).
+        var key = $"{scope}|{RefsGen(path)}";
 
         // How far back is remembered per scope, not per data generation: a commit or a fetch
         // reloads the log from the top, but at the depth that had been scrolled to, so the

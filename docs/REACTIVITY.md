@@ -1595,6 +1595,30 @@ the Changes view 497 → 315 KB; in a real window (NativeAOT) 816 → 647 KB and
 same frames and accessibility trees. (An `AsyncLoader` constructor taking an
 `IEqualityComparer<T>` would do this in the framework; it would be new public API.)
 
+### Key each load on what can change it
+
+One generation for everything an entity holds reloads everything on every change. Junction kept
+one per repository, and its watcher bumped it for a file saved in the working tree, so an editor's
+save read the log, the selected commit's files, the branches, the tags, the version and the
+remotes again, none of which a change to the working tree can move: 14 git commands and 4.3 MB on
+all threads an event over History. The watcher now says whether HEAD, a ref, the config or the
+packed refs changed in its window. The loads of what those say key on a second generation
+(`RefsGen`) that an event in the working tree or the index leaves alone, and the summary reads its
+status again and keeps the rest (round 12, step 2). Over History an event now runs `git status`
+and `git worktree list`, and makes 4,268 → 226 KB on all threads (−95 %) and 414 → 162 KB on the
+UI thread, headless; over Changes, which shows the working tree, 19 → 11 commands and 5,236 →
+1,611 KB; in a real window (NativeAOT) 4,502 → 236 KB and 647 → 172 KB an event. The same frames
+and accessibility trees.
+
+Two traps on the way, both in what a `FileSystemWatcher` on `.git` reports:
+
+- Git writes HEAD, the config and the packed refs to a lock file and renames it over the old
+  one. A watcher that listens for Changed and Created never hears them: a checkout that changed
+  no file in the working tree, and a remote added, went unseen until something else changed.
+- `git status` replaces the index the same way when it refreshes it, which it did on three runs
+  in a row on a fresh repository, unless optional locks are off (as in the tests). A watcher of
+  the index's renames hears the app's own reads, reloads, and reads again.
+
 ### What a build shows of files comes from what was read already
 
 A small read in `Build()` does not freeze anything a person would notice; it allocates on every

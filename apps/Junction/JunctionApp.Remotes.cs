@@ -46,7 +46,7 @@ public partial class JunctionApp
 
     private Element BuildRemotesPanel()
     {
-        _remoteDetails.Load($"{_activeRepoPath}|{DataGen(_activeRepoPath)}", LoadRemotes);
+        _remoteDetails.Load($"{_activeRepoPath}|{RefsGen(_activeRepoPath)}", LoadRemotes);
         var list = _remoteDetails.Value;
         var loading = _remoteDetails.IsLoading && list.Count == 0;
 
