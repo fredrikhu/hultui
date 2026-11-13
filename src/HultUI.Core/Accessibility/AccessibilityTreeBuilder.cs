@@ -764,6 +764,17 @@ public static partial class AccessibilityTreeBuilder
     };
 
     /// <summary>
+    /// Whether <paramref name="element"/>'s click handlers decide what it is to a reader: a box with no
+    /// role of its own and of no kind <see cref="InferRole"/> names otherwise, a button while it has one
+    /// (unless it holds a popup) and nothing without. Asked when its handlers came or went
+    /// (<see cref="AccessibilityProperties.ClickHandlers"/>): a button's, a scroll view's or a list's
+    /// role stays.
+    /// </summary>
+    internal static bool ClickDecidesRole(Element element) =>
+        element.Role == AccessibilityRole.None && element is BoxElement and not ButtonElement
+        && InferRole(element) is AccessibilityRole.Button or AccessibilityRole.None;
+
+    /// <summary>
     /// Whether a child of <paramref name="box"/> has the role <see cref="AccessibilityRole.Dialog"/>
     /// or <see cref="AccessibilityRole.Menu"/>: the box is its backdrop, and its click closes it
     /// (<c>Dialog.Show</c>'s scrim, a modal or a menu an app keeps in its own tree). It is no button: a

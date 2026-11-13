@@ -919,6 +919,7 @@ public abstract class Element
     {
         var items = _handlers;
         int count = items is null ? 0 : CountOf(items);
+        bool firstClick = ReferenceEquals(entry.Kind, EventKind<ClickEvent>.Instance) && !Listens(items, typeof(ClickEvent));
         // A handler can register another handler on the same element mid-dispatch, so a walk in
         // progress gets a copy to keep, as for every other change.
         if (items is null || count == items.Length || _dispatchDepth > 0)
@@ -929,6 +930,22 @@ public abstract class Element
             _handlers = items = copy;
         }
         items[count] = entry;
+        if (firstClick) ClickHandlersChanged();
+    }
+
+    /// <summary>
+    /// A box's click handler is what makes it a button to a reader when it has no role of its own
+    /// (<see cref="AccessibilityTreeBuilder.InferRole"/>): its first one, and the last one a rebuild's
+    /// patch drops, are told to the window, which walks the tree in place in the next frame and asks
+    /// for that frame (a node added or gone, or made again with its new role). A handler added to a box
+    /// already in a window was told only when something else walked or built the tree: a reader that
+    /// came to the box first heard nothing there, and one that came after a scroll heard of it at the
+    /// scroll's refresh (plan 17 round 13). An element in no window, as each one a build makes, finds no
+    /// observer above it.
+    /// </summary>
+    private void ClickHandlersChanged()
+    {
+        if (this is BoxElement) NotifyAccessibilityPropertyChanged(AccessibilityProperties.ClickHandlers);
     }
 
     public void On<TEvent>(Action<TEvent> handler) where TEvent : ElementEvent
@@ -1807,22 +1824,39 @@ public abstract class Element
         if (items is null && incoming is null)
             return;
 
+        // Whether a click handler is there before and after: one coming or going is told
+        // (ClickHandlersChanged), the box's own (owned) ones staying.
+        var click = EventKind<ClickEvent>.Instance;
+        bool hadClick = false, hasClick = false;
         int count = 0, owned = 0, added = 0;
         if (items is not null)
         {
-            for (; count < items.Length && items[count].Kind is not null; count++)
-                if (items[count].Owned) owned++;
+            for (; count < items.Length && items[count].Kind is { } kind; count++)
+            {
+                bool isClick = ReferenceEquals(kind, click);
+                hadClick |= isClick;
+                if (items[count].Owned)
+                {
+                    owned++;
+                    hasClick |= isClick;
+                }
+            }
         }
         if (incoming is not null)
         {
-            for (int i = 0; i < incoming.Length && incoming[i].Kind is not null; i++)
-                if (!incoming[i].Owned) added++;
+            for (int i = 0; i < incoming.Length && incoming[i].Kind is { } kind; i++)
+            {
+                if (incoming[i].Owned) continue;
+                added++;
+                hasClick |= ReferenceEquals(kind, click);
+            }
         }
 
         int total = owned + added;
         if (total == 0)
         {
             _handlers = null;
+            if (hadClick) ClickHandlersChanged();
             return;
         }
 
@@ -1850,6 +1884,7 @@ public abstract class Element
         if (ReferenceEquals(target, items) && count > at)
             Array.Clear(target, at, count - at);
         _handlers = target;
+        if (hadClick != hasClick) ClickHandlersChanged();
     }
 
     // ──── Rendering ────

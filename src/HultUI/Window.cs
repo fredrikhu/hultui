@@ -212,7 +212,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     // while a client listened (Vesper's pane, named after its folder). The frame walks the elements
     // against the applied tree in place (TryRefreshA11yInPlace), as for a change of their children: the
     // walk makes the node again with its children carried over, and tells the change. Every such
-    // change built the whole tree.
+    // change built the whole tree. A box's click handlers coming or going, a button to a reader or no
+    // longer one (AccessibilityProperties.ClickHandlers), is walked the same way.
     private bool _a11yWalkDue;
 
     // One of a set in the main tree changed its selected state: a menu's entry under the pointer. The
@@ -4716,6 +4717,17 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             // tree or the next, unless the row holds the focus: a rebuild for it makes the tree there
             // is. A change on a screen of rows a reader passes over built the whole tree.
             else if (AccessibilityTreeBuilder.InClosedRow(element, window._focusManager.FocusedElement)) return;
+            // A box's click handlers came or went (Element.ClickHandlersChanged): it is a button to a
+            // reader or no longer is, a node added or gone, or made again with its new role. The frame
+            // walks the elements against the applied tree in place, as for a change of their children,
+            // and is asked for (NeedsAccessibilityFrame): it draws nothing. A click handler added to a
+            // mounted box was told only when something else walked or built the tree, a scroll's
+            // refresh five frames on in MiddleClickAutoScrollTests, and never if nothing did (plan 17
+            // round 13). A button's, a scroll view's or a list's role stays, and walks nothing.
+            else if (propertyName == AccessibilityProperties.ClickHandlers)
+            {
+                if (AccessibilityTreeBuilder.ClickDecidesRole(element)) window._a11yWalkDue = true;
+            }
             // A range's value can move every frame (a drag, a playback): on its own schedule, when
             // the range's node is made again and patched in (TryPatchA11y), as a leaf's is.
             else if (propertyName == AccessibilityProperties.RangeValue)

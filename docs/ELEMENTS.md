@@ -245,7 +245,10 @@ children builds the tree.
 tree builder infers one from the element type, and the last rule is "a box with an
 `OnClick` is a `Button`", named from the text inside it. That is right for a clickable
 card and wrong for a row whose click merely selects it: give that an explicit
-`.AccessibleRole(...)`. An explicit role always wins over inference.
+`.AccessibleRole(...)`. An explicit role always wins over inference. A box's first click
+handler added after it is in a window, or the last one a rebuild drops, is told by the next
+frame (the window walks its accessibility tree in place, in a frame that draws nothing); it was
+told only when something else rebuilt or walked the tree.
 
 **A backdrop is not a button when its card is a dialog.** A box with a click whose child
 has the role `Dialog` is the dialog's backdrop: it gets no role and no name, so in your own

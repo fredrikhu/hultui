@@ -512,6 +512,15 @@ whose icon is a node there, and so is its text) gets them built as a build build
 whose name now takes the text inside it, with no other node under it, loses its children as a diff
 removes them; each failed the walk, which a renamed pane then reached on every descent into an
 archive.
+Since plan 17 round 13 step 5 (c) the observer sends that walk a box's click handlers coming or going
+too (`AccessibilityProperties.ClickHandlers`, internal): a box with no role of its own is a button
+while it has one (`InferRole`), so its first click handler added in a window, or the last one a
+rebuild's patch drops, adds its node, removes it or makes it again, and nothing on screen changes.
+The walk's frame is asked for and draws nothing; a button's, a scroll view's or a list's role stays,
+and asks for none (`ClickDecidesRole`). Such a change was told only when something else walked or
+built the tree: in MiddleClickAutoScrollTests, rows given a click handler after mount reached the
+reader at the scroll's layout refresh five frames on, and the frame a hover move drew before round 13
+step 2 only hid that from the staleness audit (it walked nothing).
 Where a build would make other nodes than a walk can, it builds the tree, as before: a described
 node or a list's item with children whose own properties changed, a list whose items cross the 2,000
 served on demand, described content in another number, an overlay opened or closed (its own refresh),
