@@ -950,6 +950,42 @@ in-app checkout: 28 → 15 git commands headless (14 with no watcher at all), 28
 window. A change the watcher hears late (its file-system event delivered after `RefreshAll` ran)
 is told and read again, as before.
 
+### A Vesper navigation's bridge time is UI Automation's own work on events a reader needs (round 13)
+
+Plan 17's round 13, step 5 (b) split what the UIA bridge does when Vesper opens or leaves a folder or
+opens its viewer. Real window, NativeAOT, the 4K primary display at 150 %, with the desktop-wide UIA
+listener this machine always has (it takes our events and never asks for the window's root). The
+UI thread's CPU was read with `QueryThreadCycleTime`.
+
+- **Expert 8's scene** (30 navigations 100 ms apart between folders of 61 and 28 files, pointer on the
+  list): "other" is 31–34 % of the six frame phases, against 1 % with `HULTUI_A11Y=0`. That is
+  0.80–0.88 ms a navigation.
+  - The bridge takes 0.59–0.62 ms of the UI thread's 2.38 ms a navigation (1.75 ms with it off).
+  - 51 raises take 0.46–0.49 ms of CPU and 0.60–0.71 ms of wall time: 36 Name, 13 BoundingRectangle
+    and 2 StructureChanged.
+  - The in-place walk takes 0.07–0.09 ms. It runs 1.5 times a navigation, always structural, and
+    builds no tree. Wrapper upkeep takes about 0.02 ms.
+- **Each raise of those kinds** gets 13 provider calls and 13 QueryInterface calls on the UI thread,
+  inside the `UiaRaise…` call:
+  - GetProviderOptions 5 times, the host provider 3, the fragment root 2, the runtime id, the native
+    window handle and one Navigate.
+  - With every call timed, our answers take under 2 µs of a raise's 13.5–14.4 µs. The rest is UI
+    Automation's own work.
+- **Enter into a folder of 200 files, Backspace out:** 35 raises, 29 of them Name (the 26 rows that
+  kept their index, the pane, its title button and its footer). They take 0.48–0.52 ms of the UI
+  thread's 2.5–2.7 ms.
+- **The viewer:** opening it takes 0.29–0.30 ms over 2 frames, with 8 raises. Its 179 KB are the 300
+  lines' item nodes and labels. Closing it takes 0.21–0.22 ms with 3 raises.
+
+Every event describes a change a reader can still reach. Rows that kept their index got another
+file's name, and the breadcrumb's buttons got another folder's name and place. None was told twice.
+Rows that left raised nothing, and each list's change of children was one event. So nothing was cut.
+
+Telling a bulk rename another way changes what a reader hears, and needs the user with a live check
+in Narrator and NVDA. One way is a single ChildrenInvalidated on the list instead of the rows' Name
+changes. Another is no Name change for rows no client has fetched, a finer form of question 50's
+gate.
+
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
 BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction
