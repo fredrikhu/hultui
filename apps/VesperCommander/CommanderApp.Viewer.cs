@@ -355,14 +355,9 @@ public partial class CommanderApp
 
     /// <summary>Width of the code column. Measured from the laid-out body when there is one
     /// and from the window before that — the first Build after opening runs before any
-    /// layout, and it still has to decide how tall a wrapped row is.</summary>
-    private float ViewerCodeWidth()
-    {
-        float body = _viewerScrollRef.Current is { Layout.AbsoluteContentBox.Width: > 0 } sv
-            ? sv.Layout.AbsoluteContentBox.Width
-            : _window.LayoutWidth;
-        return Math.Max(0, body - ViewerGutterW());
-    }
+    /// layout, and it still has to decide how tall a wrapped row is. A resize's build takes
+    /// the width the resize leads the body to (<see cref="BodyWidth"/>).</summary>
+    private float ViewerCodeWidth() => Math.Max(0, BodyWidth(_viewerScrollRef.Current) - ViewerGutterW());
 
     /// <summary>Measures every row once, at the current column width. Unwrapped every row is
     /// one line tall and the whole thing is arithmetic; wrapped, each is as tall as its line

@@ -835,6 +835,9 @@ public partial class CommanderApp : Component, IDisposable
 
     protected override void OnAfterBuild()
     {
+        // A resize's lead is for the build it started, which is done: from here on the body's
+        // laid-out width is the one to read, the check after the frame first.
+        _wrapLeadWidth = float.NaN;
         SettleWrappedRowWidths();
 
         // Returning from a full-shell view: its Close ran while the diff/sync tree was
@@ -3266,13 +3269,15 @@ public partial class CommanderApp : Component, IDisposable
         float scale = _window.DisplayScale;
         bool scaleChanged = MathF.Abs(Icons.DisplayScale - scale) >= 0.001f;
         if (scaleChanged) Icons.DisplayScale = scale;
-        // A wrapped view has to reach the build, and it takes both halves of this: the build
-        // here reads the width the body had a frame ago, and the settle registered by that
-        // build is what corrects it once the frame has been laid out at the new size. Without
-        // this call nothing rebuilds at all on a resize, so the settle is never registered
-        // and never runs — it is only ever scheduled from a build.
+        // A wrapped view has to reach the build, which measures its rows at the body's width.
+        // That build would read the width the body had a frame ago, so it is handed the width
+        // the frame is about to lay the body out at (LeadWrappedBodyWidth), and the settle the
+        // build registers checks that against the frame's layout and corrects a wrong guess.
+        // Without this call nothing rebuilds at all on a resize, so the settle is never
+        // registered and never runs — it is only ever scheduled from a build.
         if (scaleChanged || (_settings.DiffWrap && (_diffOpen || _viewerOpen)))
         {
+            LeadWrappedBodyWidth();
             MarkDirty();
             return;
         }
@@ -3310,12 +3315,13 @@ public partial class CommanderApp : Component, IDisposable
     /// every line that gains a visual line draws over the row beneath it. The row track is
     /// auto and would have grown to fit; it is the list forcing the measured height that
     /// makes it visible.</para>
-    /// <para>Marking dirty from the resize itself is not enough, and that is exactly why this
-    /// runs after the frame: the width comes from the body's laid-out box, so a build started
-    /// before layout still reads the width the body had a frame ago. Reading it once the
-    /// frame is laid out is what makes the second build measure at the size on screen — and
-    /// it covers the first open too, where the body has no box yet and the width falls back
-    /// to the whole window's.</para>
+    /// <para>Marking dirty from the resize itself is not enough on its own: the width comes
+    /// from the body's laid-out box, so a build started before layout reads the width the
+    /// body had a frame ago. The resize leads it (<see cref="LeadWrappedBodyWidth"/>), and
+    /// this, run once the frame is laid out, is the check: it finds nothing to do when the
+    /// lead was right, and otherwise makes a second build measure at the size on screen. It
+    /// covers the first open too, where the body has no box yet and the width falls back to
+    /// the whole window's.</para>
     /// <para>It cannot spin: a build measures at the width the body actually has, so after
     /// one the two agree. The settled-width fields are only a guard for the case where a
     /// rebuild somehow does not take. Junction's diff had the same gap and the same fix.</para>
@@ -3331,6 +3337,14 @@ public partial class CommanderApp : Component, IDisposable
             if (!_settings.DiffWrap) return;
             if (diff ? !_diffOpen : !_viewerOpen) return;
 
+            // What the next resize leads from: the body's width as this frame laid it out, and
+            // the window's width then.
+            if ((diff ? _diffScrollRef : _viewerScrollRef).Current is { Layout.AbsoluteContentBox.Width: > 0 } body)
+            {
+                _wrapLaidOutBodyWidth = body.Layout.AbsoluteContentBox.Width;
+                _wrapLaidOutWindowWidth = _window.LayoutWidth;
+            }
+
             float live = diff ? DiffCodeWidth() : ViewerCodeWidth();
             float measured = diff ? _diffHeightsWidth : _viewerHeightsWidth;
             float asked = diff ? _diffSettledWidth : _viewerSettledWidth;
@@ -3345,6 +3359,48 @@ public partial class CommanderApp : Component, IDisposable
     // The column width each view last asked for a corrective rebuild at — see above.
     private float _diffSettledWidth = float.NaN;
     private float _viewerSettledWidth = float.NaN;
+
+    // The wrapped body's width as the settle last saw it laid out, and the window's layout width
+    // then; 0 before it ever did.
+    private float _wrapLaidOutBodyWidth;
+    private float _wrapLaidOutWindowWidth;
+
+    // The body width a resize hands the build it starts (LeadWrappedBodyWidth); NaN otherwise.
+    private float _wrapLeadWidth = float.NaN;
+
+    /// <summary>
+    /// A window resize hands the wrapped view's build the width its body is about to be laid
+    /// out at, so the rows are measured at the width they are drawn at: the frame the resize
+    /// lays out draws each row as tall as its text, and the check after it
+    /// (<see cref="SettleWrappedRowWidths"/>) finds nothing to correct.
+    /// </summary>
+    /// <remarks>
+    /// Without it the build read the body's width from the frame before, the frame drew every
+    /// row at the old width's height, and the check built and drew a second frame: each size
+    /// change of a wrapped viewer or diff built twice and drew twice (plan 17 round 13). The
+    /// body takes the window's slack, so it moves by what the window gained or lost since the
+    /// check last read it, as Junction's diff pan does (<c>LeadDiffWidth</c>). Only from a width
+    /// the check saw: a body laid out since at some other width, or never read, is left to the
+    /// build to read and to the check to correct, as before.
+    /// </remarks>
+    private void LeadWrappedBodyWidth()
+    {
+        _wrapLeadWidth = float.NaN;
+        if (!_settings.DiffWrap || _wrapLaidOutWindowWidth <= 0) return;
+        var body = _diffOpen ? _diffScrollRef.Current : _viewerOpen ? _viewerScrollRef.Current : null;
+        if (body is not { IsHosted: true, Layout.AbsoluteContentBox.Width: > 0 }) return;
+        float laidOut = body.Layout.AbsoluteContentBox.Width;
+        if (laidOut != _wrapLaidOutBodyWidth) return;
+        _wrapLeadWidth = Math.Max(0, laidOut + _window.LayoutWidth - _wrapLaidOutWindowWidth);
+    }
+
+    /// <summary>The width a view's body is measured at: the one a resize leads it to until the
+    /// build that resize starts is done, the body's laid-out width otherwise, and the window's
+    /// before the body has been laid out at all (the first build after opening a view).</summary>
+    private float BodyWidth(ScrollViewElement? body) =>
+        !float.IsNaN(_wrapLeadWidth) ? _wrapLeadWidth
+        : body is { Layout.AbsoluteContentBox.Width: > 0 } ? body.Layout.AbsoluteContentBox.Width
+        : _window.LayoutWidth;
 
     public void Dispose()
     {
