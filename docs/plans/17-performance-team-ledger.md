@@ -981,3 +981,6 @@ From 2026-11-12 (round 12's survey); earlier entries are in the archive ([to 202
   vesper-v1.27.0, meridian-v1.10.0, aperture-v1.25.0, reel-v1.11.0 cut on e432c224 (CI green), annotated, messages from
   files, pushed 3 + 2; installer runs 43505664912 (Vesper), 43505665242 (Junction), 43505665602 (Meridian), 43505709936
   (Reel), 43505711156 (Aperture) started.
+- 2026-11-13: all five installer runs green on the first attempt (each re-ran its suites): Junction-Setup-1.27.0.exe,
+  VesperCommander-Setup-1.27.0.exe, Meridian-Setup-1.10.0.exe, Aperture-Setup-1.25.0.exe and Reel-Setup-1.11.0.exe
+  published. The loop stops; round 14 starts in a fresh context with the resume command in the Phase.
