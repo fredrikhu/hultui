@@ -176,8 +176,8 @@ public class TextAreaFitsByCountTests
     }
 
     /// <summary>The win: a long line of printable ASCII wrapped by count allocates a fraction of
-    /// what the measured path's search does, which builds a prefix table and shapes the words its
-    /// probes cut for every row.</summary>
+    /// what the measured path's search does, which builds a prefix table for every row and reads
+    /// the words its probes cut off their cuts.</summary>
     [Fact]
     public void ALongAsciiLine_WrapsByCount_WithoutShapingIt()
     {
@@ -194,7 +194,8 @@ public class TextAreaFitsByCountTests
         float width = 70.5f * advance;   // half a character from a multiple: every row by count
 
         // The counted area first, while the prefixes and words at this width are not cached: a
-        // search there would pay for them (1,074 KB), where breaking by count costs the rows (16 KB).
+        // search there would pay for them (1,074 KB, and 75 KB since its tables read the words they
+        // cut off cuts made once, plan 17 round 13), where breaking by count costs the rows (16 KB).
         long a0 = GC.GetAllocatedBytesForCurrentThread();
         var byCount = Rows(counted, width, style);
         long countedBytes = GC.GetAllocatedBytesForCurrentThread() - a0;
@@ -204,8 +205,8 @@ public class TextAreaFitsByCountTests
 
         Assert.True(searched.AsSpan().SequenceEqual(byCount), "the rows differ");
         Assert.True(byCount.Length > 1_400, $"only {byCount.Length} rows");
-        Assert.True(countedBytes < 64 * 1024 && countedBytes * 20 < measuredBytes,
-            $"by count {countedBytes / 1024.0:F1} KB, searched {measuredBytes / 1024.0:F1} KB: not a twentieth");
+        Assert.True(countedBytes < 64 * 1024 && countedBytes * 3 < measuredBytes,
+            $"by count {countedBytes / 1024.0:F1} KB, searched {measuredBytes / 1024.0:F1} KB: not a third");
     }
 
     /// <summary>The frames are the same: the rows, the caret and a selection over several

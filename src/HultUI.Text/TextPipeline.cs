@@ -164,6 +164,8 @@ public sealed class TextPipeline
     /// </summary>
     internal bool PrefixesFromCuts { get; init; } = true;
 
+    private bool ReadsCuts => _cutShaper is not null && PrefixesFromCuts;
+
     // The shortest word a prefix table shapes with its cuts (FillPrefixTable: only its words are cut
     // short). A table cuts long words (text without spaces: a row of CJK is one); a short one costs
     // the cuts' bytes for few prefixes.
@@ -2015,7 +2017,9 @@ public sealed class TextPipeline
                 bool isSpace = text[i] == ' ';
                 int start = i;
                 while (i < runEnd && (text[i] == ' ') == isSpace) i++;
-                var seg = ShapeSegment(text, start, i - start, font, style.FontSize, fontHash, withCuts: true);
+                var seg = i == end && ReadsCuts && CutsWordShortAtEnd(text, from, start, end)
+                    ? TableEndSegment(text, start, end, font, style.FontSize, fontHash)
+                    : ShapeSegment(text, start, i - start, font, style.FontSize, fontHash, withCuts: true);
                 segments.Add(new PrefixSegment(start, x, seg.Width, glyphs, seg.Glyphs));
                 x += seg.Width;
                 glyphs += seg.Glyphs;
@@ -2025,6 +2029,140 @@ public sealed class TextPipeline
         }
         fontRuns.Clear();   // the runs' faces are not kept alive by the scratch list
     }
+
+    // Whether a table of text[from..end) cuts short a word at its end that starts at `start` at every
+    // width: it goes on past end (no space or line end there), and starts at the start of a line, after
+    // a space, or where a font run starts, not at a row start inside a word, which moves with the width.
+    private static bool CutsWordShortAtEnd(string text, int from, int start, int end) =>
+        end < text.Length && text[end] is not (' ' or '\n') && text[start] != ' '
+        && (start != from || from == 0 || text[from - 1] is ' ' or '\n');
+
+    // Where such a word ends at every width: the next space or line end, at most MaxNaturalWord
+    // characters from its start.
+    private static int NaturalEnd(string text, int start, int end)
+    {
+        int stop = Math.Min(text.Length, start + MaxNaturalWord);
+        while (end < stop && text[end] is not (' ' or '\n')) end++;
+        return end;
+    }
+
+    // The longest word a table's end is read off (NaturalEnd): its shaping and cuts are kept in the
+    // word cache (some 26 bytes a character of CJK), and a word of text without spaces is a line long.
+    private const int MaxNaturalWord = 1024;
+
+    // FillPrefixTable's last segment, text[start..end), a word the table's end cuts short
+    // (CutsWordShortAtEnd): ShapeSegment's answer, but read off the word to its natural end where a cut
+    // there is safe. That word is shaped once with its cuts and kept, so the next width's table, which
+    // ends somewhere else, reads its own end off it instead of shaping a new string; the reads are
+    // RunCuts', exact to the bit.
+    private WordShape TableEndSegment(string text, int start, int end, IResolvedFont font, float fontSize, int fontHash)
+    {
+        var segment = text.AsSpan(start, end - start);
+        if (DigitTableFor(segment, font, fontSize) is { } digits)
+            return DigitSegment(segment, digits, start);
+        int natural = NaturalEnd(text, start, end);
+        if (natural > end && CutsOfNaturalWord(text, start, natural, font, fontSize, fontHash)
+                .TryPrefix(end - start, out float width, out int glyphs))
+            return new WordShape(null, null, start, width, glyphs);
+        // The segment itself, with its cuts, which the line search's probes then read (LastCuts).
+        if (!_wordShapeCache.TryGet(segment, font, fontSize, fontHash, out var run))
+        {
+            string word = segment.ToString();
+            run = _cutShaper!.Shape(word, font, fontSize, out var cuts);
+            cuts ??= RunCuts.None;
+            _wordShapeCache.Put(word, font, fontSize, fontHash, run, WordBytes(word, run) + cuts.Bytes, cuts);
+            _lastCuts = new LastCuts(text, start, font, fontSize, cuts);
+        }
+        return new WordShape(run, null, start, run.Width, run.Glyphs.Length);
+    }
+
+    // The cuts a cut in the segment text[start..end) of a table of text[from..tableEnd) is read off:
+    // those of the word to its natural end where the table's end cuts it short (TableEndSegment read
+    // the table's end off them), else, or when that word is not made (CutsOfNaturalWord), the
+    // segment's own.
+    private RunCuts CutsForCut(string text, int from, int tableEnd, int start, int end, IResolvedFont font,
+        float fontSize, int fontHash)
+    {
+        if (end == tableEnd && CutsWordShortAtEnd(text, from, start, end) && NaturalEnd(text, start, end) is var natural
+            && natural > end && CutsOfNaturalWord(text, start, natural, font, fontSize, fontHash) is var cuts
+            && cuts != RunCuts.None)
+            return cuts;
+        return CutsOfWord(text, start, end, font, fontSize, fontHash);
+    }
+
+    // The cuts CutsOfWord last gave, of a word that starts at Start of Text, in Font at Size: a line
+    // search cuts a row's word at every probe, and the probes after the first read it off these
+    // without a lookup. Any word's cuts from that start read a prefix of it to the bit (RunCuts), or
+    // refuse one they do not reach. Kept, with the text, until the next word's.
+    private readonly record struct LastCuts(string Text, int Start, IResolvedFont Font, float Size, RunCuts Cuts)
+    {
+        public RunCuts? Of(string text, int start, IResolvedFont font, float size) =>
+            ReferenceEquals(Text, text) && Start == start && ReferenceEquals(Font, font) && Size.Equals(size)
+                ? Cuts : null;
+    }
+
+    private LastCuts _lastCuts;
+
+    // Where the word text[start..end) can be cut: the word cache's cuts, or, when it has the word
+    // without them (a line's width or a drawn row shaped it, or it is under MinCutWord) or not at all,
+    // the word shaped with its cuts now and kept in their place. RunCuts.None when the shaper gives
+    // none (a run shaped right to left), kept too, so the word is not shaped again for them.
+    private RunCuts CutsOfWord(string text, int start, int end, IResolvedFont font, float fontSize, int fontHash)
+    {
+        var span = text.AsSpan(start, end - start);
+        var cuts = _wordShapeCache.CutsOf(span, font, fontSize, fontHash);
+        if (cuts is null)
+        {
+            string word = span.ToString();
+            var run = _cutShaper!.Shape(word, font, fontSize, out cuts);
+            cuts ??= RunCuts.None;
+            _wordShapeCache.Put(word, font, fontSize, fontHash, run, WordBytes(word, run) + cuts.Bytes, cuts);
+        }
+        _lastCuts = new LastCuts(text, start, font, fontSize, cuts);
+        return cuts;
+    }
+
+    // CutsOfWord for the word to its natural end, text[start..end), made only while such words are
+    // kept until a later width reads them (_naturalCredit); RunCuts.None where it is not made.
+    private RunCuts CutsOfNaturalWord(string text, int start, int end, IResolvedFont font, float fontSize,
+        int fontHash)
+    {
+        if (_wordShapeCache.CutsOf(text.AsSpan(start, end - start), font, fontSize, fontHash) is { } kept)
+        {
+            if (_naturalCredit < MaxNaturalCredit) _naturalCredit++;
+            return (_lastCuts = new LastCuts(text, start, font, fontSize, kept)).Cuts;
+        }
+        _naturalsMade ??= new int[NaturalsNoted];
+        int key = HashCode.Combine(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(text), start,
+            fontHash) | 1;
+        ref int made = ref _naturalsMade[key & (NaturalsNoted - 1)];
+        if (made == key)
+        {
+            _naturalCredit = Math.Max(_naturalCredit - LetGoCost, -MaxNaturalCredit);
+            return RunCuts.None;
+        }
+        if (_naturalCredit <= 0)
+        {
+            _naturalCredit++;
+            return RunCuts.None;
+        }
+        made = key;
+        return CutsOfWord(text, start, end, font, fontSize, fontHash);
+    }
+
+    // The words to their natural ends made, by a hash of the text, the word's start and the font: a
+    // slot two words share forgets the first, which is made once more. 64 KB, made at the first.
+    private const int NaturalsNoted = 16384;
+    private int[]? _naturalsMade;
+
+    // Words to their natural ends are made only while they are kept until a later width reads them.
+    // One made before that the cache no longer has was let go first: a document whose words at one
+    // width outgrow the word cache. There, making them shapes more than the tables' own segments and
+    // saves nothing, so the tables shape their segments, as before. Words read again earn credit and
+    // words let go cost it; with none left no more are made, and each one asked for meanwhile earns a
+    // little back, so one in about LetGoCost is tried, and a document that fits makes them again.
+    private int _naturalCredit = MaxNaturalCredit;
+    private const int MaxNaturalCredit = 64, LetGoCost = 8;
 
     // BuildPrefixWidths' runs and segments while it builds a table, which gets exact arrays
     // copied out of them: lists grown anew for every table were most of what wrapping and
@@ -2112,16 +2250,25 @@ public sealed class TextPipeline
                 width = shaped.Width;
                 glyphs = shaped.Glyphs;
             }
-            // As ShapeSegment would answer, but for a miss: the word cut short is in the word cache
-            // (a cut made at an earlier width or by the probe before), or is read off the whole
-            // word's cuts where a cut there is safe, or is shaped as a string of its own and kept.
+            // As ShapeSegment would answer, but for a miss: the word cut short is read off the last
+            // cuts given (LastCuts) when they are of a word from the same start, or is in the word
+            // cache (a cut made at an earlier width or by the probe before), or is read off the whole
+            // word's cuts where a cut there is safe (made now if the word has none yet, and read off
+            // the word to its natural end where FillPrefixTable read the table's end off it), or is
+            // shaped as a string of its own and kept.
+            else if (_lastCuts.Of(text, seg.Start, run.Font, fontSize) is { } last
+                     && last.TryPrefix(cut - seg.Start, out width, out glyphs))
+            {
+                PrefixesCut++;
+            }
             else if (_wordShapeCache.TryGet(part, run.Font, fontSize, fontHash, out var known))
             {
                 width = known.Width;
                 glyphs = known.Glyphs.Length;
             }
-            else if (_wordShapeCache.CutsOf(text.AsSpan(seg.Start, end - seg.Start), run.Font, fontSize, fontHash) is { } cuts
-                     && cuts.TryPrefix(cut - seg.Start, out width, out glyphs))
+            else if (_cutShaper is not null
+                     && CutsForCut(text, from, from + tableLength, seg.Start, end, run.Font, fontSize, fontHash)
+                         .TryPrefix(cut - seg.Start, out width, out glyphs))
             {
                 PrefixesCut++;
             }
