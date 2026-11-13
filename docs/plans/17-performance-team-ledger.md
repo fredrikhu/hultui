@@ -5,8 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 13
-- **Phase:** release — round 13's CI fixes (d797205f, 63e005f3; captures 72c0ba55) merged into main on top of 7cd6f083;
-  wait for CI green, then cut the app releases (the user, 2026-11-13). Steps 1–4, 5 (b), 6 and 7
+- **Phase:** release — round 13's CI fixes merged into main as e432c224; CI run 43499639788: Junction's ReviewTests pass,
+  one SDL3 wake test failed (a wait woken 50 ms in ran 2,456 ms); failed job re-run once; then cut the app releases. Steps 1–4, 5 (b), 6 and 7
   done (15f97351, 013e1f1b, 8e05c94e; 0da9f80e, 185bedad; 698c2758, 54bd7d3a, b8fd2c67; 8f9f2683, da72e01b,
   d413e001, 0a8361f9; 5849c137; 4fdb56cb, 276789d8, cdb47cb9; 154a7ca3, 8048b644). The survey is
   done (reports `17-reports/r13-*`, committed da6e72c8..8f01b6fd); 8 steps in the round 13 build order; questions 52–54
@@ -961,3 +961,9 @@ From 2026-11-12 (round 12's survey); earlier entries are in the archive ([to 202
   change plus a test that asked for the review before the summary landed — 2-core affinity alone reproduces it;
   wall-clock races reproduce by suspending your own testhost (`NtSuspendProcess`, `scratchpad\r13ci\stall.ps1`), not with
   CPU burners; one Headless test failed once in 10 runs beside ReviewTests as load (name not captured).
+- 2026-11-13: round 13's CI fixes merged into main as e432c224 (detached origin/main merge, tree identical, push gate
+  held; primary fast-forwarded; branch moved to the merge and pushed). CI run 43499639788: test-linux, docs and
+  meridian-keyring green; Windows test: Junction 1,112 all pass (the ReviewTests fixed), but
+  `SdlWindowingPlatformTests.AWakeThePumpTookItself_LeavesTheNextWakeToEndAWait` failed once ("a wait woken 50 ms in ran
+  2456 ms", bound < 1,500). That path is unchanged by step 8 when no short wait came before (no hold, one
+  `SDL_WaitEventTimeout`), so most likely a runner stall like the timer test's; the failed job re-run once to tell.
