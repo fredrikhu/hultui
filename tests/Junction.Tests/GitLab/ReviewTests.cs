@@ -861,6 +861,9 @@ public class ReviewTests
         origin.Git("update-ref", "HEAD", headSha);
         repo.Git("checkout", "-q", "main");
         repo.Git("branch", "-q", "-D", "feature/2.4.0/payments/PC-1042-refund-splitting");
+        // Else src\api and refs\heads report a change when the app's git first lists them, and
+        // the watcher reloads the repository 300 ms after it opened, inside the test.
+        repo.Settle();
 
         handler ??= Routes();
         handler.MapJson($"GET {Api}/projects/7781/merge_requests/412", MrJson(baseSha, headSha));
@@ -887,7 +890,13 @@ public class ReviewTests
             app = new JunctionApp(session.Application, session.Window.Window, settings,
                 credentialStore: store, gitLabHandler: _ => handler);
             session.Application.SetRoot(app.Mount());
-            session.PumpUntil(() => TreeHas(session, "orders"), TimeSpan.FromSeconds(15));
+            // The history and the GitLab mark. The mark says the repository's summary, which reads
+            // its remotes, has landed: a review asked for before it fails at once ("not on
+            // GitLab"), and in the app every way into one stands behind the mark. The history
+            // alone did not say so: its log and the summary load apart, and a working-tree event
+            // re-keys the summary and not the log.
+            session.PumpUntil(() => TreeHas(session, "orders") && ById(session, "gitlab-mark") is not null,
+                TimeSpan.FromSeconds(15));
             body(repo, origin, session, app);
         }
         finally { app?.Dispose(); }
