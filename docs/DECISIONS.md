@@ -890,21 +890,36 @@ reader must hear what came and went. Holding their bounds back while the size ch
 walking without writing the boxes and a second walk at rest; not built (2.8 to 5.4 ms of raises are
 left in a drag of about a second in Junction and Vesper).
 
-### A prefix table's own words are still shaped at every width (round 12)
+### A prefix table's row-start words are still shaped at every width (rounds 12 and 13)
 
 Plan 17's round 12, step 4 (7a753337) reads a word a prefix table cuts short off the whole word's
 cuts where HarfBuzz says the cut is safe. In Junction's Files view on a Japanese README, NativeAOT,
 a resize to 1000 px went from 14,105 HarfBuzz calls to 11,223 (frame 28.1 → 24.7 ms headless). What
-is left is mostly the tables' own words: in text without spaces a row's table starts at the row
-start, so its first word is a new string at every width, a slice from the middle of the line's word.
-Reading it off the line's word would need the script HarfBuzz guesses for the slice (from its own
-first character: in Japanese, kana and kanji start rows about equally, and Hiragana, Katakana and Han
-are three scripts), safe cuts at both ends, and the advances summed again from the slice's start
+is left at a new width is the row-start words: in text without spaces a row's table starts at the
+row start, so its first word is a new string at every width, a slice from the middle of the line's
+word. Reading it off the line's word would need the script HarfBuzz guesses for the slice (from its
+own first character: in Japanese, kana and kanji start rows about equally, and Hiragana, Katakana and
+Han are three scripts), safe cuts at both ends, and the advances summed again from the slice's start
 (the pens hold sums from the word's start, which a difference of floats does not give back to the
-bit); not built. Two variants were measured and dropped: giving a word the cache holds without cuts
-(a line's width or a drawn row shaped it) its cuts the first time a table cuts it saved 7 calls of
-11,223; reading the cuts before looking the cut word up made a 40-frame drag 4 % slower (two
-lookups for every hit), so the lookup comes first.
+bit); not built. Reading the cuts before looking the cut word up made a 40-frame drag 4 % slower (two
+lookups for every hit), so the lookup comes first, after only the last cuts given, which take none.
+
+Round 12 also dropped giving a word the cache holds without cuts its cuts the first time a table
+cuts it, for saving 7 calls of 11,223. That was measured only on its fixture, which draws ideographs
+evenly: its 11,000 new words a width overflow the 8,192-entry word cache, so the thrash there is the
+fixture's own. On real text (README.ja.md of 79,011 characters and README.zh-CN.md of 75,265, made
+from installed gettext translations) it is the largest share left, and round 13, step 3 (698c2758)
+built it with a second part: a table's last word, cut by the table's end from a start that is the
+same at every width, is read off the word to its natural end (the next space or line end), shaped
+once with its cuts. Headless, NativeAOT, UI-thread CPU: Japanese resize to 1000 px 13.5 → 12.3 ms
+(HarfBuzz calls 2,086 → 1,119), to 960 14.7 → 11.6 ms; Chinese, a 40-frame drag at 960 logical px
+(a 1,440 px window at 150 %) 651 → 337 ms and 88.6 → 2.0 MB, where every new word had evicted one
+from the full cache; in a real window there 694 → 381 ms. The cost is the first width that wraps a
+line, whose word to its natural end is longer than the table's own segment: Chinese, opening the
+file +4 % and the first new width 9.3 → 10.5 ms (+290 KB). A document whose words at one width
+outgrow the word cache lets those words go before the next width reads them, and there making them
+only shapes more: they are made only while words read again earn more credit than words let go
+spend, and both READMEs in one file (154,000 characters) resize within −2 … +7 % of before.
 
 ### A ref's lock file alone is a working-tree event, not dropped (round 13)
 
