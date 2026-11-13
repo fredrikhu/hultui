@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using static SDL.SDL3;
 
 namespace HultUI.Platform.SDL3;
@@ -42,19 +41,32 @@ internal sealed class SdlTimerResolution
     /// <summary>How long the request outlives the last short wait.</summary>
     internal const int HoldMs = 1000;
 
-    private static readonly long HoldTicks = HoldMs * Stopwatch.Frequency / 1000;
-
+    private readonly TimeProvider _clock;
+    private readonly long _holdTicks;
     private readonly Action<bool> _ask;
     private bool _held;
     private long _lastPacedAt;
 
-    /// <summary>Asks through SDL's hint.</summary>
-    internal SdlTimerResolution() : this(AskSdl)
+    /// <summary>Asks through SDL's hint, counting the hold on the system clock.</summary>
+    internal SdlTimerResolution() : this(TimeProvider.System, AskSdl)
     {
     }
 
+    /// <summary>Asks through SDL's hint.</summary>
+    /// <param name="clock">What the hold is counted on: the system's, or a test's own, so
+    /// that whether the hold is out at a wait does not hang on how fast the machine runs.</param>
+    internal SdlTimerResolution(TimeProvider clock) : this(clock, AskSdl)
+    {
+    }
+
+    /// <param name="clock">See <see cref="SdlTimerResolution(TimeProvider)"/>.</param>
     /// <param name="ask">Asked for 1 ms (true) or for nothing (false), each time that changes.</param>
-    internal SdlTimerResolution(Action<bool> ask) => _ask = ask;
+    internal SdlTimerResolution(TimeProvider clock, Action<bool> ask)
+    {
+        _clock = clock;
+        _holdTicks = HoldMs * clock.TimestampFrequency / 1000;
+        _ask = ask;
+    }
 
     /// <summary>Whether 1 ms is asked for now.</summary>
     internal bool Held => _held;
@@ -71,14 +83,14 @@ internal sealed class SdlTimerResolution
 
     /// <summary>
     /// Called before a wait of <paramref name="timeoutMs"/> (<see cref="Timeout.Infinite"/> for
-    /// none) that starts at <paramref name="now"/>, in <see cref="Stopwatch"/> ticks. A short wait
-    /// asks for 1 ms; a longer one that starts after the hold is out gives it back. Returns how
-    /// many milliseconds into this wait the hold runs out, when that is before the wait ends: the
-    /// caller waits that long, then calls <see cref="Release"/> unless something arrived, and waits
-    /// the rest. Otherwise -1.
+    /// none) that starts now, on the clock. A short wait asks for 1 ms; a longer one that starts
+    /// after the hold is out gives it back. Returns how many milliseconds into this wait the hold
+    /// runs out, when that is before the wait ends: the caller waits that long, then calls
+    /// <see cref="Release"/> unless something arrived, and waits the rest. Otherwise -1.
     /// </summary>
-    internal int BeforeWait(int timeoutMs, long now)
+    internal int BeforeWait(int timeoutMs)
     {
+        long now = _clock.GetTimestamp();
         if (timeoutMs is > 0 and < PacedWaitMs)
         {
             _lastPacedAt = now;
@@ -91,13 +103,14 @@ internal sealed class SdlTimerResolution
         }
         // A poll (0) waits for nothing.
         if (!_held || timeoutMs == 0) return -1;
-        long left = _lastPacedAt + HoldTicks - now;
+        long left = _lastPacedAt + _holdTicks - now;
         if (left <= 0)
         {
             Release();
             return -1;
         }
-        int ms = (int)((left * 1000 + Stopwatch.Frequency - 1) / Stopwatch.Frequency);
+        long frequency = _clock.TimestampFrequency;
+        int ms = (int)((left * 1000 + frequency - 1) / frequency);
         return timeoutMs < 0 || timeoutMs > ms ? ms : -1;
     }
 

@@ -133,7 +133,21 @@ internal sealed class TempRepo : IDisposable
         // counted (a ChromePartTests count failed 5 runs in 40 under load). Listing every folder
         // of the copy here spends those reports before any watcher exists (0 copies of 19 after).
         // FixtureQuietTests holds it.
-        foreach (var _ in Directory.EnumerateFileSystemEntries(to, "*", SearchOption.AllDirectories)) { }
+        ListEverything(to);
+    }
+
+    /// <summary>
+    /// Spends the change reports of the folders a test's own setup made, as every copy's are
+    /// spent (see <see cref="CopyTree"/>): call it after the last write of the setup and before
+    /// the app opens the repository. A folder that setup made (src\api for a file written into
+    /// it, refs\heads after <c>checkout -b</c> and <c>branch -D</c>) reports a change the first
+    /// time the app's git lists it, which the watcher tells the app 300 ms after it opened.
+    /// </summary>
+    public void Settle() => ListEverything(Path);
+
+    private static void ListEverything(string root)
+    {
+        foreach (var _ in Directory.EnumerateFileSystemEntries(root, "*", SearchOption.AllDirectories)) { }
     }
 
     /// <summary>Runs git in the repo and fails loudly — arranging a fixture must not

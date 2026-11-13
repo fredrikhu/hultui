@@ -5,8 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 13
-- **Phase:** release — round 13: the full suite passed on f0150d53; merge into main, push, wait for CI, then cut the app
-  releases (the user, 2026-11-13: "cut app releases after round 13 too"). Steps 1–4, 5 (b), 6 and 7
+- **Phase:** release — round 13's CI fixes (d797205f, 63e005f3; captures 72c0ba55) merged into main on top of 7cd6f083;
+  wait for CI green, then cut the app releases (the user, 2026-11-13). Steps 1–4, 5 (b), 6 and 7
   done (15f97351, 013e1f1b, 8e05c94e; 0da9f80e, 185bedad; 698c2758, 54bd7d3a, b8fd2c67; 8f9f2683, da72e01b,
   d413e001, 0a8361f9; 5849c137; 4fdb56cb, 276789d8, cdb47cb9; 154a7ca3, 8048b644). The survey is
   done (reports `17-reports/r13-*`, committed da6e72c8..8f01b6fd); 8 steps in the round 13 build order; questions 52–54
@@ -926,3 +926,38 @@ From 2026-11-12 (round 12's survey); earlier entries are in the archive ([to 202
   `wsl-test.sh` 22 projects, 0 failures (Core 5,084 + 1, Headless 1,410 + 88, Vesper 917 + 20); docfx
   `--warningsAsErrors` 0 warnings, 0 errors. origin/main afc1ed40 is in the branch. The user asked for app releases
   after this round's release. Phase → release.
+- 2026-11-13: round 13 merged into main as 7cd6f083 (detached origin/main merge in this worktree, tree identical to the
+  tested branch; origin/main afc1ed40 was in the branch and had not moved, so the push gate held). Primary checkout
+  fast-forwarded behind the guard; branch reset to the merge and pushed. CI run 43481808112 on 7cd6f083 next; then the
+  app releases.
+- 2026-11-13: CI run 43481808112 on 7cd6f083 red: test-linux, docs and meridian-keyring (ubuntu, macOS) green; the
+  Windows test job failed (a) `TimerResolutionHintTests.AWakeBeforeTheHoldIsOut_KeepsOneMillisecond` (step 8's new test,
+  expected "1", got "0": the 1 s hold ran out on a slow 2-core runner — a wall-clock test) and (b) 15 of Junction's
+  GitLab `ReviewTests` in a row, each `PumpUntil` 20 s with the review never coming up (round 12's CI passed them; two
+  round 13 build steps saw one time out once locally under load). Not a known flake: the failed job re-run once (attempt
+  2) for data, and a CI-fix agent reproduces both under CI-like conditions (2 cores, loaded), bisects round 13's
+  suspects and fixes the causes on the branch. Main is red until the fix lands; app releases wait for green.
+- 2026-11-13: CI attempt 2 on 7cd6f083 (failed job re-run): the same 15 Junction GitLab `ReviewTests` failed again in
+  the same order (deterministic on the hosted runner); the step 8 timer test passed (a timing flake). Passed to the
+  CI-fix agent.
+- 2026-11-13: round 13 CI fixes landed (d797205f, 63e005f3; captures 72c0ba55; CI-fix agent, brief `brief-r13ci.md`).
+  (a) The step 8 timer test was a wall-clock race (a wake 200 ms in had to beat the 1 s hold on Stopwatch; a runner
+  stalling the process ~800 ms lost it): `SdlTimerResolution` reads an injected `TimeProvider` (internal; the public
+  constructors pass `TimeProvider.System`), the tests drive a manual clock; the old test failed 5 of 5 here while a
+  script suspended the testhost 1.1 s at a time (CPU burners did not reproduce it), after 10 of 10 under the stalls and
+  20 of 20 on 2 cores. (b) ReviewTests: `Hosted` asked for the review once the history showed, but the summary holding
+  the remotes could still be loading, so `LoadReview` failed at once ("not on GitLab"); folders the setup made report a
+  change the first time git lists them, the watcher reloads 300 ms after start, and since 013e1f1b that event is a
+  working-tree change that restarts the summary but not the log — on a slow 2-core runner the first summary is always
+  overtaken. Fix in the test only: `TempRepo.Settle()` lists the setup's folders before the app opens (as `CopyTree`
+  already does for copies), and the wait also needs the GitLab mark; 013e1f1b's rule kept; the app is unaffected (every
+  way into a review sits behind a loaded merge request, and a landed summary keeps its value through reloads). Repro:
+  ReviewTests alone held to 2 cores (affinity 0x3) failed 4–6 of 17 a run; bisect landed on 013e1f1b at once (its rule
+  reversed: 0 of 34); after: 170 of 170 under 2 cores with Headless.Tests beside. Here `NtQueryTimerResolution` read
+  15.625 ms (Steam not running). Windows `dotnet test HultUI.slnx -c Release` 30 projects pass (SDL3 64, Headless 1,584,
+  Junction 1,112); Fedora `wsl-test.sh` 22 projects 0 failures (SDL3 55 + 5, Headless 1,410 + 88, Vesper 917 + 20);
+  docfx 0 warnings. step-ab (5484fd89) 1 pair: JIT one row slower, AOT one faster, opposite ways on rows the change does
+  not reach (noise), no allocKB moved. For memory `ci-red-findings`: a test class red every time on CI from a watcher
+  change plus a test that asked for the review before the summary landed — 2-core affinity alone reproduces it;
+  wall-clock races reproduce by suspending your own testhost (`NtSuspendProcess`, `scratchpad 13ci\stall.ps1`), not with
+  CPU burners; one Headless test failed once in 10 runs beside ReviewTests as load (name not captured).
