@@ -926,3 +926,7 @@ From 2026-11-12 (round 12's survey); earlier entries are in the archive ([to 202
   `wsl-test.sh` 22 projects, 0 failures (Core 5,084 + 1, Headless 1,410 + 88, Vesper 917 + 20); docfx
   `--warningsAsErrors` 0 warnings, 0 errors. origin/main afc1ed40 is in the branch. The user asked for app releases
   after this round's release. Phase → release.
+- 2026-11-13: round 13 merged into main as 7cd6f083 (detached origin/main merge in this worktree, tree identical to the
+  tested branch; origin/main afc1ed40 was in the branch and had not moved, so the push gate held). Primary checkout
+  fast-forwarded behind the guard; branch reset to the merge and pushed. CI run 43481808112 on 7cd6f083 next; then the
+  app releases.
