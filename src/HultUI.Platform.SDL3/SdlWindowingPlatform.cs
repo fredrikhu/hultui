@@ -60,7 +60,20 @@ public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform, IMonitorSo
     /// apps that show HDR content; <c>HULTUI_DISPLAY_INFORMATION</c> overrides it either
     /// way.</param>
     public SdlWindowingPlatform(RendererKind renderer, bool displayColorEvents)
+        : this(renderer, displayColorEvents, TimeProvider.System)
     {
+    }
+
+    /// <summary>Creates the platform with the timer resolution's hold counted on a clock of the
+    /// caller's.</summary>
+    /// <param name="renderer">See <see cref="SdlWindowingPlatform(RendererKind)"/>.</param>
+    /// <param name="displayColorEvents">See <see cref="SdlWindowingPlatform(RendererKind, bool)"/>.</param>
+    /// <param name="timerResolutionClock">What the timer resolution's hold is counted on (see
+    /// <see cref="SdlTimerResolution"/>): a test's own clock, so that whether the hold is out at a
+    /// wait is the test's to say. The waits themselves are SDL's, in real time.</param>
+    internal SdlWindowingPlatform(RendererKind renderer, bool displayColorEvents, TimeProvider timerResolutionClock)
+    {
+        _timerResolution = new SdlTimerResolution(timerResolutionClock);
         SDL3Window.RequestRenderer(renderer);
         SDL3Window.RequestDisplayColorEvents(displayColorEvents);
 
@@ -167,7 +180,7 @@ public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform, IMonitorSo
     {
         if (OperatingSystem.IsWindows())
         {
-            int releaseIn = _timerResolution.BeforeWait(timeoutMs, Stopwatch.GetTimestamp());
+            int releaseIn = _timerResolution.BeforeWait(timeoutMs);
             if (timeoutMs is > 0 and < int.MaxValue)
                 timeoutMs++;
             if (releaseIn > 0)
@@ -186,7 +199,7 @@ public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform, IMonitorSo
     }
 
     // Windows' timer resolution: 1 ms while the loop paces frames, the default while it rests.
-    private readonly SdlTimerResolution _timerResolution = new();
+    private readonly SdlTimerResolution _timerResolution;
 
     /// <summary>
     /// Pushes a wake event so a <see cref="WaitForEvents"/> in progress returns at
