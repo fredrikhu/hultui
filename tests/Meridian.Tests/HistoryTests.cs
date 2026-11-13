@@ -491,6 +491,51 @@ public class HistoryTests : IClassFixture<TestHttpServer>, IDisposable
         }, at: midnight);
     }
 
+    /// <summary>A reader's name for a send reads against today too ("23:59:20", then "yesterday 23:59"). The list
+    /// keeps each send's name while the send is the same, also when its rows are made again (InvalidateRows, plan 17
+    /// round 13 step 5 (a)), so a new day hands the list a new label delegate, which makes the names again: kept
+    /// through the rows' day change alone, a reader heard yesterday's sends as today's.</summary>
+    [Fact]
+    public void AReadersNamesForTheSends_FollowTheDayChange()
+    {
+        var evening = HistoryClock.At(23, 59, 30);
+        HistoryLog.Append(_root, new HistoryEntry(evening.AddMinutes(-1), "GET", "https://api.x/v1/late", 200, 12, null, null));
+        HistoryLog.Append(_root, new HistoryEntry(evening.AddSeconds(-10), "GET", "https://api.x/v1/later", 200, 12, null, null));
+        Hosted((session, app) =>
+        {
+            var bridge = session.Window.InstallAccessibilityBridge();
+            GoTo(session, KeyCode.Digit4);
+            session.PumpFrames(2);
+            Assert.Equal(["23:59:20 GET https://api.x/v1/later 200", "23:58:30 GET https://api.x/v1/late 200"], SendNames(bridge));
+
+            session.AdvanceTime(TimeSpan.FromMinutes(1));   // 00:00:30, the next day
+            GoTo(session, KeyCode.Down);                     // a key builds the view on another day
+            session.PumpFrames(2);
+            Assert.Equal(["yesterday 23:59 GET https://api.x/v1/later 200", "yesterday 23:58 GET https://api.x/v1/late 200"],
+                SendNames(bridge));
+        }, at: evening);
+    }
+
+    /// <summary>The names a reader has for History's sends: the items of the list named "History".</summary>
+    private static List<string?> SendNames(HeadlessAccessibilityBridge bridge)
+    {
+        var names = new List<string?>();
+        if (bridge.CurrentTree is { } tree) Find(tree);
+        return names;
+
+        bool Find(AccessibilityNode node)
+        {
+            if (node.Role == AccessibilityRole.List && node.Name == "History")
+            {
+                names.AddRange(node.Children.Where(c => c.Role == AccessibilityRole.ListItem).Select(c => c.Name));
+                return true;
+            }
+            foreach (var child in node.Children)
+                if (Find(child)) return true;
+            return false;
+        }
+    }
+
     /// <summary>A key in History builds the archived send beside the list and nothing else: the list
     /// draws the selection and is told through its ref, so the window does not build (plan 17
     /// round 8: 52 KB a key, the window built for a panel). The archive shows the send the key
