@@ -5,8 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 13
-- **Phase:** build — round 13, waiting for the user: every build step left needs an answer (5 (a) question 52, 8
-  question 53, 6 (d) question 54); the full suite runs meanwhile (`fullsuite-r13.sh`). Steps 1–4, 5 (b), 6 and 7
+- **Phase:** build — round 13, step 5 (a) next (a11y-labels-kept-across-invalidaterows, expert 7, question 52: option
+  2), then step 8 (question 53: build, asking the user for a few minutes with Steam closed); 6 (d) done (ea00556e). Steps 1–4, 5 (b), 6 and 7
   done (15f97351, 013e1f1b, 8e05c94e; 0da9f80e, 185bedad; 698c2758, 54bd7d3a, b8fd2c67; 8f9f2683, da72e01b,
   d413e001, 0a8361f9; 5849c137; 4fdb56cb, 276789d8, cdb47cb9; 154a7ca3, 8048b644). The survey is
   done (reports `17-reports/r13-*`, committed da6e72c8..8f01b6fd); 8 steps in the round 13 build order; questions 52–54
@@ -672,18 +672,19 @@ Round 13 questions (from the survey, 2026-11-13). Recommendations in brackets.
     option or overload that keeps labels (public API). Option 2: `InvalidateRows` keeps labels by contract (the
     documented behaviour in `VirtualListElement.cs:60–66` and ELEMENTS.md changes), and an app whose labels read other
     state passes a new label delegate, as Meridian's history list would at a day change. A reader hears the same names.
-    [Option 2: no new API, one app line.]
+    [Option 2: no new API, one app line.] → **option 2, keep by default** (2026-11-13; step 5 (a)).
 53. **gl-sdl-timer-resolution-at-rest** (r13-3; step 8): SDL holds Windows' timer at 1 ms for the app's whole life.
     Asking only while frames are paced would let the machine's clock interrupt fall from 1,000 to 64 a second while a GL
     HultUI app rests and nothing else asks (a laptop), with no change in the app's own wakes; experts 4 and 8 count it
     not worth it here, because Steam already holds 1 ms on this machine. Building it needs a measurement with Steam (and
     any browser video) closed for a few minutes, or `powercfg /energy` run as administrator. Build it, with the step
     asking you for those minutes, or decline? [Build it, with a few minutes of Steam closed when the step asks; drop it
-    if the count shows nothing.]
+    if the count shows nothing.] → **build it, asking for a few minutes with Steam closed** (2026-11-13; step 8).
 54. **What an HDR video leaves behind** (r13-3; step 6 (d)): after the first HDR video in a process, NVIDIA keeps its
     DXGI threads (~125 wakes a second more) and ~47 MB more GPU memory until the app closes, even back on 8-bit; only
     rebuilding the Vulkan device (the Skia context, every GPU resource, the mpv interop: large, may not work) could
-    return it. Document it in HDR.md, or try the device rebuild? [Document it.]
+    return it. Document it in HDR.md, or try the device rebuild? [Document it.] → **document it** (2026-11-13;
+    HDR.md ea00556e, step 6 (d)).
 
 Reminder (expert 8): Aperture signed in to jellyfin.home as device "aperture-survey" in earlier rounds, as "aperture-r13" in round 13, and once in
 round 12 as "aperture-r12"; the user should remove those devices and revoke the API key when the work is done.
@@ -883,3 +884,11 @@ From 2026-11-12 (round 12's survey); earlier entries are in the archive ([to 202
   user (questions 52–54): asked; the full suite runs meanwhile. For PERFORMANCE.md: with a UIA listener running each
   Name, bounds, structure or focus event costs ~9 µs CPU, IsSelected one call; a list keyed by index renames every row
   it keeps when its contents swap (one raise a row).
+- 2026-11-13: the user answered questions 52–54 with the recommendations: 52 option 2 (`InvalidateRows` keeps labels by
+  default; Meridian passes a new label delegate at a day change; step 5 (a)), 53 build it, the step asking for a few
+  minutes with Steam closed (step 8), 54 document it (HDR.md ea00556e, step 6 (d), written by the orchestrator; its
+  commit message also claims these ledger lines, which landed in the next commit). Full suite on 5d4e779c
+  (`fullsuite-r13.sh`, ~15 min): Windows `dotnet test HultUI.slnx -c Release` 30 projects, 0 failures (Core 5,085,
+  Headless 1,577, Junction 1,111 in 10 m, Vesper 934, Meridian 678, Aperture 363, Rendering.Skia 416, Text 302, Reel 51,
+  Fluent 34; UiTests 25 + 102 skipped, gate off); Fedora `wsl-test.sh` 22 projects, 0 failures (Core 5,084 + 1,
+  Headless 1,403 + 88, Vesper 916 + 20); docfx `--warningsAsErrors` 0 warnings. It runs again after steps 5 (a) and 8.
