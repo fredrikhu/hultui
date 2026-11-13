@@ -5,8 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 13
-- **Phase:** build — round 13, every build step done (step 8 landed cd7e3db2, 12adfdca); the full suite runs next
-  (`fullsuite-r13.sh`), then Phase release. Steps 1–4, 5 (b), 6 and 7
+- **Phase:** release — round 13: the full suite passed on f0150d53; merge into main, push, wait for CI, then cut the app
+  releases (the user, 2026-11-13: "cut app releases after round 13 too"). Steps 1–4, 5 (b), 6 and 7
   done (15f97351, 013e1f1b, 8e05c94e; 0da9f80e, 185bedad; 698c2758, 54bd7d3a, b8fd2c67; 8f9f2683, da72e01b,
   d413e001, 0a8361f9; 5849c137; 4fdb56cb, 276789d8, cdb47cb9; 154a7ca3, 8048b644). The survey is
   done (reports `17-reports/r13-*`, committed da6e72c8..8f01b6fd); 8 steps in the round 13 build order; questions 52–54
@@ -920,3 +920,9 @@ From 2026-11-12 (round 12's survey); earlier entries are in the archive ([to 202
   after a few seconds); read whether the machine's clock was raised with NtQueryTimerResolution with Steam closed, not
   an interrupt count. All eight build steps done (5 (b) measured with nothing to cut; 6 (c) back to Waiting); the full
   suite runs next.
+- 2026-11-13: round 13 full suite on f0150d53 (`fullsuite-r13.sh`, ~12 min): Windows `dotnet test HultUI.slnx -c
+  Release` 30 projects, 0 failures (Core 5,085, Headless 1,584, Junction 1,112, Vesper 935, Meridian 679, Aperture 363,
+  Rendering.Skia 416, Text 302, Platform.SDL3 64, Reel 51, Fluent 34; UiTests 25 + 102 skipped, gate off); Fedora
+  `wsl-test.sh` 22 projects, 0 failures (Core 5,084 + 1, Headless 1,410 + 88, Vesper 917 + 20); docfx
+  `--warningsAsErrors` 0 warnings, 0 errors. origin/main afc1ed40 is in the branch. The user asked for app releases
+  after this round's release. Phase → release.
