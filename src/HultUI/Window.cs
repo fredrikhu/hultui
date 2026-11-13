@@ -2184,6 +2184,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // these are the remaining signals.
         long handlersBefore = EventDispatcher.HandlerInvocationCount;
         var hoveredBefore = _lastHoveredElement;
+        int drawnHoverBefore = _pointerState.DrawnHoverChanges;
         bool draggingBefore = _isDragging;
         var focusedBefore = _focusManager.FocusedElement;
         bool keyboardBefore = _focusFromKeyboard;
@@ -2817,15 +2818,22 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // counts as "a handler ran" is an ordinary handler for an event this input
         // dispatched (the key, the press and its focus and blur, the click, the drag's
         // enter, over and leave) on that event's path. The rest of the conditions are the
-        // window's own drawing: the hover chain, the drag ghost (while a drag runs and on
-        // the input that ends it) and the focus ring, which moves with the focus and shows
-        // or hides as the keyboard takes over or the pointer does.
-        // Note: DevTools needs no clause of its own — its element inspector
-        // renders from the hovered element only (not the raw pointer position),
-        // so the hover-changed condition already covers it. Forcing a render per
-        // move while the overlay is open just spins the FPS counter.
+        // window's own drawing: a hover change that is drawn with no mark of its own, the drag
+        // ghost (while a drag runs and on the input that ends it) and the focus ring, which
+        // moves with the focus and shows or hides as the keyboard takes over or the pointer does.
+        // A hover change mostly asks for its frame itself, as after the settle (SettleHover): a
+        // hover or pressed look marks its element (InteractionStyles), a scrollbar its bar, a
+        // tooltip opens an overlay, an owned enter or leave handler marks what it changes, and an
+        // app's runs as a handler above. Only two things draw from the hover with nothing marked:
+        // a list's tint under the row the pointer is on (VirtualListElement.HoverHighlight,
+        // counted by DrawnHoverChanges) and the DevTools inspector, which draws the hovered
+        // element's box — on a change only: a render per move while it is open just spins the
+        // FPS counter. Every hover change drew a frame: a sweep of the pointer down Junction's
+        // diff drew 42 for 52 moves, the same pixels each time (plan 17 round 13).
         if (EventDispatcher.HandlerInvocationCount != handlersBefore     // a handler ran — may have mutated silently
-            || !ReferenceEquals(_lastHoveredElement, hoveredBefore)      // hover chain changed (enter/leave side effects)
+            || (!ReferenceEquals(_lastHoveredElement, hoveredBefore)     // the hover moved, onto or off something
+                && (_pointerState.DrawnHoverChanges != drawnHoverBefore  //   drawn from it: a list's row tint
+                    || _devTools.IsEnabled))                             //   or the inspector's box
             || _isDragging || draggingBefore                             // drag ghost follows the cursor, or goes
             || !ReferenceEquals(_focusManager.FocusedElement, focusedBefore)
             || (_focusFromKeyboard != keyboardBefore && _focusManager.FocusedElement is not null))

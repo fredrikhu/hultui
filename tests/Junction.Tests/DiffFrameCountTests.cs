@@ -42,6 +42,30 @@ public class DiffFrameCountTests
         });
     }
 
+    /// <summary>Nothing in the diff draws hover, so the pointer crossing its lines draws nothing.
+    /// Every line it reached drew the window again, the same pixels: a sweep down the diff in a
+    /// real window drew 42 frames for 52 moves (plan 17 round 13).</summary>
+    [Fact]
+    public void APointerSweepDownTheDiff_DrawsNoFrame()
+    {
+        Hosted((session, app) =>
+        {
+            var body = List(app).Layout.AbsoluteBorderBox;
+            float x = body.X + body.Width / 2;
+            session.Window.MoveMouse(x, body.Y + 20);
+            DiffScrollTests.Quiet(session, app);
+
+            int frames = 0, moves = 0;
+            for (float y = body.Y + 28; y < body.Bottom - 20; y += 8, moves++)
+            {
+                session.Window.MoveMouse(x, y);
+                frames += FramesDrawn(session);
+            }
+            Assert.True(moves > 50, $"the diff is {body.Height} px tall: too short to sweep");
+            Assert.Equal(0, frames);
+        });
+    }
+
     [Fact]
     public void ASizeChangeWithADiffShown_DrawsOneFrame_WithTheThumbWhereItSettles()
     {

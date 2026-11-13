@@ -12,7 +12,8 @@ using Text = HultUI.Core.Builders.Text;
 /// <summary>
 /// Which inputs draw a frame. Every input follows the rule pointer moves always had: a frame
 /// when an ordinary (app) handler for an event the input dispatched ran — it may have changed
-/// something without marking it — when the hover chain changed, while a drag runs and on the
+/// something without marking it — when the hover moved onto or off something drawn from it
+/// (<see cref="HoverMoveFrameTests"/>), while a drag runs and on the
 /// input that ends it, when the focus ring moves, shows or hides, or when something marked
 /// itself dirty. Until plan 17's round 4 every other input forced one: a key-up nobody hears,
 /// a wheel notch that scrolls nothing and a press on static content each drew a full frame

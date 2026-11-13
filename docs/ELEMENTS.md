@@ -127,13 +127,14 @@ capture, a drag, a text selection, a slider, an autoscroll): hover stays where i
 release, as it does on a move, and the frame after the release settles it. Nothing happens
 when the pointer is outside the window or has never been in it, or when the build kept the
 hovered element. The settle draws a frame of its own only when something shows the new
-hover: a hover or pressed style (`.OnHover`), a list's tint under the row
-(`.HoverHighlight`), or an enter or leave handler, which may change what is drawn without
-marking it. Otherwise the frame that replaced the elements stands: Junction drew every key of
-its commit file walk twice while the pointer rested on the diff, the second frame the same
-pixels (plan 17 round 12). Until plan 17's round 9, hover stayed on the removed element until the
-pointer moved, and through its parents that element kept the whole old view alive: in
-Meridian with a 2,000-endpoint spec, 7.8 MB of a 28 MB heap after a key switched the view.
+hover, as a pointer move does (see "Which inputs draw a frame" below): a hover or pressed
+style (`.OnHover`), a list's tint under the row (`.HoverHighlight`), or an enter or leave
+handler, which may change what is drawn without marking it. Otherwise the frame that replaced
+the elements stands: Junction drew every key of its commit file walk twice while the pointer
+rested on the diff, the second frame the same pixels (plan 17 round 12). Until plan 17's
+round 9, hover stayed on the removed element until the pointer moved, and through its parents
+that element kept the whole old view alive: in Meridian with a 2,000-endpoint spec, 7.8 MB of
+a 28 MB heap after a key switched the view.
 
 So an enter or leave handler must not rebuild the element the pointer is over into a new one:
 the next frame's hit-test enters the new one, the handler builds another, and the window
@@ -142,7 +143,8 @@ place, or the same key) and change what it shows, as Vesper Commander's column h
 
 **Which inputs draw a frame.** An input draws a frame when it changes something: an element
 marked itself dirty (a control's own state, a scroll, a hover or pressed style, an overlay),
-the hover moved to another element, a drag is under way or has just ended, or the focus ring
+the hover moved onto or off a row its list tints (`.HoverHighlight`), or to another element
+while the DevTools inspector is open, a drag is under way or has just ended, or the focus ring
 moved, showed or hid. It also draws one when an app handler ran for an event the input
 dispatched — the key, the press and the focus and blur it caused, the release and its
 click, the wheel's `ScrollEvent` — on that event's way through the tree (`On<TEvent>`,
@@ -150,8 +152,19 @@ click, the wheel's `ScrollEvent` — on that event's way through the tree (`On<T
 anything (see "Layout styles do not self-invalidate" in REACTIVITY.md; `HULTUI002` catches
 the common case), so the window repaints after one to be safe. Nothing else draws a frame: a
 key-up no handler hears, a wheel notch over a list that has nothing to scroll, a press on
-static text. Until plan 17's round 4 every input but a pointer move drew one, and a key-up's
-frame was 42–46 % of a key press's frame time in Junction and Vesper Commander.
+static text, a move onto an element that shows no hover. Until plan 17's round 4 every input
+but a pointer move drew one, and a key-up's frame was 42–46 % of a key press's frame time in
+Junction and Vesper Commander.
+
+The hover moving to another element draws nothing by itself. What shows a hover marks what it
+changes: a hover or pressed style its element, a scrollbar its bar, a tooltip opens an overlay,
+the framework's controls (a splitter, a calendar, a menu, a slider) what their enter and leave
+handlers change; an app's enter or leave handler gets the frame any handler gets. Only a list's
+tint under the row (`.HoverHighlight`) and the DevTools inspector are drawn from the hover
+itself, so a change of the hovered row or of the inspected element draws. Until plan 17's
+round 13 every change of the hovered element drew a frame: a sweep of the pointer down
+Junction's diff drew 42, now 3, the rest the pixels already on screen. So a custom element that
+draws from its own `IsHovered` shows that with `.OnHover` or an enter or leave handler.
 
 So a handler that runs often and usually does nothing — a move tracker on a root that acts
 only during a resize drag or a right-drag selection — belongs in `el.OnPassive<TEvent>(handler)`.

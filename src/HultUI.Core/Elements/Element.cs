@@ -514,7 +514,9 @@ public abstract class Element
     // the element's visuals, and a later one would revert an app's own changes.
     private bool _hovered, _pressed, _focused;
 
-    /// <summary>True while the pointer is over this element or a descendant.</summary>
+    /// <summary>True while the pointer is over this element or a descendant. Its change marks
+    /// nothing: an element that draws from it shows that with <c>.OnHover</c> or an enter or leave
+    /// handler, which get the frame that draws it.</summary>
     public bool IsHovered => _hovered;
     /// <summary>True while the pointer is pressed on this element or a descendant.</summary>
     public bool IsPressed => _pressed;
