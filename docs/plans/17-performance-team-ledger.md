@@ -5,8 +5,9 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 13
-- **Phase:** release — round 13: the full suite passed on f0150d53; merge into main, push, wait for CI, then cut the app
-  releases (the user, 2026-11-13: "cut app releases after round 13 too"). Steps 1–4, 5 (b), 6 and 7
+- **Phase:** release — round 13 merged into main as 7cd6f083; CI run 43481808112 red (a step 8 timer test, 15 Junction
+  ReviewTests); the failed job re-run once (attempt 2) while a CI-fix agent (brief `brief-r13ci.md`) reproduces and fixes
+  both on the branch; then merge and push the fix, CI green, and cut the app releases (the user, 2026-11-13). Steps 1–4, 5 (b), 6 and 7
   done (15f97351, 013e1f1b, 8e05c94e; 0da9f80e, 185bedad; 698c2758, 54bd7d3a, b8fd2c67; 8f9f2683, da72e01b,
   d413e001, 0a8361f9; 5849c137; 4fdb56cb, 276789d8, cdb47cb9; 154a7ca3, 8048b644). The survey is
   done (reports `17-reports/r13-*`, committed da6e72c8..8f01b6fd); 8 steps in the round 13 build order; questions 52–54
@@ -930,3 +931,10 @@ From 2026-11-12 (round 12's survey); earlier entries are in the archive ([to 202
   tested branch; origin/main afc1ed40 was in the branch and had not moved, so the push gate held). Primary checkout
   fast-forwarded behind the guard; branch reset to the merge and pushed. CI run 43481808112 on 7cd6f083 next; then the
   app releases.
+- 2026-11-13: CI run 43481808112 on 7cd6f083 red: test-linux, docs and meridian-keyring (ubuntu, macOS) green; the
+  Windows test job failed (a) `TimerResolutionHintTests.AWakeBeforeTheHoldIsOut_KeepsOneMillisecond` (step 8's new test,
+  expected "1", got "0": the 1 s hold ran out on a slow 2-core runner — a wall-clock test) and (b) 15 of Junction's
+  GitLab `ReviewTests` in a row, each `PumpUntil` 20 s with the review never coming up (round 12's CI passed them; two
+  round 13 build steps saw one time out once locally under load). Not a known flake: the failed job re-run once (attempt
+  2) for data, and a CI-fix agent reproduces both under CI-like conditions (2 cores, loaded), bisects round 13's
+  suspects and fixes the causes on the branch. Main is red until the fix lands; app releases wait for green.
