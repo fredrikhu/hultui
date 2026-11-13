@@ -220,6 +220,56 @@ public class MpvBackendTests : IDisposable
         return picture.PictureRange;
     }
 
+    /// <summary>
+    /// A paused player's event thread sleeps until mpv has something to say. It waited half a
+    /// second at a time, so an open player woke twice a second at rest (Reel paused on a clip:
+    /// 2.0–2.2 a second, the only thread of the app's own awake). Without the timeout, Dispose
+    /// still ends the thread at once: it wakes the wait.
+    /// </summary>
+    [MpvFact]
+    public void APausedPlayersEventThread_SleepsUntilAnEvent_AndDisposeStillEndsItAtOnce()
+    {
+        var f = new Fixture();
+        try
+        {
+            f.Player.Open(Clip);
+            f.Until(() => f.Player.State == PlaybackState.Paused);
+            Thread.Sleep(300);   // what the load still has to say
+
+            int before = f.Backend.EventWaits;
+            Thread.Sleep(2000);
+            int woke = f.Backend.EventWaits - before;
+            Assert.True(woke <= 1, $"the event thread woke {woke} times in 2 s at rest");
+        }
+        finally
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            f.Dispose();
+            Assert.False(f.Backend.EventThreadAlive);
+            Assert.True(clock.Elapsed < TimeSpan.FromSeconds(1), $"Dispose took {clock.Elapsed.TotalMilliseconds:0} ms");
+        }
+    }
+
+    /// <summary>A player opened and closed again and again leaves no thread behind: each event thread
+    /// ends with its Dispose, and none of them waits out the join's timeout.</summary>
+    [MpvFact]
+    public void PlayersOpenedAndClosed_LeaveNoEventThreadBehind()
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        int threadsBefore = System.Diagnostics.Process.GetCurrentProcess().Threads.Count;
+        for (int i = 0; i < 8; i++)
+        {
+            var backend = new MpvBackend();
+            Thread.Sleep(50);   // the thread is in its wait
+            backend.Dispose();
+            Assert.False(backend.EventThreadAlive);
+        }
+        int threadsAfter = System.Diagnostics.Process.GetCurrentProcess().Threads.Count;
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(4), $"eight players took {clock.Elapsed.TotalMilliseconds:0} ms");
+        // mpv starts several threads of its own per handle; eight leaked players would show.
+        Assert.True(threadsAfter - threadsBefore < 8, $"{threadsBefore} threads before, {threadsAfter} after");
+    }
+
     [Fact]
     public void OnlyPqAndHlg_AreHighDynamicRangeTransfers()
     {
