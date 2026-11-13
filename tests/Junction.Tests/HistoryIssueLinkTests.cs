@@ -120,6 +120,25 @@ public class HistoryIssueLinkTests
         }, withRules: false);
     }
 
+    /// <summary>A rules file git ignores changes nothing git reports, so its save is a watcher
+    /// event that moves no summary and re-keys no load of History's (plan 17 round 13: such an
+    /// event builds no view). The file is what History shows, so it builds for that.</summary>
+    [Fact]
+    public void AnIgnoredRulesFileWrittenWhileOpenLinksTheSubjectsOnTheNextBuild()
+    {
+        Hosted((session, app, repo) =>
+        {
+            repo.Write(".git/info/exclude", IssueTrackerFile.FileName + "\n");
+            // Past the watcher's debounce, so the rules file's save is an event of its own.
+            for (var until = DateTime.UtcNow.AddSeconds(1); DateTime.UtcNow < until; Thread.Sleep(5)) session.PumpFrame();
+            Assert.True(SubjectLabel(session, Linked).Links is null or { Count: 0 });
+
+            repo.Write(IssueTrackerFile.FileName, Rules);
+            session.PumpUntil(() => SubjectLabel(session, Linked).Links is { Count: 1 },
+                TimeSpan.FromSeconds(30));
+        }, withRules: false);
+    }
+
     private static int MidOf(TextLink link) => link.Start + link.Length / 2;
 
     private static void ClickAtOffset(HeadlessSession session, TextElement label, string text, int offset)

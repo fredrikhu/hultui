@@ -504,17 +504,20 @@ public class ChromePartTests
 
     /// <summary>A watcher event over a repository that is as it was — an editor saving a file
     /// with nothing git reports changed, git's own index refresh — reloads the repository's data
-    /// and builds the view, and builds no chrome: the summary and the worktrees land equal to what
-    /// is on screen, so the parts reading them do not hear them. Each such event built the title
-    /// bar, the sidebar and the toolbar seven times between them (plan 17 round 12: 578 KB and 10
-    /// builds an event on the UI thread, 274 KB and 2 builds now).</summary>
+    /// and builds no chrome: the summary and the worktrees land equal to what is on screen, so the
+    /// parts reading them do not hear them. Each such event built the title bar, the sidebar and
+    /// the toolbar seven times between them (plan 17 round 12: 578 KB and 10 builds an event on
+    /// the UI thread, 274 KB and 2 builds then). A ref moving builds the view, whose loads key on
+    /// the refs; an event in the working tree builds no History (round 13: 20.5 → 2.7 KB, 1 → 0
+    /// builds and frames).</summary>
     [Fact]
-    public void AWatcherEventOverAnUnchangedRepository_BuildsTheViewAndNoChrome()
+    public void AWatcherEventOverAnUnchangedRepository_BuildsNoChrome_AndTheViewForARefMoving()
     {
         Hosted(fx =>
         {
             var path = fx.A.Path;
-            void Event(string name, Action fire)
+            Assert.Equal(JunctionView.History, fx.App.View);
+            void Event(string name, Action fire, bool view)
             {
                 int gen = DataGen(fx.App, path), builds = fx.App.Builds, chrome = fx.App.ChromeBuilds;
                 fire();
@@ -523,12 +526,55 @@ public class ChromePartTests
                 fx.Session.PumpUntil(() => LoadedKey(fx.App, "_summaryLoaders", path) == $"{path}#{DataGen(fx.App, path)}"
                     && LoadedKey(fx.App, "_worktreeLoaders", path) == $"{path}|{DataGen(fx.App, path)}", Wait);
                 Settle(fx);
-                Assert.True(fx.App.Builds > builds, $"{name} did not rebuild the view");
+                if (view) Assert.True(fx.App.Builds > builds, $"{name} did not rebuild the view");
+                else Assert.True(fx.App.Builds == builds, $"{name} built the view ({fx.App.Builds - builds} builds)");
                 Assert.True(fx.App.ChromeBuilds == chrome, $"{name} built the chrome ({fx.App.ChromeBuilds - chrome} part builds)");
                 AssertChromeIsAFullBuild(fx, "after " + name);
             }
-            Event("the watcher's callback", () => Invoke(fx.App, "OnExternalChange", path));
-            Event("README's write time touched", () => File.SetLastWriteTimeUtc(System.IO.Path.Combine(path, "README.md"), DateTime.UtcNow));
+            Event("the watcher's callback", () => Invoke(fx.App, "OnExternalChange", path), view: true);
+            Event("README's write time touched", () => File.SetLastWriteTimeUtc(System.IO.Path.Combine(path, "README.md"), DateTime.UtcNow), view: false);
+        });
+    }
+
+    /// <summary>A watcher event re-keys only what reads the generation it moves, so the view
+    /// builds for it only when a load of its own reads that: another repository's event builds
+    /// none (the sidebar follows that repository's summary on its own), nor does an event in the
+    /// working tree over History, whose log, branches and tags key on the refs. Over Changes,
+    /// which lists the working tree, it does. Each such event built the view for nothing (plan 17
+    /// round 13: another repository's save 86.0 → 70.0 KB and 2 → 1 builds an event).</summary>
+    [Fact]
+    public void AWatcherEvent_BuildsTheViewOnlyWhenALoadOfItsOwnReadsWhatMoved()
+    {
+        Hosted(fx =>
+        {
+            string a = fx.A.Path, b = fx.B.Path;
+            Assert.Equal(JunctionView.History, fx.App.View);
+            void Event(string name, string path, string callback, bool view)
+            {
+                int gen = DataGen(fx.App, path), builds = fx.App.Builds;
+                Invoke(fx.App, callback, path);
+                Assert.True(DataGen(fx.App, path) > gen, $"{name} moved no generation");
+                fx.Session.PumpUntil(() => LoadedKey(fx.App, "_summaryLoaders", path) == $"{path}#{DataGen(fx.App, path)}", Wait);
+                Settle(fx);
+                if (view) Assert.True(fx.App.Builds > builds, $"{name} did not rebuild the view");
+                else Assert.True(fx.App.Builds == builds, $"{name} built the view ({fx.App.Builds - builds} builds)");
+            }
+            Event("another repository's save", b, "OnWorkingTreeChange", view: false);
+            Event("another repository's ref moving", b, "OnExternalChange", view: false);
+            Event("a save over History", a, "OnWorkingTreeChange", view: false);
+
+            // What another repository's event does change still reaches its row.
+            fx.B.Write("dirty.txt", "x\n");
+            Invoke(fx.App, "OnWorkingTreeChange", b);
+            fx.Session.PumpUntil(() => HasTooltip(RepoRow(fx, b), "Uncommitted changes"), Wait);
+            Settle(fx);
+            KeyViewOnly(fx);
+            AssertChromeIsAFullBuild(fx, "after another repository's save");
+
+            Switch(fx, KeyCode.Digit4);
+            fx.Session.PumpUntil(() => LoadedKey(fx.App, "_changesLoaders", a) is not null, Wait);
+            Settle(fx);
+            Event("a save over Changes", a, "OnWorkingTreeChange", view: true);
         });
     }
 

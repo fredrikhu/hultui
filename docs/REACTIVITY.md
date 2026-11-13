@@ -1637,6 +1637,30 @@ Four traps on the way, all in what a `FileSystemWatcher` on `.git` reports:
   shows the watcher nothing else, so the reflog keys on the data generation (round 13; see
   docs/DECISIONS.md).
 
+### An event builds only the view whose loads it re-keys
+
+A new generation re-keys loads; it needs a build only when something on screen keys a load on
+it. Junction's watcher handler built the view after every event so the view's loads would see
+the new keys, and most events re-key none: another repository's save (the overview reads only
+summaries, which land by themselves and rebuild what reads them), and a save in the repository on
+screen while History, Branches or Tags is shown, whose loads key on the refs. The generation
+accessors now note which repository's generation a load of the view read since its last build
+began, and the handler builds the view only when the event moved one of those, or a ref moved in
+the repository on screen. Two readers note nothing: the loads the handler starts itself (the
+summary and the worktrees, whose parts hear them land) and the preload, which warms views that
+are not on screen.
+
+What a view reads from disk without a load needs the handler's eye too. History shows the
+issue-tracker file's rules, looked at once a build; a save of that file used to arrive with the
+build every event made, and the handler now builds when the file's write time moved (git may
+ignore the file, and then no summary moves either).
+
+Per event (round 13): another repository's save 86.0 → 70.0 KB on the UI thread and 2 → 1
+builds and frames headless, 91.1 → 71.9 KB in a real window (NativeAOT); a file touched there
+18.4 → 2.4 KB and 1 → 0 builds and frames; a save over History 166.4 → 150.8 KB and 2 → 1
+frames headless, 205.6 → 187.8 KB in a real window, a touch 21.5 → 1.9 KB and 1 → 0; Changes
+unchanged. The same frames and accessibility trees.
+
 ### What a build shows of files comes from what was read already
 
 A small read in `Build()` does not freeze anything a person would notice; it allocates on every

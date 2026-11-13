@@ -31,8 +31,8 @@ public partial class JunctionApp
     /// The active repository's rules, re-read when the file changes. Cached because it is
     /// asked once per rendered line — every visible History row, every line of a message —
     /// and the answer costs a subprocess. Whether the file changed is asked once a build: a
-    /// change is seen by the next one, and the repository watcher rebuilds on any change in
-    /// the working tree.
+    /// change is seen by the next one, and the repository watcher rebuilds when the file
+    /// changes (<see cref="IssueRulesFileMoved"/>).
     /// <para>A repository on GitLab gets two rules of its own after the file's: <c>#123</c>
     /// is an issue and <c>!123</c> a merge request on that project. The file's rules come
     /// first so a project that maps <c>#</c> elsewhere keeps its say.</para>
@@ -64,6 +64,17 @@ public partial class JunctionApp
             _issueRules = (_activeRepoPath, stamp, hostKey, rules);
         }
         return _issueRules.Rules;
+    }
+
+    /// <summary>Whether the rules file of <paramref name="path"/> changed since a build last
+    /// read it: a watcher event in the working tree builds a view that shows the rules (History,
+    /// a commit's message) only then, since nothing else it reads moved (see Reload).</summary>
+    private bool IssueRulesFileMoved(string path)
+    {
+        if (!PathEquals(_issueRules.Repo, path)) return false;
+        var file = System.IO.Path.Combine(path, IssueTrackerFile.FileName);
+        var stamp = System.IO.File.Exists(file) ? System.IO.File.GetLastWriteTimeUtc(file) : default;
+        return stamp != _issueRules.Stamp;
     }
 
     /// <summary>

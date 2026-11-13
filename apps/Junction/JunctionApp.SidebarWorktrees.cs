@@ -48,7 +48,8 @@ public partial class JunctionApp
         if (string.IsNullOrEmpty(path)) return [];
         var loader = _worktreeLoaders.For(path);
         var shown = loader.Value;
-        loader.Load($"{path}|{DataGen(path)}", () => RepoFor(path).GetWorktrees() is var loaded && loaded.SequenceEqual(shown) ? shown : loaded);
+        // The generation read apart from DataGen: Reload starts this load itself (see _viewKeysData).
+        loader.Load($"{path}|{_dataGen.GetValueOrDefault(path)}", () => RepoFor(path).GetWorktrees() is var loaded && loaded.SequenceEqual(shown) ? shown : loaded);
         return loader.Value;
     }
 
