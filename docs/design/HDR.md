@@ -350,6 +350,15 @@ quantity; where HDR-LOG.md has several, these are the most careful.
   (115–116). Loop at rest: 0 frames, 0 passes, 0 wakes either way. The chrome reads back the same
   but for blending: white, background and accent identical, a 3-level step on Aperture's card
   surface, 1–3 levels on glyph edges (the 8-bit swapchain blends as GL does).
+- **The first HDR video leaves NVIDIA's DXGI path behind for the process's life** (2026-11-13, plan
+  17 round 13). Reel played a PQ clip for 4 s, then the same clip as SDR, paused and rested on
+  8-bit; against an SDR-only session in the same state, NVIDIA's DXGI threads stayed (`nvwgf2umx`
+  at 96–100 plus 25 a second), wakes went 126 → 256–264 a second, DXGI local 284 → 331 MB,
+  non-local 108 → 139 MB, private 516 → 569–611 MB, threads 37 → 50. Against round 12's
+  always-half-float window at the same point it is still 101 MB less local memory, so not a
+  regression. Replacing the `VkSurfaceKHR` at the switch back to 8-bit changed nothing (the same
+  threads and memory): the driver keeps it per device. Only rebuilding the device (the Skia
+  context, every GPU resource, the mpv interop) could return it; not done (the user, 2026-11-13).
 - **On NVIDIA Linux F16 is nearly free.** There the fixed costs are the API's: about +95 ms of
   start-up and +23 MB, with or without F16.
 - **Over-allocating during a drag** (2026-10-11): a step of an 80-step drag went from 32.9–38.1
