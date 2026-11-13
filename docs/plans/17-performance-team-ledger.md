@@ -959,5 +959,5 @@ From 2026-11-12 (round 12's survey); earlier entries are in the archive ([to 202
   docfx 0 warnings. step-ab (5484fd89) 1 pair: JIT one row slower, AOT one faster, opposite ways on rows the change does
   not reach (noise), no allocKB moved. For memory `ci-red-findings`: a test class red every time on CI from a watcher
   change plus a test that asked for the review before the summary landed — 2-core affinity alone reproduces it;
-  wall-clock races reproduce by suspending your own testhost (`NtSuspendProcess`, `scratchpad 13ci\stall.ps1`), not with
+  wall-clock races reproduce by suspending your own testhost (`NtSuspendProcess`, `scratchpad\r13ci\stall.ps1`), not with
   CPU burners; one Headless test failed once in 10 runs beside ReviewTests as load (name not captured).
