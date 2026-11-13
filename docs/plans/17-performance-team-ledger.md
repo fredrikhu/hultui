@@ -5,8 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 14
-- **Phase:** build — round 14, step 1 next (the round 14 build order below; 8 steps). Questions 55–59 are open (Needs
-  the user): step 1 (c)'s raised bounds wait for 56, step 8 for 55; 57–59 shape later work. Build briefs
+- **Phase:** build — round 14, step 1 building (the round 14 build order below; 9 steps). Questions 55–59 answered
+  2026-11-13 with the recommendations; 57 is asked again with step 1's numbers. Build briefs
   `brief-r14b<N>.md`, the agent ids in `r14-agents.txt`, survey probes `r14-<area>\` and build probes `r14b<N>\` in
   session 41943a9b's scratchpad
   `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\41943a9b-f657-4483-971a-a2b346b967f7\scratchpad\`. One build
@@ -113,7 +113,8 @@ a guarded real window (the desktop lock `Global\HultUI-r14-desktop` and the harn
    test of every probe width on the four READMEs; check the end heap (28.3 → 40.0 MB by `GetTotalMemory(false)`). (c)
    **text-word-cache-cjk-cliff, measure first**: a scan-resistant admission once the cache is full (keep only words
    seen twice), which changes no memory; raised bounds (32,768 entries, 16 MB: the big file's drag 157.6 MB → 1.1 MB)
-   only with the user's yes **(question 56)**. Patch `r14-text\r14-probe-and-variants.patch` (`R14_VAR=12`, `R14_VAR=16`
+   only if the admission fails (question 56: yes, as its own commit). The report also gives what is left a drag frame
+   (question 57). Patch `r14-text\r14-probe-and-variants.patch` (`R14_VAR=12`, `R14_VAR=16`
    with `R14_TAW=1`, `R14_WCAP`/`R14_WMB`, `R14_NAT=0`). Small; no API, no pixels.
 2. **junction-commit-detail-whole-patch** (4, with 6; r14-4 Candidate 1, r14-8 Waiting) — `LoadDetail` parses the whole
    commit patch into `GitDiffLine`s though only the selected file's diff is read: the whole patch below 262,144
@@ -130,8 +131,13 @@ a guarded real window (the desktop lock `Global\HultUI-r14-desktop` and the harn
    22–33 git runs, 4–6 frames, 3–4 MB → 0; real window History, three builds 6/6/4 git runs → 2/0/0. (b)
    **dotnet-junction-watcher-debounce-timer**: one re-armed `ITimer` under the existing lock instead of a CTS, a
    `Task.Run`, a `Task.Delay` and a caught exception per event (GitWatcher.cs:135–139, :157–185): AOT 9.4–9.6 → 5.9 KB a
-   file written, exceptions 2,690–2,875 → 0 per 1,000 files (a Junction build 267 events, a publish 551). Prototypes
-   `r14-reactivity\final14.patch` (`R14_SKIPBINOBJ`), `r14-dotnet\watchprobe\`. Medium + small; no API.
+   file written, exceptions 2,690–2,875 → 0 per 1,000 files (a Junction build 267 events, a publish 551). (c)
+   **reactivity-junction-watch-index-staging** (question 58: yes): the watcher hears index renames again and answers
+   with a status, so terminal or IDE staging (`git add`, `restore --staged`, a staged submodule bump) reaches Changes:
+   3 of 53 operations fixed on both backends, 0 regressions; cost 1–2 extra working-tree reloads after an outside
+   checkout, pull or stash, and the app's own status heard back once or twice (measure it; `Forget` may cover the
+   latter). Prototypes `r14-reactivity\final14.patch` (`R14_SKIPBINOBJ`), `r14-reactivity\fswidx\`,
+   `r14-dotnet\watchprobe\`. Medium + small + small; no API.
 4. **Junction's wrapped diff leads its width** (1; r14-1 Candidates 1 and 3) — separate commits. (a)
    **layout-junction-wrap-resize-lead**, as 154a7ca3 for Vesper: a window resize and a file-list splitter drag hand the
    build the body's laid-out width plus or minus the change (JunctionApp.cs:498, JunctionApp.Diff.cs:675 and :756,
@@ -163,11 +169,20 @@ a guarded real window (the desktop lock `Global\HultUI-r14-desktop` and the harn
    Junction palette close ~101 → ~6 KB (−94 %), open −28 %, a context menu close −83 %; O(window nodes) → O(overlay
    nodes). The palette's focus move must still be told; the palette and menu event-stream scenarios stay identical.
    Medium; no API.
-8. **media-interop-gl-preload** (3; r14-3 Candidate) **(question 55)** — load the GL driver the video interop's hidden
-   context needs on a worker after the Vulkan device is made (Reel with a file) or at the first rest (Aperture), joined
-   only by `EnableInterop` (SdlVulkanHost.Interop.cs:147–236; `BeginPreload` returns early for Vulkan, SDL3Window.cs:2047):
-   Open → interop ready 98/93 → 36/45 ms, Open → first video 246/229 → 180/189 ms. Measure Reel's first UI frame too
-   (plan 15 §3.1: a preload joined before the window cost it ~95 ms). Small–medium; no API.
+8. **media-interop-gl-preload** (3; r14-3 Candidate; question 55: (b), opt-in) — when an app takes
+   `HULTUI_GL_PRELOAD`'s opt-in, a Vulkan window with video interop loads the GL driver its hidden context needs on a
+   worker after the Vulkan device is made (Reel with a file) or at the first rest (Aperture), joined only by
+   `EnableInterop` (SdlVulkanHost.Interop.cs:147–236; `BeginPreload` returns early for Vulkan, SDL3Window.cs:2047);
+   Aperture opts in as Reel does (one line); no default change. Open → interop ready 98/93 → 36/45 ms, Open → first
+   video 246/229 → 180/189 ms. Measure Reel's first UI frame too (plan 15 §3.1: a preload joined before the window cost
+   it ~95 ms). Small–medium; no API.
+9. **layout-hover-follows-scroll** (1; r14-1 NEEDS THE USER; question 59: yes, images first) — when content scrolls
+   under a resting pointer, hover (the list tint, hover styles) moves to the element now under it, as browsers do: one
+   hit test a scroll frame (27–38 visits) before the frame draws, no extra frame. Today hover stays on the row that
+   scrolled away (Junction 4 of 4 wheel series, Vesper 3 of 4). Make before/after images from headless frames after a
+   wheel series (Junction History, Vesper's list) and return them to the orchestrator for the user **before
+   committing**; commit only after the user's look. Small–medium; no API; changes where the tint is drawn during a
+   scroll.
 
 ### Waiting
 
@@ -752,29 +767,34 @@ Round 14 questions (from the survey, 2026-11-13). Recommendations in brackets.
     the UI thread (~50 ms of the first video frame in Reel opened with a film, and Aperture's first playback). Loading
     it on a worker first is outside SDL's documented threading contract (validated on Windows/WGL); today it is
     `HULTUI_GL_PRELOAD`'s opt-in, which Reel takes on Windows. (a) The framework does it by default on Windows for
-    Vulkan windows with interop, or (b) it stays opt-in and Aperture opts in as Reel does (one line). [(b)]
+    Vulkan windows with interop, or (b) it stays opt-in and Aperture opts in as Reel does (one line). [(b)] → **(b):
+    opt-in, Aperture opts in as Reel does** (2026-11-13; step 8).
 56. **text-word-cache-cjk-cliff** (r14-5; step 1 (c)): a CJK document whose words at one width pass the word cache's
     bounds (8,192 entries, 4 MB) re-shapes the whole document every frame: the 154k-character ja + zh file drags at
     157.6 MB headless and 156.9 MB in a real window. Raising the bounds to 32,768 entries / 16 MB: 1.1 MB and 0.78 MB,
     HarfBuzz calls 397k → 1,087; the cache keeps up to ~12 MB more while and after such a document is shown (Latin text
     fills ~2 MB; the process still ended 6.6 MB smaller). Step 1 (c) first tries a scan-resistant admission that changes
-    no memory. If it does not remove the cliff, raise the bounds? [Yes, only if the admission fails.]
+    no memory. If it does not remove the cliff, raise the bounds? [Yes, only if the admission fails.] → **yes, only
+    if the admission fails** (2026-11-13; step 1 (c), told to its running agent).
 57. **text-open-measures-every-line (full)**, asked again (2026-10-13: not now): may a TextArea measure only the lines
     near the viewport and estimate the rest of the scroll extent, refining it as lines are drawn (the scrollbar thumb can
     shift while scrolling)? Round 14 on real text: with ~40 rows on screen a drag frame makes 1,140–2,734 prefix tables
     and itemizes 131k–169k characters (zh/ja READMEs); the 154k-character file 2,178–5,288 tables and 9,900–13,550
     HarfBuzz calls a frame; an Arabic README 1,846 BiDi probes a frame. It is the root of step 1's costs. Large. [After
-    step 1 lands, re-measure what is left and decide then.]
+    step 1 lands, re-measure what is left and decide then.] → **re-measure after step 1, then decide** (2026-11-13;
+    step 1's report gives what is left a drag frame; the question is asked again with those numbers).
 58. **reactivity-junction-watch-index-staging** (r14-6): staging from a terminal or IDE (`git add`, `restore --staged`, a
     staged submodule bump) is never heard, so Changes stays stale until the next working-tree event. Hearing index
     renames again (and answering with a status) fixes 3 of 53 real git operations on both backends with 0 regressions,
     at the cost of 1–2 extra working-tree reloads after each outside checkout, pull or stash (2 git runs each over
     History, ~11 over Changes) and the app's own status heard back once or twice. Build it? [Yes: a correctness fix.]
+    → **yes** (2026-11-13; step 3 (c)).
 59. **Hover after a scroll** (r14-1): when content scrolls under a resting pointer, the list tint and hover styles stay on
     the row that scrolled away until the pointer moves (Junction 4 of 4 wheel series, Vesper 3 of 4). Should hover
     follow the row now under the pointer, as browsers do? One hit test a scroll frame (27–38 visits) before the frame
     draws, no extra frame; it changes where the tint is drawn during a scroll. [Yes, with before/after images from
-    headless frames first.]
+    headless frames first.] → **yes, with before/after images first** (2026-11-13; step 9: the images go to the user
+    before the change is committed).
 
 Reminder (expert 8): Aperture signed in to jellyfin.home as device "aperture-survey" in earlier rounds, as "aperture-r13" in round 13, and once in
 round 12 as "aperture-r12"; the user should remove those devices and revoke the API key when the work is done.
@@ -1011,3 +1031,8 @@ From 2026-11-12 (round 13's survey); earlier entries are in the archive ([to 202
   passive; `PatchFrom` marks paint on every patch, so a view build ahead of its load draws a same-pixel frame; a list
   keyed by index renames every kept row when a commit arrives at the top; walks on a shared fixture hear other
   sessions' git activity. Phase → build.
+- 2026-11-13: step 1 spawned (expert 5, base ded3e51c, brief `brief-r14b1.md`). The user answered questions 55–59 with
+  the recommendations: 55 (b), the GL preload stays opt-in and Aperture opts in (step 8); 56 yes, raise the word cache
+  bounds only if step 1 (c)'s admission fails (told to step 1's agent); 57 re-measure after step 1, then ask again; 58
+  yes, Junction hears terminal staging (step 3 (c)); 59 yes, hover follows content scrolled under the pointer, with
+  before/after images for the user before the commit (new step 9).
