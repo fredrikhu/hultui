@@ -763,6 +763,83 @@ public sealed class VulkanProbeTests
     }
 
     /// <summary>
+    /// A window keeps one stencil once its size has rested, not one for every size it drew at.
+    /// Skia attaches a stencil of a render target's size when a draw needs one (the cards' rounded
+    /// clips here) and shares it by a key, which no scratch purge lets go: Aperture held 9 after
+    /// 18 size changes through 9 sizes, 21.8 MB. The surface purges what the last frame did not
+    /// draw with a second after the last change, from the loop's own deadline: the probe asks for
+    /// display-colour events, so nothing else wakes its loop while it rests. The images on screen
+    /// stay uploaded, and the frame after the purge is the frame before it, pixel for pixel. Under
+    /// the validation layer where it is installed.
+    /// </summary>
+    [VulkanUiTheory]
+    [InlineData("8-bit")]
+    [InlineData("f16-offscreen")]
+    public void AfterSizeChangesRest_TheWindowKeepsOneStencil(string variant)
+    {
+        if (!OperatingSystem.IsWindows()) return;   // the probe resizes through user32
+        string frames = Path.Combine(Path.GetTempPath(), $"hultui-vulkan-rest-{Guid.NewGuid():N}");
+        string validation = frames + ".log";
+        try
+        {
+            var environment = new Dictionary<string, string?>
+            {
+                ["HULTUI_STARTUP"] = "1",
+                ["VK_LOADER_LAYERS_ENABLE"] = "*validation*",
+                ["VK_LAYER_VALIDATE_SYNC"] = "1",
+                ["VK_LAYER_LOG_FILENAME"] = validation,
+                ["VK_LOADER_DEBUG"] = "warn",
+                ["HULTUI_VULKAN_FIXED_EXTENT"] = null,
+                ["HULTUI_VULKAN_PRESENT"] = null,
+                ["HULTUI_VULKAN_F16"] = variant == "8-bit" ? "0" : "1",
+                ["HULTUI_VULKAN_WHITE_SCALE"] = variant == "8-bit" ? null : "2",
+            };
+            var run = RunProbe(environment, $"--size-rest --save-frame={frames}");
+
+            Assert.True(run.ExitCode == 0, run.Output);
+            Assert.Contains("probe: done", run.Output);
+            (int Stencils, int Images) Stage(string stage)
+            {
+                var m = System.Text.RegularExpressions.Regex.Match(run.Output, $@"probe: {stage} stencils (\d+) images (\d+)");
+                Assert.True(m.Success, $"no '{stage}' line:\n{run.Output}");
+                return (int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value));
+            }
+            var settled = Stage("settled");
+            var resized = Stage("resized");
+            var rested = Stage("rested");
+            // The cards need a stencil at every size, or this would prove nothing.
+            Assert.True(resized.Stencils >= 4, $"{resized.Stencils} stencils after five new sizes:\n{run.Output}");
+            Assert.Equal(1, rested.Stencils);
+            Assert.Equal(settled.Images, rested.Images);
+
+            // Once, a second after the last size, woken by its own deadline: not at the probe's post 2.5 s on.
+            var purges = System.Text.RegularExpressions.Regex.Matches(run.Output, @"\[startup\] vulkan size rest purge .*t=\s*([\d.,]+) ms");
+            Assert.True(purges.Count == 1, $"{purges.Count} purges:\n{run.Output}");
+            var done = System.Text.RegularExpressions.Regex.Match(run.Output, @"\[startup\] probe sizes done .*t=\s*([\d.,]+) ms");
+            Assert.True(done.Success, run.Output);
+            static double Ms(string s) => double.Parse(s.Replace(',', '.'), System.Globalization.CultureInfo.InvariantCulture);
+            double after = Ms(purges[0].Groups[1].Value) - Ms(done.Groups[1].Value);
+            Assert.True(after is > 800 and < 1800, $"the purge came {after:0} ms after the last size:\n{run.Output}");
+
+            Assert.Equal(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(frames + ".before.png")),
+                System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(frames + ".after.png")));
+
+            if (run.Output.Contains("\"VK_LAYER_KHRONOS_validation\" forced enabled"))
+            {
+                string reported = File.Exists(validation) ? File.ReadAllText(validation) : "";
+                Assert.True(reported.Length == 0, "the validation layer reported:\n" +
+                    (reported.Length > 4000 ? reported[..4000] : reported));
+            }
+        }
+        finally
+        {
+            File.Delete(frames + ".before.png");
+            File.Delete(frames + ".after.png");
+            File.Delete(validation);
+        }
+    }
+
+    /// <summary>
     /// A window that draws while minimized, then is restored and resized. On Windows a minimized
     /// Vulkan surface has no area, so the frame's swapchain went out of date and none could be
     /// built; the old one was dropped without being destroyed. Restored at the same size, the

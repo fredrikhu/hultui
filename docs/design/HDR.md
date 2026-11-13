@@ -178,6 +178,17 @@ DXGI read 391.5 MB against 213.2 after the purge. The surface purges after a fra
 a live image scrolled out of view keeps its texture and is not uploaded again. GL does not purge:
 there Skia freed 211 MB and DXGI read 303.7 MB before and 312.0 after, the driver keeping it.
 
+**And so are the stencils of sizes no longer shown** (2026-11-13). Skia attaches a stencil of a
+render target's size when a draw needs one (Aperture's rounded, clipped cards) and shares it between
+targets of that size by a key, which no scratch purge lets go: Aperture kept one for every size it
+had drawn at, 9 and 21.8 MB after 18 size changes through 9 sizes, and every maximize, snap or
+monitor move added the window's width × height bytes. Once a size change has rested (a second after
+the last one, and a frame drawn since the old targets went), the surface purges what went with them
+or before and was not drawn with since (`SizeRestPurge`), from a deadline of the frame loop's own:
+one stencil, Skia's budget 32.0 → 11.2 MB, DXGI local 105 → 84 MB, in 1.1–1.3 ms. It also drops the
+textures of images alive but not drawn since, which come back from their pixels if they are shown
+again. Never inside a drag, whose every step puts it off. GL keeps one stencil, framebuffer 0's.
+
 ### Display colour: HDR state, SDR white, peak
 
 | | HDR state | SDR white | peak |

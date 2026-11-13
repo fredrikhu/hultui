@@ -45,7 +45,8 @@ Both wake the loop. Between frames the application parks in the platform's wait
 until the next deadline the loop owns — an animation's next step, the trailing
 edge of a coalesced accessibility refresh, a throttled resize, the DevTools
 inspector's refresh, a display-colour poll of a Vulkan window without
-display-colour events — or, with none, until something arrives. Posting from
+display-colour events, a Vulkan window's one purge a second after its size last
+changed — or, with none, until something arrives. Posting from
 another thread ends that wait through `IWindowingPlatform.Wake`, so the work runs
 within a frame of being posted. Posting from the UI thread itself does not wake
 anything while the loop runs that code: it is drained in the same pass.

@@ -19,6 +19,8 @@
   <ItemGroup>
     <!-- HdrVideoLuminance: the HDR video arithmetic, tested without a GPU. -->
     <InternalsVisibleTo Include="HultUI.Rendering.Skia.Tests" />
+    <!-- SDL3Window: the Vulkan surface's purge once a size change has rested, run from its pump. -->
+    <InternalsVisibleTo Include="HultUI.Platform.SDL3" />
   </ItemGroup>
 
   <ItemGroup>

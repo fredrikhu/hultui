@@ -912,6 +912,10 @@ public sealed class Application : IDisposable
         // (SDL3Window.PollDisplayColor): the slider for SDR content brightness sends no message.
         if (_platform is SdlWindowingPlatform && SDL3Window.NextDisplayColorPoll is { } poll)
             Earliest(ref at, ref deadline, poll, IdleDeadline.DisplayColor);
+        // A Vulkan window frees what Skia kept for its old sizes once a size change has rested
+        // (SkiaVulkanRenderSurface.PurgeAfterSizeRest), at the end of the pump this deadline wakes.
+        if (_platform is SdlWindowingPlatform && SDL3Window.NextSurfacePurge is { } purge)
+            Earliest(ref at, ref deadline, purge, IdleDeadline.SurfacePurge);
         // The GL driver's thread walk, set off once the window has settled. Only while that is to
         // come: once it has, a pass that finds the window resting sets it off, and one that finds
         // it busy leaves it to the pass after the work, which the work's own frames or deadlines
