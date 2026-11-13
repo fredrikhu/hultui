@@ -142,6 +142,9 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IVulkan
     /// </summary>
     public void SizeMoveStarted(VulkanSwapchainChoice.SizeMoveLoop loop) => _sizeMoveLoop = loop;
 
+    /// <summary>Whether the window is inside Win32's modal size/move loop.</summary>
+    public bool InSizeMoveLoop => _sizeMoveLoop != VulkanSwapchainChoice.SizeMoveLoop.None;
+
     /// <summary>
     /// The loop ended (<c>WM_EXITSIZEMOVE</c>). A swapchain the drag left over-allocated is rebuilt
     /// at the window's exact size, so the window presents on the compositor's direct path again

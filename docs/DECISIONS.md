@@ -890,21 +890,101 @@ reader must hear what came and went. Holding their bounds back while the size ch
 walking without writing the boxes and a second walk at rest; not built (2.8 to 5.4 ms of raises are
 left in a drag of about a second in Junction and Vesper).
 
-### A prefix table's own words are still shaped at every width (round 12)
+### A prefix table's row-start words are still shaped at every width (rounds 12 and 13)
 
 Plan 17's round 12, step 4 (7a753337) reads a word a prefix table cuts short off the whole word's
 cuts where HarfBuzz says the cut is safe. In Junction's Files view on a Japanese README, NativeAOT,
 a resize to 1000 px went from 14,105 HarfBuzz calls to 11,223 (frame 28.1 → 24.7 ms headless). What
-is left is mostly the tables' own words: in text without spaces a row's table starts at the row
-start, so its first word is a new string at every width, a slice from the middle of the line's word.
-Reading it off the line's word would need the script HarfBuzz guesses for the slice (from its own
-first character: in Japanese, kana and kanji start rows about equally, and Hiragana, Katakana and Han
-are three scripts), safe cuts at both ends, and the advances summed again from the slice's start
+is left at a new width is the row-start words: in text without spaces a row's table starts at the
+row start, so its first word is a new string at every width, a slice from the middle of the line's
+word. Reading it off the line's word would need the script HarfBuzz guesses for the slice (from its
+own first character: in Japanese, kana and kanji start rows about equally, and Hiragana, Katakana and
+Han are three scripts), safe cuts at both ends, and the advances summed again from the slice's start
 (the pens hold sums from the word's start, which a difference of floats does not give back to the
-bit); not built. Two variants were measured and dropped: giving a word the cache holds without cuts
-(a line's width or a drawn row shaped it) its cuts the first time a table cuts it saved 7 calls of
-11,223; reading the cuts before looking the cut word up made a 40-frame drag 4 % slower (two
-lookups for every hit), so the lookup comes first.
+bit); not built. Reading the cuts before looking the cut word up made a 40-frame drag 4 % slower (two
+lookups for every hit), so the lookup comes first, after only the last cuts given, which take none.
+
+Round 12 also dropped giving a word the cache holds without cuts its cuts the first time a table
+cuts it, for saving 7 calls of 11,223. That was measured only on its fixture, which draws ideographs
+evenly: its 11,000 new words a width overflow the 8,192-entry word cache, so the thrash there is the
+fixture's own. On real text (README.ja.md of 79,011 characters and README.zh-CN.md of 75,265, made
+from installed gettext translations) it is the largest share left, and round 13, step 3 (698c2758)
+built it with a second part: a table's last word, cut by the table's end from a start that is the
+same at every width, is read off the word to its natural end (the next space or line end), shaped
+once with its cuts. Headless, NativeAOT, UI-thread CPU: Japanese resize to 1000 px 13.5 → 12.3 ms
+(HarfBuzz calls 2,086 → 1,119), to 960 14.7 → 11.6 ms; Chinese, a 40-frame drag at 960 logical px
+(a 1,440 px window at 150 %) 651 → 337 ms and 88.6 → 2.0 MB, where every new word had evicted one
+from the full cache; in a real window there 694 → 381 ms. The cost is the first width that wraps a
+line, whose word to its natural end is longer than the table's own segment: Chinese, opening the
+file +4 % and the first new width 9.3 → 10.5 ms (+290 KB). A document whose words at one width
+outgrow the word cache lets those words go before the next width reads them, and there making them
+only shapes more: they are made only while words read again earn more credit than words let go
+spend, and both READMEs in one file (154,000 characters) resize within −2 … +7 % of before.
+
+### A ref's lock file alone is a working-tree event, not dropped (round 13)
+
+Plan 17's round 13, step 1 stopped Junction's repository watcher from reading a ref transaction
+that changes nothing as a ref moving: git creates the ref's lock and deletes it, and the folder
+reports a Changed. Every `git fetch` does it for the remote's HEAD, so a fetch that brought
+nothing read the log, the branches and the tags again. Two ways were measured. Dropping such
+events costs least (headless, the background fetch with nothing new: 3 git commands and 1.5 KB on
+the UI thread a sweep in the survey's prototype, against 5 and 24 KB told as a working-tree event,
+and 17 and 254 KB before), but over 53 real git operations it left 4 unheard: `merge --abort` and `cherry-pick --abort` (a reset that writes only HEAD's
+reflog), `reflog expire` and `worktree add` of an existing branch, whose only sign in the watched
+folders is a ref's lock. So they are told as working-tree events, which read the status and the
+worktrees, and the reflog panel keys on the data generation. A reftable repository's lock alone
+(`tables.list.lock`) is not heard at all: reftable writes reflog entries into its tables, so
+every move there renames `tables.list`.
+
+### The app's own action is forgotten by the watcher, not fingerprinted or paused (round 13)
+
+Plan 17's round 13, step 4 stopped Junction reading the repository twice after its own actions
+(its `RefreshAll`, then the watcher's event for the same writes 300 ms later). The survey proposed
+two ways. A fingerprint of HEAD, the refs and the config, read before the action's reload and
+again at the event, costs one or two git commands at each end and must be read before the reload
+starts, so it delays every action's reload by a git command. Pausing the watcher around the app's
+commands loses an outside change made during the pause. What was built is neither: the watcher
+forgets what it heard before `RefreshAll` (all of it was made before the reload's loads read the
+repository) and tells what it hears after, so no change is lost and no git command is added. An
+in-app checkout: 28 → 15 git commands headless (14 with no watcher at all), 28 → 17 in a real
+window. A change the watcher hears late (its file-system event delivered after `RefreshAll` ran)
+is told and read again, as before.
+
+### A Vesper navigation's bridge time is UI Automation's own work on events a reader needs (round 13)
+
+Plan 17's round 13, step 5 (b) split what the UIA bridge does when Vesper opens or leaves a folder or
+opens its viewer. Real window, NativeAOT, the 4K primary display at 150 %, with the desktop-wide UIA
+listener this machine always has (it takes our events and never asks for the window's root). The
+UI thread's CPU was read with `QueryThreadCycleTime`.
+
+- **Expert 8's scene** (30 navigations 100 ms apart between folders of 61 and 28 files, pointer on the
+  list): "other" is 31–34 % of the six frame phases, against 1 % with `HULTUI_A11Y=0`. That is
+  0.80–0.88 ms a navigation.
+  - The bridge takes 0.59–0.62 ms of the UI thread's 2.38 ms a navigation (1.75 ms with it off).
+  - 51 raises take 0.46–0.49 ms of CPU and 0.60–0.71 ms of wall time: 36 Name, 13 BoundingRectangle
+    and 2 StructureChanged.
+  - The in-place walk takes 0.07–0.09 ms. It runs 1.5 times a navigation, always structural, and
+    builds no tree. Wrapper upkeep takes about 0.02 ms.
+- **Each raise of those kinds** gets 13 provider calls and 13 QueryInterface calls on the UI thread,
+  inside the `UiaRaise…` call:
+  - GetProviderOptions 5 times, the host provider 3, the fragment root 2, the runtime id, the native
+    window handle and one Navigate.
+  - With every call timed, our answers take under 2 µs of a raise's 13.5–14.4 µs. The rest is UI
+    Automation's own work.
+- **Enter into a folder of 200 files, Backspace out:** 35 raises, 29 of them Name (the 26 rows that
+  kept their index, the pane, its title button and its footer). They take 0.48–0.52 ms of the UI
+  thread's 2.5–2.7 ms.
+- **The viewer:** opening it takes 0.29–0.30 ms over 2 frames, with 8 raises. Its 179 KB are the 300
+  lines' item nodes and labels. Closing it takes 0.21–0.22 ms with 3 raises.
+
+Every event describes a change a reader can still reach. Rows that kept their index got another
+file's name, and the breadcrumb's buttons got another folder's name and place. None was told twice.
+Rows that left raised nothing, and each list's change of children was one event. So nothing was cut.
+
+Telling a bulk rename another way changes what a reader hears, and needs the user with a live check
+in Narrator and NVDA. One way is a single ChildrenInvalidated on the list instead of the rows' Name
+changes. Another is no Name change for rows no client has fetched, a finer form of question 50's
+gate.
 
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 

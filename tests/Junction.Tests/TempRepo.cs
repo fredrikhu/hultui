@@ -34,19 +34,23 @@ internal sealed class TempRepo : IDisposable
     /// <summary>Creates a repository with one root commit already in it. Every call gets its
     /// own copy of the same repository, so the commit is identical across fixtures (same id,
     /// same date) — see <see cref="CreateFrom"/>.</summary>
-    public static TempRepo CreateWithInitialCommit() => CreateFrom("initial-commit", () =>
-    {
-        var repo = CreateEmpty();
-        repo.Write("README.md", "hello\n");
-        repo.Git("add", "-A");
-        repo.Git("commit", "-m", "initial");
-        return repo;
-    });
+    public static TempRepo CreateWithInitialCommit(bool reftable = false) =>
+        CreateFrom(reftable ? "initial-commit-reftable" : "initial-commit", () =>
+        {
+            var repo = CreateEmpty(reftable);
+            repo.Write("README.md", "hello\n");
+            repo.Git("add", "-A");
+            repo.Git("commit", "-m", "initial");
+            return repo;
+        });
 
-    public static TempRepo CreateEmpty()
+    /// <param name="reftable">Keep the refs in git's reftable format (`--ref-format=reftable`,
+    /// git 2.45 and later; see <see cref="ReftableFactAttribute"/>) rather than as files.</param>
+    public static TempRepo CreateEmpty(bool reftable = false)
     {
         var repo = new TempRepo(NewFixturePath());
-        repo.Git("init", "-b", "main");
+        if (reftable) repo.Git("init", "-b", "main", "--ref-format=reftable");
+        else repo.Git("init", "-b", "main");
         // Written straight into the repository's config rather than with four `git config`
         // calls: the suite's time is mostly git process starts, and these were four of the
         // five an empty fixture used to make. No automatic maintenance: every commit started
@@ -164,6 +168,18 @@ internal sealed class TempRepo : IDisposable
         File.ReadAllText(System.IO.Path.Combine(Path, relativePath));
 
     public string Head => Git("rev-parse", "HEAD").Stdout.Trim();
+
+    /// <summary>Whether this machine's git makes reftable repositories (2.45 and later).
+    /// Asked once, of a throwaway repository.</summary>
+    public static bool SupportsReftable => _supportsReftable.Value;
+
+    private static readonly Lazy<bool> _supportsReftable = new(() =>
+    {
+        var path = NewFixturePath();
+        try { return GitProcess.Run(path, "init", "-q", "--ref-format=reftable").Success; }
+        catch { return false; }
+        finally { ForceDelete(path); }
+    });
 
     private static void PrepareEnvironment()
     {

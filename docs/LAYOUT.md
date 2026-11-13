@@ -691,7 +691,10 @@ takes the window's slack moves by what the window gained or lost — give the pa
 the `Window.Resized` handler as well, from the width the column was last laid out at and the
 window's width then (Junction's `LeadDiffWidth`), and keep the read after the frame as the
 check: it finds nothing to move when the guess was right, and corrects it a frame later when
-it was not.
+it was not. The same goes for anything a build measures at a laid-out width, such as
+wrapped rows whose heights a virtual list is handed: give the build the led width, or each
+size change builds and draws twice and its first frame shows the old width's heights (Vesper
+Commander's wrapped viewer and diff until plan 17 round 13, `LeadWrappedBodyWidth`).
 
 ---
 

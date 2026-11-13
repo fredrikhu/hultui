@@ -501,6 +501,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
 
         _width = widthPx;
         _height = heightPx;
+        _sizeRest.Changed(System.Diagnostics.Stopwatch.GetTimestamp());
 
         if (!_keepTargets) DropWrappedSurfaces();
         if (widthPx > 0 && heightPx > 0) _host.RecreateSwapchain(widthPx, heightPx);
@@ -558,7 +559,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     public void Present()
     {
         if (!_frameOpen) return;
-
+        if (_sizeRest.Owed) _sizeRest.Presenting(System.Diagnostics.Stopwatch.GetTimestamp());
         // The frame was drawn at 0..1; this is where it gets the display's SDR white level,
         // once, as an image rather than as a property of every paint. Drawn as a surface rather
         // than through Snapshot: the same draw of the same texture, without a managed SKImage
@@ -670,9 +671,13 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     /// finished that frame by the next one.</param>
     private void PurgeScratch(bool afterDisposedImages = false)
     {
+        bool offscreenWent = _purgeScratch;
         _purgeScratch = false;
         long start = StartupTrace.Enabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
         _grContext.PurgeUnlockedResources(scratchResourcesOnly: true);
+        // The offscreen let go is freed here, and the stencil Skia attached to it is unused from now:
+        // a keyed resource, which this purge keeps (SizeRestPurge).
+        if (offscreenWent) _sizeRest.Released(System.Diagnostics.Stopwatch.GetTimestamp());
         if (StartupTrace.Enabled)
         {
             // What the scratch test reads: everything Skia still holds, the offscreen in use
@@ -683,6 +688,45 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
                 $"vulkan scratch purged in {ms:0.00} ms with a {_offscreenWidth}x{_offscreenHeight} offscreen: " +
                 $"skia cache {bytes / 1048576.0:0.0} MB in {resources} resources{(afterDisposedImages ? " (images were disposed)" : "")}"));
         }
+    }
+
+    /// <summary>When the purge after a size change is owed and the size has rested; see
+    /// <see cref="SizeRestPurge"/>.</summary>
+    private readonly SizeRestPurge _sizeRest = new();
+
+    /// <summary>When the purge after the last size change is due, as a
+    /// <see cref="System.Diagnostics.Stopwatch"/> timestamp, or <see cref="long.MaxValue"/> with none
+    /// owed. The window's frame loop waits for it (<see cref="PurgeAfterSizeRest"/>).</summary>
+    internal long SizeRestPurgeAt => _sizeRest.DueAt;
+
+    /// <summary>
+    /// Frees what Skia keeps that the last frame did not draw with, once a size change has rested
+    /// (<see cref="SizeRestPurge"/>): the stencils of the sizes the window had before, among them.
+    /// The window calls it between frames, from its event pump, which Win32's modal size/move loop
+    /// never reaches; a frame open, or a purge not yet due, and it does nothing.
+    /// </summary>
+    /// <param name="now">A <see cref="System.Diagnostics.Stopwatch"/> timestamp.</param>
+    /// <returns>Whether it purged.</returns>
+    internal bool PurgeAfterSizeRest(long now)
+    {
+        if (_disposed || _frameOpen || !_sizeRest.TakeDue(now, out long msNotUsed)) return false;
+        long start = StartupTrace.Enabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+        int resourcesBefore = 0;
+        long bytesBefore = 0;
+        if (StartupTrace.Enabled) _grContext.GetResourceCacheUsage(out resourcesBefore, out bytesBefore);
+        // What was let go with the old targets or before, and not used since (SizeRestPurge.TakeDue).
+        // Skia finds the last frame's work finished as it starts, so what that frame drew with is
+        // let go now, after the time purged up to, and stays.
+        _grContext.PurgeUnusedResources(msNotUsed);
+        if (StartupTrace.Enabled)
+        {
+            double ms = System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+            _grContext.GetResourceCacheUsage(out int resources, out long bytes);
+            StartupTrace.Mark(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                $"vulkan size rest purge in {ms:0.00} ms, unused for {msNotUsed} ms: skia cache " +
+                $"{bytesBefore / 1048576.0:0.0} MB in {resourcesBefore} resources -> {bytes / 1048576.0:0.0} MB in {resources}"));
+        }
+        return true;
     }
 
     /// <summary>
@@ -789,6 +833,9 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         _frame = null;
         _transitionBeforeBlit = false;
         _frameOpen = false;
+        // New images, perhaps of another size (the exact one at a drag's end comes without a
+        // resize) or format: the stencils attached to the old targets are unused from here.
+        _sizeRest.Released(System.Diagnostics.Stopwatch.GetTimestamp());
     }
 
     /// <summary>
@@ -1116,6 +1163,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         _transitionBeforeBlit = false;
         ReleaseOffscreen(gpuIdle: true);
         _frameOpen = false;
+        if (!_disposed) _sizeRest.Released(System.Diagnostics.Stopwatch.GetTimestamp());
     }
 
     public void Dispose()

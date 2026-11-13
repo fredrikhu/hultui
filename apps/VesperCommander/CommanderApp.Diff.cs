@@ -493,14 +493,9 @@ public partial class CommanderApp
     /// <summary>Width of one code column — the two split whatever the fixed tracks leave
     /// over. Measured from the laid-out body when there is one, and from the window before
     /// that: the first Build after opening a comparison runs before any layout, and it still
-    /// has to decide whether there is a scrollbar to show.</summary>
-    private float DiffCodeWidth()
-    {
-        float body = _diffScrollRef.Current is { Layout.AbsoluteContentBox.Width: > 0 } sv
-            ? sv.Layout.AbsoluteContentBox.Width
-            : _window.LayoutWidth;
-        return Math.Max(0, (body - DiffGutterW * 2 - DiffMarkerW) / 2);
-    }
+    /// has to decide whether there is a scrollbar to show. A resize's build takes the width
+    /// the resize leads the body to (<see cref="BodyWidth"/>).</summary>
+    private float DiffCodeWidth() => Math.Max(0, (BodyWidth(_diffScrollRef.Current) - DiffGutterW * 2 - DiffMarkerW) / 2);
 
     /// <summary>How far right the view can scroll: the longest line, less what one code
     /// column shows of it. Nowhere, when lines wrap instead.</summary>

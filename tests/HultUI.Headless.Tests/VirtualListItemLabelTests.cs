@@ -3,6 +3,7 @@ using HultUI.Core.Builders;
 using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Reactivity;
+using HultUI.Core.Styling;
 using Xunit;
 using TextB = HultUI.Core.Builders.Text;
 
@@ -11,11 +12,12 @@ namespace HultUI.Headless.Tests;
 /// <summary>
 /// The accessibility tree asks a list for every item's label each time it is built — with a
 /// reader listening, on every structural change and after every scroll — and the label is the
-/// app's code, a string made per call. A list on item rows promises its rows show only their
-/// item and selected state; the promise covers the label too: the list keeps each item's label
-/// while the item is equal to the one it was made from and the label delegate is the same, and
-/// <see cref="VirtualListElement{T}.InvalidateRows"/>, new Items or another delegate make them
-/// all again. A one-argument list keeps nothing, as before.
+/// app's code, a string made per call. A list on item rows keeps each item's label while the item
+/// is equal to the one it was made from and the label delegate is the same: a label reads its item
+/// and nothing else. The rows made again (<see cref="VirtualListElement{T}.InvalidateRows"/>,
+/// another theme or display scale) keep the labels (plan 17 round 13 step 5 (a)); new Items or
+/// another delegate make them all again, and another delegate tells a reader the new names by
+/// itself. A one-argument list keeps nothing, as before.
 /// </summary>
 public class VirtualListItemLabelTests
 {
@@ -29,6 +31,9 @@ public class VirtualListItemLabelTests
         public int Labelled;
         public Func<Entry, string?> Label = null!;
         public int Builds;
+        public int RowsMade;
+        /// <summary>Off, a build that changes nothing else builds nothing new for the tree.</summary>
+        public bool NewTreeEachBuild = true;
         public readonly Ref<VirtualListElement<Entry>> List = new();
 
         public Func<Entry, string?> Counting(string prefix) => e => { Labelled++; return prefix + e.Name; };
@@ -44,10 +49,16 @@ public class VirtualListItemLabelTests
             else list.RenderWith(e => Row(e));
             // A label with a new automation id on every build, so every build changes the tree and
             // has it built again (a new text alone is patched into the tree since plan 17's round 4).
-            return Flex.Column().FlexGrow(1).Children(TextB.New("build").AutomationId($"build-{++Builds}"), list.WithRef(List));
+            ++Builds;
+            return Flex.Column().FlexGrow(1).Children(
+                TextB.New("build").AutomationId(NewTreeEachBuild ? $"build-{Builds}" : "build"), list.WithRef(List));
         }
 
-        private static Element Row(Entry e) => Flex.Row().Children(TextB.New(e.Name).FontSize(12f));
+        private Element Row(Entry e)
+        {
+            RowsMade++;
+            return Flex.Row().Children(TextB.New(e.Name).FontSize(12f));
+        }
 
         public void Rebuild() => MarkDirty();
     }
@@ -140,17 +151,41 @@ public class VirtualListItemLabelTests
         Assert.Equal(Count, pane.Labelled);
     }
 
+    /// <summary>The rows made again for what they show keep the labels: Junction's History told its list
+    /// four times as it started, and with a reader each made all 1,000 labels again.</summary>
     [Fact]
-    public void InvalidateRows_LabelsEveryItemAgain()
+    public void InvalidateRows_MakesTheRowsAgain_AndKeepsTheLabels()
     {
-        var (session, pane, _) = Mount();
+        var (session, pane, bridge) = Mount();
         using var __ = session;
         pane.Labelled = 0;
+        pane.RowsMade = 0;
 
         pane.List.Current!.InvalidateRows();
         RebuildAndBuildTree(session, pane);
 
-        Assert.Equal(Count, pane.Labelled);
+        Assert.True(pane.RowsMade > 0, "no row made again");
+        Assert.Equal(0, pane.Labelled);
+        Assert.Equal("entry 9", ItemNames(bridge)[9]);
+    }
+
+    [Fact]
+    public void AnotherThemeOrDisplayScale_MakesTheRowsAgain_AndKeepsTheLabels()
+    {
+        var (session, pane, _) = Mount();
+        using var __ = session;
+        pane.Labelled = 0;
+        pane.RowsMade = 0;
+
+        session.Application.Theme = Theme.Dark;
+        RebuildAndBuildTree(session, pane);
+        session.Window.SetScale(1.5f);
+        RebuildAndBuildTree(session, pane);
+        session.Window.SetScale(1f);
+        RebuildAndBuildTree(session, pane);
+
+        Assert.True(pane.RowsMade > 0, "no row made again");
+        Assert.Equal(0, pane.Labelled);
     }
 
     [Fact]
@@ -165,6 +200,46 @@ public class VirtualListItemLabelTests
 
         Assert.Equal(Count, pane.Labelled);
         Assert.Equal("now entry 9", ItemNames(bridge)[9]);
+    }
+
+    /// <summary>Meridian's history at a day change: the rows show the new day, and so do the labels, which
+    /// come as a new delegate.</summary>
+    [Fact]
+    public void InvalidateRows_WithAnotherLabelDelegate_LabelsEveryItemAgain()
+    {
+        var (session, pane, bridge) = Mount();
+        using var _ = session;
+        pane.Labelled = 0;
+
+        pane.List.Current!.InvalidateRows();
+        pane.Label = pane.Counting("today ");
+        RebuildAndBuildTree(session, pane);
+
+        Assert.Equal(Count, pane.Labelled);
+        Assert.Equal("today entry 9", ItemNames(bridge)[9]);
+    }
+
+    /// <summary>A label that reads state no row shows is told by its new delegate alone: a build that
+    /// changes nothing else, no row made again, and a reader hears the new names in that frame's walk.</summary>
+    [Fact]
+    public void AnotherLabelDelegate_Alone_TellsAReaderTheNewNames()
+    {
+        var (session, pane, bridge) = Mount();
+        using var _ = session;
+        pane.NewTreeEachBuild = false;
+        pane.Rebuild();
+        session.PumpFrames(2);
+        pane.Labelled = 0;
+        pane.RowsMade = 0;
+
+        pane.Label = pane.Counting("now ");
+        pane.Rebuild();
+        session.PumpFrames(2);
+
+        Assert.Equal(0, pane.RowsMade);
+        Assert.Equal(Count, pane.Labelled);
+        Assert.Equal("now entry 9", ItemNames(bridge)[9]);
+        Assert.Equal("now entry 199", ItemNames(bridge)[199]);
     }
 
     /// <summary>The one-argument template promises nothing, so its labels are asked for on

@@ -41,6 +41,8 @@ internal enum IdleDeadline
     Posted,
     /// <summary>The window has settled, and the GL driver's one-time thread walk may be set off.</summary>
     DriverThreadWalk,
+    /// <summary>A Vulkan window's purge once a size change has rested.</summary>
+    SurfacePurge,
     Count,
 }
 
@@ -234,6 +236,7 @@ internal static class FrameLog
         IdleDeadline.DisplayColor => "display-colour",
         IdleDeadline.Posted => "posted",
         IdleDeadline.DriverThreadWalk => "driver-walk",
+        IdleDeadline.SurfacePurge => "surface-purge",
         _ => "?",
     };
 

@@ -14,6 +14,10 @@ internal sealed class RunCuts(int[] starts, float[] pens, int firstStrong)
     /// <summary>The top bit of a glyph's start: a cut at its cluster is unsafe.</summary>
     public const int Unsafe = int.MinValue;
 
+    /// <summary>Cuts that read no prefix, for a word the shaper gave none (a run shaped right to
+    /// left): kept in their place, they keep the word from being shaped again for its cuts.</summary>
+    public static readonly RunCuts None = new([], [], int.MaxValue);
+
     // Per glyph: where in the run's text its cluster starts, with Unsafe set where a cut there is unsafe.
     private readonly int[] _starts = starts;
 

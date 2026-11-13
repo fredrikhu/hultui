@@ -3,6 +3,7 @@ using System.Reflection;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Headless;
+using Junction.Git;
 using Xunit;
 
 namespace Junction.Tests;
@@ -210,6 +211,192 @@ public class ExternalChangeTests
         });
     }
 
+    /// <summary>A reftable repository keeps HEAD's branch and every ref in .git/reftable, which
+    /// the watcher did not watch: a switch made outside reached it only as the working-tree files
+    /// it changed, a working-tree event, and the branch label, the branch list and the log kept
+    /// what they had until a commit (plan 17 round 13). It is a ref moving now.</summary>
+    [ReftableFact]
+    public void OnAReftableRepository_AnOutsideSwitch_ShowsTheNewBranch()
+    {
+        Hosted(repo =>
+        {
+            Commit(repo, "second");
+            repo.Git("branch", "other", "HEAD~1");
+        }, (repo, session, app) =>
+        {
+            var path = repo.Path;
+            session.Window.PressKey(KeyCode.Digit2);
+            PumpUntil(session, () => Commits(app, path) == 2 && SummaryMember(app, path, "Branch") is "main",
+                "the History view never loaded");
+            Quiet(session, app, path);
+            var log = LoadedKey(app, "_historyLoaders", path);
+
+            repo.Git("switch", "-q", "other");   // second.txt leaves the working tree too
+            PumpUntil(session, () => SummaryMember(app, path, "Branch") is "other",
+                "the switch made outside never reached the branch label");
+            PumpUntil(session, () => LoadedKey(app, "_historyLoaders", path) != log,
+                "the switch made outside did not read the log again");
+        }, reftable: true);
+    }
+
+    /// <summary>A fetch that brings nothing new still takes a ref's lock (the remote's HEAD, git
+    /// 2.53 at least) and deletes it, which the watcher told as a ref moving: the log, the tags and
+    /// the branches were read again 300 ms after the fetch, the background fetch's own fingerprint
+    /// check having decided not to (plan 17 round 13). Such an event reads the status now; a fetch
+    /// that brings a commit still reads them all.</summary>
+    [Fact]
+    public void ARefTransactionThatChangesNothing_ReadsNoLogOrRefs_AndAFetchThatBringsACommitDoes()
+    {
+        var remotes = Path.Combine(Path.GetTempPath(), "junction-git-remote-" + Guid.NewGuid().ToString("N"));
+        string bare = Path.Combine(remotes, "origin.git"), peer = Path.Combine(remotes, "peer");
+        try
+        {
+            Hosted(repo =>
+            {
+                Directory.CreateDirectory(bare);
+                Assert.True(GitProcess.Run(bare, "init", "--bare", "-b", "main").Success);
+                repo.Git("remote", "add", "origin", bare);
+                repo.Git("push", "-q", "-u", "origin", "main");
+                repo.Git("fetch", "-q", "origin");
+                Assert.True(GitProcess.Run(remotes, "clone", "-q", bare, peer).Success);
+            }, (repo, session, app) =>
+            {
+                var path = repo.Path;
+                session.Window.PressKey(KeyCode.Digit2);
+                PumpUntil(session, () => Commits(app, path) == 1 && LoadedKey(app, "_tagsLoaders", path) != null,
+                    "the History view never loaded");
+                Quiet(session, app, path);
+                var log = LoadedKey(app, "_historyLoaders", path);
+                var tags = LoadedKey(app, "_tagsLoaders", path);
+                var branches = SummaryMember(app, path, "Branches");
+                int gen = DataGeneration(app, path);
+
+                repo.Git("fetch", "--all", "--prune");
+                // What that fetch does with the remote's HEAD, by hand, so the event is there
+                // whatever this git's version.
+                var lockFile = Path.Combine(path, ".git", "refs", "remotes", "origin", "HEAD.lock");
+                File.WriteAllText(lockFile, "ref: refs/remotes/origin/main\n");
+                File.Delete(lockFile);
+                PumpUntil(session, () => DataGeneration(app, path) > gen, "the lock was never heard");
+                Quiet(session, app, path);
+                Assert.Equal(log, LoadedKey(app, "_historyLoaders", path));
+                Assert.Equal(tags, LoadedKey(app, "_tagsLoaders", path));
+                Assert.Same(branches, SummaryMember(app, path, "Branches"));
+
+                File.WriteAllText(Path.Combine(peer, "peer.txt"), "peer\n");
+                Assert.True(GitProcess.Run(peer, "add", "-A").Success);
+                Assert.True(GitProcess.Run(peer, "-c", "user.name=Peer", "-c", "user.email=peer@example.invalid",
+                    "commit", "-q", "-m", "from the peer").Success);
+                Assert.True(GitProcess.Run(peer, "push", "-q", "origin", "main").Success);
+                repo.Git("fetch", "-q", "origin");
+                PumpUntil(session, () => LoadedKey(app, "_historyLoaders", path) != log && LoadedKey(app, "_tagsLoaders", path) != tags
+                    && !ReferenceEquals(SummaryMember(app, path, "Branches"), branches), "a fetch that brought a commit did not read the refs again");
+            });
+        }
+        finally { TempRepo.ForceDelete(remotes); }
+    }
+
+    /// <summary>A move that writes only a reflog entry — <c>merge --abort</c>'s reset, a reset to
+    /// where HEAD is — shows the watcher a ref's lock file and nothing else, a working-tree event,
+    /// so the reflog keys on the data generation: an open reflog takes the new entry.</summary>
+    [Fact]
+    public void AMoveThatWritesOnlyTheReflog_ReachesTheOpenReflog()
+    {
+        Hosted(_ => { }, (repo, session, app) =>
+        {
+            var path = repo.Path;
+            typeof(JunctionApp).GetMethod("OpenReflog", Priv)!.Invoke(app, []);
+            PumpUntil(session, () => ReflogEntries(app, path) == 1, "the reflog never loaded");
+            Quiet(session, app, path);
+
+            repo.Git("reset", "-q", "--hard", "HEAD");
+            PumpUntil(session, () => ReflogEntries(app, path) == 2, "the reset's reflog entry never showed");
+        });
+    }
+
+    // ── The app's own actions ────────────────────────────────────────────
+
+    /// <summary>An action of the app's own that moves a ref reloads once. Its RefreshAll reads the
+    /// repository again after everything the watcher had heard while the command ran, so the event
+    /// the watcher told 300 ms later read it all a second time (plan 17 round 13: an in-app
+    /// checkout ran 28 git commands, 14 of them for that). An outside change made while the command
+    /// runs is read by the action's own reload; one made after it is heard as ever.</summary>
+    [Fact]
+    public void AnInAppCheckout_ReloadsOnce_AndAnOutsideChangeMadeMeanwhileShows() => CheckoutReloadsOnce(reftable: false);
+
+    [ReftableFact]
+    public void OnAReftableRepository_AnInAppCheckout_ReloadsOnce_AndAnOutsideChangeMadeMeanwhileShows() => CheckoutReloadsOnce(reftable: true);
+
+    private static void CheckoutReloadsOnce(bool reftable)
+    {
+        Hosted(repo =>
+        {
+            Commit(repo, "second");
+            repo.Git("branch", "other", "HEAD~1");
+        }, (repo, session, app) =>
+        {
+            var path = repo.Path;
+            session.Window.PressKey(KeyCode.Digit2);
+            PumpUntil(session, () => Commits(app, path) == 2 && SummaryMember(app, path, "Branch") is "main",
+                "the History view never loaded");
+            Quiet(session, app, path);
+            // The app's watcher, told what it hears as the app's is, with a debounce long enough
+            // that when it tells is no race with this test: the command below waits until it has
+            // heard everything before it returns.
+            var watchers = (IDictionary)Field(app, "_watchers")!;
+            ((IDisposable)watchers[path]!).Dispose();
+            var watcher = new GitWatcher(path, refs => typeof(JunctionApp)
+                .GetMethod(refs ? "OnExternalChange" : "OnWorkingTreeChange", Priv)!.Invoke(app, [path]), debounceMs: 2000);
+            watchers[path] = watcher;
+            int gen = DataGeneration(app, path);
+
+            // The palette's checkout, with a branch made outside while it runs.
+            var git = (GitRepository)typeof(JunctionApp).GetMethod("RepoFor", Priv)!.Invoke(app, [path])!;
+            Func<GitResult> command = () =>
+            {
+                var result = git.Checkout("other");
+                GitProcess.Run(path, "branch", "made-meanwhile");
+                HeardEverything(watcher);
+                return result;
+            };
+            Action<GitResult> apply = _ => typeof(JunctionApp).GetMethod("RefreshAll", Priv)!.Invoke(app, null);
+            typeof(JunctionApp).GetMethod("RunGitCommand", Priv)!.MakeGenericMethod(typeof(GitResult))
+                .Invoke(app, [command, apply]);
+            PumpUntil(session, () => SummaryMember(app, path, "Branch") is "other" && HasBranch(app, path, "made-meanwhile"),
+                "the checkout's reload never showed the checkout and the branch made meanwhile");
+            // Past the watcher's debounce: what it heard would have been told by now.
+            for (var until = DateTime.UtcNow.AddSeconds(2.5); DateTime.UtcNow < until; Thread.Sleep(5)) session.PumpFrame();
+            Quiet(session, app, path);
+            Assert.Equal(gen + 1, DataGeneration(app, path));
+
+            repo.Git("branch", "made-after");
+            PumpUntil(session, () => HasBranch(app, path, "made-after"), "a branch made after the checkout never showed");
+        }, reftable);
+    }
+
+    /// <summary>Waits, on the command's thread, until the watcher has heard something and then
+    /// nothing more for 300 ms.</summary>
+    private static void HeardEverything(GitWatcher watcher)
+    {
+        var field = typeof(GitWatcher).GetField("_heard", Priv)!;
+        long last = (long)field.GetValue(watcher)!, since = Environment.TickCount64;
+        var until = Environment.TickCount64 + 10_000;
+        while (Environment.TickCount64 < until)
+        {
+            Thread.Sleep(10);
+            long now = (long)field.GetValue(watcher)!;
+            if (now != last) { last = now; since = Environment.TickCount64; }
+            else if (now > 0 && Environment.TickCount64 - since >= 300) return;
+        }
+    }
+
+    private static bool HasBranch(JunctionApp app, string path, string name) =>
+        ((IEnumerable)SummaryMember(app, path, "Branches")!).Cast<object>()
+            .Any(b => (string)b.GetType().GetProperty("Name")!.GetValue(b)! == name);
+
+    private static int ReflogEntries(JunctionApp app, string path) =>
+        ((ICollection)LoaderValue(app, "_reflogLoaders", path)).Count;
+
     /// <summary>Pumps until the repository's loads have landed and a quarter second has passed
     /// with no event, so what a test compares is not still moving.</summary>
     private static void Quiet(HeadlessSession session, JunctionApp app, string path)
@@ -349,9 +536,9 @@ public class ExternalChangeTests
         }
     }
 
-    private static void Hosted(Action<TempRepo> arrange, Action<TempRepo, HeadlessSession, JunctionApp> body)
+    private static void Hosted(Action<TempRepo> arrange, Action<TempRepo, HeadlessSession, JunctionApp> body, bool reftable = false)
     {
-        using var repo = TempRepo.CreateWithInitialCommit();
+        using var repo = TempRepo.CreateWithInitialCommit(reftable);
         arrange(repo);
 
         using var session = HeadlessSession.Create(1440, 900);

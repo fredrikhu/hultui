@@ -935,7 +935,41 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         }
 
         if (OperatingSystem.IsWindows()) PollDisplayColor();
+        PurgeRestedSurfaces();
         return !quit;
+    }
+
+    /// <summary>When the first Vulkan window's purge after a size change is due
+    /// (<see cref="SkiaVulkanRenderSurface.SizeRestPurgeAt"/>), on the
+    /// <see cref="System.Diagnostics.Stopwatch"/>, or null when none is owed. The idle frame loop
+    /// waits for it: once a second after the last of a run of size changes, and never at rest.</summary>
+    internal static long? NextSurfacePurge
+    {
+        get
+        {
+            long at = long.MaxValue;
+            foreach (var window in _registry.Values)
+                if (window._vulkanSurface is { } surface && surface.SizeRestPurgeAt < at)
+                    at = surface.SizeRestPurgeAt;
+            return at == long.MaxValue ? null : at;
+        }
+    }
+
+    /// <summary>
+    /// Runs the Vulkan windows' purges that are due (<see cref="SkiaVulkanRenderSurface.PurgeAfterSizeRest"/>),
+    /// at the end of the pump, between frames. Win32's modal size/move loop runs inside the pump and
+    /// never reaches here; the check on it is for any other way in.
+    /// </summary>
+    private static void PurgeRestedSurfaces()
+    {
+        long now = 0;
+        foreach (var window in _registry.Values)
+        {
+            if (window._vulkanSurface is not { } surface || surface.SizeRestPurgeAt == long.MaxValue) continue;
+            if (window.DrawingFrame || window._vulkanHost?.InSizeMoveLoop == true) continue;
+            if (now == 0) now = System.Diagnostics.Stopwatch.GetTimestamp();
+            surface.PurgeAfterSizeRest(now);
+        }
     }
 
     /// <summary>
@@ -2060,7 +2094,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         StartupTrace.Mark("gl-driver join");
     }
 
-    private static void EnsureSDLInitialized()
+    internal static void EnsureSDLInitialized()
     {
         if (_sdlInitialized) return;
         _sdlInitialized = true;
@@ -2080,6 +2114,10 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // — the user has to click a second time. With click-through the same click
         // both focuses the window and hits the control, as users expect.
         SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
+
+        // Windows only: no 1 ms timer resolution for the life of the process, which SDL asks for
+        // by default; the frame loop's waits ask for it while frames are paced (SdlTimerResolution).
+        SdlTimerResolution.AtRest();
 
         if (!SDL_Init(SDL_InitFlags.SDL_INIT_VIDEO))
             throw new InvalidOperationException($"SDL_Init failed: {GetError()}");

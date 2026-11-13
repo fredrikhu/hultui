@@ -8,6 +8,7 @@ using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
 using HultUI.Core.Reactivity;
+using System.Runtime.CompilerServices;
 using Junction.Git;
 using Junction.Theme;
 
@@ -576,6 +577,30 @@ public partial class JunctionApp : Component, IDisposable
     private RepoSummary SummaryFor(string path)
     {
         var loader = _summaryLoaders.For(path);
+        // The load is asked for only when its key moved. A build asks for a summary in up to
+        // two dozen places, and asking made the key, the two callbacks and what they capture
+        // every time, to be told the key was the one it had (see LoadSummaryAt). The
+        // generations are read apart from DataGen: Reload starts this load itself.
+        int gen = _dataGen.GetValueOrDefault(path);
+        var asked = _summaryAskedAt.GetValue(loader, static _ => new StrongBox<int>(int.MinValue));
+        if (asked.Value != gen)
+        {
+            asked.Value = gen;
+            LoadSummaryAt(path, loader, gen);
+        }
+        return loader.Value;
+    }
+
+    /// <summary>The data generation each summary loader was last asked to load at. Weak, so a
+    /// loader the keyed set evicts takes its entry along; a slot made anew is asked again.</summary>
+    private readonly ConditionalWeakTable<AsyncLoader<RepoSummary>, StrongBox<int>> _summaryAskedAt = new();
+
+    /// <summary>How many times <see cref="SummaryFor"/> asked a loader for a summary, for tests.</summary>
+    internal int SummaryLoadsAsked { get; private set; }
+
+    private void LoadSummaryAt(string path, AsyncLoader<RepoSummary> loader, int gen)
+    {
+        SummaryLoadsAsked++;
         // A reload that finds the repository as it was hands back the summary on screen: a new
         // one with equal content would still notify every reader, since a record struct
         // compares its branch and remote lists by reference (and BranchesFor's sort is
@@ -584,13 +609,12 @@ public partial class JunctionApp : Component, IDisposable
         // The branch, the branches, the version and the remotes on screen were read at a refs
         // generation; while it stands, a reload reads only the status (see RefsGen). The list is
         // the check that the value on screen is the one read then, not a slot made anew.
-        int refsGen = RefsGen(path);
+        int refsGen = _refsGen.GetValueOrDefault(path);
         RepoSummary? refs = _summaryRefsRead.TryGetValue(path, out var read) && read.Gen == refsGen
             && ReferenceEquals(read.Branches, shown.Branches) ? shown : null;
-        loader.Load($"{path}#{DataGen(path)}",
+        loader.Load($"{path}#{gen}",
             () => LoadSummary(path, refs) is var loaded && loaded.SameAs(shown) ? shown : loaded,
             onLoaded: landed => _summaryRefsRead[path] = (refsGen, landed.Branches));
-        return loader.Value;
     }
 
     /// <summary>The refs generation each repository's summary on screen was read at, and its
@@ -602,14 +626,31 @@ public partial class JunctionApp : Component, IDisposable
     private static readonly StringComparer PathComparer =
         OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
-    private int DataGen(string path) => _dataGen.GetValueOrDefault(path);
+    private int DataGen(string path)
+    {
+        if (!_preloading) _viewKeysData.Add(path);
+        return _dataGen.GetValueOrDefault(path);
+    }
 
     /// <summary>The generation of what a repo's HEAD, refs and config say — the log, the
     /// branches, the tags, the remotes, a commit's files. Moves with <see cref="DataGen"/>,
     /// except on a watcher event that changed only the working tree or the index (an editor's
     /// save, a build's output), which cannot change any of them: the loaders keyed on it then
     /// keep what they have, rather than run git a dozen times to read it again.</summary>
-    private int RefsGen(string path) => _refsGen.GetValueOrDefault(path);
+    private int RefsGen(string path)
+    {
+        if (!_preloading) _viewKeysRefs.Add(path);
+        return _refsGen.GetValueOrDefault(path);
+    }
+
+    // The repositories whose data generation, and whose refs generation, a load of the view on
+    // screen was keyed on since its last build began: a watcher event that moves neither builds
+    // no view (see Reload). The summary and the worktrees read theirs apart, since Reload starts
+    // those loads itself and the parts hear them land; so does the preload, which warms views
+    // that are not on screen.
+    private readonly HashSet<string> _viewKeysData = new(PathComparer);
+    private readonly HashSet<string> _viewKeysRefs = new(PathComparer);
+    private bool _preloading;
 
     /// <summary>Invalidate a repo's cached data (views + summary) so it reloads
     /// on next display. Called by our own git actions and by the change watcher.</summary>
@@ -623,8 +664,8 @@ public partial class JunctionApp : Component, IDisposable
 
     private void Invalidate(string path)
     {
-        _dataGen[path] = DataGen(path) + 1;
-        _refsGen[path] = RefsGen(path) + 1;
+        _dataGen[path] = _dataGen.GetValueOrDefault(path) + 1;
+        _refsGen[path] = _refsGen.GetValueOrDefault(path) + 1;
     }
 
     // ── Refused loads ────────────────────────────────────────────────────
@@ -725,7 +766,10 @@ public partial class JunctionApp : Component, IDisposable
     {
         if (_preload is not { } p) return;
         _preload = null;
-        PreloadViews(p.Path, p.Full);
+        // Warming a view is not showing it: its keys say nothing of what is on screen.
+        _preloading = true;
+        try { PreloadViews(p.Path, p.Full); }
+        finally { _preloading = false; }
     }
 
     /// <summary>Reconcile the watcher set with the repos in the active workspace
@@ -760,7 +804,7 @@ public partial class JunctionApp : Component, IDisposable
     private void OnExternalChange(string path)
     {
         BumpDataGen(path);
-        Reload(path);
+        Reload(path, refs: true);
     }
 
     /// <summary>Only the working tree or the index of a watched repo changed (an editor
@@ -772,12 +816,12 @@ public partial class JunctionApp : Component, IDisposable
     private void OnWorkingTreeChange(string path)
     {
         if (string.IsNullOrEmpty(path)) return;
-        _dataGen[path] = DataGen(path) + 1;
+        _dataGen[path] = _dataGen.GetValueOrDefault(path) + 1;
         _loadRetries.Remove(path);
-        Reload(path);
+        Reload(path, refs: false);
     }
 
-    private void Reload(string path)
+    private void Reload(string path, bool refs)
     {
         // Re-warm the cheap views of the repo on screen. Not the full set: the working
         // tree watcher fires on every editor save, and the numstat pass and the
@@ -792,10 +836,26 @@ public partial class JunctionApp : Component, IDisposable
         // the sidebar and the toolbar two or three times each for nothing.
         _ = SummaryFor(path);
         _ = WorktreesFor(path);
+        // The view builds again only for a load of its own that the event re-keys. Another
+        // repository's event re-keys none (the overview reads only summaries, which land on
+        // their own), and an event in the working tree re-keys only what reads it — Changes,
+        // a working-tree diff, the submodules, the reflog — not History, Branches or Tags:
+        // their build found what it had, and the sidebar's dirty count is a part's.
+        if (!ViewKeysOn(path, refs)) return;
         // RerenderView, not MarkViewDirty: the view's own loaders are re-keyed by the
         // generation, and a tracked rebuild is what subscribes to the new ones (see RefreshAll).
         RerenderView();
     }
+
+    /// <summary>Whether an event in <paramref name="path"/> re-keys a load of the view on
+    /// screen: its last build read the repository's data generation, or the event moved a
+    /// ref and the view reads the refs (the active repository's view always does: the
+    /// preload Reload asks for runs at that build), or the issue-tracker file it shows
+    /// changed.</summary>
+    private bool ViewKeysOn(string path, bool refs) =>
+        _viewKeysData.Contains(path)
+        || (refs && (PathEquals(path, _activeRepoPath) || _viewKeysRefs.Contains(path)))
+        || IssueRulesFileMoved(path);
 
     // Runs off the UI thread — no UI / reactive access. With <paramref name="refs"/>, a summary
     // whose HEAD, refs and config have not moved since it was read: only the status is read again.
@@ -886,6 +946,8 @@ public partial class JunctionApp : Component, IDisposable
         _highlightShown = null;   // set again by the diff pane built below (see HighlightForCurrent)
         _changesColumnRef.Current = null;   // set again by a Changes column built below at the split
                                             // (held, it kept the Changes view behind the next one)
+        _viewKeysData.Clear();   // noted again by the loads the view below keys (see Reload)
+        _viewKeysRefs.Clear();
         Builds++;
 
         // Track the revision signal so a Rerender() re-runs Build through the
@@ -1299,6 +1361,12 @@ public partial class JunctionApp : Component, IDisposable
     private void RefreshAll()
     {
         BumpDataGen(_activeRepoPath);
+        // Everything the watcher heard of this repository so far (the action's own writes, and
+        // anyone else's made while it ran) was made before the loads this reload starts read it,
+        // so its event 300 ms from now would read it all a second time. What it hears from here
+        // on is told as before. The preload is the one that event's reload asked for.
+        if (HasActiveRepo && _watchers.TryGetValue(_activeRepoPath, out var watcher) && watcher.Forget())
+            RequestPreload(_activeRepoPath, full: false);
         // Rerender (reactive) rather than MarkDirty: some callers (repo/workspace
         // mutations) have just changed the active repo, so the rebuild must
         // re-subscribe the Effect to the newly-active repo's loaders.

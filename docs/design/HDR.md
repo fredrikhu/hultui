@@ -178,6 +178,17 @@ DXGI read 391.5 MB against 213.2 after the purge. The surface purges after a fra
 a live image scrolled out of view keeps its texture and is not uploaded again. GL does not purge:
 there Skia freed 211 MB and DXGI read 303.7 MB before and 312.0 after, the driver keeping it.
 
+**And so are the stencils of sizes no longer shown** (2026-11-13). Skia attaches a stencil of a
+render target's size when a draw needs one (Aperture's rounded, clipped cards) and shares it between
+targets of that size by a key, which no scratch purge lets go: Aperture kept one for every size it
+had drawn at, 9 and 21.8 MB after 18 size changes through 9 sizes, and every maximize, snap or
+monitor move added the window's width × height bytes. Once a size change has rested (a second after
+the last one, and a frame drawn since the old targets went), the surface purges what went with them
+or before and was not drawn with since (`SizeRestPurge`), from a deadline of the frame loop's own:
+one stencil, Skia's budget 32.0 → 11.2 MB, DXGI local 105 → 84 MB, in 1.1–1.3 ms. It also drops the
+textures of images alive but not drawn since, which come back from their pixels if they are shown
+again. Never inside a drag, whose every step puts it off. GL keeps one stencil, framebuffer 0's.
+
 ### Display colour: HDR state, SDR white, peak
 
 | | HDR state | SDR white | peak |
@@ -339,6 +350,15 @@ quantity; where HDR-LOG.md has several, these are the most careful.
   (115–116). Loop at rest: 0 frames, 0 passes, 0 wakes either way. The chrome reads back the same
   but for blending: white, background and accent identical, a 3-level step on Aperture's card
   surface, 1–3 levels on glyph edges (the 8-bit swapchain blends as GL does).
+- **The first HDR video leaves NVIDIA's DXGI path behind for the process's life** (2026-11-13, plan
+  17 round 13). Reel played a PQ clip for 4 s, then the same clip as SDR, paused and rested on
+  8-bit; against an SDR-only session in the same state, NVIDIA's DXGI threads stayed (`nvwgf2umx`
+  at 96–100 plus 25 a second), wakes went 126 → 256–264 a second, DXGI local 284 → 331 MB,
+  non-local 108 → 139 MB, private 516 → 569–611 MB, threads 37 → 50. Against round 12's
+  always-half-float window at the same point it is still 101 MB less local memory, so not a
+  regression. Replacing the `VkSurfaceKHR` at the switch back to 8-bit changed nothing (the same
+  threads and memory): the driver keeps it per device. Only rebuilding the device (the Skia
+  context, every GPU resource, the mpv interop) could return it; not done (the user, 2026-11-13).
 - **On NVIDIA Linux F16 is nearly free.** There the fixed costs are the API's: about +95 ms of
   start-up and +23 MB, with or without F16.
 - **Over-allocating during a drag** (2026-10-11): a step of an 80-step drag went from 32.9–38.1

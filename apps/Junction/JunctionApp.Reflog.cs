@@ -46,7 +46,10 @@ public partial class JunctionApp
 
     private Element BuildReflogPanel()
     {
-        _reflog.Load($"{_activeRepoPath}|{RefsGen(_activeRepoPath)}", LoadReflog);
+        // The data generation, not the refs one: a move that writes only a reflog entry
+        // (merge --abort's reset, reflog expire) shows the watcher a ref's lock file and nothing
+        // else, which it tells as a working-tree event (GitWatcher.OnFileChanged).
+        _reflog.Load($"{_activeRepoPath}|{DataGen(_activeRepoPath)}", LoadReflog);
         var entries = _reflog.Value;
         var loading = _reflog.IsLoading && entries.Count == 0;
 

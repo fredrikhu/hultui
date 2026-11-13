@@ -212,7 +212,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     // while a client listened (Vesper's pane, named after its folder). The frame walks the elements
     // against the applied tree in place (TryRefreshA11yInPlace), as for a change of their children: the
     // walk makes the node again with its children carried over, and tells the change. Every such
-    // change built the whole tree.
+    // change built the whole tree. A box's click handlers coming or going, a button to a reader or no
+    // longer one (AccessibilityProperties.ClickHandlers), is walked the same way.
     private bool _a11yWalkDue;
 
     // One of a set in the main tree changed its selected state: a menu's entry under the pointer. The
@@ -2184,6 +2185,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // these are the remaining signals.
         long handlersBefore = EventDispatcher.HandlerInvocationCount;
         var hoveredBefore = _lastHoveredElement;
+        int drawnHoverBefore = _pointerState.DrawnHoverChanges;
         bool draggingBefore = _isDragging;
         var focusedBefore = _focusManager.FocusedElement;
         bool keyboardBefore = _focusFromKeyboard;
@@ -2817,15 +2819,22 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // counts as "a handler ran" is an ordinary handler for an event this input
         // dispatched (the key, the press and its focus and blur, the click, the drag's
         // enter, over and leave) on that event's path. The rest of the conditions are the
-        // window's own drawing: the hover chain, the drag ghost (while a drag runs and on
-        // the input that ends it) and the focus ring, which moves with the focus and shows
-        // or hides as the keyboard takes over or the pointer does.
-        // Note: DevTools needs no clause of its own — its element inspector
-        // renders from the hovered element only (not the raw pointer position),
-        // so the hover-changed condition already covers it. Forcing a render per
-        // move while the overlay is open just spins the FPS counter.
+        // window's own drawing: a hover change that is drawn with no mark of its own, the drag
+        // ghost (while a drag runs and on the input that ends it) and the focus ring, which
+        // moves with the focus and shows or hides as the keyboard takes over or the pointer does.
+        // A hover change mostly asks for its frame itself, as after the settle (SettleHover): a
+        // hover or pressed look marks its element (InteractionStyles), a scrollbar its bar, a
+        // tooltip opens an overlay, an owned enter or leave handler marks what it changes, and an
+        // app's runs as a handler above. Only two things draw from the hover with nothing marked:
+        // a list's tint under the row the pointer is on (VirtualListElement.HoverHighlight,
+        // counted by DrawnHoverChanges) and the DevTools inspector, which draws the hovered
+        // element's box — on a change only: a render per move while it is open just spins the
+        // FPS counter. Every hover change drew a frame: a sweep of the pointer down Junction's
+        // diff drew 42 for 52 moves, the same pixels each time (plan 17 round 13).
         if (EventDispatcher.HandlerInvocationCount != handlersBefore     // a handler ran — may have mutated silently
-            || !ReferenceEquals(_lastHoveredElement, hoveredBefore)      // hover chain changed (enter/leave side effects)
+            || (!ReferenceEquals(_lastHoveredElement, hoveredBefore)     // the hover moved, onto or off something
+                && (_pointerState.DrawnHoverChanges != drawnHoverBefore  //   drawn from it: a list's row tint
+                    || _devTools.IsEnabled))                             //   or the inspector's box
             || _isDragging || draggingBefore                             // drag ghost follows the cursor, or goes
             || !ReferenceEquals(_focusManager.FocusedElement, focusedBefore)
             || (_focusFromKeyboard != keyboardBefore && _focusManager.FocusedElement is not null))
@@ -4708,6 +4717,17 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             // tree or the next, unless the row holds the focus: a rebuild for it makes the tree there
             // is. A change on a screen of rows a reader passes over built the whole tree.
             else if (AccessibilityTreeBuilder.InClosedRow(element, window._focusManager.FocusedElement)) return;
+            // A box's click handlers came or went (Element.ClickHandlersChanged): it is a button to a
+            // reader or no longer is, a node added or gone, or made again with its new role. The frame
+            // walks the elements against the applied tree in place, as for a change of their children,
+            // and is asked for (NeedsAccessibilityFrame): it draws nothing. A click handler added to a
+            // mounted box was told only when something else walked or built the tree, a scroll's
+            // refresh five frames on in MiddleClickAutoScrollTests, and never if nothing did (plan 17
+            // round 13). A button's, a scroll view's or a list's role stays, and walks nothing.
+            else if (propertyName == AccessibilityProperties.ClickHandlers)
+            {
+                if (AccessibilityTreeBuilder.ClickDecidesRole(element)) window._a11yWalkDue = true;
+            }
             // A range's value can move every frame (a drag, a playback): on its own schedule, when
             // the range's node is made again and patched in (TryPatchA11y), as a leaf's is.
             else if (propertyName == AccessibilityProperties.RangeValue)

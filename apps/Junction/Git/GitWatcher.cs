@@ -10,6 +10,7 @@ namespace Junction.Git;
 ///   • .git/HEAD           — branch switches, rebase
 ///   • .git/index          — staging changes from external commands
 ///   • .git/refs/**        — branch/tag creation, deletion, updates
+///   • .git/reftable       — every ref of a reftable repository
 ///   • Working tree        — file edits by external editors
 ///
 /// All events are debounced into a single callback with a configurable
@@ -24,6 +25,7 @@ public sealed class GitWatcher : IDisposable
     private readonly FileSystemWatcher _gitDirWatcher;
     private readonly FileSystemWatcher _refsWatcher;
     private readonly FileSystemWatcher _workTreeWatcher;
+    private readonly FileSystemWatcher? _reftableWatcher;
     private readonly Action<bool> _onChange;
     private readonly int _debounceMs;
     private CancellationTokenSource? _debounceCts;
@@ -31,6 +33,9 @@ public sealed class GitWatcher : IDisposable
     /// <summary>Whether HEAD, a ref, the config or the packed refs changed since the last
     /// callback. Guarded by <see cref="_lock"/>.</summary>
     private bool _refsMoved;
+    /// <summary>How many changes were heard; how many of them the last callback told; how many
+    /// the last <see cref="Forget"/> covered. Guarded by <see cref="_lock"/>.</summary>
+    private long _heard, _told, _forgotten;
 
     /// <param name="onChange">Called on the UI thread, debounced; its argument is true when
     /// HEAD, a ref, the config or the packed refs changed, false when only the working tree or
@@ -65,6 +70,24 @@ public sealed class GitWatcher : IDisposable
         _refsWatcher.Created += OnFileChanged;
         _refsWatcher.Deleted += OnFileChanged;
         _refsWatcher.Renamed += OnFileChanged;
+
+        // A reftable repository (`git init --ref-format=reftable`, `git refs migrate`) keeps every
+        // ref, the branch HEAD names included, in .git/reftable: HEAD and refs/heads are stubs that
+        // never change, so neither watcher above hears a checkout, a reset or a branch made. Each
+        // committed ref transaction (a ref, a reflog entry, a compaction) writes a new table and
+        // renames tables.list.lock over tables.list; one that writes nothing creates the lock and
+        // deletes it. Only that rename says a ref moved.
+        var reftableDir = Path.Combine(gitDir, "reftable");
+        if (Directory.Exists(reftableDir))
+        {
+            _reftableWatcher = new FileSystemWatcher(reftableDir)
+            {
+                NotifyFilter = NotifyFilters.FileName,
+                EnableRaisingEvents = true,
+                IncludeSubdirectories = false,
+            };
+            _reftableWatcher.Renamed += OnReftableRenamed;
+        }
 
         // Watch working tree — exclude .git/ directory
         _workTreeWatcher = new FileSystemWatcher(repoPath)
@@ -101,6 +124,11 @@ public sealed class GitWatcher : IDisposable
     private static bool IsRefsFile(string name) =>
         name is "HEAD" or "MERGE_HEAD" or "REBASE_HEAD" or "COMMIT_EDITMSG" or "config" or "packed-refs";
 
+    private void OnReftableRenamed(object sender, RenamedEventArgs e)
+    {
+        if (e.Name == "tables.list") ScheduleRefresh(refs: true);
+    }
+
     private void OnWorkTreeChanged(object sender, FileSystemEventArgs e)
     {
         // Ignore changes inside .git/
@@ -111,15 +139,26 @@ public sealed class GitWatcher : IDisposable
         ScheduleRefresh(refs: false);
     }
 
+    // Git writes a ref to X.lock and renames that over X. A ref transaction that changes
+    // nothing creates the lock and deletes it, and the folder that held it reports a Changed of
+    // its own: every `git fetch` takes refs/remotes/<remote>/HEAD.lock to check the remote's
+    // HEAD, so a fetch that brought nothing new read the log, the branches and the tags again.
+    // A lock or a folder alone is told as a working-tree event, not dropped: a move that writes
+    // only a reflog entry (`merge --abort`'s reset, `reflog expire`) shows the watcher nothing
+    // else, and the reflog keys on the data generation for it. The ref's own rename or delete
+    // is the ref moving.
     private void OnFileChanged(object sender, FileSystemEventArgs e)
     {
-        ScheduleRefresh(refs: true);
+        bool lockOnly = e.Name?.EndsWith(".lock", StringComparison.Ordinal) == true
+            || (e.ChangeType == WatcherChangeTypes.Changed && Directory.Exists(e.FullPath));
+        ScheduleRefresh(refs: !lockOnly);
     }
 
     private void ScheduleRefresh(bool refs)
     {
         lock (_lock)
         {
+            _heard++;
             _refsMoved |= refs;
             _debounceCts?.Cancel();
             _debounceCts = new CancellationTokenSource();
@@ -131,16 +170,49 @@ public sealed class GitWatcher : IDisposable
                 {
                     await Task.Delay(_debounceMs, token);
                     bool moved;
+                    long heard;
                     lock (_lock)
                     {
                         if (token.IsCancellationRequested) return;
                         moved = _refsMoved;
                         _refsMoved = false;
+                        heard = _heard;
                     }
-                    HultUI.Application.InvokeOnMainThread(() => _onChange(moved));
+                    HultUI.Application.InvokeOnMainThread(() => Tell(moved, heard));
                 }
                 catch (TaskCanceledException) { }
             }, token);
+        }
+    }
+
+    private void Tell(bool moved, long heard)
+    {
+        lock (_lock)
+        {
+            if (heard <= _forgotten) return;   // covered by a Forget made since it was posted
+            _told = heard;
+        }
+        _onChange(moved);
+    }
+
+    /// <summary>
+    /// Forgets what was heard so far, for a caller about to read the repository again in full
+    /// after all of it: the app's own git command has finished and the reload that follows starts
+    /// now. Every change heard before this call was made before it, so that reload reads it; the
+    /// callback that would tell it 300 ms later, reading it all again, is dropped, one already on
+    /// its way to the UI thread included. What is heard from now on is told as before, so no
+    /// change made after this call is lost, the app's or anyone else's. Returns whether anything
+    /// heard was still untold. Call on the UI thread.
+    /// </summary>
+    public bool Forget()
+    {
+        lock (_lock)
+        {
+            bool untold = _heard > Math.Max(_told, _forgotten);
+            _forgotten = _heard;
+            _refsMoved = false;
+            _debounceCts?.Cancel();
+            return untold;
         }
     }
 
@@ -149,9 +221,11 @@ public sealed class GitWatcher : IDisposable
         _gitDirWatcher.EnableRaisingEvents = false;
         _refsWatcher.EnableRaisingEvents = false;
         _workTreeWatcher.EnableRaisingEvents = false;
+        if (_reftableWatcher != null) _reftableWatcher.EnableRaisingEvents = false;
         _gitDirWatcher.Dispose();
         _refsWatcher.Dispose();
         _workTreeWatcher.Dispose();
+        _reftableWatcher?.Dispose();
         _debounceCts?.Cancel();
         _debounceCts?.Dispose();
     }

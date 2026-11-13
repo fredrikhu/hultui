@@ -246,11 +246,23 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
 
     // ──── Events (mpv thread) ────
 
+    /// <summary>
+    /// mpv's events, on a thread of their own, waited for without a timeout.
+    ///
+    /// <para><b>No timeout, because nothing here needs one.</b> It waited half a second at a time,
+    /// so an open player woke twice a second at rest: Reel paused on a clip, 2.0–2.2 wakes a second,
+    /// the only thread of the app's own that woke at all. Everything the loop reads besides mpv's
+    /// events is a flag set with an <c>mpv_wakeup</c> after it — <see cref="_stopping"/> (Dispose)
+    /// and <see cref="_traceHwdec"/> (the first drawn frame) — and mpv keeps a wakeup that comes
+    /// before the wait, so none is lost. The rest of what the handlers touch is read when an event
+    /// arrives, and nothing is retried on a timer.</para>
+    /// </summary>
     private void EventLoop()
     {
         while (!_stopping)
         {
-            var e = mpv_wait_event(_mpv, 0.5);
+            var e = mpv_wait_event(_mpv, -1);
+            _eventWaits++;
             if (_traceHwdec)
             {
                 _traceHwdec = false;
@@ -262,6 +274,14 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
             catch (Exception ex) { Console.Error.WriteLine($"[HultUI.Media.Mpv] event handler failed: {ex}"); }
         }
     }
+
+    /// <summary>How many times the event thread's wait has returned, for the tests: once per event
+    /// or wakeup, and never on its own.</summary>
+    private int _eventWaits;
+    internal int EventWaits => Volatile.Read(ref _eventWaits);
+
+    /// <summary>Whether the event thread is still running, for the tests.</summary>
+    internal bool EventThreadAlive => _eventThread.IsAlive;
 
     private void Handle(mpv_event* e)
     {

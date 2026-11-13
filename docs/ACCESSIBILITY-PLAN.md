@@ -476,7 +476,11 @@ item-rows patch asks for the walk itself when the list has more items than label
 reader and the first new one has no row (plan 17 round 12 step 3, a bug fix the user approved,
 question 48): 1 or 3 items appended to a 200-item list were not told (the reader's tree 200 items, a
 build 201 or 203, no walk after 360 ms); now in the patch's frame, by 1 walk and no tree. The labels
-kept grow to the items' number, so a list served on demand asks once per append. The refresh hands the bridge `ApplyChanges` with the diff a build would make, in
+kept grow to the items' number, so a list served on demand asks once per append. The labels kept stay
+when the rows are made again (`InvalidateRows`, another theme or scale; plan 17 round 13 step 5 (a), the user's
+choice, question 52): a label reads its item alone, and one that reads other state comes as a new delegate when
+that state changes, which lets the labels go and asks for the walk. Junction's History made its 1,000 labels again
+at each of its start's four row-shape changes. The refresh hands the bridge `ApplyChanges` with the diff a build would make, in
 its order: the nodes added, each subtree in order; the nodes removed, deepest first, the top one's
 parent a stand-in that keeps the children it had (`AccessibilityNode.ChildrenStandIn`), where AT-SPI
 reads the child's old index for its `children-changed:remove`; the parents reordered; the property
@@ -508,6 +512,15 @@ whose icon is a node there, and so is its text) gets them built as a build build
 whose name now takes the text inside it, with no other node under it, loses its children as a diff
 removes them; each failed the walk, which a renamed pane then reached on every descent into an
 archive.
+Since plan 17 round 13 step 5 (c) the observer sends that walk a box's click handlers coming or going
+too (`AccessibilityProperties.ClickHandlers`, internal): a box with no role of its own is a button
+while it has one (`InferRole`), so its first click handler added in a window, or the last one a
+rebuild's patch drops, adds its node, removes it or makes it again, and nothing on screen changes.
+The walk's frame is asked for and draws nothing; a button's, a scroll view's or a list's role stays,
+and asks for none (`ClickDecidesRole`). Such a change was told only when something else walked or
+built the tree: in MiddleClickAutoScrollTests, rows given a click handler after mount reached the
+reader at the scroll's layout refresh five frames on, and the frame a hover move drew before round 13
+step 2 only hid that from the staleness audit (it walked nothing).
 Where a build would make other nodes than a walk can, it builds the tree, as before: a described
 node or a list's item with children whose own properties changed, a list whose items cross the 2,000
 served on demand, described content in another number, an overlay opened or closed (its own refresh),

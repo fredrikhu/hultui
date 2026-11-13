@@ -52,6 +52,14 @@ using HultUI.WebView.WebView2;
 // disposes them, then draws a few more frames: with HULTUI_STARTUP=1 the purge after them says
 // how much Skia still holds.
 //
+// --size-rest draws rounded, clipped cards with an image in each (what makes Skia attach a stencil to
+// a render target), resizes the window through five new sizes with two frames at each, then runs the
+// real loop with nothing to draw for 2.5 s. It prints Skia's stencils and image textures settled,
+// after the sizes and after the rest, from the window's own GPU context (Windows). With HULTUI_STARTUP
+// set, the trace's "probe sizes done" mark is when the last size had been drawn. With
+// --save-frame=<path> it saves the frame before the rest to <path>.before.png and the one after to
+// <path>.after.png.
+//
 // --frame-counter draws each frame's own number, as sixteen black or white cells, over a red,
 // green or blue background by the number mod 3. HULTUI_VULKAN_CAPTURE's file is looked for after
 // every frame, decoded and deleted: it must show the frame just drawn. Each swapchain captures
@@ -102,6 +110,7 @@ internal static class Program
         Foreground.Keep();
         var renderer = args.Contains("--renderer=default") ? RendererKind.Default : RendererKind.Vulkan;
         if (args.Contains("--disposed-images")) return DisposedImages(renderer);
+        if (args.Contains("--size-rest")) return SizeRest(renderer, args.FirstOrDefault(a => a.StartsWith("--save-frame="))?["--save-frame=".Length..]);
         if (args.Contains("--frame-counter")) return FrameCounter(renderer);
         if (args.Contains("--frame-bytes")) return FrameBytes(renderer);
         if (args.Contains("--first-thread-busy")) return FirstThread(renderer, busyMs: 800);
@@ -559,6 +568,109 @@ internal static class Program
             app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
         Console.WriteLine("probe: done");
         return 0;
+    }
+
+    /// <summary>
+    /// What a Vulkan window keeps for the sizes it no longer has. Skia attaches a stencil of the
+    /// target's size when a draw needs one and shares it by a key, so nothing used to let it go:
+    /// one for every size the window had drawn at (Aperture: 9 after 18 size changes, 21.8 MB).
+    /// </summary>
+    private static int SizeRest(RendererKind renderer, string? savePath)
+    {
+        // Display-colour events, as Aperture and Reel ask for: without them a Vulkan window polls the
+        // display every 100 ms, and the loop would come round to the purge without its own deadline.
+        using var app = Foreground.NoActivate(new Application("vulkan-probe", 640, 400, renderer: renderer,
+            displayColorEvents: true));
+        string[] colours = ["#E04040", "#40C060", "#4060E0", "#E0C040", "#C040C0", "#40C0C0"];
+        var sources = new HultUI.Rendering.Skia.SkiaImageSource[colours.Length];
+        var cards = new HultUI.Core.Elements.Element[colours.Length];
+        for (int i = 0; i < colours.Length; i++)
+        {
+            var bitmap = new SkiaSharp.SKBitmap(96, 96, SkiaSharp.SKColorType.Rgba8888, SkiaSharp.SKAlphaType.Premul);
+            bitmap.Erase(SkiaSharp.SKColor.Parse(colours[i]));
+            sources[i] = new HultUI.Rendering.Skia.SkiaImageSource(bitmap);
+            // A rounded box that clips: overflow hidden with a radius, as Aperture's cards are.
+            var card = Box.New().Width(150f).Height(110f).CornerRadius(14f).Background(Color.FromHex("#303030"))
+                .Children(Image.New(sources[i]).FlexGrow(1), Box.New().Height(20f).Background(Color.FromHex("#F0F0F0")));
+            card.Box.OverflowX = HultUI.Core.Layout.Overflow.Hidden;
+            card.Box.OverflowY = HultUI.Core.Layout.Overflow.Hidden;
+            cards[i] = card;
+        }
+        app.SetRoot(Flex.Row().FlexGrow(1).FlexWrap(HultUI.Core.Layout.FlexWrap.Wrap).Gap(8f).Padding(8f)
+            .Background(Color.FromHex("#101010")).Children(cards));
+        for (int i = 0; i < 12; i++)
+            app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+        PrintSkia(app, "settled");
+
+        nint hwnd = app.PrimaryWindow.NativeHandle;
+        for (int i = 1; i <= 5; i++)
+        {
+            SetWindowPos(hwnd, 0, 0, 0, 640 + 40 * i, 400 + 24 * i, NoMove | NoZOrder | NoActivate);
+            for (int f = 0; f < 2; f++)
+                app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+        }
+        HultUI.Core.DevTools.StartupTrace.Mark("probe sizes done");
+        PrintSkia(app, "resized");
+        if (savePath is not null) SaveFrame(app, savePath + ".before.png");
+        // The real loop, which waits for its next deadline: nothing is dirty, nothing animates.
+        new Thread(() =>
+        {
+            Thread.Sleep(2500);
+            Application.InvokeOnMainThread(() =>
+            {
+                PrintSkia(app, "rested");
+                if (savePath is null) app.PrimaryWindow.Close();
+                else _ = app.PrimaryWindow.SaveFrame(savePath + ".after.png")
+                    .ContinueWith(_ => Application.InvokeOnMainThread(app.PrimaryWindow.Close));
+            });
+        }) { IsBackground = true }.Start();
+        app.Run();
+        foreach (var source in sources) source.Dispose();
+        Console.WriteLine("probe: done");
+        return 0;
+    }
+
+    private static void SaveFrame(Application app, string path)
+    {
+        var saved = app.PrimaryWindow.SaveFrame(path);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (!saved.IsCompleted && clock.Elapsed.TotalSeconds < 10)
+            app.RunFrame(TimeSpan.FromMilliseconds(16));
+        saved.GetAwaiter().GetResult();
+    }
+
+    /// <summary>Prints the stencils and image textures the window's Skia context holds, by
+    /// resource type and category from its memory dump.</summary>
+    private static void PrintSkia(Application app, string stage)
+    {
+        const System.Reflection.BindingFlags Private = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+        var platformWindow = typeof(Window).GetProperty("PlatformWindow", Private)!.GetValue(app.PrimaryWindow)!;
+        var surface = platformWindow.GetType().GetField("_vulkanSurface", Private)?.GetValue(platformWindow);
+        if (surface?.GetType().GetField("_grContext", Private)?.GetValue(surface) is not SkiaSharp.GRContext gr)
+        {
+            Console.WriteLine($"probe: {stage} no Vulkan context");
+            return;
+        }
+        using var dump = new SkiaDump();
+        gr.DumpMemoryStatistics(dump);
+        gr.GetResourceCacheUsage(out _, out long budgeted);
+        Console.WriteLine(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+            $"probe: {stage} stencils {dump.Count("StencilAttachment")} images {dump.Count("Surface/Image")} budget {budgeted / 1048576.0:0.00} MB"));    }
+
+    private sealed class SkiaDump() : SkiaSharp.SKTraceMemoryDump(detailedDump: true, dumpWrappedObjects: false)
+    {
+        private readonly Dictionary<string, string> _type = new();
+        private readonly Dictionary<string, string> _category = new();
+
+        protected override void OnDumpStringValue(string dumpName, string valueName, string value)
+        {
+            if (valueName == "type") _type[dumpName] = value;
+            else if (valueName == "category") _category[dumpName] = value;
+        }
+
+        /// <summary>Resources whose "type" or "type/category" is <paramref name="what"/>.</summary>
+        public int Count(string what) => _type.Count(e =>
+            e.Value == what || e.Value + "/" + _category.GetValueOrDefault(e.Key) == what);
     }
 
     /// <summary>

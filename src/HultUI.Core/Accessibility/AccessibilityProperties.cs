@@ -78,4 +78,12 @@ public static class AccessibilityProperties
 
     /// <summary><see cref="AccessibilityNode.Text"/>'s caret or selection moved.</summary>
     public const string TextSelection = "TextSelection";
+
+    /// <summary>
+    /// An element's click handlers came or went: its first was added, or a rebuild dropped its last
+    /// (<c>Element.ClickHandlersChanged</c>). No bridge is told this name: the window walks the tree
+    /// for it, and what the handlers changed (a box that is a button now, or no longer is) reaches the
+    /// bridges as the walk's nodes added or removed and their role.
+    /// </summary>
+    internal const string ClickHandlers = "ClickHandlers";
 }

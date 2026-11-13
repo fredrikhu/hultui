@@ -127,13 +127,14 @@ capture, a drag, a text selection, a slider, an autoscroll): hover stays where i
 release, as it does on a move, and the frame after the release settles it. Nothing happens
 when the pointer is outside the window or has never been in it, or when the build kept the
 hovered element. The settle draws a frame of its own only when something shows the new
-hover: a hover or pressed style (`.OnHover`), a list's tint under the row
-(`.HoverHighlight`), or an enter or leave handler, which may change what is drawn without
-marking it. Otherwise the frame that replaced the elements stands: Junction drew every key of
-its commit file walk twice while the pointer rested on the diff, the second frame the same
-pixels (plan 17 round 12). Until plan 17's round 9, hover stayed on the removed element until the
-pointer moved, and through its parents that element kept the whole old view alive: in
-Meridian with a 2,000-endpoint spec, 7.8 MB of a 28 MB heap after a key switched the view.
+hover, as a pointer move does (see "Which inputs draw a frame" below): a hover or pressed
+style (`.OnHover`), a list's tint under the row (`.HoverHighlight`), or an enter or leave
+handler, which may change what is drawn without marking it. Otherwise the frame that replaced
+the elements stands: Junction drew every key of its commit file walk twice while the pointer
+rested on the diff, the second frame the same pixels (plan 17 round 12). Until plan 17's
+round 9, hover stayed on the removed element until the pointer moved, and through its parents
+that element kept the whole old view alive: in Meridian with a 2,000-endpoint spec, 7.8 MB of
+a 28 MB heap after a key switched the view.
 
 So an enter or leave handler must not rebuild the element the pointer is over into a new one:
 the next frame's hit-test enters the new one, the handler builds another, and the window
@@ -142,7 +143,8 @@ place, or the same key) and change what it shows, as Vesper Commander's column h
 
 **Which inputs draw a frame.** An input draws a frame when it changes something: an element
 marked itself dirty (a control's own state, a scroll, a hover or pressed style, an overlay),
-the hover moved to another element, a drag is under way or has just ended, or the focus ring
+the hover moved onto or off a row its list tints (`.HoverHighlight`), or to another element
+while the DevTools inspector is open, a drag is under way or has just ended, or the focus ring
 moved, showed or hid. It also draws one when an app handler ran for an event the input
 dispatched — the key, the press and the focus and blur it caused, the release and its
 click, the wheel's `ScrollEvent` — on that event's way through the tree (`On<TEvent>`,
@@ -150,8 +152,19 @@ click, the wheel's `ScrollEvent` — on that event's way through the tree (`On<T
 anything (see "Layout styles do not self-invalidate" in REACTIVITY.md; `HULTUI002` catches
 the common case), so the window repaints after one to be safe. Nothing else draws a frame: a
 key-up no handler hears, a wheel notch over a list that has nothing to scroll, a press on
-static text. Until plan 17's round 4 every input but a pointer move drew one, and a key-up's
-frame was 42–46 % of a key press's frame time in Junction and Vesper Commander.
+static text, a move onto an element that shows no hover. Until plan 17's round 4 every input
+but a pointer move drew one, and a key-up's frame was 42–46 % of a key press's frame time in
+Junction and Vesper Commander.
+
+The hover moving to another element draws nothing by itself. What shows a hover marks what it
+changes: a hover or pressed style its element, a scrollbar its bar, a tooltip opens an overlay,
+the framework's controls (a splitter, a calendar, a menu, a slider) what their enter and leave
+handlers change; an app's enter or leave handler gets the frame any handler gets. Only a list's
+tint under the row (`.HoverHighlight`) and the DevTools inspector are drawn from the hover
+itself, so a change of the hovered row or of the inspected element draws. Until plan 17's
+round 13 every change of the hovered element drew a frame: a sweep of the pointer down
+Junction's diff drew 42, now 3, the rest the pixels already on screen. So a custom element that
+draws from its own `IsHovered` shows that with `.OnHover` or an enter or leave handler.
 
 So a handler that runs often and usually does nothing — a move tracker on a root that acts
 only during a resize drag or a right-drag selection — belongs in `el.OnPassive<TEvent>(handler)`.
@@ -232,7 +245,10 @@ children builds the tree.
 tree builder infers one from the element type, and the last rule is "a box with an
 `OnClick` is a `Button`", named from the text inside it. That is right for a clickable
 card and wrong for a row whose click merely selects it: give that an explicit
-`.AccessibleRole(...)`. An explicit role always wins over inference.
+`.AccessibleRole(...)`. An explicit role always wins over inference. A box's first click
+handler added after it is in a window, or the last one a rebuild drops, is told by the next
+frame (the window walks its accessibility tree in place, in a frame that draws nothing); it was
+told only when something else rebuilt or walked the tree.
 
 **A backdrop is not a button when its card is a dialog.** A box with a click whose child
 has the role `Dialog` is the dialog's backdrop: it gets no role and no name, so in your own
@@ -1367,8 +1383,8 @@ var list = VirtualListElement<FileEntry>.New()
 | `.OnActivateItem(h)` | `OnItemActivate` | called when assistive technology invokes or selects a row through the accessibility bridge; pointer and keyboard activation are the row template's own `OnClick` / `On<KeyDownEvent>` handlers |
 | `.KeyboardScroll(bool)` | `KeyboardScrollEnabled` | arrows / PageUp / PageDown / Home / End |
 | — | `RowsAreComposite` | one item is a row of controls (a wrap grid), so the realized rows answer to assistive tech rather than one node per item — see **A row that is not one thing** below |
-| — | `InvalidateHeights()`, `InvalidateRows()` | after a change the list cannot see; with `ItemRowTemplate`, whenever anything a row shows besides its item and selected state changes |
-| — | `InvalidateRow(index)` | `InvalidateRows()` for one item: its row (if realized) and its kept label are made again, every other row is kept — for something only a row or two show that moves (see **State that only some rows show** below) |
+| — | `InvalidateHeights()`, `InvalidateRows()` | after a change the list cannot see; with `ItemRowTemplate`, whenever anything a row shows besides its item and selected state changes (the items' accessible labels stay: a label that reads other state is a new delegate, see **Item labels a list keeps** below) |
+| — | `InvalidateRow(index)` | `InvalidateRows()` for one item: its row (if realized) and, unlike `InvalidateRows()`, its kept label are made again, every other row is kept — for something only a row or two show that moves (see **State that only some rows show** below) |
 | `.SelectionHighlight(fill, radius, ring, width)`, `.SelectionHighlight(RowHighlight?)` | `SelectionHighlight` | the list draws the selection itself, under each selected row on screen, and makes its rows unselected, so a selection move makes no row; a `RowHighlight` with `BorderThickness` draws a ring whose width differs by side (an accent on one edge) — see **A selection the list draws** below |
 | `.HoverHighlight(fill, radius, rows)` | `HoverHighlight`, `HoverRowFor` | the list draws a tint under the unselected row the pointer is on, so rows it keeps need no hover of their own; with `rows`, only under the rows it is true for (not a header) — same section |
 | `.SelectionOverlay(element)` | `SelectionOverlay` | the list holds one element over the selected row, against its end, for what only that row shows — same section |
@@ -1674,15 +1690,34 @@ listening; kept: 150.4 → 2.0 KB a key, 206.7 → 2.0 with UIA, 1 tree a key �
 and −20 % (headless, JIT; NativeAOT −20 % both). The suite pins it:
 `a11y/type in a rich text editor inside a VirtualList row, bridge on`, and its UIA twin.
 
-The items' accessible labels follow the same contract. The accessibility tree asks for every
-item's label each time it is built — with a reader listening, after every structural change
-and every scroll — so an item-rows list keeps each item's label while the item is equal to
-the one it was made from and `AccessibleItemLabel` is the same delegate; `InvalidateRows()`,
-new `Items` and another delegate let them all go. Pass a label that reads only its item as a
-lambda that captures nothing, or keep the delegate in a field: a lambda that captures the
-build's state is a new delegate every build and keeps nothing (which is right for a label
-that reads that state, unless the state is in the shape you invalidate on). On the walk with
-a recording bridge listening, keeping the labels takes a step from 274 to 112 KB.
+**Item labels a list keeps.** The items' accessible labels have a contract of their own. The
+accessibility tree asks for every item's label each time it is built — with a reader
+listening, after every structural change and every scroll — so an item-rows list keeps each
+item's label while the item is equal to
+the one it was made from and `AccessibleItemLabel` is the same delegate. A label reads its item
+and nothing else: the rows made again (`InvalidateRows()`, another theme, another display
+scale) keep the labels, and new `Items` or another delegate let them all go. Pass a label that
+reads only its item as a lambda that captures nothing, or keep the delegate in a field. A label
+that reads other state is a new delegate when that state changes, which makes every label again
+and tells a reader those that changed at the next frame, whether or not a row is made again:
+
+```csharp
+if (day != _rowsDay)              // a send is named by its time against today: "yesterday 23:59"
+{
+    _rowsDay = day;
+    _listRef.Current?.InvalidateRows();   // the rows show the time too
+    _itemLabel = null;                    // a new delegate below: the labels are made again
+}
+list.AccessibleItemLabel(_itemLabel ??= item => RowName(item.Entry, Now));
+```
+
+That is Meridian's history; Vesper's find results do the same when the folder their places are
+told relative to moves. A lambda that captures the build's state is a new delegate every build
+and keeps nothing. Until plan 17 round 13 `InvalidateRows()` let the labels go with the rows:
+with a reader listening, Junction's History made its 1,000 labels again (217 KB) at each of the
+four row-shape changes its start brings as its loads land, and again at every later one (a
+stats page, the window crossing the compact width, a theme). On the walk with a recording bridge listening, keeping the labels takes a
+step from 274 to 112 KB.
 A reader hears an item's new label whether its row is on screen or not: a patch that finds another
 item where a label was kept, or none (past the items' new end), asks the frame's in-place walk,
 which names that item again, or tells it gone, with no tree built. The check is one comparison per

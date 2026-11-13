@@ -405,6 +405,9 @@ public partial class CommanderApp
         if (shape != _findRowShape)
         {
             _findVList.Current?.InvalidateRows();
+            // The labels read the folder too, and the list keeps them through InvalidateRows: a new
+            // folder is a new delegate, which makes them again.
+            if (shape.Item4 != _findRowShape.Item4) _findItemLabel = null;
             _findRowShape = shape;
         }
         return VirtualListElement<FindRowItem>.New()
@@ -415,7 +418,7 @@ public partial class CommanderApp
             // Each result is read out as its row shows it (FindResultLabel); it was the Hit record's
             // ToString, every field and the full path. One delegate from build to build, so the
             // list keeps the labels; the folder they are relative to is in the rows' shape, and a
-            // change lets them go with the rows.
+            // change makes a new delegate (above).
             .AccessibleItemLabel(_findItemLabel ??= item => FindResultLabel(item.Hit))
             .WithRef(_findVList)
             .Height(_findListH)

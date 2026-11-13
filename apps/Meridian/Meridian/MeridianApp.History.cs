@@ -303,12 +303,14 @@ public partial class MeridianApp
         }
 
         // A row's time reads against today (a clock time today, "yesterday", a weekday, a
-        // date), so a new day makes the rows on screen, and their labels, again.
+        // date), so a new day makes the rows on screen again, and the label is a new delegate:
+        // the list keeps each send's label while the send is the same, through InvalidateRows too.
         var day = HistoryNow.ToLocalTime().Date;
         if (day != _historyRowsDay)
         {
             _historyRowsDay = day;
             _historyListRef.Current?.InvalidateRows();
+            _historyItemLabel = null;
         }
 
         // VirtualList: history is the one surface that really does grow to
@@ -322,7 +324,7 @@ public partial class MeridianApp
             .Items(new HistoryRowItems(rows))
             .RenderWith((item, _) => HistoryRow(item.Entry, item.Index))
             .SelectionHighlight(HistoryHighlight(_historySelection, HistoryNow))
-            // One delegate from build to build, so the list keeps each row's label too.
+            // One delegate from build to build, so the list keeps each row's label too; a new one a day.
             .AccessibleItemLabel(_historyItemLabel ??= item => HistoryRowName(item.Entry, HistoryNow))
             .OnActivateItem(item => { _historySelection = item.Entry; MarkViewDirty(); })
             .SelectedIndex(SelectedHistoryIndex(rows))

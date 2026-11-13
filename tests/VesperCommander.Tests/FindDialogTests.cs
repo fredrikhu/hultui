@@ -186,6 +186,49 @@ public class FindDialogTests
         Assert.DoesNotContain(names, n => n.StartsWith("Hit {", System.StringComparison.Ordinal));
     }
 
+    /// <summary>A result's name says the folder it is in relative to the folder searched, the pane's: when the pane
+    /// moves to another folder with the results on screen, the rows are made again and a reader hears the names
+    /// relative to the new one. The list keeps each result's name while the result is the same, also when the rows
+    /// are made again (InvalidateRows, plan 17 round 13 step 5 (a)), so the move hands it a new label delegate.</summary>
+    [Fact]
+    public void AResultsName_FollowsTheFolderItIsRelativeTo()
+    {
+        using var t = new DiffViewTests.Fixture();
+        for (int i = 0; i < 70; i++) t.WriteLeft($"f{i:000}.txt", "x");
+        string sub = Path.Combine(t.Left, "sub");
+        Directory.CreateDirectory(sub);
+        File.WriteAllText(Path.Combine(sub, "deep.txt"), "xy");
+        t.Open();
+        var bridge = t.Session.Window.InstallAccessibilityBridge();
+        t.Press(KeyCode.F7, KeyModifiers.Alt);
+        t.SetField("_findPattern", ".txt");
+        t.SetField("_findRecursive", true);
+        t.Invoke("RunFind");
+        t.Session.PumpUntil(() => !t.Field<bool>("_findSearching"), System.TimeSpan.FromSeconds(30));
+        t.Session.PumpFrames(3);
+        Assert.Contains($"deep.txt, in sub, {FileSystem.ByteCount(2)}", Names(bridge));
+
+        t.Invoke("NavigateTo", 'L', sub);   // the pane moved under the open dialog, by whatever moves it
+        t.MarkDirty();
+        t.Session.PumpFrames(3);
+        Assert.Equal(sub, t.Dir('L'));
+        var names = Names(bridge);
+        Assert.Contains($"deep.txt, {FileSystem.ByteCount(2)}", names);
+        Assert.Contains($"f000.txt, in {t.Left}, {FileSystem.ByteCount(1)}", names);
+
+        static List<string> Names(HeadlessAccessibilityBridge bridge)
+        {
+            var names = new List<string>();
+            void Walk(HultUI.Core.Accessibility.AccessibilityNode node)
+            {
+                if (node.Role == HultUI.Core.Accessibility.AccessibilityRole.ListItem) names.Add(node.Name ?? "");
+                foreach (var child in node.Children) Walk(child);
+            }
+            Walk(bridge.CurrentTree!);
+            return names;
+        }
+    }
+
     // ── harness ──────────────────────────────────────────────────────────
     private static readonly List<string> _tmp = new();
 

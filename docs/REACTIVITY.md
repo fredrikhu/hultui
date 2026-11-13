@@ -1610,7 +1610,7 @@ UI thread, headless; over Changes, which shows the working tree, 19 → 11 comma
 1,611 KB; in a real window (NativeAOT) 4,502 → 236 KB and 647 → 172 KB an event. The same frames
 and accessibility trees.
 
-Two traps on the way, both in what a `FileSystemWatcher` on `.git` reports:
+Four traps on the way, all in what a `FileSystemWatcher` on `.git` reports:
 
 - Git writes HEAD, the config and the packed refs to a lock file and renames it over the old
   one. A watcher that listens for Changed and Created never hears them: a checkout that changed
@@ -1618,6 +1618,66 @@ Two traps on the way, both in what a `FileSystemWatcher` on `.git` reports:
 - `git status` replaces the index the same way when it refreshes it, which it did on three runs
   in a row on a fresh repository, unless optional locks are off (as in the tests). A watcher of
   the index's renames hears the app's own reads, reloads, and reads again.
+- A reftable repository (`git init --ref-format=reftable`, `git refs migrate`; git 3.0 plans it as
+  the default for new repositories) keeps every ref, the branch HEAD names included, in
+  `.git/reftable`. HEAD and `refs/heads` are stubs that never change, so a watcher of them heard a
+  checkout, a reset or a pull made outside only through the working-tree files it changed, as a
+  working-tree event, and the branch label, the branch list and the log kept what they had until
+  a commit (round 13: 8 of 9 outside operations left the app stale). Every committed ref
+  transaction writes a new table and renames `tables.list.lock` over `tables.list`; that rename
+  is the ref moving, and the watcher now hears it in that folder.
+- A ref transaction that changes nothing still takes the ref's lock: git creates `X.lock` and
+  deletes it, and the folder that held it reports a Changed of its own. Every `git fetch` (git
+  2.53 at least) does that for `refs/remotes/<remote>/HEAD`, so a fetch that brought nothing, the
+  app's own background fetch included, read the log, the branches and the tags again 300 ms after
+  the fetch's own check had decided not to: in a real window on a clone of this repository, 14 git
+  commands and 4.5 MB on all threads a fetch, 2 and 0.17 MB once a lock or a folder alone was
+  told as a working-tree event.
+  Not dropped: a move that writes only a reflog entry (`merge --abort`'s reset, `reflog expire`)
+  shows the watcher nothing else, so the reflog keys on the data generation (round 13; see
+  docs/DECISIONS.md).
+
+### An event builds only the view whose loads it re-keys
+
+A new generation re-keys loads; it needs a build only when something on screen keys a load on
+it. Junction's watcher handler built the view after every event so the view's loads would see
+the new keys, and most events re-key none: another repository's save (the overview reads only
+summaries, which land by themselves and rebuild what reads them), and a save in the repository on
+screen while History, Branches or Tags is shown, whose loads key on the refs. The generation
+accessors now note which repository's generation a load of the view read since its last build
+began, and the handler builds the view only when the event moved one of those, or a ref moved in
+the repository on screen. Two readers note nothing: the loads the handler starts itself (the
+summary and the worktrees, whose parts hear them land) and the preload, which warms views that
+are not on screen.
+
+What a view reads from disk without a load needs the handler's eye too. History shows the
+issue-tracker file's rules, looked at once a build; a save of that file used to arrive with the
+build every event made, and the handler now builds when the file's write time moved (git may
+ignore the file, and then no summary moves either).
+
+Per event (round 13): another repository's save 86.0 → 70.0 KB on the UI thread and 2 → 1
+builds and frames headless, 91.1 → 71.9 KB in a real window (NativeAOT); a file touched there
+18.4 → 2.4 KB and 1 → 0 builds and frames; a save over History 166.4 → 150.8 KB and 2 → 1
+frames headless, 205.6 → 187.8 KB in a real window, a touch 21.5 → 1.9 KB and 1 → 0; Changes
+unchanged. The same frames and accessibility trees.
+
+### The app's own change, heard again
+
+An app that watches what it also writes hears its own writes. Junction's actions (a checkout, a
+commit, a pull, a branch or a tag made) end in `RefreshAll`, which reloads the repository, and
+300 ms later the watcher told the same change and the repository was read a second time. Every
+change the watcher has heard when `RefreshAll` runs was made before the loads it starts read the
+repository, so those loads read it: `RefreshAll` tells the watcher to forget what it heard so
+far (`GitWatcher.Forget`), its pending callback and one already posted to the UI thread
+included, and everything heard after that is told as before. Nothing is paused: an outside
+change made while the action ran is read by the action's own reload, one made after it is heard.
+A fingerprint of the refs read before the reload would do the same for one or two git commands
+an action, and has to be read before the reload starts, which delays it.
+
+An in-app checkout, headless: 28 → 15 git commands (14 with no watcher at all), 987 → 747 KB on
+the UI thread (−24 %), 1,975 → 1,288 KB on all threads (−35 %), 17 → 15 builds; the same on a
+reftable repository. In a real window (NativeAOT, a clone of this repository): 28 → 17 git
+commands, 1,740 → 1,215 KB on the UI thread and 10.6 → 6.5 MB on all threads a checkout.
 
 ### What a build shows of files comes from what was read already
 
