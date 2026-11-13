@@ -1380,8 +1380,8 @@ var list = VirtualListElement<FileEntry>.New()
 | `.OnActivateItem(h)` | `OnItemActivate` | called when assistive technology invokes or selects a row through the accessibility bridge; pointer and keyboard activation are the row template's own `OnClick` / `On<KeyDownEvent>` handlers |
 | `.KeyboardScroll(bool)` | `KeyboardScrollEnabled` | arrows / PageUp / PageDown / Home / End |
 | — | `RowsAreComposite` | one item is a row of controls (a wrap grid), so the realized rows answer to assistive tech rather than one node per item — see **A row that is not one thing** below |
-| — | `InvalidateHeights()`, `InvalidateRows()` | after a change the list cannot see; with `ItemRowTemplate`, whenever anything a row shows besides its item and selected state changes |
-| — | `InvalidateRow(index)` | `InvalidateRows()` for one item: its row (if realized) and its kept label are made again, every other row is kept — for something only a row or two show that moves (see **State that only some rows show** below) |
+| — | `InvalidateHeights()`, `InvalidateRows()` | after a change the list cannot see; with `ItemRowTemplate`, whenever anything a row shows besides its item and selected state changes (the items' accessible labels stay: a label that reads other state is a new delegate, see **Item labels a list keeps** below) |
+| — | `InvalidateRow(index)` | `InvalidateRows()` for one item: its row (if realized) and, unlike `InvalidateRows()`, its kept label are made again, every other row is kept — for something only a row or two show that moves (see **State that only some rows show** below) |
 | `.SelectionHighlight(fill, radius, ring, width)`, `.SelectionHighlight(RowHighlight?)` | `SelectionHighlight` | the list draws the selection itself, under each selected row on screen, and makes its rows unselected, so a selection move makes no row; a `RowHighlight` with `BorderThickness` draws a ring whose width differs by side (an accent on one edge) — see **A selection the list draws** below |
 | `.HoverHighlight(fill, radius, rows)` | `HoverHighlight`, `HoverRowFor` | the list draws a tint under the unselected row the pointer is on, so rows it keeps need no hover of their own; with `rows`, only under the rows it is true for (not a header) — same section |
 | `.SelectionOverlay(element)` | `SelectionOverlay` | the list holds one element over the selected row, against its end, for what only that row shows — same section |
@@ -1687,15 +1687,34 @@ listening; kept: 150.4 → 2.0 KB a key, 206.7 → 2.0 with UIA, 1 tree a key �
 and −20 % (headless, JIT; NativeAOT −20 % both). The suite pins it:
 `a11y/type in a rich text editor inside a VirtualList row, bridge on`, and its UIA twin.
 
-The items' accessible labels follow the same contract. The accessibility tree asks for every
-item's label each time it is built — with a reader listening, after every structural change
-and every scroll — so an item-rows list keeps each item's label while the item is equal to
-the one it was made from and `AccessibleItemLabel` is the same delegate; `InvalidateRows()`,
-new `Items` and another delegate let them all go. Pass a label that reads only its item as a
-lambda that captures nothing, or keep the delegate in a field: a lambda that captures the
-build's state is a new delegate every build and keeps nothing (which is right for a label
-that reads that state, unless the state is in the shape you invalidate on). On the walk with
-a recording bridge listening, keeping the labels takes a step from 274 to 112 KB.
+**Item labels a list keeps.** The items' accessible labels have a contract of their own. The
+accessibility tree asks for every item's label each time it is built — with a reader
+listening, after every structural change and every scroll — so an item-rows list keeps each
+item's label while the item is equal to
+the one it was made from and `AccessibleItemLabel` is the same delegate. A label reads its item
+and nothing else: the rows made again (`InvalidateRows()`, another theme, another display
+scale) keep the labels, and new `Items` or another delegate let them all go. Pass a label that
+reads only its item as a lambda that captures nothing, or keep the delegate in a field. A label
+that reads other state is a new delegate when that state changes, which makes every label again
+and tells a reader those that changed at the next frame, whether or not a row is made again:
+
+```csharp
+if (day != _rowsDay)              // a send is named by its time against today: "yesterday 23:59"
+{
+    _rowsDay = day;
+    _listRef.Current?.InvalidateRows();   // the rows show the time too
+    _itemLabel = null;                    // a new delegate below: the labels are made again
+}
+list.AccessibleItemLabel(_itemLabel ??= item => RowName(item.Entry, Now));
+```
+
+That is Meridian's history; Vesper's find results do the same when the folder their places are
+told relative to moves. A lambda that captures the build's state is a new delegate every build
+and keeps nothing. Until plan 17 round 13 `InvalidateRows()` let the labels go with the rows:
+with a reader listening, Junction's History made its 1,000 labels again (217 KB) at each of the
+four row-shape changes its start brings as its loads land, and again at every later one (a
+stats page, the window crossing the compact width, a theme). On the walk with a recording bridge listening, keeping the labels takes a
+step from 274 to 112 KB.
 A reader hears an item's new label whether its row is on screen or not: a patch that finds another
 item where a label was kept, or none (past the items' new end), asks the frame's in-place walk,
 which names that item again, or tells it gone, with no tree built. The check is one comparison per

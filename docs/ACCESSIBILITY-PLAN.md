@@ -476,7 +476,11 @@ item-rows patch asks for the walk itself when the list has more items than label
 reader and the first new one has no row (plan 17 round 12 step 3, a bug fix the user approved,
 question 48): 1 or 3 items appended to a 200-item list were not told (the reader's tree 200 items, a
 build 201 or 203, no walk after 360 ms); now in the patch's frame, by 1 walk and no tree. The labels
-kept grow to the items' number, so a list served on demand asks once per append. The refresh hands the bridge `ApplyChanges` with the diff a build would make, in
+kept grow to the items' number, so a list served on demand asks once per append. The labels kept stay
+when the rows are made again (`InvalidateRows`, another theme or scale; plan 17 round 13 step 5 (a), the user's
+choice, question 52): a label reads its item alone, and one that reads other state comes as a new delegate when
+that state changes, which lets the labels go and asks for the walk. Junction's History made its 1,000 labels again
+at each of its start's four row-shape changes. The refresh hands the bridge `ApplyChanges` with the diff a build would make, in
 its order: the nodes added, each subtree in order; the nodes removed, deepest first, the top one's
 parent a stand-in that keeps the children it had (`AccessibilityNode.ChildrenStandIn`), where AT-SPI
 reads the child's old index for its `children-changed:remove`; the parents reordered; the property

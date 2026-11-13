@@ -59,11 +59,12 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// <para>On item rows (<see cref="ItemRowTemplate"/>) the list keeps each item's label
     /// while the item at its index is equal to the one it was made from and this is the same
     /// delegate: the accessibility tree asks for every item's label each time it is built, and
-    /// a label made on every ask is a string per item per tree. The label is held to the rows'
-    /// contract — it reads its item and nothing else, or the list is told with
-    /// <see cref="InvalidateRows"/> — so a label that reads other state either goes with a
-    /// shape the app invalidates on, or is a new delegate each build (a lambda that captures
-    /// that state is), which keeps nothing.</para>
+    /// a label made on every ask is a string per item per tree. The label reads its item and
+    /// nothing else: the rows made again (<see cref="InvalidateRows"/>, another theme, another
+    /// display scale) keep the labels. A label that reads other state is given as a new delegate
+    /// when that state changes, which makes every label again and tells a reader the ones that
+    /// changed at the next frame; a lambda that captures that state is a new delegate each
+    /// build, and keeps nothing.</para>
     /// </summary>
     public Func<T, string?>? AccessibleLabel
     {
@@ -72,15 +73,20 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         {
             if (ReferenceEquals(_accessibleLabel, value)) return;
             _accessibleLabel = value;
+            if (_labels is null) return;
+            // A reader was given labels made by the delegate before. The frame's walk names each item
+            // again, which tells those that changed: a new delegate may come with no row made again.
             _labels = null;
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.Name);
         }
     }
     private Func<T, string?>? _accessibleLabel;
 
     // Item rows only: the label each index was named with and the item it was made from. Kept
-    // while that item stays equal (EqualityComparer<T>.Default) and the delegate is the same;
-    // InvalidateRows, new Items and another delegate let them all go. A patch that finds another
-    // item at an index lets its label go and asks the frame's walk (KeepUnchangedRows).
+    // while that item stays equal (EqualityComparer<T>.Default) and the delegate is the same, also
+    // when the rows are made again (InvalidateRows, a theme, a scale); new Items and another
+    // delegate let them all go. A patch that finds another item at an index lets its label go and
+    // asks the frame's walk (KeepUnchangedRows).
     private ItemLabel[]? _labels;
 
     private readonly record struct ItemLabel(T Item, string? Label, bool Made);
@@ -520,9 +526,10 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     {
         base.ApplyTheme(theme);
         // Kept rows were made with the colours of the theme in force then. Another theme makes
-        // them again; this runs on every style pass, so only a different theme object counts.
+        // them again (their labels stay); this runs on every style pass, so only a different
+        // theme object counts.
         if (_itemRowTemplate is not null && _activeTheme is not null && !ReferenceEquals(theme, _activeTheme))
-            InvalidateItems();
+            InvalidateItems(keepLabels: true);
         _activeTheme = theme;
     }
 
@@ -530,10 +537,10 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// scale (Junction's icons) is a raster for that scale, which the app's cache retires when the
     /// scale changes and frees at the next change. Another scale makes them again, as another theme
     /// does, so a row whose shape forgot the scale cannot keep a freed raster (Junction History,
-    /// junction-v1.20.0: every icon gone after a move to 150 % and back).</summary>
+    /// junction-v1.20.0: every icon gone after a move to 150 % and back). The items' labels stay.</summary>
     internal override void OnDisplayScaleChanged()
     {
-        if (_itemRowTemplate is not null) InvalidateItems();
+        if (_itemRowTemplate is not null) InvalidateItems(keepLabels: true);
     }
 
     internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx)
@@ -604,10 +611,12 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// capture what the build saw.
     /// </para>
     /// <para>
-    /// The contract covers the items' accessible labels too (<see cref="AccessibleLabel"/>):
-    /// the list keeps each item's label while the item is equal and the label is the same
-    /// delegate, and lets them all go with the rows on <see cref="InvalidateRows"/> or new
-    /// <see cref="Items"/>.
+    /// The items' accessible labels (<see cref="AccessibleLabel"/>) have a contract of their own:
+    /// a label reads its item and nothing else. The list keeps each item's label while the item
+    /// is equal and the label is the same delegate, also when the rows are made again
+    /// (<see cref="InvalidateRows"/>, another theme or scale), and lets them all go on new
+    /// <see cref="Items"/> or another delegate. A label that reads other state is a new delegate
+    /// when that state changes (see <see cref="InvalidateRows"/>).
     /// </para>
     /// </summary>
     public Func<T, bool, Element>? ItemRowTemplate
@@ -688,16 +697,28 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// it when the rows' <i>appearance</i> depends on state the list cannot see — a shared
     /// horizontal offset, say — since a recycled row is otherwise reused as-is. The scroll
     /// position is kept. With <see cref="ItemRowTemplate"/> this is how anything a row shows
-    /// beyond its item and its selected state reaches the rows the list keeps, and the items'
-    /// accessible labels, which it keeps the same way.
+    /// beyond its item and its selected state reaches the rows the list keeps.
+    /// <para>
+    /// It keeps the items' accessible labels (<see cref="AccessibleLabel"/>). With a reader
+    /// listening, the accessibility tree asks for every item's label (up to 2,000) after the rows
+    /// are made again, and a list whose rows are often told what they show around them made every
+    /// label again each time: Junction's History (the graph, the remotes, the stats, the window's
+    /// width) 1,000 labels, 217 KB, four times as it started. A label reads its item and nothing
+    /// else. One that reads other state is passed as a new delegate when that state changes,
+    /// beside this call when the rows show it too: Meridian's history names a send by its time
+    /// against today ("yesterday 23:59"), so at a day change it calls this and hands the list a
+    /// new label delegate, which makes every label again and tells a reader the ones that changed.
+    /// Until plan 17 round 13 this let the labels go with the rows.
+    /// </para>
     /// </summary>
-    public void InvalidateRows() => InvalidateItems();
+    public void InvalidateRows() => InvalidateItems(keepLabels: true);
 
     /// <summary>
     /// <see cref="InvalidateRows"/> for one item: throws away the realized row at
-    /// <paramref name="index"/>, and the item's kept accessible label, so the next frame makes
-    /// them again from the latest template and label; every other row stays as it is. For item
-    /// rows (<see cref="ItemRowTemplate"/>) that show something beside their item and selected
+    /// <paramref name="index"/>, and (unlike <see cref="InvalidateRows"/>) the item's kept
+    /// accessible label, so the next frame makes them again from the latest template and label;
+    /// every other row stays as it is. For item rows (<see cref="ItemRowTemplate"/>) that show
+    /// something beside their item and selected
     /// state which only a row or two show at a time and which moves — a second highlight that
     /// follows another list's cursor, say — when the app knows which rows it left and reached:
     /// told through <see cref="InvalidateRows"/>, each move made every row on screen again.
@@ -724,10 +745,13 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         DropGathered();
     }
 
-    private void InvalidateItems()
+    /// <param name="keepLabels">The rows are made again for what they show (InvalidateRows, a theme,
+    /// a scale): the items' labels, which read the items alone, stay. Each is checked against its
+    /// item when asked for anyway.</param>
+    private void InvalidateItems(bool keepLabels = false)
     {
         _offsets = null;
-        _labels = null;
+        if (!keepLabels) _labels = null;
         _stickyRowsCurrent = false;
         _visibleStart = -1;
         _visibleEnd = -1;
@@ -1504,7 +1528,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             }
             // Rows realized as sticky elements go when a list stops holding them; otherwise they
             // are told again over the rows the patch brings, as the heights are worked out.
-            if (_stickyRowFor is not null && vl._stickyRowFor is null) InvalidateItems();
+            if (_stickyRowFor is not null && vl._stickyRowFor is null) InvalidateItems(keepLabels: true);
             _stickyRowFor = vl._stickyRowFor;
 
             // First: it decides the selected state rows are made with, which the selection
