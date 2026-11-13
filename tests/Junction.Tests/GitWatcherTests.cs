@@ -76,6 +76,43 @@ public class GitWatcherTests
         Assert.Contains(true, after(() => repo.Git("reset", "-q", "--hard", "HEAD~1"), false));
     }
 
+    /// <summary>A ref transaction that changes nothing creates the ref's lock and deletes it, and
+    /// the folder reports a Changed of its own: every <c>git fetch</c> (git 2.53 at least) does it for
+    /// the remote's HEAD, so a fetch that brought nothing read the log, the branches and the tags
+    /// again (plan 17 round 13). It is a working-tree event now, not dropped: a move that writes
+    /// only a reflog entry shows the watcher nothing else. A ref's own rename still moves it.</summary>
+    [Fact]
+    public void ARefTransactionThatChangesNothing_IsAWorkingTreeEvent()
+    {
+        using var repo = TempRepo.CreateWithInitialCommit();
+        var remote = Path.Combine(Path.GetTempPath(), "junction-git-remote-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(remote);
+            Assert.True(GitProcess.Run(remote, "init", "--bare", "-b", "main").Success);
+            repo.Git("remote", "add", "origin", remote);
+            repo.Git("push", "-q", "-u", "origin", "main");
+            repo.Git("fetch", "-q", "origin");
+            using var session = HeadlessSession.Create(400, 300);
+            var seen = new List<bool>();
+            using var watcher = new GitWatcher(repo.Path, refs => seen.Add(refs), debounceMs: 100);
+            var after = Observer(session, seen);
+
+            // As git leaves it when the ref already holds the value: the lock made and deleted.
+            var lockFile = Path.Combine(repo.Path, ".git", "refs", "heads", "main.lock");
+            Assert.Equal([false], after(() => { File.WriteAllText(lockFile, repo.Head + "\n"); File.Delete(lockFile); }, false));
+            Assert.DoesNotContain(true, after(() => repo.Git("fetch", "--all", "--prune"), true));
+            // The reflog gains "reset: moving to HEAD"; no ref moves.
+            Assert.DoesNotContain(true, after(() => repo.Git("reset", "-q", "--hard", "HEAD"), true));
+
+            repo.Write("next.txt", "next\n");
+            repo.Git("add", "-A");
+            repo.Git("commit", "-q", "-m", "next");
+            Assert.Equal([true], after(() => repo.Git("push", "-q", "origin", "main"), false));
+        }
+        finally { TempRepo.ForceDelete(remote); }
+    }
+
     /// <summary>Waits out what came before, runs the action, and returns what the watcher said
     /// about it (a straggler in the same change included).</summary>
     private static Func<Action, bool, List<bool>> Observer(HeadlessSession session, List<bool> seen) => (act, expectNone) =>

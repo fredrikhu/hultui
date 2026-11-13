@@ -3,6 +3,7 @@ using System.Reflection;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Headless;
+using Junction.Git;
 using Xunit;
 
 namespace Junction.Tests;
@@ -237,6 +238,84 @@ public class ExternalChangeTests
                 "the switch made outside did not read the log again");
         }, reftable: true);
     }
+
+    /// <summary>A fetch that brings nothing new still takes a ref's lock (the remote's HEAD, git
+    /// 2.53 at least) and deletes it, which the watcher told as a ref moving: the log, the tags and
+    /// the branches were read again 300 ms after the fetch, the background fetch's own fingerprint
+    /// check having decided not to (plan 17 round 13). Such an event reads the status now; a fetch
+    /// that brings a commit still reads them all.</summary>
+    [Fact]
+    public void ARefTransactionThatChangesNothing_ReadsNoLogOrRefs_AndAFetchThatBringsACommitDoes()
+    {
+        var remotes = Path.Combine(Path.GetTempPath(), "junction-git-remote-" + Guid.NewGuid().ToString("N"));
+        string bare = Path.Combine(remotes, "origin.git"), peer = Path.Combine(remotes, "peer");
+        try
+        {
+            Hosted(repo =>
+            {
+                Directory.CreateDirectory(bare);
+                Assert.True(GitProcess.Run(bare, "init", "--bare", "-b", "main").Success);
+                repo.Git("remote", "add", "origin", bare);
+                repo.Git("push", "-q", "-u", "origin", "main");
+                repo.Git("fetch", "-q", "origin");
+                Assert.True(GitProcess.Run(remotes, "clone", "-q", bare, peer).Success);
+            }, (repo, session, app) =>
+            {
+                var path = repo.Path;
+                session.Window.PressKey(KeyCode.Digit2);
+                PumpUntil(session, () => Commits(app, path) == 1 && LoadedKey(app, "_tagsLoaders", path) != null,
+                    "the History view never loaded");
+                Quiet(session, app, path);
+                var log = LoadedKey(app, "_historyLoaders", path);
+                var tags = LoadedKey(app, "_tagsLoaders", path);
+                var branches = SummaryMember(app, path, "Branches");
+                int gen = DataGeneration(app, path);
+
+                repo.Git("fetch", "--all", "--prune");
+                // What that fetch does with the remote's HEAD, by hand, so the event is there
+                // whatever this git's version.
+                var lockFile = Path.Combine(path, ".git", "refs", "remotes", "origin", "HEAD.lock");
+                File.WriteAllText(lockFile, "ref: refs/remotes/origin/main\n");
+                File.Delete(lockFile);
+                PumpUntil(session, () => DataGeneration(app, path) > gen, "the lock was never heard");
+                Quiet(session, app, path);
+                Assert.Equal(log, LoadedKey(app, "_historyLoaders", path));
+                Assert.Equal(tags, LoadedKey(app, "_tagsLoaders", path));
+                Assert.Same(branches, SummaryMember(app, path, "Branches"));
+
+                File.WriteAllText(Path.Combine(peer, "peer.txt"), "peer\n");
+                Assert.True(GitProcess.Run(peer, "add", "-A").Success);
+                Assert.True(GitProcess.Run(peer, "-c", "user.name=Peer", "-c", "user.email=peer@example.invalid",
+                    "commit", "-q", "-m", "from the peer").Success);
+                Assert.True(GitProcess.Run(peer, "push", "-q", "origin", "main").Success);
+                repo.Git("fetch", "-q", "origin");
+                PumpUntil(session, () => LoadedKey(app, "_historyLoaders", path) != log && LoadedKey(app, "_tagsLoaders", path) != tags
+                    && !ReferenceEquals(SummaryMember(app, path, "Branches"), branches), "a fetch that brought a commit did not read the refs again");
+            });
+        }
+        finally { TempRepo.ForceDelete(remotes); }
+    }
+
+    /// <summary>A move that writes only a reflog entry — <c>merge --abort</c>'s reset, a reset to
+    /// where HEAD is — shows the watcher a ref's lock file and nothing else, a working-tree event,
+    /// so the reflog keys on the data generation: an open reflog takes the new entry.</summary>
+    [Fact]
+    public void AMoveThatWritesOnlyTheReflog_ReachesTheOpenReflog()
+    {
+        Hosted(_ => { }, (repo, session, app) =>
+        {
+            var path = repo.Path;
+            typeof(JunctionApp).GetMethod("OpenReflog", Priv)!.Invoke(app, []);
+            PumpUntil(session, () => ReflogEntries(app, path) == 1, "the reflog never loaded");
+            Quiet(session, app, path);
+
+            repo.Git("reset", "-q", "--hard", "HEAD");
+            PumpUntil(session, () => ReflogEntries(app, path) == 2, "the reset's reflog entry never showed");
+        });
+    }
+
+    private static int ReflogEntries(JunctionApp app, string path) =>
+        ((ICollection)LoaderValue(app, "_reflogLoaders", path)).Count;
 
     /// <summary>Pumps until the repository's loads have landed and a quarter second has passed
     /// with no event, so what a test compares is not still moving.</summary>

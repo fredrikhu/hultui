@@ -136,9 +136,19 @@ public sealed class GitWatcher : IDisposable
         ScheduleRefresh(refs: false);
     }
 
+    // Git writes a ref to X.lock and renames that over X. A ref transaction that changes
+    // nothing creates the lock and deletes it, and the folder that held it reports a Changed of
+    // its own: every `git fetch` takes refs/remotes/<remote>/HEAD.lock to check the remote's
+    // HEAD, so a fetch that brought nothing new read the log, the branches and the tags again.
+    // A lock or a folder alone is told as a working-tree event, not dropped: a move that writes
+    // only a reflog entry (`merge --abort`'s reset, `reflog expire`) shows the watcher nothing
+    // else, and the reflog keys on the data generation for it. The ref's own rename or delete
+    // is the ref moving.
     private void OnFileChanged(object sender, FileSystemEventArgs e)
     {
-        ScheduleRefresh(refs: true);
+        bool lockOnly = e.Name?.EndsWith(".lock", StringComparison.Ordinal) == true
+            || (e.ChangeType == WatcherChangeTypes.Changed && Directory.Exists(e.FullPath));
+        ScheduleRefresh(refs: !lockOnly);
     }
 
     private void ScheduleRefresh(bool refs)

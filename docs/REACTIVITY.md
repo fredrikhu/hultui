@@ -1610,7 +1610,7 @@ UI thread, headless; over Changes, which shows the working tree, 19 → 11 comma
 1,611 KB; in a real window (NativeAOT) 4,502 → 236 KB and 647 → 172 KB an event. The same frames
 and accessibility trees.
 
-Three traps on the way, all in what a `FileSystemWatcher` on `.git` reports:
+Four traps on the way, all in what a `FileSystemWatcher` on `.git` reports:
 
 - Git writes HEAD, the config and the packed refs to a lock file and renames it over the old
   one. A watcher that listens for Changed and Created never hears them: a checkout that changed
@@ -1626,6 +1626,16 @@ Three traps on the way, all in what a `FileSystemWatcher` on `.git` reports:
   a commit (round 13: 8 of 9 outside operations left the app stale). Every committed ref
   transaction writes a new table and renames `tables.list.lock` over `tables.list`; that rename
   is the ref moving, and the watcher now hears it in that folder.
+- A ref transaction that changes nothing still takes the ref's lock: git creates `X.lock` and
+  deletes it, and the folder that held it reports a Changed of its own. Every `git fetch` (git
+  2.53 at least) does that for `refs/remotes/<remote>/HEAD`, so a fetch that brought nothing, the
+  app's own background fetch included, read the log, the branches and the tags again 300 ms after
+  the fetch's own check had decided not to: in a real window on a clone of this repository, 14 git
+  commands and 4.5 MB on all threads a fetch, 2 and 0.17 MB once a lock or a folder alone was
+  told as a working-tree event.
+  Not dropped: a move that writes only a reflog entry (`merge --abort`'s reset, `reflog expire`)
+  shows the watcher nothing else, so the reflog keys on the data generation (round 13; see
+  docs/DECISIONS.md).
 
 ### What a build shows of files comes from what was read already
 

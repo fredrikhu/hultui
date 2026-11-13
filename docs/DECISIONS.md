@@ -906,6 +906,21 @@ bit); not built. Two variants were measured and dropped: giving a word the cache
 11,223; reading the cuts before looking the cut word up made a 40-frame drag 4 % slower (two
 lookups for every hit), so the lookup comes first.
 
+### A ref's lock file alone is a working-tree event, not dropped (round 13)
+
+Plan 17's round 13, step 1 stopped Junction's repository watcher from reading a ref transaction
+that changes nothing as a ref moving: git creates the ref's lock and deletes it, and the folder
+reports a Changed. Every `git fetch` does it for the remote's HEAD, so a fetch that brought
+nothing read the log, the branches and the tags again. Two ways were measured. Dropping such
+events costs least (headless, the background fetch with nothing new: 3 git commands and 1.5 KB on
+the UI thread a sweep in the survey's prototype, against 5 and 24 KB told as a working-tree event,
+and 17 and 254 KB before), but over 53 real git operations it left 4 unheard: `merge --abort` and `cherry-pick --abort` (a reset that writes only HEAD's
+reflog), `reflog expire` and `worktree add` of an existing branch, whose only sign in the watched
+folders is a ref's lock. So they are told as working-tree events, which read the status and the
+worktrees, and the reflog panel keys on the data generation. A reftable repository's lock alone
+(`tables.list.lock`) is not heard at all: reftable writes reflog entries into its tables, so
+every move there renames `tables.list`.
+
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
 BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction
