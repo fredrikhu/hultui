@@ -578,6 +578,31 @@ public class ChromePartTests
         });
     }
 
+    /// <summary>A build asks for the summary of the repository on screen in many places; under a
+    /// key that has not moved, none of them makes the load's key and callbacks again (plan 17
+    /// round 13: 0.5 KB a build on History). A generation moving asks once.</summary>
+    [Fact]
+    public void ABuildUnderTheSameSummaryKey_AsksForNoSummaryLoad()
+    {
+        Hosted(fx =>
+        {
+            var path = fx.A.Path;
+            int asked = fx.App.SummaryLoadsAsked, builds = fx.App.Builds;
+            KeyViewOnly(fx);
+            KeyViewOnly(fx);
+            Assert.True(fx.App.Builds > builds, "the keys built no view");
+            Assert.Equal(asked, fx.App.SummaryLoadsAsked);
+
+            Invoke(fx.App, "OnWorkingTreeChange", path);
+            fx.Session.PumpUntil(() => LoadedKey(fx.App, "_summaryLoaders", path) == $"{path}#{DataGen(fx.App, path)}", Wait);
+            Settle(fx);
+            int after = fx.App.SummaryLoadsAsked;
+            Assert.True(after > asked, "the generation moving asked for no load");
+            KeyViewOnly(fx);
+            Assert.Equal(after, fx.App.SummaryLoadsAsked);
+        });
+    }
+
     /// <summary>What a watcher event does change still reaches the chrome and the view, as a full
     /// build shows it: a branch made (the summary carries the list the Branches view shows), a
     /// remote added (the GitLab mark by the name) and a commit ahead of its upstream (the count on

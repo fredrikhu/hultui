@@ -8,6 +8,7 @@ using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
 using HultUI.Core.Reactivity;
+using System.Runtime.CompilerServices;
 using Junction.Git;
 using Junction.Theme;
 
@@ -576,6 +577,30 @@ public partial class JunctionApp : Component, IDisposable
     private RepoSummary SummaryFor(string path)
     {
         var loader = _summaryLoaders.For(path);
+        // The load is asked for only when its key moved. A build asks for a summary in up to
+        // two dozen places, and asking made the key, the two callbacks and what they capture
+        // every time, to be told the key was the one it had (see LoadSummaryAt). The
+        // generations are read apart from DataGen: Reload starts this load itself.
+        int gen = _dataGen.GetValueOrDefault(path);
+        var asked = _summaryAskedAt.GetValue(loader, static _ => new StrongBox<int>(int.MinValue));
+        if (asked.Value != gen)
+        {
+            asked.Value = gen;
+            LoadSummaryAt(path, loader, gen);
+        }
+        return loader.Value;
+    }
+
+    /// <summary>The data generation each summary loader was last asked to load at. Weak, so a
+    /// loader the keyed set evicts takes its entry along; a slot made anew is asked again.</summary>
+    private readonly ConditionalWeakTable<AsyncLoader<RepoSummary>, StrongBox<int>> _summaryAskedAt = new();
+
+    /// <summary>How many times <see cref="SummaryFor"/> asked a loader for a summary, for tests.</summary>
+    internal int SummaryLoadsAsked { get; private set; }
+
+    private void LoadSummaryAt(string path, AsyncLoader<RepoSummary> loader, int gen)
+    {
+        SummaryLoadsAsked++;
         // A reload that finds the repository as it was hands back the summary on screen: a new
         // one with equal content would still notify every reader, since a record struct
         // compares its branch and remote lists by reference (and BranchesFor's sort is
@@ -587,10 +612,9 @@ public partial class JunctionApp : Component, IDisposable
         int refsGen = _refsGen.GetValueOrDefault(path);
         RepoSummary? refs = _summaryRefsRead.TryGetValue(path, out var read) && read.Gen == refsGen
             && ReferenceEquals(read.Branches, shown.Branches) ? shown : null;
-        loader.Load($"{path}#{_dataGen.GetValueOrDefault(path)}",
+        loader.Load($"{path}#{gen}",
             () => LoadSummary(path, refs) is var loaded && loaded.SameAs(shown) ? shown : loaded,
             onLoaded: landed => _summaryRefsRead[path] = (refsGen, landed.Branches));
-        return loader.Value;
     }
 
     /// <summary>The refs generation each repository's summary on screen was read at, and its
