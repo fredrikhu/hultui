@@ -4,17 +4,16 @@ State of [the performance team](17-performance-team.md). The orchestrator update
 file after every step and commits it with the step's work. Full survey reports are in
 [`17-reports/`](17-reports/).
 
-- **Round:** 13
-- **Phase:** release — round 13's CI fixes merged into main as e432c224; CI run 43499639788: Junction's ReviewTests pass,
-  one SDL3 wake test failed (a wait woken 50 ms in ran 2,456 ms); failed job re-run once; then cut the app releases. Steps 1–4, 5 (b), 6 and 7
-  done (15f97351, 013e1f1b, 8e05c94e; 0da9f80e, 185bedad; 698c2758, 54bd7d3a, b8fd2c67; 8f9f2683, da72e01b,
-  d413e001, 0a8361f9; 5849c137; 4fdb56cb, 276789d8, cdb47cb9; 154a7ca3, 8048b644). The survey is
-  done (reports `17-reports/r13-*`, committed da6e72c8..8f01b6fd); 8 steps in the round 13 build order; questions 52–54
-  are open (52 shapes step 5 (a), 53 step 8, 54 step 6 (d)); the rest of each step goes ahead. Build briefs
-  `brief-r13b<N>.md` in session 17c11f5e's scratchpad quote their report lines; one build agent at a time in this
-  worktree, with `scripts/perf/step-ab.ps1` and the desktop lock `Global\HultUI-r13-desktop` for real windows. Round 12
-  released: merged into main as afc1ed40; CI run 43269911874 green on attempt 2; app releases junction-v1.26.0,
-  vesper-v1.26.0, meridian-v1.9.0, aperture-v1.24.0, reel-v1.10.0 on afc1ed40.
+- **Round:** 14
+- **Phase:** survey — round 14, to start in a fresh context (the loop stopped 2026-11-13 after round 13's release).
+  Round 13 released: merged into main as 7cd6f083, then its CI fixes as e432c224; CI run 43499639788 green on attempt 2
+  (attempt 1: a runner stall in an SDL3 wake test). App releases (the user asked): junction-v1.27.0, vesper-v1.27.0,
+  meridian-v1.10.0, aperture-v1.25.0, reel-v1.11.0 on e432c224 (see the Log). Round 14's survey measures in real windows
+  too and ranks by real-app effect: start the common brief from session 17c11f5e's scratchpad `brief-r13-survey.md` (the
+  desktop lock, now `Global\HultUI-r14-desktop`; dot-source only .ps1 files; real ja/zh text fixtures from
+  `r13-text\mkreal.py`; log the window's DPI and the attached monitors). Round 14's survey archives round 12's Landed
+  rows, round 13's build order and answered questions 52–54, and round 12's log entries (from 2026-11-12, round 12's
+  survey, to its release); use `archive_r13.py` in session 17c11f5e's scratchpad as the model.
   To resume in a fresh context, run in this worktree: `/loop Run the next step of
   the performance team: follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
   Read both once per session (afterwards only the ledger's Phase and the part the step needs), do the step the ledger's
@@ -24,7 +23,7 @@ file after every step and commits it with the step's work. Full survey reports a
   [the archive](17-performance-team-ledger-archive.md) (search it, don't read it whole). History note: rewritten
   2026-10-25 (every commit after 3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history).
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`)
-- **Review commits since:** round 14's survey reviews round 13's build, 8f01b6fd..(round 13's release). Earlier: round 13's survey reviewed round 12's build, 5f1744ca..afc1ed40 (the last survey report to the round 12 release; the one merge is round 12's own into main). Round 12's survey reviewed round 11's build, 5731ee58..b0dd1954 (the last survey report to the
+- **Review commits since:** round 14's survey reviews round 13's build, 8f01b6fd..e432c224 (the last survey report to the round 13 release; its two merges are round 13's own into main). Earlier: round 13's survey reviewed round 12's build, 5f1744ca..afc1ed40 (the last survey report to the round 12 release; the one merge is round 12's own into main). Round 12's survey reviewed round 11's build, 5731ee58..b0dd1954 (the last survey report to the
   round 11 release; it includes the .NET 11 upgrade's step 0 only as already reviewed). Earlier: round 11's survey reviewed round 10's build and the .NET 11 upgrade, f4d6050d..868e2ffc
   (the last survey report to the upgrade's captures; round 10's merge into main cc55bdcc is in the range). Earlier: round 10's survey reviewed round 9's build, 4919ac40..facced69 (the last survey report
   to the round 9 release; 82 commits, 81 not merges; no merge from main this round). Round 9's survey reviewed
@@ -967,3 +966,18 @@ From 2026-11-12 (round 12's survey); earlier entries are in the archive ([to 202
   `SdlWindowingPlatformTests.AWakeThePumpTookItself_LeavesTheNextWakeToEndAWait` failed once ("a wait woken 50 ms in ran
   2456 ms", bound < 1,500). That path is unchanged by step 8 when no short wait came before (no hold, one
   `SDL_WaitEventTimeout`), so most likely a runner stall like the timer test's; the failed job re-run once to tell.
+- 2026-11-13: CI run 43499639788 on e432c224 green on attempt 2 (test, test-linux, docs, meridian-keyring on
+  ubuntu-24.04 and macos-15); attempt 1's Windows test job failed
+  `SdlWindowingPlatformTests.AWakeThePumpTookItself_LeavesTheNextWakeToEndAWait` once (a wait woken 50 ms in ran 2,456
+  ms; a path step 8 leaves alone): a runner stall, `gh run rerun --failed` once. Round 13 landed eight steps (and 5 (c)
+  and the CI fixes): Junction's watcher hears reftable refs and ignores lock echoes (a no-op fetch 14 → 2 git runs); a
+  pointer move whose hover change nothing draws asks for no frame (−55…−75 % frames a sweep); CJK words cut by prefix
+  tables read off cuts made once (a Chinese drag at 960 logical px 88.6 → 2.0 MB, −45 % in a real window); Junction
+  events build and load less (a checkout −30 % UI KB); lists keep reader labels across `InvalidateRows` (Junction start
+  −28 % UI KB with a reader) and a click handler added after mount is told; Vulkan windows free stencils of old sizes at
+  rest (−19 MB after 9 sizes) and mpv waits without a timeout; Vesper's wrapped views lead their width (one frame a
+  resize); Windows' 1 ms timer only while the loop paces frames. Round → 14, Phase → survey; the loop stops, and round
+  14 starts in a fresh context. The user asked for app releases after this round (2026-11-13): junction-v1.27.0,
+  vesper-v1.27.0, meridian-v1.10.0, aperture-v1.25.0, reel-v1.11.0 cut on e432c224 (CI green), annotated, messages from
+  files, pushed 3 + 2; installer runs 43505664912 (Vesper), 43505665242 (Junction), 43505665602 (Meridian), 43505709936
+  (Reel), 43505711156 (Aperture) started.
