@@ -938,3 +938,6 @@ From 2026-11-12 (round 12's survey); earlier entries are in the archive ([to 202
   round 13 build steps saw one time out once locally under load). Not a known flake: the failed job re-run once (attempt
   2) for data, and a CI-fix agent reproduces both under CI-like conditions (2 cores, loaded), bisects round 13's
   suspects and fixes the causes on the branch. Main is red until the fix lands; app releases wait for green.
+- 2026-11-13: CI attempt 2 on 7cd6f083 (failed job re-run): the same 15 Junction GitLab `ReviewTests` failed again in
+  the same order (deterministic on the hosted runner); the step 8 timer test passed (a timing flake). Passed to the
+  CI-fix agent.
