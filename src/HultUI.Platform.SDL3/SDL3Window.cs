@@ -2094,7 +2094,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         StartupTrace.Mark("gl-driver join");
     }
 
-    private static void EnsureSDLInitialized()
+    internal static void EnsureSDLInitialized()
     {
         if (_sdlInitialized) return;
         _sdlInitialized = true;
@@ -2114,6 +2114,10 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // — the user has to click a second time. With click-through the same click
         // both focuses the window and hits the control, as users expect.
         SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
+
+        // Windows only: no 1 ms timer resolution for the life of the process, which SDL asks for
+        // by default; the frame loop's waits ask for it while frames are paced (SdlTimerResolution).
+        SdlTimerResolution.AtRest();
 
         if (!SDL_Init(SDL_InitFlags.SDL_INIT_VIDEO))
             throw new InvalidOperationException($"SDL_Init failed: {GetError()}");

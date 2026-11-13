@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using HultUI.Core.Platform;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
@@ -156,13 +157,36 @@ public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform, IMonitorSo
     /// for. Only Windows: SDL's X11 and Wayland waits take the remainder in nanoseconds
     /// (or round it up), and Cocoa's in seconds, so there it already waits what it is
     /// asked to.</para>
+    ///
+    /// <para><b>Timer resolution on Windows.</b> A short wait (what is left of a display
+    /// interval) asks SDL for 1 ms timer resolution before it starts; a long one gives it back,
+    /// partway in, a second after the last short one (<see cref="SdlTimerResolution"/>). Split
+    /// there, the wait still ends only when something arrives or its timeout is out.</para>
     /// </remarks>
     public void WaitForEvents(int timeoutMs)
     {
-        if (OperatingSystem.IsWindows() && timeoutMs is > 0 and < int.MaxValue)
-            timeoutMs++;
+        if (OperatingSystem.IsWindows())
+        {
+            int releaseIn = _timerResolution.BeforeWait(timeoutMs, Stopwatch.GetTimestamp());
+            if (timeoutMs is > 0 and < int.MaxValue)
+                timeoutMs++;
+            if (releaseIn > 0)
+            {
+                long start = Stopwatch.GetTimestamp();
+                if (SDL_WaitEventTimeout(null, releaseIn + 1)) return;
+                _timerResolution.Release();
+                if (timeoutMs != Timeout.Infinite)
+                {
+                    timeoutMs -= (int)Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+                    if (timeoutMs <= 0) return;
+                }
+            }
+        }
         SDL_WaitEventTimeout(null, timeoutMs);
     }
+
+    // Windows' timer resolution: 1 ms while the loop paces frames, the default while it rests.
+    private readonly SdlTimerResolution _timerResolution = new();
 
     /// <summary>
     /// Pushes a wake event so a <see cref="WaitForEvents"/> in progress returns at

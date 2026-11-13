@@ -94,6 +94,25 @@ twice) does the same on its own, so the throughput figure it exists to show is
 not capped. Neither touches the swap interval: this is the loop's pacing, not
 the driver's vsync.
 
+**Timer resolution (Windows).** The wait for what is left of an interval lasts a
+few milliseconds, and Windows times waits in ticks of 15.6 ms unless the process
+asks for finer ones (`timeBeginPeriod`): at 15.6 ms a tween would draw about 64
+frames a second on any display. SDL asks for 1 ms by default, from `SDL_Init` for
+the life of the process, and where nothing else asks (a laptop with no video
+playing) that alone keeps the machine's clock at 1,000 interrupts a second
+instead of 64 while an app sits open at rest. So the platform asks for it only
+while the loop paces frames (`SdlTimerResolution`): a wait shorter than 32 ms asks
+before it starts, so the first paced frame after a rest is on time, and a rest
+gives it back a second after the last such wait. At rest an event or a wake ends
+a wait at once whatever the resolution, but a deadline the loop owns (a caret's
+blink, a tooltip's delay, an accessibility refresh) may come up to one tick late:
+a tween's 250 ms delay at rest fired 9–12 ms late on average and 15 ms at most,
+against under 1 ms while 1 ms was held. Frame pacing measured the same both ways
+(tweens, a 1,000 Hz event storm, a drag, video; 120 and 200 Hz).
+`SDL_TIMER_RESOLUTION` in the environment overrides all of it, as it does any SDL
+hint. NVIDIA's Vulkan driver asks for 1 ms itself for as long as its device
+lives, so a Vulkan window there keeps 1 ms anyway.
+
 **A minimized window is not drawn.** Its frame runs up to the drawing — actions
 from assistive technology, style, layout and the accessibility tree stay current
 — and stops there with the paint dirt kept, so the first frame after the restore
