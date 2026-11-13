@@ -1661,6 +1661,24 @@ builds and frames headless, 91.1 → 71.9 KB in a real window (NativeAOT); a fil
 frames headless, 205.6 → 187.8 KB in a real window, a touch 21.5 → 1.9 KB and 1 → 0; Changes
 unchanged. The same frames and accessibility trees.
 
+### The app's own change, heard again
+
+An app that watches what it also writes hears its own writes. Junction's actions (a checkout, a
+commit, a pull, a branch or a tag made) end in `RefreshAll`, which reloads the repository, and
+300 ms later the watcher told the same change and the repository was read a second time. Every
+change the watcher has heard when `RefreshAll` runs was made before the loads it starts read the
+repository, so those loads read it: `RefreshAll` tells the watcher to forget what it heard so
+far (`GitWatcher.Forget`), its pending callback and one already posted to the UI thread
+included, and everything heard after that is told as before. Nothing is paused: an outside
+change made while the action ran is read by the action's own reload, one made after it is heard.
+A fingerprint of the refs read before the reload would do the same for one or two git commands
+an action, and has to be read before the reload starts, which delays it.
+
+An in-app checkout, headless: 28 → 15 git commands (14 with no watcher at all), 987 → 747 KB on
+the UI thread (−24 %), 1,975 → 1,288 KB on all threads (−35 %), 17 → 15 builds; the same on a
+reftable repository. In a real window (NativeAOT, a clone of this repository): 28 → 17 git
+commands, 1,740 → 1,215 KB on the UI thread and 10.6 → 6.5 MB on all threads a checkout.
+
 ### What a build shows of files comes from what was read already
 
 A small read in `Build()` does not freeze anything a person would notice; it allocates on every

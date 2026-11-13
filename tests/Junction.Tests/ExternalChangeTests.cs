@@ -314,6 +314,86 @@ public class ExternalChangeTests
         });
     }
 
+    // ── The app's own actions ────────────────────────────────────────────
+
+    /// <summary>An action of the app's own that moves a ref reloads once. Its RefreshAll reads the
+    /// repository again after everything the watcher had heard while the command ran, so the event
+    /// the watcher told 300 ms later read it all a second time (plan 17 round 13: an in-app
+    /// checkout ran 28 git commands, 14 of them for that). An outside change made while the command
+    /// runs is read by the action's own reload; one made after it is heard as ever.</summary>
+    [Fact]
+    public void AnInAppCheckout_ReloadsOnce_AndAnOutsideChangeMadeMeanwhileShows() => CheckoutReloadsOnce(reftable: false);
+
+    [ReftableFact]
+    public void OnAReftableRepository_AnInAppCheckout_ReloadsOnce_AndAnOutsideChangeMadeMeanwhileShows() => CheckoutReloadsOnce(reftable: true);
+
+    private static void CheckoutReloadsOnce(bool reftable)
+    {
+        Hosted(repo =>
+        {
+            Commit(repo, "second");
+            repo.Git("branch", "other", "HEAD~1");
+        }, (repo, session, app) =>
+        {
+            var path = repo.Path;
+            session.Window.PressKey(KeyCode.Digit2);
+            PumpUntil(session, () => Commits(app, path) == 2 && SummaryMember(app, path, "Branch") is "main",
+                "the History view never loaded");
+            Quiet(session, app, path);
+            // The app's watcher, told what it hears as the app's is, with a debounce long enough
+            // that when it tells is no race with this test: the command below waits until it has
+            // heard everything before it returns.
+            var watchers = (IDictionary)Field(app, "_watchers")!;
+            ((IDisposable)watchers[path]!).Dispose();
+            var watcher = new GitWatcher(path, refs => typeof(JunctionApp)
+                .GetMethod(refs ? "OnExternalChange" : "OnWorkingTreeChange", Priv)!.Invoke(app, [path]), debounceMs: 2000);
+            watchers[path] = watcher;
+            int gen = DataGeneration(app, path);
+
+            // The palette's checkout, with a branch made outside while it runs.
+            var git = (GitRepository)typeof(JunctionApp).GetMethod("RepoFor", Priv)!.Invoke(app, [path])!;
+            Func<GitResult> command = () =>
+            {
+                var result = git.Checkout("other");
+                GitProcess.Run(path, "branch", "made-meanwhile");
+                HeardEverything(watcher);
+                return result;
+            };
+            Action<GitResult> apply = _ => typeof(JunctionApp).GetMethod("RefreshAll", Priv)!.Invoke(app, null);
+            typeof(JunctionApp).GetMethod("RunGitCommand", Priv)!.MakeGenericMethod(typeof(GitResult))
+                .Invoke(app, [command, apply]);
+            PumpUntil(session, () => SummaryMember(app, path, "Branch") is "other" && HasBranch(app, path, "made-meanwhile"),
+                "the checkout's reload never showed the checkout and the branch made meanwhile");
+            // Past the watcher's debounce: what it heard would have been told by now.
+            for (var until = DateTime.UtcNow.AddSeconds(2.5); DateTime.UtcNow < until; Thread.Sleep(5)) session.PumpFrame();
+            Quiet(session, app, path);
+            Assert.Equal(gen + 1, DataGeneration(app, path));
+
+            repo.Git("branch", "made-after");
+            PumpUntil(session, () => HasBranch(app, path, "made-after"), "a branch made after the checkout never showed");
+        }, reftable);
+    }
+
+    /// <summary>Waits, on the command's thread, until the watcher has heard something and then
+    /// nothing more for 300 ms.</summary>
+    private static void HeardEverything(GitWatcher watcher)
+    {
+        var field = typeof(GitWatcher).GetField("_heard", Priv)!;
+        long last = (long)field.GetValue(watcher)!, since = Environment.TickCount64;
+        var until = Environment.TickCount64 + 10_000;
+        while (Environment.TickCount64 < until)
+        {
+            Thread.Sleep(10);
+            long now = (long)field.GetValue(watcher)!;
+            if (now != last) { last = now; since = Environment.TickCount64; }
+            else if (now > 0 && Environment.TickCount64 - since >= 300) return;
+        }
+    }
+
+    private static bool HasBranch(JunctionApp app, string path, string name) =>
+        ((IEnumerable)SummaryMember(app, path, "Branches")!).Cast<object>()
+            .Any(b => (string)b.GetType().GetProperty("Name")!.GetValue(b)! == name);
+
     private static int ReflogEntries(JunctionApp app, string path) =>
         ((ICollection)LoaderValue(app, "_reflogLoaders", path)).Count;
 

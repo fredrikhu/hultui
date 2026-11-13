@@ -113,6 +113,33 @@ public class GitWatcherTests
         finally { TempRepo.ForceDelete(remote); }
     }
 
+    /// <summary>What was heard before <see cref="GitWatcher.Forget"/> is not told, whether its
+    /// debounce was still running or its callback already on its way to the UI thread; what is
+    /// heard after it is (the app forgets when its own action's reload starts, plan 17 round 13).</summary>
+    [Fact]
+    public void WhatWasHeardBeforeForget_IsNotTold_AndWhatComesAfterIs()
+    {
+        using var repo = TempRepo.CreateWithInitialCommit();
+        using var session = HeadlessSession.Create(400, 300);
+        var seen = new List<bool>();
+        using var watcher = new GitWatcher(repo.Path, refs => seen.Add(refs), debounceMs: 100);
+        var heard = typeof(GitWatcher).GetField("_heard", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        Pump(session, TimeSpan.FromMilliseconds(300));
+        Assert.False(watcher.Forget());   // nothing heard yet
+
+        // Heard, debounced and posted, not yet run: no frame is pumped until after the Forget.
+        long before = (long)heard.GetValue(watcher)!;
+        repo.Git("branch", "delta");
+        var until = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (DateTime.UtcNow < until && (long)heard.GetValue(watcher)! == before) Thread.Sleep(10);
+        Thread.Sleep(400);
+        Assert.True(watcher.Forget());
+        Pump(session, TimeSpan.FromMilliseconds(600));
+        Assert.Empty(seen);
+
+        Assert.Equal([true], Observer(session, seen)(() => repo.Git("branch", "epsilon"), false));
+    }
+
     /// <summary>Waits out what came before, runs the action, and returns what the watcher said
     /// about it (a straggler in the same change included).</summary>
     private static Func<Action, bool, List<bool>> Observer(HeadlessSession session, List<bool> seen) => (act, expectNone) =>

@@ -33,6 +33,9 @@ public sealed class GitWatcher : IDisposable
     /// <summary>Whether HEAD, a ref, the config or the packed refs changed since the last
     /// callback. Guarded by <see cref="_lock"/>.</summary>
     private bool _refsMoved;
+    /// <summary>How many changes were heard; how many of them the last callback told; how many
+    /// the last <see cref="Forget"/> covered. Guarded by <see cref="_lock"/>.</summary>
+    private long _heard, _told, _forgotten;
 
     /// <param name="onChange">Called on the UI thread, debounced; its argument is true when
     /// HEAD, a ref, the config or the packed refs changed, false when only the working tree or
@@ -155,6 +158,7 @@ public sealed class GitWatcher : IDisposable
     {
         lock (_lock)
         {
+            _heard++;
             _refsMoved |= refs;
             _debounceCts?.Cancel();
             _debounceCts = new CancellationTokenSource();
@@ -166,16 +170,49 @@ public sealed class GitWatcher : IDisposable
                 {
                     await Task.Delay(_debounceMs, token);
                     bool moved;
+                    long heard;
                     lock (_lock)
                     {
                         if (token.IsCancellationRequested) return;
                         moved = _refsMoved;
                         _refsMoved = false;
+                        heard = _heard;
                     }
-                    HultUI.Application.InvokeOnMainThread(() => _onChange(moved));
+                    HultUI.Application.InvokeOnMainThread(() => Tell(moved, heard));
                 }
                 catch (TaskCanceledException) { }
             }, token);
+        }
+    }
+
+    private void Tell(bool moved, long heard)
+    {
+        lock (_lock)
+        {
+            if (heard <= _forgotten) return;   // covered by a Forget made since it was posted
+            _told = heard;
+        }
+        _onChange(moved);
+    }
+
+    /// <summary>
+    /// Forgets what was heard so far, for a caller about to read the repository again in full
+    /// after all of it: the app's own git command has finished and the reload that follows starts
+    /// now. Every change heard before this call was made before it, so that reload reads it; the
+    /// callback that would tell it 300 ms later, reading it all again, is dropped, one already on
+    /// its way to the UI thread included. What is heard from now on is told as before, so no
+    /// change made after this call is lost, the app's or anyone else's. Returns whether anything
+    /// heard was still untold. Call on the UI thread.
+    /// </summary>
+    public bool Forget()
+    {
+        lock (_lock)
+        {
+            bool untold = _heard > Math.Max(_told, _forgotten);
+            _forgotten = _heard;
+            _refsMoved = false;
+            _debounceCts?.Cancel();
+            return untold;
         }
     }
 

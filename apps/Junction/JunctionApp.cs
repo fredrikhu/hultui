@@ -1361,6 +1361,12 @@ public partial class JunctionApp : Component, IDisposable
     private void RefreshAll()
     {
         BumpDataGen(_activeRepoPath);
+        // Everything the watcher heard of this repository so far (the action's own writes, and
+        // anyone else's made while it ran) was made before the loads this reload starts read it,
+        // so its event 300 ms from now would read it all a second time. What it hears from here
+        // on is told as before. The preload is the one that event's reload asked for.
+        if (HasActiveRepo && _watchers.TryGetValue(_activeRepoPath, out var watcher) && watcher.Forget())
+            RequestPreload(_activeRepoPath, full: false);
         // Rerender (reactive) rather than MarkDirty: some callers (repo/workspace
         // mutations) have just changed the active repo, so the rebuild must
         // re-subscribe the Effect to the newly-active repo's loaders.

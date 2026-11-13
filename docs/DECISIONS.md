@@ -936,6 +936,20 @@ worktrees, and the reflog panel keys on the data generation. A reftable reposito
 (`tables.list.lock`) is not heard at all: reftable writes reflog entries into its tables, so
 every move there renames `tables.list`.
 
+### The app's own action is forgotten by the watcher, not fingerprinted or paused (round 13)
+
+Plan 17's round 13, step 4 stopped Junction reading the repository twice after its own actions
+(its `RefreshAll`, then the watcher's event for the same writes 300 ms later). The survey proposed
+two ways. A fingerprint of HEAD, the refs and the config, read before the action's reload and
+again at the event, costs one or two git commands at each end and must be read before the reload
+starts, so it delays every action's reload by a git command. Pausing the watcher around the app's
+commands loses an outside change made during the pause. What was built is neither: the watcher
+forgets what it heard before `RefreshAll` (all of it was made before the reload's loads read the
+repository) and tells what it hears after, so no change is lost and no git command is added. An
+in-app checkout: 28 → 15 git commands headless (14 with no watcher at all), 28 → 17 in a real
+window. A change the watcher hears late (its file-system event delivered after `RefreshAll` ran)
+is told and read again, as before.
+
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
 BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction
