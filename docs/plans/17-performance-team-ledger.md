@@ -10,7 +10,7 @@ file after every step and commits it with the step's work. Full survey reports a
   at the merge, so step 1 starts after it resets (01:10 UTC). Build briefs `brief-r15b<N>.md`, agent ids `r15-agents.txt`,
   probes `r15-<area>\` and `r15b<N>\`, the survey brief `brief-r15-survey.md`, `archive_r15.py` and `merge_r15.py`, all in
   this session's scratchpad `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\8e8ba33b-db33-43fa-885a-cb6b82b7253f\scratchpad\`.
-  Questions 63–65 are open (step 2 (c) and step 10 wait for 63 and 65; 64 waits for the live reader check). Build
+  Questions 63 and 65 answered (a) and (b) on 2026-11-15; 64 waits for the live reader check. Build
   briefs measure the real-app case in a guarded real window (the lock `Global\HultUI-r15-desktop` and the survey's
   harnesses) as well as by step-ab; a step that changes when a navigation or a load applies runs its app's tests on
   Fedora too (round 14). Round 14's files (briefs `brief-r14*.md`, `fullsuite-r14.sh`, the model for the full suite,
@@ -878,7 +878,7 @@ Round 15 questions. Recommendations in brackets.
     `KeyChord.IsModifierKey` (Vesper's pattern: one line there, a wrapper in the other four), with a guideline in the
     docs; no framework change. (b) Fix it once in the framework's input net (a bare modifier key-down asks for no
     frame): an app elsewhere that draws something on a bare modifier without marking would lose that frame (none of
-    the five does). [(a): it keeps the framework's rules.]
+    the five does). [(a): it keeps the framework's rules.] → **(a)** (2026-11-15; step 2 (c), app level).
 64. **Long lists with a UIA reader** (r15-7; decide with question 50's live Narrator/NVDA check): a list keyed by index
     that changes its contents renames every item to a reader: a Vesper navigation between two 1,000-file folders makes
     1,003 Name raises and 13,052 provider calls; a Junction ref move with History shown 1,003 raises and 13,184 calls,
@@ -892,7 +892,8 @@ Round 15 questions. Recommendations in brackets.
     Without the prefetch the first switch to the Commit tab shows its diff uncoloured for up to ~350 ms. (a) Keep it so;
     (b) prefetch only once the Commit tab has been opened in this session; (c) prefetch after a longer rest (~600 ms);
     (d) never prefetch. Images of the tab switch at 50 and 400 ms can be made from headless frames. [(b): reading
-    History alone stops paying, and once the Commit tab is in use it works as today.]
+    History alone stops paying, and once the Commit tab is in use it works as today.] → **(b)** (2026-11-15; step 10, images of
+    the tab switch to the user before the commit).
 
 Reminder (expert 8): Aperture signed in to jellyfin.home as device "aperture-survey" in earlier rounds, as "aperture-r13" in round 13 (and twice in round 15), and once in
 round 12 as "aperture-r12" (again in round 15); the user should remove those devices and revoke the API key when the work is done.
