@@ -127,6 +127,11 @@ public partial class JunctionApp
         // get a before/after view instead of the empty "No textual changes" pane.
         if (IsImagePath(path) && BuildImageDiffBody(path) is { } imagePane)
             return imagePane;
+        // A file of a commit read a file at a time, on its first visit: its patch is on its way.
+        if (diff is null && CommitPatchLoading(path))
+            return Box.New().FlexGrow(1)
+                .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
+                .Children(Text.New("Loading…").FontSize(13f).TextColor(Nocturne.On(0.45)));
         // Every other binary — archive, font, PDF, compiled output — says it differs and
         // by how much, and stops there.
         if (diff?.Binary is { } binary)
@@ -1545,10 +1550,7 @@ public partial class JunctionApp
     private (string Path, GitFileDiff? Diff) CurrentDiffTarget()
     {
         if (View == JunctionView.Commit && _selectedFilePath != null)
-        {
-            _commitDetail.Value.DiffByPath.TryGetValue(_selectedFilePath, out var d);
-            return (_selectedFilePath, d);
-        }
+            return (_selectedFilePath, CommitDiffFor(_commitDetail.Value, _selectedFilePath));
         if (View == JunctionView.Changes && _changeSelPath != null)
         {
             // ChangesView, not the raw load: a file whose staging is still in flight has

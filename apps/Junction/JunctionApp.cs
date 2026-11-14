@@ -344,7 +344,10 @@ public partial class JunctionApp : Component, IDisposable
         GitCommit? Commit,
         IReadOnlyList<GitFileChange> Files,
         Dictionary<string, GitFileDiff> DiffByPath,
-        string? RangeBaseHash = null)   // non-null: a multi-select compare against this base
+        string? RangeBaseHash = null,   // non-null: a multi-select compare against this base
+        // Non-null: the commit's patch was too long to read whole, and DiffByPath holds only the
+        // files read so far; the others are read when they are opened (CommitDiffFor).
+        FilePatches? Patches = null)
     {
         public static readonly CommitDetail Empty = new(null, [], new());
     }

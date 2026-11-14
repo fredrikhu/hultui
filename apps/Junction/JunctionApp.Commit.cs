@@ -219,9 +219,10 @@ public partial class JunctionApp
         if (string.IsNullOrEmpty(hash) || !HasActiveRepo) return;
         var h = hash;
         var path = _activeRepoPath;   // captured: the producer runs off-thread, after any switch
+        var open = _selectedFilePath; // the file PickInitialFile keeps open when the commit has it
         var key = CommitDetailKey(h);
         SelectionMovedTo(key);
-        _commitDetail.Load(key, () => LoadOrRetry(path, () => LoadDetail(path, h)),
+        _commitDetail.Load(key, () => LoadOrRetry(path, () => LoadDetail(path, h, open)),
             onLoaded: PickInitialFile);
     }
 
@@ -291,19 +292,96 @@ public partial class JunctionApp
         else PrefetchCommitDetail(_selectedCommitHash);
     }
 
+    /// <summary>
+    /// The longest patch a commit's detail reads whole, in characters. A longer one is read a file at a
+    /// time: the file the Commit tab opens on with the detail, each other file when it is first opened.
+    ///
+    /// <para>Only the open file's diff is ever shown, and the whole patch was read and parsed into
+    /// objects for it anyway — for every commit History's selection rested on, the Commit tab open or
+    /// not. On this repository's own last 300 commits that was 628.7 MB allocated, 8 gen-2 collections,
+    /// up to 87.4 MB for one load and up to 32 MB kept while a commit was selected (a plan merge, 8.0
+    /// million characters). 253 of those 300 are below this and load as they did. 262,144 characters
+    /// are 512 KB as a string, the apps' large-object threshold.</para>
+    /// </summary>
+    internal int WholePatchChars { get; set; } = 262_144;
+
+    /// <summary>Files read on their own for a commit read a file at a time, for tests.</summary>
+    internal int FilePatchLoads => _filePatchLoads;
+
+    private int _filePatchLoads;
+
     // Runs off the UI thread.
-    private CommitDetail LoadDetail(string path, string hash)
+    private CommitDetail LoadDetail(string path, string hash, string? open)
     {
         Interlocked.Increment(ref _detailLoads);
         var repo = RepoFor(path);
         var commit = repo.GetCommit(hash);
         var files = repo.GetCommitFiles(hash);
-        var diffs = repo.GetCommitDiff(hash, _settings.Git.IgnoreWhitespace);
-        var byPath = diffs
-            .GroupBy(d => d.Path)
-            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
-        return new CommitDetail(commit, files, byPath);
+        bool ignoreWhitespace = _settings.Git.IgnoreWhitespace;
+        // The file PickInitialFile opens: the one open now when this commit has it, else the first.
+        var opening = files.Find(f => f.Path == open) ?? (files.Count > 0 ? files[0] : null);
+        var (diffs, whole) = repo.GetCommitDiff(hash, ignoreWhitespace, WholePatchChars, opening);
+        var byPath = new Dictionary<string, GitFileDiff>(diffs.Count, StringComparer.Ordinal);
+        foreach (var d in diffs) byPath.TryAdd(d.Path, d);   // the first of a path, as before
+        return new CommitDetail(commit, files, byPath,
+            Patches: whole ? null : new FilePatches(path, hash, ignoreWhitespace));
     }
+
+    /// <summary>
+    /// Where the rest of a commit read a file at a time (<see cref="WholePatchChars"/>) comes from: the
+    /// repository, commit and whitespace setting its detail was loaded with. One per detail, compared
+    /// by reference, so a file read for one load of a commit is never taken for another's.
+    /// </summary>
+    private sealed class FilePatches(string repoPath, string hash, bool ignoreWhitespace)
+    {
+        public string RepoPath { get; } = repoPath;
+        public string Hash { get; } = hash;
+        public bool IgnoreWhitespace { get; } = ignoreWhitespace;
+
+        /// <summary>Files git gave no patch for when asked, so they are not asked for again.</summary>
+        public HashSet<string> NoPatch { get; } = new(StringComparer.Ordinal);
+    }
+
+    /// <summary>The file being read on its own for the Commit tab, and its patch (see CommitDiffFor).</summary>
+    private readonly HultUI.AsyncLoader<List<GitFileDiff>> _commitFilePatch = new([]);
+    private (FilePatches? Source, string? Path) _commitFilePatchAsked;
+
+    /// <summary>
+    /// The diff the Commit tab shows for <paramref name="path"/>. For a commit read a file at a time,
+    /// a file not read yet is read now, when it is opened, and is null until it lands
+    /// (<see cref="CommitPatchLoading"/>); its patch then joins the detail's, so a second visit reads
+    /// nothing.
+    /// </summary>
+    private GitFileDiff? CommitDiffFor(CommitDetail detail, string? path)
+    {
+        if (path is null) return null;
+        if (detail.DiffByPath.TryGetValue(path, out var diff)) return diff;
+        if (detail.Patches is not { } source || source.NoPatch.Contains(path)) return null;
+        int index = IndexOfPath(detail.Files, path);
+        if (index < 0) return null;
+
+        var oldPath = detail.Files[index].OldPath;
+        var byPath = detail.DiffByPath;
+        _commitFilePatchAsked = (source, path);
+        _commitFilePatch.Load((source, path), () => LoadOrRetry(source.RepoPath, () =>
+            {
+                Interlocked.Increment(ref _filePatchLoads);
+                return RepoFor(source.RepoPath).GetCommitFileDiff(source.Hash, path, oldPath, source.IgnoreWhitespace);
+            }),
+            onLoaded: diffs =>
+            {
+                foreach (var d in diffs) byPath.TryAdd(d.Path, d);
+                if (!byPath.ContainsKey(path)) source.NoPatch.Add(path);
+            });
+        _ = _commitFilePatch.IsLoading;   // tracked: the build runs again when the patch lands
+        return null;
+    }
+
+    /// <summary>True while the Commit tab waits for <paramref name="path"/>'s patch on its own.</summary>
+    private bool CommitPatchLoading(string path) =>
+        View == JunctionView.Commit && _commitFilePatch.IsLoading
+        && _commitFilePatchAsked.Path == path
+        && ReferenceEquals(_commitFilePatchAsked.Source, _commitDetail.Value.Patches);
 
     private void PickInitialFile(CommitDetail detail)
     {
@@ -523,10 +601,12 @@ public partial class JunctionApp
         // diff in VS Code with Ctrl+D — see OpenSelectedDiffExternally).
         row.AddChild(BuildFileTree(detail.Files, fill: _hideDiff));
 
+        // Asked for with the pane hidden too: Ctrl+D still opens the file elsewhere, and refuses a
+        // binary one by its patch.
+        var diff = CommitDiffFor(detail, _selectedFilePath);
         if (!_hideDiff)
         {
             row.AddChild(_commitSplit.Handle(Nocturne.Alpha(Nocturne.Accent, 0.18), Nocturne.Alpha(Nocturne.Accent, 0.40)));
-            detail.DiffByPath.TryGetValue(_selectedFilePath ?? "", out var diff);
             row.AddChild(BuildDiffPane(_selectedFilePath ?? "", diff));
         }
         return row;
