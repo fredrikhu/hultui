@@ -352,16 +352,27 @@ public partial class JunctionApp
     /// <summary>The code label for a diff line, wrapped or clipped to one line and panned.
     /// Wrapping and sideways scrolling are alternatives, so a wrapped line takes neither the
     /// one-line clip nor the panning cell.</summary>
-    private Element DiffCodeCell(TextElement label)
+    private Element DiffCodeCell(TextElement label, float padX)
     {
-        // Wrapped, the cell takes what the fixed columns leave and nothing more. A zero basis
-        // is what says so: with the default `auto` the item is sized to its own content first,
-        // and the content width of a line holding one unbreakable token is that token — a
+        // Wrapped, the cell takes what the fixed columns leave and nothing more. A definite
+        // basis is what says so: with the default `auto` the item is sized to its own content
+        // first, and the content width of a line holding one unbreakable token is that token — a
         // minified bundle, a base64 blob, a long hash. The label then grew to a thousand
         // pixels inside a three-hundred-pixel column, wrapped its text at the width it had
         // taken rather than the one on screen, and let the pane clip the overflow. The row
         // was the right height for the wrap nobody could see.
-        if (_diffWrap) return label.FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0));
+        //
+        // The basis is the width the label will have, the code width the rows' heights were
+        // measured at plus the label's padding, and only the label grows or shrinks (the fixed
+        // columns do not), so it takes what they leave as a zero basis did. Not zero: an item
+        // is measured at its basis before it grows, and at zero width a wrapped line is laid out
+        // a word to a line, its most expensive layout (~20 KB for a line of 290 characters).
+        // That layout lived in the text pipeline's layout cache only while the rows a build
+        // measures left room for it: once a resize's build measured 400 wrapped rows just
+        // before the frame (LeadWrappedDiffWidth), the frame laid the rows on screen out at zero
+        // width again, 372 KB a step (plan 17 round 14). At the code width the measure is the
+        // layout the build made for the row's height.
+        if (_diffWrap) return label.FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(Math.Max(0, _diffCodeWidth + padX)));
         return _diffPan.Cell(label.MaxLines(1).OverflowMode(TextOverflow.Clip).FlexGrow(1));
     }
     // Review is the review's height version, so a card opening or a composer appearing
@@ -1405,7 +1416,8 @@ public partial class JunctionApp
 
         row.AddChild(NumCell(line.OldLineNumber, 46f));
         row.AddChild(NumCell(line.NewLineNumber, 46f));
-        row.AddChild(Box.New().Width(16).JustifyContent(JustifyContent.Center)
+        // A fixed column: only the code label gives way when the row is short (DiffCodeCell).
+        row.AddChild(Box.New().Width(16).FlexShrink(0).JustifyContent(JustifyContent.Center)
             .Children(CodeText(sign, signColor)));
         // Clip rather than ellipsise: the line is scrollable now, so cutting it at the edge
         // says "there is more that way", where an ellipsis says "this is all there is".
@@ -1413,7 +1425,7 @@ public partial class JunctionApp
             CodeText(line.Content.Length == 0 ? " " : ExpandTabs(line.Content), code)
                 .Selectable().SelectionGroup(_diffGroupUnified, rowIndex)
                 .Spans(RemapSpans(spans, line.Content))
-                .Padding(new Thickness(2, UnifiedCodePadX, 2, 0))));
+                .Padding(new Thickness(2, UnifiedCodePadX, 2, 0)), UnifiedCodePadX));
 
         if (selectable)
         {
@@ -1479,7 +1491,7 @@ public partial class JunctionApp
             CodeText(ExpandTabs(text), code).Selectable()
                 .SelectionGroup(isLeft ? _diffGroupLeft : _diffGroupRight, rowIndex)
                 .Spans(RemapSpans(spans, text))
-                .Padding(new Thickness(2, SplitCodePadX, 2, 0))));
+                .Padding(new Thickness(2, SplitCodePadX, 2, 0)), SplitCodePadX));
         return half;
     }
 
