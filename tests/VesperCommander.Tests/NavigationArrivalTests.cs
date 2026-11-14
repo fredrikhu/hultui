@@ -96,6 +96,9 @@ public class NavigationArrivalTests
     {
         using var g = new Gated();
         var t = g.T;
+        // The rows wait at the gate as long as this test likes; the pane moving without them past
+        // LocalMoveMs is the next test's.
+        t.App.LocalMoveMs = 10_000;
         t.PutCursorOn('L', "sub");
         g.Frames(6);
         // Any other key still draws the window, as an ordinary handler's does: the root's handler is
@@ -131,31 +134,51 @@ public class NavigationArrivalTests
         }
     }
 
-    /// <summary>A local folder still out at the connecting delay moves the pane then, and says it
-    /// is connecting, as a slow folder always has; a share moves the pane at once, as it did, and
-    /// says so at the delay.</summary>
+    /// <summary>A local folder whose rows are not there by LocalMoveMs (50 ms) moves the pane then:
+    /// its name over the waiting block, never over the rows it is leaving, and its rows land into
+    /// it. A share moves the pane at once, as it did, and says it is connecting at the delay.</summary>
     [Fact]
-    public void ASlowFolder_StillShowsWhatItIsWaitingFor()
+    public void ASlowFolder_ShowsItsNameAndTheWaitingBlock_NeverOverTheRowsItLeaves()
     {
         using var g = new Gated();
         var t = g.T;
+        Assert.Equal(50, t.App.LocalMoveMs);
         t.PutCursorOn('L', "sub");
         g.Frames(6);
+        double Now() => t.Session.Application.Time.GetTimestamp() * 1000.0 / t.Session.Application.Time.TimestampFrequency;
+        void NotOverTheOldRows(string when)
+        {
+            bool mixed = !string.Equals(t.Dir('L'), g.Shown('L'), System.StringComparison.OrdinalIgnoreCase)
+                && g.State('L') != PaneState.Connecting;
+            Assert.False(mixed, $"{t.Dir('L')} over the rows of {g.Shown('L')} {when}");
+        }
 
         g.Hold();
+        double t0 = Now();
         t.Session.Window.PressKey(KeyCode.Enter);
-        g.Frames(3);
-        Assert.Equal(t.Left, t.Dir('L'), ignoreCase: true);
-        t.Session.AdvanceTime(System.TimeSpan.FromMilliseconds(400));
+        // 16 ms frames with the wall's 16 ms beside each, as a window has them.
+        double moved = -1;
+        for (int i = 0; i < 40 && moved < 0; i++)
+        {
+            t.Session.PumpFrame(System.TimeSpan.FromMilliseconds(16));
+            Thread.Sleep(16);
+            NotOverTheOldRows("while its rows are out");
+            if (string.Equals(t.Dir('L'), g.Sub, System.StringComparison.OrdinalIgnoreCase)) moved = Now() - t0;
+        }
+        Assert.InRange(moved, 50, 150);
         Assert.Equal(PaneState.Connecting, g.State('L'));
-        // The delay's nudge moves the pane, the block with it.
-        var until = System.DateTime.UtcNow + System.TimeSpan.FromSeconds(5);
-        while (!string.Equals(t.Dir('L'), g.Sub, System.StringComparison.OrdinalIgnoreCase) && System.DateTime.UtcNow < until) g.Frames(1);
-        Assert.Equal(g.Sub, t.Dir('L'), ignoreCase: true);
         g.Frames(2);
         Assert.Contains("Connecting to", t.Session.Window.DumpAccessibilityTree());
+        NotOverTheOldRows("after the move");
+
         g.Release();
-        g.FramesUntilShown(g.Sub);
+        var until = System.DateTime.UtcNow + System.TimeSpan.FromSeconds(10);
+        while (!string.Equals(g.Shown('L'), g.Sub, System.StringComparison.OrdinalIgnoreCase) && System.DateTime.UtcNow < until)
+        {
+            g.Frames(1);
+            NotOverTheOldRows("as its rows land");
+        }
+        Assert.Equal(g.Sub, g.Shown('L'), ignoreCase: true);
         Assert.Equal(PaneState.Ok, g.State('L'));
 
         // A share: the pane is there at once, before its rows.

@@ -598,6 +598,17 @@ public partial class CommanderApp : Component, IDisposable
     /// Settable so a test need not spend it.</summary>
     internal int ConnectingDelayMs = 350;
 
+    /// <summary>How long a navigation to a local folder waits for its rows before it moves the
+    /// pane anyway, to the folder's name over the waiting block (never over the rows it is
+    /// leaving), the rows landing into it. A folder of 61 files lands in 2.5 ms in a real window
+    /// and one of 1,000 within a frame; this is three frames at 60 Hz, past which the key would
+    /// otherwise seem not to have been heard. Settable so a test need not spend it.</summary>
+    internal int LocalMoveMs = 50;
+
+    // The key of the load a pane moved ahead of (a local navigation whose rows were not there by
+    // LocalMoveMs): while it is out the pane shows the waiting block at once, not the rows it left.
+    private readonly string?[] _aheadKey = new string?[2];
+
     /// <summary>True while a pane is waiting on a folder it is not already showing, and has
     /// been for long enough to be worth saying so. A refresh of the folder on screen keeps its
     /// rows and never shows this — there is nothing to wait for that is not already there.
@@ -610,16 +621,45 @@ public partial class CommanderApp : Component, IDisposable
     private bool IsConnecting(char side)
     {
         int i = side == 'L' ? 0 : 1;
-        // A navigation still waiting for its rows waits on a folder the pane does not show yet; past
-        // the delay the next build moves the pane there and says so (SettleOverdueNavs).
-        if (NavWaiting(side) is not null) return LoadOverdue(side) && Loader(side).IsLoading;
+        // A navigation still waiting for its rows waits on a folder the pane does not show yet; once
+        // it is due to move the pane, the next build moves it there and says so (SettleOverdueNavs).
+        if (NavWaiting(side) is not null) return MoveDue(side) && Loader(side).IsLoading;
         // The folder on screen first: a plain field, so a pane showing its own folder's rows reads
         // no loading flag, and the load of the next folder, asked for before the pane moves to it,
         // builds nothing as it starts.
         if (PathEquals(_shownDir[i], Dir(side))) return false;
         if (!Loader(side).IsLoading) return false;
-        return LoadOverdue(side);
+        // A pane that moved ahead of its rows says so from the start: the rows it would show
+        // otherwise are the folder it left.
+        return LoadOverdue(side) || (_aheadKey[i] is { } ahead && ahead == _loadingKey[i]);
     }
+
+    /// <summary>Whether a navigation waiting for its rows is due to move the pane without them.</summary>
+    private bool MoveDue(char side) =>
+        _app.Time.GetElapsedTime(_loadStarted[Si(side)]).TotalMilliseconds >= Math.Min(LocalMoveMs, ConnectingDelayMs);
+
+    /// <summary>Moves the pane to a waiting navigation's folder before its rows land: the name, and
+    /// the waiting block in place of the rows it is leaving (see IsConnecting).</summary>
+    private void MoveAhead(char side, PendingNav nav)
+    {
+        _pendingNav[Si(side)] = null;
+        ApplyNav(side, nav);
+        _aheadKey[Si(side)] = nav.Key;
+    }
+
+    /// <summary>Checks, on the application's clock, whether the navigation waiting under
+    /// <paramref name="key"/> is due to move the pane, and moves it then; until it lands, is replaced
+    /// or moves, asked again after the time left (the wall's clock can run ahead of a headless
+    /// session's).</summary>
+    private void MoveWhenDue(char side, string key, int delayMs) =>
+        _ = Task.Delay(Math.Max(1, delayMs)).ContinueWith(_ => HultUI.Application.InvokeOnMainThread(() =>
+        {
+            if (NavWaiting(side) is not { } nav || nav.Key != key || !Loader(side).IsLoading) return;
+            double left = Math.Min(LocalMoveMs, ConnectingDelayMs) - _app.Time.GetElapsedTime(_loadStarted[Si(side)]).TotalMilliseconds;
+            if (left > 0) { MoveWhenDue(side, key, (int)Math.Ceiling(left)); return; }
+            MoveAhead(side, nav);
+            PaneDirty(side);
+        }));
 
     /// <summary>Whether the load the pane is timing has been out for the connecting delay.</summary>
     private bool LoadOverdue(char side) =>
@@ -663,7 +703,7 @@ public partial class CommanderApp : Component, IDisposable
             {
                 if (!Loader(side).IsLoading) return;
                 if (NavWaiting(side) is not { } nav) MarkViewDirty();
-                else if (LoadOverdue(side)) { _pendingNav[Si(side)] = null; ApplyNav(side, nav); PaneDirty(side); }
+                else if (LoadOverdue(side)) { MoveAhead(side, nav); PaneDirty(side); }
             }));
     }
 
@@ -727,6 +767,7 @@ public partial class CommanderApp : Component, IDisposable
         }
         if (side == 'L') _loadedL = true; else _loadedR = true;
         _shownDir[side == 'L' ? 0 : 1] = dir;   // these rows belong to this folder now
+        _aheadKey[Si(side)] = null;
         var listed = loader.Value.Entries;
         // If we ascended, land the cursor on the folder we came out of.
         var want = _pendingFocusChild[side == 'L' ? 0 : 1];
@@ -996,8 +1037,9 @@ public partial class CommanderApp : Component, IDisposable
     // moves the pane with them, in one build: until then the pane shows, and the keys act on, the
     // folder it is leaving. A folder that is slow to answer, or may not answer (a share, a server,
     // an archive), moves the pane at once as before, where its name and, past the connecting
-    // delay, the connecting block say what is being waited for; so does any folder whose rows are
-    // still out at that delay.
+    // delay, the connecting block say what is being waited for. A local folder whose rows are
+    // still out at LocalMoveMs moves the pane then, its name over the waiting block (never over
+    // the rows it is leaving), and its rows land into it.
 
     /// <summary>How a navigation moves through the tab's history.</summary>
     private enum HistoryStep { None, Back, Forward }
@@ -1037,6 +1079,8 @@ public partial class CommanderApp : Component, IDisposable
         // Already there (a key the loader holds): nothing will land, so the pane moves now.
         if (!Loader(side).IsLoading && NavWaiting(side) is { Key: var k } && k == key)
             ListingLanded(side, Loader(side), nav.Path, key);
+        // Not there by LocalMoveMs: the pane moves without its rows, to the waiting block.
+        else MoveWhenDue(side, key, Math.Min(LocalMoveMs, ConnectingDelayMs));
     }
 
     /// <summary>Whether a navigation to <paramref name="path"/> waits for its rows before it moves
@@ -1115,20 +1159,19 @@ public partial class CommanderApp : Component, IDisposable
     {
         if (_pendingNav[Si(side)] is not { } nav) return;
         _pendingNav[Si(side)] = null;
-        if (ReferenceEquals(nav.Tab, ActiveTab(side))) ApplyNav(side, nav);
+        if (ReferenceEquals(nav.Tab, ActiveTab(side))) MoveAhead(side, nav);
         else ApplyNavUnseen(nav);
     }
 
-    /// <summary>At the start of a build: a navigation whose rows are still out at the connecting
-    /// delay moves the pane, so the build shows the connecting block for the folder being waited
-    /// for (the delay's nudge usually gets there first, see NudgeWhenConnectingIsDue).</summary>
+    /// <summary>At the start of a build: a navigation whose rows are still out when it is due to
+    /// move the pane (LocalMoveMs) moves it, so the build shows the waiting block for the folder
+    /// being waited for (the check MoveWhenDue schedules usually gets there first).</summary>
     private void SettleOverdueNavs()
     {
         foreach (char side in "LR")
         {
-            if (NavWaiting(side) is not { } nav || !LoadOverdue(side) || !Loader(side).IsLoading) continue;
-            _pendingNav[Si(side)] = null;
-            ApplyNav(side, nav);
+            if (NavWaiting(side) is not { } nav || !MoveDue(side) || !Loader(side).IsLoading) continue;
+            MoveAhead(side, nav);
             _parts.Invalidate();   // this build builds the parts that show the folder
         }
     }
@@ -3001,6 +3044,7 @@ public partial class CommanderApp : Component, IDisposable
         (_loadingKey[0], _loadingKey[1]) = (_loadingKey[1], _loadingKey[0]);
         (_loadStarted[0], _loadStarted[1]) = (_loadStarted[1], _loadStarted[0]);
         (_loadCts[0], _loadCts[1]) = (_loadCts[1], _loadCts[0]);
+        (_aheadKey[0], _aheadKey[1]) = (_aheadKey[1], _aheadKey[0]);
         RequestScroll('L'); RequestScroll('R');
         MarkDirty();
     }

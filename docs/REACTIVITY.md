@@ -1582,7 +1582,11 @@ were not on screen. The navigation now asks for the rows and changes nothing; wh
 moves the pane, its history included, in the build they land with. A source that is slow to
 answer or may not answer (a share, a server, an archive) still moves the pane at once: its name,
 and past the connecting delay its connecting block, are what the reader sees while it waits. A
-local folder still out at that delay moves the pane then, with the block.
+local folder still out 50 ms after the key moves the pane then: its name over the waiting block,
+never over the rows it is leaving, and its rows land into it. A local listing is far inside that
+(a real window: 61 files 2.5 ms, 20,000 files 12–17 ms, warm), so a waiting navigation shows
+nothing but its one frame; a cold or slow disk shows its name and the block by about 65 ms
+instead of the rows it left.
 
 Two traps on the way:
 
