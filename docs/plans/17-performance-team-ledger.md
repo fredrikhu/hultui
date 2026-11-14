@@ -5,8 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 14
-- **Phase:** build — round 14, step 8 next (the round 14 build order below; 9 steps; steps 1–7 landed, step 6 with its
-  question 61 follow-up). Questions 55–59 answered 2026-11-13 with the
+- **Phase:** build — round 14, step 9 next (the round 14 build order below; 9 steps; steps 1–7 landed, step 6 with its
+  question 61 follow-up; step 8 measured and reverted). Step 9's before/after images go to the user before its commit. Questions 55–59 answered 2026-11-13 with the
   recommendations; 57 (asked again with step 1's numbers: not now) and 60 ((b) with (d)) answered 2026-11-14. Build briefs
   `brief-r14b<N>.md`, the agent ids in `r14-agents.txt`, survey probes `r14-<area>\` and build probes `r14b<N>\` in
   session 41943a9b's scratchpad
@@ -370,6 +370,18 @@ Round 13 (the round round 14's survey reviews; it moves to the archive at round 
 ## Examined, not worth it
 
 From the round 14 surveys (details in `17-reports/r14-*`):
+
+- **media-interop-gl-preload, built and measured (round 14 step 8; DECISIONS.md 0ba99050):** with the opt-in, a Vulkan
+  interop window loaded the GL driver on a worker after the device. NativeAOT probe host built as each app's Main, the
+  4K at 150 %, before (104179d2) and after alternated, idle-gated: Reel opening a film at rest Open → interop ready
+  96.5 → 44.0 ms but → first video frame only 196.5 → 177.3 ms; Aperture's first playback 96.6 → 46.1 and 236 → 230 ms;
+  Reel started with a film 177 → 162 ms. Only 11–21 ms reaches the frame because mpv's GL context creation takes 76–88
+  ms instead of 49–62 when the driver was loaded seconds earlier (a UI-thread load at device creation was as slow).
+  Cost in every session that never plays: one more NVIDIA GL thread waking 10 a second for the process's life (113 →
+  123), Reel's empty player 108 → 127 MB working set and 106 → 132 MB private, Aperture before any playback 143 → 161 and
+  153 → 181 MB. Reverted; the patch (with Aperture's opt-in, no tests) is `r14b8\gl-interop-preload.patch` in session
+  41943a9b's scratchpad. For PERFORMANCE.md: judge a driver preload by the frame that uses it; count its at-rest threads
+  and memory in sessions that never use it; `SDL_GL_LoadLibrary` on a worker pumps nothing there.
 
 - **Closed from Waiting:** junction-git-optional-locks (6: a content save makes `git status` write the index 0 times in 8;
   with `GIT_OPTIONAL_LOCKS=0` files rewritten with the same bytes stay stale, 192 entries and 2.6 MB re-hashed by every
@@ -1159,3 +1171,7 @@ From 2026-11-12 (round 13's survey); earlier entries are in the archive ([to 202
   list moves the pane at 50 ms to its waiting block (a 700 ms listing shows its name at 63–66 ms in a real window, from
   377–378), never over the old rows; ordinary navigations still 1 frame. Optional wording item vesper-local-waiting-text
   to Waiting. Next: step 8.
+- 2026-11-14: round 14 step 8 measured and reverted (DECISIONS.md 0ba99050): the opt-in GL driver preload for video
+  interop brought the first video frame only 11–21 ms sooner (mpv's own GL setup got slower after an early load) and
+  cost every session that never plays a 10-a-second NVIDIA thread and +18–28 MB (Examined). Next: step 9 (images to the
+  user before its commit).
