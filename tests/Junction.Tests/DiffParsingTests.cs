@@ -185,6 +185,34 @@ public class DiffParsingTests
         Assert.Empty(GitRepository.ParseUnifiedDiff(""));
     }
 
+    /// <summary>
+    /// The markers are matched ordinally, whatever the culture. Asked of the culture (a plain
+    /// <c>StartsWith(string)</c>), a line that begins with a character the culture ignores — a
+    /// soft hyphen here — matches "diff --git " and "@@ ": the line below would start a second
+    /// file and a second hunk. It is neither: git starts every line of a hunk with a space, a
+    /// plus or a minus, so it is not a line of the diff at all. The same lookups were four
+    /// collation calls a line on a Swedish machine.
+    /// </summary>
+    [Fact]
+    public void MarkersAreMatchedOrdinally_WhateverTheCulture()
+    {
+        var culture = System.Globalization.CultureInfo.CurrentCulture;
+        System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
+        try
+        {
+            var files = GitRepository.ParseUnifiedDiff(OneFile +
+                "­diff --git a/other.cs b/other.cs\n" +
+                "­@@ -1 +1 @@\n" +
+                "+not a line of other.cs\n");
+
+            var file = Assert.Single(files);
+            var hunk = Assert.Single(file.Hunks);
+            // The header, the five lines of OneFile and the one after the two stray lines.
+            Assert.Equal(7, hunk.Lines.Count);
+        }
+        finally { System.Globalization.CultureInfo.CurrentCulture = culture; }
+    }
+
     [Fact]
     public void BuildHunkPatchReconstructsAnApplyableSingleHunkPatch()
     {

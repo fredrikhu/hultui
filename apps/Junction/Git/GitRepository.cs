@@ -2260,9 +2260,14 @@ public class GitRepository
         var headerKind = FileChangeKind.Modified;
         string? oldBlob = null, newBlob = null;
 
+        // Every marker is matched ordinally. git writes them byte for byte, and StartsWith(string)
+        // without a comparison asks the current culture: on a Swedish machine four collation
+        // lookups a line, for every line of every patch, and a line that started with a
+        // character the culture ignores (a soft hyphen) would have matched a marker it does not
+        // begin with.
         foreach (var rawLine in diffText.Split('\n'))
         {
-            if (rawLine.StartsWith("diff --git "))
+            if (rawLine.StartsWith("diff --git ", StringComparison.Ordinal))
             {
                 var parts = rawLine.Split(" b/", 2);
                 var path = parts.Length > 1 ? parts[1] : rawLine;
@@ -2272,42 +2277,42 @@ public class GitRepository
                 headerKind = FileChangeKind.Modified;
                 oldBlob = newBlob = null;
             }
-            else if (rawLine.StartsWith("--- ") && currentFile != null && currentHunk == null)
+            else if (rawLine.StartsWith("--- ", StringComparison.Ordinal) && currentFile != null && currentHunk == null)
             {
                 currentFile.OldPathHeader = rawLine;
             }
-            else if (rawLine.StartsWith("+++ ") && currentFile != null && currentHunk == null)
+            else if (rawLine.StartsWith("+++ ", StringComparison.Ordinal) && currentFile != null && currentHunk == null)
             {
                 currentFile.NewPathHeader = rawLine;
             }
-            else if (currentFile != null && currentHunk == null && rawLine.StartsWith("new file mode "))
+            else if (currentFile != null && currentHunk == null && rawLine.StartsWith("new file mode ", StringComparison.Ordinal))
             {
                 headerKind = FileChangeKind.Added;
             }
-            else if (currentFile != null && currentHunk == null && rawLine.StartsWith("deleted file mode "))
+            else if (currentFile != null && currentHunk == null && rawLine.StartsWith("deleted file mode ", StringComparison.Ordinal))
             {
                 headerKind = FileChangeKind.Deleted;
             }
-            else if (currentFile != null && currentHunk == null && rawLine.StartsWith("rename from "))
+            else if (currentFile != null && currentHunk == null && rawLine.StartsWith("rename from ", StringComparison.Ordinal))
             {
                 headerKind = FileChangeKind.Renamed;
                 currentFile.RenamedFrom = rawLine["rename from ".Length..];
             }
-            else if (currentFile != null && currentHunk == null && rawLine.StartsWith("index "))
+            else if (currentFile != null && currentHunk == null && rawLine.StartsWith("index ", StringComparison.Ordinal))
             {
                 // "similarity index 90%" does not match — that line has no trailing space
                 // after "similarity", and this one is anchored at the start.
                 (oldBlob, newBlob) = ParseIndexBlobs(rawLine);
             }
             else if (currentFile != null && currentHunk == null
-                     && (rawLine.StartsWith("Binary files ") || rawLine.StartsWith("GIT binary patch")))
+                     && (rawLine.StartsWith("Binary files ", StringComparison.Ordinal) || rawLine.StartsWith("GIT binary patch", StringComparison.Ordinal)))
             {
                 // git's stand-in for a patch it will not produce. Recorded rather than
                 // dropped, so the viewer can say what changed instead of showing an empty
                 // pane — and so nothing downstream tries to tokenize bytes that aren't text.
                 currentFile.Binary = new GitBinaryDiff(headerKind, oldBlob, newBlob);
             }
-            else if (rawLine.StartsWith("@@ ") && currentFile != null)
+            else if (rawLine.StartsWith("@@ ", StringComparison.Ordinal) && currentFile != null)
             {
                 // Parse hunk header: @@ -oldStart,oldCount +newStart,newCount @@
                 var header = rawLine;
