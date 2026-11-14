@@ -4,23 +4,17 @@ State of [the performance team](17-performance-team.md). The orchestrator update
 file after every step and commits it with the step's work. Full survey reports are in
 [`17-reports/`](17-reports/).
 
-- **Round:** 14
-- **Phase:** release — round 14 merged into main 5b2985be (tree identical to the tested branch; origin/main was
-  e432c224, unmoved) and pushed 2026-11-14; primary checkout fast-forwarded. CI run 43637780093 on 5b2985be: attempt 1
-  red on Windows `test` only (`HultUI.Syntax.Tests.LongLineTests.ALongJsonLine_IsColouredFurther`: one `:` at 1866
-  coloured in one tokenize, not the other; no Syntax change this round; 5/5 local, 4/4 on 2 cores); attempt 2 (failed
-  job rerun) cancelled at 21:03 by the user's push a589b52b (Dependabot, CI on pull requests, SECURITY.md), then
-  Dependabot's 5aa1d25b (#1, actions bumps); neither touches code. Waiting for CI run 43642521961 on 5aa1d25b, which
-  carries round 14; on green, Round 15 survey in a fresh context (merge origin/main into the branch first). Full suite: Windows and docfx at e21a0202, Fedora at 6ea0db3b. Steps 1–7 and 9 landed
-  (step 6 with its question 61 follow-up); step 8 measured and reverted. Questions 55–59 answered 2026-11-13 with the
-  recommendations; 57 (asked again with step 1's numbers: not now) and 60 ((b) with (d)) answered 2026-11-14. Build briefs
-  `brief-r14b<N>.md`, the agent ids in `r14-agents.txt`, survey probes `r14-<area>\` and build probes `r14b<N>\` in
-  session 41943a9b's scratchpad
-  `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\41943a9b-f657-4483-971a-a2b346b967f7\scratchpad\`. One build
-  agent at a time in this worktree; real windows under the desktop lock `Global\HultUI-r14-desktop`. After the last
-  step the full suite (`fullsuite-r13.sh` in session 17c11f5e's scratchpad as the model), then Phase → release. Round
-  13's release: main 7cd6f083 + CI fixes e432c224, CI run 43499639788 green; app releases junction-v1.27.0,
-  vesper-v1.27.0, meridian-v1.10.0, aperture-v1.25.0, reel-v1.11.0 (see the Log).
+- **Round:** 15
+- **Phase:** survey — round 15, to start in a fresh context. Round 14 RELEASED 2026-11-14: main 5b2985be (merge, tree
+  identical to the tested branch), CI green on 5aa1d25b (run 43642521961; it carries round 14 plus the user's
+  a589b52b and Dependabot's 5aa1d25b, which touch no code; the run on 5b2985be had one Syntax flake, its rerun was
+  cancelled by those pushes; see the Log). origin/main is merged into the branch. No app releases this round (only
+  when the user asks). Round 14's files: briefs `brief-r14*.md`, agent ids `r14-agents.txt`, probes `r14-<area>\` and
+  `r14b<N>\`, `fullsuite-r14.sh` (the model for round 15's full suite), all in session 41943a9b's scratchpad
+  `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\41943a9b-f657-4483-971a-a2b346b967f7\scratchpad\`. For
+  round 15's start: move round 13's Landed rows, round 14's build order and questions 55–61 to the archive, as round 14
+  did (`archive_r14.py` there); new guideline from round 14: a step that changes when a navigation or a load applies
+  runs its app's tests on Fedora too.
   To resume in a fresh context, run in this worktree: `/loop Run the next step of
   the performance team: follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
   Read both once per session (afterwards only the ledger's Phase and the part the step needs), do the step the ledger's
@@ -1200,3 +1194,11 @@ From 2026-11-12 (round 13's survey); earlier entries are in the archive ([to 202
   moves a waiting navigation at once (`ListingFailed`). Tests `FileSystemTests.TheTopOfTheTree_ListsWithNoParentRow`,
   `NavigationArrivalTests.ANavigationToTheTopOfTheTree_MovesThePane`; Fedora whole suite 22/22 projects pass at
   6ea0db3b; Windows Vesper 941, Headless 1,614. Phase release.
+- 2026-11-14: round 14 RELEASED. Merged into main 5b2985be and pushed (origin/main e432c224 unmoved, tree identical
+  to the tested branch). CI run 43637780093 on 5b2985be: Windows `test` red once on
+  `HultUI.Syntax.Tests.LongLineTests.ALongJsonLine_IsColouredFurther` (the full line's tokenize coloured one `:` at
+  1866 that the prefix's did not; no Syntax change this round; 5/5 local, 4/4 on 2 cores; a flake candidate in memory
+  `ci-red-findings`); every other job green, CodeQL green. The rerun was cancelled at 21:03 by the user's push
+  a589b52b and Dependabot's 5aa1d25b (workflows and docs only); CI run 43642521961 on 5aa1d25b, which carries round
+  14, all green (Windows test, test-linux, docs, keyrings), CodeQL and the Junction installer green. origin/main
+  merged into the branch. Round → 15, Phase survey, in a fresh context.
