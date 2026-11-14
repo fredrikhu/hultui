@@ -629,6 +629,11 @@ public sealed class AccessibilityNode
         Volatile.Write(ref _children, children);
     }
 
+    /// <summary>The array of the node's children, which a caller that replaced them may put back
+    /// (<see cref="ReplaceChildren"/>): the window's overlay parts swapped in before a walk that then
+    /// could not be made in place.</summary>
+    internal AccessibilityNode[] ChildArray => _children;
+
     /// <summary>
     /// A node of no tree standing for this one with the children it has now, before a layout
     /// refresh puts others in their place (<see cref="ReplaceChildren"/>): what the refresh hands a

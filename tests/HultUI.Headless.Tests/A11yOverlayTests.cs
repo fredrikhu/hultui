@@ -572,4 +572,172 @@ public class A11yOverlayTests
         Assert.True(session.PumpFrame(), "the restore drew nothing");
         Assert.Equal(built + 1, Built(session));
     }
+
+    // ── An overlay opening or closing (plan 17, round 14) ──
+    //
+    // Each opening and each closing built the whole window's tree for the overlay's part: over
+    // Junction's History (1,114 nodes) a context menu's 14 nodes 101.7 KB to open and 99.0 to close,
+    // the palette's 55 106.5 and 99.0. Now the part is added under the root node, or taken out.
+
+    private static Element[] Labels(int n)
+    {
+        var rows = new Element[n];
+        for (int i = 0; i < n; i++) rows[i] = TextB.New($"row {i}");
+        return rows;
+    }
+
+    private static int Count(AccessibilityNode node) => 1 + node.Children.Sum(Count);
+
+    [Fact]
+    public void AnOverlayOpeningAndClosing_AddsAndTakesOutOnlyItsPart_WithNoTreeBuilt()
+    {
+        var (session, bridge) = Mount(Flex.Column().Children(Labels(200)));
+        using var _ = session;
+        var applied = bridge.CurrentTree!;
+        var firstRow = applied.Children[0];
+        int trees = session.Window.AccessibilityTreesBuilt, parts = session.Window.Window.AccessibilityOverlayPartsBuilt;
+        bridge.ClearDiffs();
+        var content = Flex.Column(gap: 4).Padding(8).Children(TextB.New("Pick"), Button.New("One"), Checkbox.New(false, "Two"));
+
+        var handle = session.Window.Window.ShowOverlay(content, 50, 50);
+        session.PumpFrame();
+
+        Assert.Equal((trees, parts + 1), (session.Window.AccessibilityTreesBuilt, session.Window.Window.AccessibilityOverlayPartsBuilt));
+        Assert.Same(applied, bridge.CurrentTree);
+        Assert.Same(firstRow, applied.Children[0]);
+        var part = Find(applied, n => n.ElementId == content.Id)!;
+        Assert.Same(part, applied.Children[^1]);
+        var opened = Assert.Single(bridge.Diffs);
+        Assert.Equal((part, applied), (opened.Added[0].Node, opened.Added[0].Parent));
+        Assert.Equal(Count(part), opened.Added.Count);
+        Assert.Empty(opened.Removed);
+        AssertFresh(session, bridge);
+        bridge.ClearDiffs();
+
+        session.Window.Window.CloseOverlay(handle);
+        session.PumpFrame();
+
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+        Assert.Same(applied, bridge.CurrentTree);
+        Assert.Same(firstRow, applied.Children[0]);
+        Assert.Null(Find(applied, n => n.ElementId == content.Id));
+        var closed = Assert.Single(bridge.Diffs);
+        Assert.Empty(closed.Added);
+        Assert.Equal(Count(part), closed.Removed.Count);
+        // Deepest first, the part's own node last, under the root node as it was.
+        var top = closed.Removed[^1];
+        Assert.Same(part, top.Node);
+        Assert.Equal(applied.ElementId, top.Parent!.ElementId);
+        Assert.Contains(part, top.Parent.Children);
+        AssertFresh(session, bridge);
+    }
+
+    [Fact]
+    public void APalettesFieldTakingTheFocusAsItOpens_IsTold_AndSoIsTheFocusGoingBack()
+    {
+        var before = Button.New("Before");
+        var (session, bridge) = Mount(Flex.Column().Children(before, Flex.Column().Children(Labels(200))));
+        using var _ = session;
+        before.Focus();
+        session.PumpFrame();
+        int trees = session.Window.AccessibilityTreesBuilt;
+        long visited = session.Window.Window.AccessibilityFocusNodesVisited;
+        var palette = new CommandPalette(() => Enumerable.Range(0, 12).Select(i => new PaletteCommand($"Command {i}", () => { })));
+
+        palette.Open(session.Window.Window);
+        session.PumpFrame();
+
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+        var field = bridge.FocusedNode;
+        Assert.NotNull(field);
+        Assert.True(field!.IsFocused);
+        Assert.Same(field, Find(bridge.CurrentTree, n => n.ElementId == field.ElementId));
+        Assert.NotNull(Find(bridge.CurrentTree!.Children[^1], n => n.ElementId == field.ElementId));
+        Assert.False(Find(bridge.CurrentTree, n => n.ElementId == before.Id)!.IsFocused);
+        AssertFresh(session, bridge);
+
+        session.Window.PressKey(HultUI.Core.Events.KeyCode.Escape);
+        session.PumpFrame();
+
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+        Assert.Equal(before.Id, bridge.FocusedNode!.ElementId);
+        Assert.True(bridge.FocusedNode.IsFocused);
+        Assert.Null(Find(bridge.CurrentTree, n => n.ElementId == field.ElementId));
+        AssertFresh(session, bridge);
+        // The field's node was looked for in no walk of the window's 200 rows: as the palette opened (no
+        // node of it yet), nor as it closed (its part still there, found down from it).
+        Assert.InRange(session.Window.Window.AccessibilityFocusNodesVisited - visited, 1, 40);
+    }
+
+    [Fact]
+    public void AnOverlayComingOrGoing_InAFrameThatBuildsTheTree_IsInThatTree()
+    {
+        var marker = Box.New().Width(Dimension.Px(4)).Height(Dimension.Px(4)).AccessibleName("marker");
+        var (session, bridge) = Mount(Flex.Column().Children(marker, Flex.Column().Children(Labels(50))));
+        using var _ = session;
+        int trees = session.Window.AccessibilityTreesBuilt;
+        var content = Flex.Column().Padding(8).Children(Button.New("Inside"));
+
+        // A change no patch or walk tells, in the frame of the opening, and of the closing.
+        var handle = session.Window.Window.ShowOverlay(content, 50, 50);
+        marker.AutomationId = "rebuilt";
+        session.PumpFrame();
+        Assert.Equal(trees + 1, session.Window.AccessibilityTreesBuilt);
+        Assert.NotNull(Find(bridge.CurrentTree, n => n.ElementId == content.Id));
+        AssertFresh(session, bridge);
+
+        session.Window.Window.CloseOverlay(handle);
+        marker.AutomationId = "rebuilt again";
+        session.PumpFrame();
+        Assert.Equal(trees + 2, session.Window.AccessibilityTreesBuilt);
+        Assert.Null(Find(bridge.CurrentTree, n => n.ElementId == content.Id));
+        AssertFresh(session, bridge);
+    }
+
+    [Fact]
+    public void AnOverlayComingOrGoing_InAFrameThatWalksTheElements_IsTakenByTheWalk()
+    {
+        var grow = Box.New().Width(Dimension.Px(20)).Height(Dimension.Px(10));
+        var row = Flex.Row(gap: 4).Children(grow, Button.New("After"));
+        var (session, bridge) = Mount(Flex.Column().Children(row, Flex.Column().Children(Labels(50))));
+        using var _ = session;
+        int trees = session.Window.AccessibilityTreesBuilt, walks = session.Window.Window.AccessibilityLayoutRefreshesInPlace;
+        var content = Flex.Column().Padding(8).Children(Button.New("Inside"));
+
+        // A layout refresh's leading edge in the frame of the opening: the walk takes the part come.
+        var handle = session.Window.Window.ShowOverlay(content, 50, 50);
+        grow.Box.Width = Dimension.Px(120);
+        grow.MarkLayoutDirty();
+        session.PumpFrame(TimeSpan.FromMilliseconds(16));
+        Assert.Equal((trees, walks + 1), (session.Window.AccessibilityTreesBuilt, session.Window.Window.AccessibilityLayoutRefreshesInPlace));
+        Assert.NotNull(Find(bridge.CurrentTree, n => n.ElementId == content.Id));
+        AssertFresh(session, bridge);
+
+        // And the part gone in the frame of the closing, the window's elements changed in it too.
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        session.Window.Window.CloseOverlay(handle);
+        row.AddChild(Button.New("New"));
+        session.PumpFrame(TimeSpan.FromMilliseconds(16));
+        Assert.Equal((trees, walks + 2), (session.Window.AccessibilityTreesBuilt, session.Window.Window.AccessibilityLayoutRefreshesInPlace));
+        Assert.Null(Find(bridge.CurrentTree, n => n.ElementId == content.Id));
+        Assert.NotNull(Find(bridge.CurrentTree, n => n.Name == "New"));
+        AssertFresh(session, bridge);
+    }
+
+    [Fact]
+    public void AnOverlayOpenedAndClosedBetweenTwoFrames_TellsNothing()
+    {
+        var (session, bridge) = Mount(Flex.Column().Children(Labels(20)));
+        using var _ = session;
+        int built = Built(session);
+        bridge.ClearDiffs();
+
+        var handle = session.Window.Window.ShowOverlay(Flex.Column().Padding(8).Children(Button.New("Gone")), 50, 50);
+        session.Window.Window.CloseOverlay(handle);
+        session.PumpFrame();
+
+        Assert.Equal(built, Built(session));
+        Assert.Empty(bridge.Diffs);
+        AssertFresh(session, bridge);
+    }
 }
