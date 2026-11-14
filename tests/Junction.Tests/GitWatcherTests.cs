@@ -140,6 +140,88 @@ public class GitWatcherTests
         Assert.Equal([true], Observer(session, seen)(() => repo.Git("branch", "epsilon"), false));
     }
 
+    /// <summary>Staging from a terminal or an editor writes only the index, by renaming a new one
+    /// over it, which the watcher did not hear (plan 17 round 14: `git add`, `restore --staged`
+    /// and a staged submodule bump left Changes stale). It hears the rename now, and tells it
+    /// when the index's entries changed: a `git status` that rewrites the index to refresh the
+    /// file times it holds (optional locks on, as outside the tests) is this app's own read and
+    /// tells nothing.</summary>
+    [Fact]
+    public void AStageMadeOutside_IsHeard_AndAStatusThatRefreshesTheIndexIsNot()
+    {
+        using var repo = TempRepo.CreateWithInitialCommit();
+        repo.Write("README.md", "changed\n");
+        repo.Settle();
+        using var session = HeadlessSession.Create(400, 300);
+        var seen = new List<bool>();
+        using var watcher = new GitWatcher(repo.Path, refs => seen.Add(refs), debounceMs: 100);
+        var after = Observer(session, seen);
+
+        Assert.Equal([false], after(() => repo.Git("add", "README.md"), false));
+        Assert.Equal([false], after(() => repo.Git("restore", "--staged", "README.md"), false));
+        Assert.Equal([false], after(() => repo.Git("add", "README.md"), false));
+
+        // The same bytes written again: the file's times move, the status re-reads it and writes
+        // the index back with the new times and the same entries.
+        var readme = Path.Combine(repo.Path, "README.md");
+        Assert.Equal([false], after(() => File.WriteAllBytes(readme, File.ReadAllBytes(readme)), false));
+        var index = File.GetLastWriteTimeUtc(Path.Combine(repo.Path, ".git", "index"));
+        Assert.Empty(after(() => GitWithOptionalLocks(repo.Path, "status", "--porcelain=v1"), true));
+        Assert.True(File.GetLastWriteTimeUtc(Path.Combine(repo.Path, ".git", "index")) > index, "status did not write the index");
+    }
+
+    /// <summary>What the watcher compares an index by: its entries' paths, modes, object ids and
+    /// flags, in every index version git writes (2; 3 with an intent-to-add entry; 4 with its
+    /// paths shortened) and with SHA-256 object ids, never the file times a status refreshes.</summary>
+    [Theory]
+    [InlineData("sha1", 2)]
+    [InlineData("sha1", 3)]
+    [InlineData("sha1", 4)]
+    [InlineData("sha256", 2)]
+    [InlineData("sha256", 4)]
+    public void TheIndexPrint_FollowsTheEntries_NotTheFileTimes(string format, int version)
+    {
+        var path = Path.Combine(Path.GetTempPath(), "junction-git-print-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(path);
+            void Git(params string[] args) => Assert.True(GitProcess.Run(path, args).Success, "git " + string.Join(' ', args));
+            Git("init", "-q", "-b", "main", "--object-format=" + format);
+            for (int i = 0; i < 40; i++)
+            {
+                var file = Path.Combine(path, $"dir{i % 3}", $"file-{i:D2}-with-a-longer-name.txt");
+                Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+                File.WriteAllText(file, $"{i}\n");
+            }
+            Git("add", "-A");
+            if (version == 3) { File.WriteAllText(Path.Combine(path, "later.txt"), "later\n"); Git("add", "-N", "later.txt"); }
+            Git("update-index", "--index-version", version.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            var indexPath = Path.Combine(path, ".git", "index");
+            int oid = format == "sha256" ? 32 : 20;
+            Assert.Equal(version, System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(File.ReadAllBytes(indexPath).AsSpan(4)));
+
+            var first = GitWatcher.IndexPrint(indexPath, oid);
+            Assert.NotNull(first);
+
+            // Every file's times move and a status with optional locks writes the index back.
+            foreach (var f in Directory.EnumerateFiles(path, "*.txt", SearchOption.AllDirectories))
+                File.SetLastWriteTimeUtc(f, DateTime.UtcNow.AddMinutes(1));
+            var before = File.GetLastWriteTimeUtc(indexPath);
+            GitWithOptionalLocks(path, "status", "--porcelain=v1");
+            Assert.True(File.GetLastWriteTimeUtc(indexPath) > before, "status did not write the index");
+            Assert.Equal(first, GitWatcher.IndexPrint(indexPath, oid));
+
+            File.WriteAllText(Path.Combine(path, "dir1", "file-01-with-a-longer-name.txt"), "staged\n");
+            Git("add", "dir1/file-01-with-a-longer-name.txt");
+            var staged = GitWatcher.IndexPrint(indexPath, oid);
+            Assert.NotNull(staged);
+            Assert.NotEqual(first, staged);
+            Git("update-index", "--chmod=+x", "dir2/file-02-with-a-longer-name.txt");
+            Assert.NotEqual(staged, GitWatcher.IndexPrint(indexPath, oid));
+        }
+        finally { TempRepo.ForceDelete(path); }
+    }
+
     /// <summary>A build writes hundreds of files in a burst. The burst is one callback, as
     /// before, and costs no exception: the debounce used to make a token, a task and a delay per
     /// event and cancel the one before, which threw (plan 17 round 14: a Junction build of this

@@ -1615,9 +1615,15 @@ Four traps on the way, all in what a `FileSystemWatcher` on `.git` reports:
 - Git writes HEAD, the config and the packed refs to a lock file and renames it over the old
   one. A watcher that listens for Changed and Created never hears them: a checkout that changed
   no file in the working tree, and a remote added, went unseen until something else changed.
-- `git status` replaces the index the same way when it refreshes it, which it did on three runs
-  in a row on a fresh repository, unless optional locks are off (as in the tests). A watcher of
-  the index's renames hears the app's own reads, reloads, and reads again.
+- Git writes the index the same way, and not only to stage: `git status` (optional locks on,
+  as outside the tests) replaces it to refresh the file times it keeps, after a checkout, a
+  fresh copy or a file rewritten with the same bytes (not after an ordinary save: 0 of 8 in
+  round 14). A watcher of the index's renames hears the app's own reads, reloads, and reads
+  again; one that ignores them never hears staging from a terminal or an editor (`git add`,
+  `restore --staged`, a staged submodule bump), which writes nothing else, and Changes stays
+  stale (round 14: 3 of 53 outside operations). Junction's watcher hears the renames and reads
+  the index when one comes: it tells the rename only when the entries changed (their paths,
+  modes, object ids and flags), which a refresh of the file times never does.
 - A reftable repository (`git init --ref-format=reftable`, `git refs migrate`; git 3.0 plans it as
   the default for new repositories) keeps every ref, the branch HEAD names included, in
   `.git/reftable`. HEAD and `refs/heads` are stubs that never change, so a watcher of them heard a
