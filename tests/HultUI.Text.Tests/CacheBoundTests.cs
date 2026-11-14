@@ -43,11 +43,11 @@ public class CacheBoundTests
         }
 
         Check(pipeline.ShapeCacheUse, TextPipeline.ShapeCacheBytes, 3_000, "shape");
-        Check(pipeline.WordCacheUse, TextPipeline.WordCacheBytes, 8_192, "word");
+        Check(pipeline.WordCacheUse, TextPipeline.WordCacheBytes, TextPipeline.WordCacheEntries, "word");
         Check(pipeline.LayoutCacheUse, TextPipeline.LayoutCacheBytes, 2_048, "layout");
 
         // Within the bound, near it, and the bound is what stopped it: by the entry counts alone
-        // (every line laid out, or the 8,192 and 2,048 the word and layout caches may hold)
+        // (every line laid out, or the 32,768 and 2,048 the word and layout caches may hold)
         // each would hold ten times its bound or more.
         static void Check((int Entries, long Bytes) use, long bound, int entries, string name)
         {
@@ -107,6 +107,28 @@ public class CacheBoundTests
         for (int i = 0; i < labels.Length; i++)
             Assert.Same(first[i], pipeline.Layout(labels[i], Style, float.PositiveInfinity, 1));
         Assert.Equal(shaped, shaper.Calls);
+    }
+
+    [Fact]
+    public void ADocumentsWordsWalkedAgain_AreAllFound()
+    {
+        // A TextArea wraps every row of a document again at each width of a drag: a walk over its
+        // words in the same order each time, which a least-recently-used cache smaller than the
+        // walk misses word for word. 20,000 words (~6 MB as weighed) walked twice, in other lines
+        // the second time so that no line is found whole: the second walk shapes none. With 8,192
+        // entries, or 4 MB, it shaped them all again.
+        var shaper = new CountingShaper();
+        var pipeline = new TextPipeline(new StubFontCollection(), shaper);
+        var words = Enumerable.Range(0, 20_000).Select(i => $"w{i:x5}").ToArray();
+        for (int i = 0; i < words.Length; i += 10)
+            pipeline.Layout(string.Join(' ', words[i..(i + 10)]), Style, float.PositiveInfinity, 1);
+        Assert.True(pipeline.WordCacheUse.Entries > words.Length, $"{pipeline.WordCacheUse.Entries:N0} words kept");
+
+        int shaped = shaper.Calls;
+        for (int i = 5; i + 10 <= words.Length; i += 10)
+            pipeline.Layout(string.Join(' ', words[i..(i + 10)]), Style, float.PositiveInfinity, 1);
+        Assert.Equal(shaped, shaper.Calls);
+        Assert.True(pipeline.WordCacheUse.Bytes > 4L << 20, $"the words weigh only {pipeline.WordCacheUse.Bytes:N0} bytes");
     }
 
     [Fact]

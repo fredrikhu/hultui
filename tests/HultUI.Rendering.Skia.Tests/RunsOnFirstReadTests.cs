@@ -76,9 +76,9 @@ public class RunsOnFirstReadTests
                     lazy.Layout(text, style, w, maxLines, overflow, spans),
                     $"\"{text}\" spans {spans?.Length ?? 0} w={w} lines={maxLines} {overflow} {style}"));
 
-            // Every word of the corpus out of the word cache (8,192 entries) before a line is read.
+            // Every word of the corpus out of the word cache (TextPipeline.WordCacheEntries) before a line is read.
             if (flushFirst)
-                for (int i = 0; i < 2 * 8192; i++)
+                for (int i = 0; i < 2 * TextPipeline.WordCacheEntries; i++)
                     lazy.Layout($"w{i:x5}", Base, float.PositiveInfinity, null);
 
             foreach (var (expected, actual, context) in laidOut)

@@ -31,7 +31,7 @@ public sealed class TextPipeline
     // never do, and WordShapeCacheTests verifies equivalence on this system.
     // Looked up by a span of the text: a segment becomes a string of its own only on a miss, to
     // be the entry's key.
-    private readonly WordCache _wordShapeCache = new(capacity: 8192, maxWeight: WordCacheBytes);
+    private readonly WordCache _wordShapeCache = new(capacity: WordCacheEntries, maxWeight: WordCacheBytes);
 
     // Widths of whole strings on one unbounded line, for MeasureWidth (Widths, below). Made at
     // the first width asked for: a pipeline that measures none — no TextArea — has none.
@@ -57,13 +57,20 @@ public sealed class TextPipeline
     // few words; at 4 MB the perf suite's 5,000-block rich text document no longer fitted and
     // took twice as long to open. (It was 24 MB while a TextArea found each of its lines' widths
     // here on every keystroke — 8 MB made typing in a 10,000-line JSON document go from 2 to
-    // 26 ms — until the TextArea kept its own widths.) The word and layout bounds hold all that
-    // the perf suite, Junction and Vesper Commander find in them again: ordinary words fill
-    // the word cache's 8,192 entries with ~2 MB, and no scenario reuses more than ~1.5 MB of
-    // laid-out text. The width cache holds the distinct lines of a 19,000-line JSON response
-    // (~7,000 of them, ~1.8 MB) with room for the next one's.
+    // 26 ms — until the TextArea kept its own widths.) The layout bound holds all that the perf
+    // suite, Junction and Vesper Commander find in it again: no scenario reuses more than
+    // ~1.5 MB of laid-out text. The word cache holds the words a TextArea's prefix tables shape
+    // at one width of a long document without spaces, which every row is wrapped again from at
+    // the next width of a drag: walked in the same order each time, words that outgrow the cache
+    // are all let go before they are read again. Both READMEs of Chinese and Japanese in one
+    // file (154,000 characters) want ~19,000 entries and ~11 MB, README.zh-CN.md alone at 960
+    // logical px ~10,000 and ~5 MB; 8,192 entries and 4 MB made every frame of a drag over them
+    // shape the whole document again (plan 17, round 14). Ordinary words fill ~2 MB. The width
+    // cache holds the distinct lines of a 19,000-line JSON response (~7,000 of them, ~1.8 MB)
+    // with room for the next one's.
     internal const long ShapeCacheBytes = 8L << 20;
-    internal const long WordCacheBytes = 4L << 20;
+    internal const int WordCacheEntries = 32768;
+    internal const long WordCacheBytes = 16L << 20;
     internal const long LayoutCacheBytes = 4L << 20;
     internal const long WidthCacheBytes = 4L << 20;
 
