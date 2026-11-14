@@ -843,7 +843,7 @@ Round 14 questions (from the survey, 2026-11-13). Recommendations in brackets.
     block instead of at 16 ms over the old rows; the block appears when it always did; shares and archives unchanged.
     (a) Keep it so; (b) a local folder also moves the pane at ~50 ms when its rows have not landed (the name and the
     loading state from 50 ms, never over the old rows); (c) revert ae8429d3. [(b): a slow folder answers within 50 ms,
-    and ordinary navigations keep one frame.]
+    and ordinary navigations keep one frame.] → **(b)** (2026-11-14; step 6's agent resumes after step 7).
 
 Reminder (expert 8): Aperture signed in to jellyfin.home as device "aperture-survey" in earlier rounds, as "aperture-r13" in round 13, and once in
 round 12 as "aperture-r12"; the user should remove those devices and revoke the API key when the work is done.
