@@ -1416,9 +1416,12 @@ public partial class JunctionApp
 
         row.AddChild(NumCell(line.OldLineNumber, 46f));
         row.AddChild(NumCell(line.NewLineNumber, 46f));
-        // A fixed column: only the code label gives way when the row is short (DiffCodeCell).
-        row.AddChild(Box.New().Width(16).FlexShrink(0).JustifyContent(JustifyContent.Center)
-            .Children(CodeText(sign, signColor)));
+        // Wrapped, a fixed column: only the code label gives way when its basis is more than the
+        // row has (DiffCodeCell). Unwrapped it shrinks with the panned cell as it always has (the
+        // cell's basis is the line, so the two share what the row lacks: 2-3 px of the 16).
+        var signCell = Box.New().Width(16).JustifyContent(JustifyContent.Center);
+        if (_diffWrap) signCell.FlexShrink(0);
+        row.AddChild(signCell.Children(CodeText(sign, signColor)));
         // Clip rather than ellipsise: the line is scrollable now, so cutting it at the edge
         // says "there is more that way", where an ellipsis says "this is all there is".
         row.AddChild(DiffCodeCell(
