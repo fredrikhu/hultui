@@ -739,7 +739,8 @@ Round 15 questions. Recommendations in brackets.
     fixes the click handler's case), REACTIVITY.md updated; code elsewhere that writes a signal after an await and then
     reads an element that rebuild makes would read the old tree. (c) An opt-in batched post: new public API, nothing
     existing changes. [(b): posts then behave as event handlers do, none of our code breaks, and `AutoBatch = false`
-    turns both off.]
+    turns both off.] → **(b)** (2026-11-14; built with reactivity-posted-drain-bound in round 15, as its own commit,
+    with the nested-pass guard and REACTIVITY.md; audit `tests/` first).
 
 Reminder (expert 8): Aperture signed in to jellyfin.home as device "aperture-survey" in earlier rounds, as "aperture-r13" in round 13, and once in
 round 12 as "aperture-r12"; the user should remove those devices and revoke the API key when the work is done.
