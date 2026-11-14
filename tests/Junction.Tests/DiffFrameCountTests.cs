@@ -2,7 +2,11 @@ using System.Reflection;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
+using HultUI.Core.Layout;
+using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
+using HultUI.Core.Rendering;
+using HultUI.Core.Styling;
 using HultUI.Headless;
 using Xunit;
 
@@ -189,7 +193,101 @@ public class DiffFrameCountTests
         });
     }
 
+    /// <summary>The rows a size change or a file list drag makes again lay their wrapped lines out
+    /// at the code width, never at zero. A zero flex basis had the layout measure each new label at
+    /// zero width before it grew, a word to a line, the most expensive layout a line has; the
+    /// text pipeline's layout cache kept those only while a build measured few enough rows, and a
+    /// Changes diff of 400 wrapped rows laid them out again every step, 534 → 709 KB a drag step
+    /// (plan 17 round 14). Counted at the layout engine's own measure context.</summary>
+    [Fact]
+    public void AWrappedDiffsNewRows_AreNeverLaidOutAtZeroWidth()
+    {
+        Hosted((session, app) =>
+        {
+            WrapOn(session, app);
+            var spy = MeasureSpy.Install(session);
+            foreach (int width in new[] { 1380, 1376, 1300 })
+            {
+                session.Window.SetClientSize(width, 900);
+                FramesDrawn(session);
+            }
+            var files = Get<Ref<ScrollViewElement>>(app, "_fileScrollRef").Current!;
+            float edge = files.Layout.AbsoluteBorderBox.Right;
+            var handle = Descendants(RootOf(session)).OfType<SplitterHandleElement>()
+                .Where(h => h.Layout.AbsoluteBorderBox.Height > 0)
+                .MinBy(h => MathF.Abs(h.Layout.AbsoluteBorderBox.X - edge))!;
+            var box = handle.ScreenBorderBox;
+            float x = box.X + box.Width / 2, y = box.Y + box.Height / 2;
+            session.Window.MoveMouse(x, y);
+            session.Window.MouseDown(x, y);
+            FramesDrawn(session);
+            session.Window.MoveMouse(x - 8, y);
+            FramesDrawn(session);
+            session.Window.MouseUp(x - 8, y);
+            FramesDrawn(session);
+
+            Assert.True(spy.LongLines > 20, $"{spy.LongLines} long lines measured: the steps made no rows");
+            Assert.True(spy.LongLinesAtZero == 0, $"{spy.LongLinesAtZero} of {spy.LongLines} long lines laid out at zero width");
+        });
+    }
+
     // ── harness ──────────────────────────────────────────────────────────
+
+    /// <summary>Counts what the window's layout engine measures, by wrapping its measure context: lines
+    /// longer than 100 characters, and those of them laid out at no width.</summary>
+    private sealed class MeasureSpy(IMeasureContext inner) : IMeasureContext
+    {
+        public int LongLines, LongLinesAtZero;
+
+        public static MeasureSpy Install(HeadlessSession session)
+        {
+            var engine = typeof(HultUI.Window).GetField("_layoutEngine", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .GetValue(session.Window.Window)!;
+            var field = engine.GetType().GetField("_measureContext", BindingFlags.NonPublic | BindingFlags.Instance)!;
+            var spy = new MeasureSpy((IMeasureContext)field.GetValue(engine)!);
+            field.SetValue(engine, spy);
+            return spy;
+        }
+
+        private void Note(string text, float maxWidth)
+        {
+            if (text.Length <= 100) return;
+            LongLines++;
+            if (maxWidth <= 0f) LongLinesAtZero++;
+        }
+
+        public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+            TextOverflow overflow = TextOverflow.Clip)
+        {
+            Note(text, maxWidth);
+            return inner.MeasureText(text, style, maxWidth, maxLines, overflow);
+        }
+
+        public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+            TextOverflow overflow, IReadOnlyList<TextSpan>? spans)
+        {
+            Note(text, maxWidth);
+            return inner.MeasureText(text, style, maxWidth, maxLines, overflow, spans);
+        }
+
+        public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+            TextOverflow overflow, IReadOnlyList<TextSpan>? spans, out float sameFromWidth)
+        {
+            Note(text, maxWidth);
+            return inner.MeasureText(text, style, maxWidth, maxLines, overflow, spans, out sameFromWidth);
+        }
+
+        public float MinContentTextWidth(string text, ResolvedInheritedStyle style, IReadOnlyList<TextSpan>? spans = null) =>
+            inner.MinContentTextWidth(text, style, spans);
+
+        public FontMetrics MeasureFont(ResolvedInheritedStyle style) => inner.MeasureFont(style);
+
+        public bool HasGlyph(ResolvedInheritedStyle style, int codePoint) => inner.HasGlyph(style, codePoint);
+
+        public float MeasureFirstBaseline(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+            TextOverflow overflow = TextOverflow.Clip, IReadOnlyList<TextSpan>? spans = null) =>
+            inner.MeasureFirstBaseline(text, style, maxWidth, maxLines, overflow, spans);
+    }
 
     /// <summary>Wrap on, from the diff's own key, and settled.</summary>
     private static void WrapOn(HeadlessSession session, JunctionApp app)
