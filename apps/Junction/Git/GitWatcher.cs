@@ -28,14 +28,27 @@ public sealed class GitWatcher : IDisposable
     private readonly FileSystemWatcher? _reftableWatcher;
     private readonly Action<bool> _onChange;
     private readonly int _debounceMs;
-    private CancellationTokenSource? _debounceCts;
+    /// <summary>The debounce: one timer, armed by the first event of a window and moved on by
+    /// <see cref="OnDue"/> until <see cref="_due"/> has passed. A build writes hundreds of
+    /// files a second; a new token, task and delay per event, and the cancelled delay's
+    /// exception, were most of what the watcher cost (plan 17 round 14).</summary>
+    private readonly ITimer _debounce;
     private readonly object _lock = new();
     /// <summary>Whether HEAD, a ref, the config or the packed refs changed since the last
     /// callback. Guarded by <see cref="_lock"/>.</summary>
     private bool _refsMoved;
     /// <summary>How many changes were heard; how many of them the last callback told; how many
-    /// the last <see cref="Forget"/> covered. Guarded by <see cref="_lock"/>.</summary>
-    private long _heard, _told, _forgotten;
+    /// the last <see cref="Forget"/> covered; how many the last callback posted had heard.
+    /// Guarded by <see cref="_lock"/>.</summary>
+    private long _heard, _told, _forgotten, _posted;
+    /// <summary>When the window closes (<see cref="Environment.TickCount64"/>): the debounce
+    /// after the last event heard. Whether the timer is set to fire. Whether it was
+    /// disposed. Guarded by <see cref="_lock"/>.</summary>
+    private long _due;
+    private bool _armed, _disposed;
+
+    private static readonly string GitInside = Path.DirectorySeparatorChar + ".git" + Path.DirectorySeparatorChar;
+    private static readonly string GitAtEnd = Path.DirectorySeparatorChar + ".git";
 
     /// <param name="onChange">Called on the UI thread, debounced; its argument is true when
     /// HEAD, a ref, the config or the packed refs changed, false when only the working tree or
@@ -44,6 +57,8 @@ public sealed class GitWatcher : IDisposable
     {
         _onChange = onChange;
         _debounceMs = debounceMs;
+        _debounce = TimeProvider.System.CreateTimer(static w => ((GitWatcher)w!).OnDue(), this,
+            Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
 
         var gitDir = Path.Combine(repoPath, ".git");
 
@@ -132,8 +147,8 @@ public sealed class GitWatcher : IDisposable
     private void OnWorkTreeChanged(object sender, FileSystemEventArgs e)
     {
         // Ignore changes inside .git/
-        if (e.FullPath.Contains(Path.DirectorySeparatorChar + ".git" + Path.DirectorySeparatorChar)
-            || e.FullPath.EndsWith(Path.DirectorySeparatorChar + ".git"))
+        if (e.FullPath.Contains(GitInside, StringComparison.Ordinal)
+            || e.FullPath.EndsWith(GitAtEnd, StringComparison.Ordinal))
             return;
 
         ScheduleRefresh(refs: false);
@@ -158,37 +173,49 @@ public sealed class GitWatcher : IDisposable
     {
         lock (_lock)
         {
+            if (_disposed) return;
             _heard++;
             _refsMoved |= refs;
-            _debounceCts?.Cancel();
-            _debounceCts = new CancellationTokenSource();
-            var token = _debounceCts.Token;
-
-            _ = Task.Run(async () =>
+            // The window closes a debounce after the last event. The timer is set once a window;
+            // OnDue moves it on while events keep coming, rather than every event doing so.
+            _due = Environment.TickCount64 + _debounceMs;
+            if (!_armed)
             {
-                try
-                {
-                    await Task.Delay(_debounceMs, token);
-                    bool moved;
-                    long heard;
-                    lock (_lock)
-                    {
-                        if (token.IsCancellationRequested) return;
-                        moved = _refsMoved;
-                        _refsMoved = false;
-                        heard = _heard;
-                    }
-                    HultUI.Application.InvokeOnMainThread(() => Tell(moved, heard));
-                }
-                catch (TaskCanceledException) { }
-            }, token);
+                _armed = true;
+                _debounce.Change(TimeSpan.FromMilliseconds(_debounceMs), Timeout.InfiniteTimeSpan);
+            }
         }
+    }
+
+    /// <summary>The debounce timer fired (on the thread pool): if an event came since it was
+    /// set, wait out the rest of that event's debounce; otherwise tell what the window heard.</summary>
+    private void OnDue()
+    {
+        bool moved;
+        long heard;
+        lock (_lock)
+        {
+            if (_disposed || !_armed) return;   // stopped by Forget or Dispose
+            long wait = _due - Environment.TickCount64;
+            if (wait > 0)
+            {
+                _debounce.Change(TimeSpan.FromMilliseconds(wait), Timeout.InfiniteTimeSpan);
+                return;
+            }
+            _armed = false;
+            if (_heard <= Math.Max(_posted, _forgotten)) return;
+            moved = _refsMoved;
+            _refsMoved = false;
+            heard = _posted = _heard;
+        }
+        HultUI.Application.InvokeOnMainThread(() => Tell(moved, heard));
     }
 
     private void Tell(bool moved, long heard)
     {
         lock (_lock)
         {
+            if (_disposed) return;
             if (heard <= _forgotten) return;   // covered by a Forget made since it was posted
             _told = heard;
         }
@@ -211,7 +238,11 @@ public sealed class GitWatcher : IDisposable
             bool untold = _heard > Math.Max(_told, _forgotten);
             _forgotten = _heard;
             _refsMoved = false;
-            _debounceCts?.Cancel();
+            if (_armed)
+            {
+                _armed = false;
+                _debounce.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+            }
             return untold;
         }
     }
@@ -226,7 +257,11 @@ public sealed class GitWatcher : IDisposable
         _refsWatcher.Dispose();
         _workTreeWatcher.Dispose();
         _reftableWatcher?.Dispose();
-        _debounceCts?.Cancel();
-        _debounceCts?.Dispose();
+        lock (_lock)
+        {
+            _disposed = true;
+            _armed = false;
+        }
+        _debounce.Dispose();
     }
 }

@@ -140,6 +140,45 @@ public class GitWatcherTests
         Assert.Equal([true], Observer(session, seen)(() => repo.Git("branch", "epsilon"), false));
     }
 
+    /// <summary>A build writes hundreds of files in a burst. The burst is one callback, as
+    /// before, and costs no exception: the debounce used to make a token, a task and a delay per
+    /// event and cancel the one before, which threw (plan 17 round 14: a Junction build of this
+    /// repository 267 events, an AOT publish 551, a caught exception each).</summary>
+    [Fact]
+    public void ABurstOfEvents_IsOneCallback_AndThrowsNothing()
+    {
+        using var repo = TempRepo.CreateWithInitialCommit();
+        using var session = HeadlessSession.Create(400, 300);
+        var seen = new List<bool>();
+        using var watcher = new GitWatcher(repo.Path, refs => seen.Add(refs), debounceMs: 500);
+        Directory.CreateDirectory(Path.Combine(repo.Path, "out"));
+        Pump(session, TimeSpan.FromMilliseconds(800));
+        seen.Clear();
+
+        int thrown = 0;
+        void OnThrown(object? sender, System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs e)
+        {
+            if (e.Exception is OperationCanceledException && Environment.StackTrace.Contains(nameof(GitWatcher), StringComparison.Ordinal))
+                Interlocked.Increment(ref thrown);
+        }
+        AppDomain.CurrentDomain.FirstChanceException += OnThrown;
+        try
+        {
+            for (int i = 0; i < 100; i++)
+            {
+                File.WriteAllText(Path.Combine(repo.Path, "out", $"f{i}.bin"), "x");
+                Thread.Sleep(1);   // a build's pace: each write its own event, all inside one debounce
+            }
+            var until = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+            while (DateTime.UtcNow < until && seen.Count == 0) { session.PumpFrame(); Thread.Sleep(10); }
+            Pump(session, TimeSpan.FromMilliseconds(800));
+        }
+        finally { AppDomain.CurrentDomain.FirstChanceException -= OnThrown; }
+
+        Assert.Equal([false], seen);
+        Assert.Equal(0, thrown);
+    }
+
     /// <summary>Waits out what came before, runs the action, and returns what the watcher said
     /// about it (a straggler in the same change included).</summary>
     private static Func<Action, bool, List<bool>> Observer(HeadlessSession session, List<bool> seen) => (act, expectNone) =>
