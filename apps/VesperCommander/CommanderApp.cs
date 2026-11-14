@@ -773,7 +773,12 @@ public partial class CommanderApp : Component, IDisposable
             // is exactly the case that must not still count as holding still.
             UpdateContextHold(ev.Position.X, ev.Position.Y);
         }, _rootMoveListening ??= () => _findResizing || _holdArmed);
-        root.On<PointerUpEvent>(ev =>
+        // The release is passive too: it ends the hold's timer and a right-drag mark (the rows
+        // marked as the pointer crossed them, each drawn then) or the grip's resize (each move
+        // drew), and none of that changes what is on screen. As an ordinary handler it drew a frame
+        // of the same pixels for every release in the window, a second frame for every click
+        // (plan 17 round 14: 20 frames for 10 clicks in a real window, 10 now).
+        root.OnPassive<PointerUpEvent>(ev =>
         {
             if (ev.Button == 2) { CancelContextHold(); EndRightMark(); }
             if (_findResizing) _findResizing = false;
