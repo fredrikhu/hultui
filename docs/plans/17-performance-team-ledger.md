@@ -5,9 +5,9 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 14
-- **Phase:** build — round 14, step 9 waits for the user's look at its images (sent 2026-11-14; `r14b9\png\*-compare.png`
-  in session 41943a9b's scratchpad); the change is uncommitted in the worktree (4 files, also `r14b9\hover-follows-scroll.patch`):
-  on a yes, resume step 9's agent aa1e7c71f5434fef1 to test, measure and commit; on a no, it reverts. Steps 1–7 landed
+- **Phase:** build — round 14, step 9: the user said yes to its images 2026-11-14 (with its behaviour choices); agent
+  aa1e7c71f5434fef1 resumed to test, measure and commit (`r14b9\` in session 41943a9b's scratchpad); then the full suite
+  and release. Steps 1–7 landed
   (step 6 with its question 61 follow-up); step 8 measured and reverted. Questions 55–59 answered 2026-11-13 with the
   recommendations; 57 (asked again with step 1's numbers: not now) and 60 ((b) with (d)) answered 2026-11-14. Build briefs
   `brief-r14b<N>.md`, the agent ids in `r14-agents.txt`, survey probes `r14-<area>\` and build probes `r14b<N>\` in
@@ -1177,3 +1177,6 @@ From 2026-11-12 (round 13's survey); earlier entries are in the archive ([to 202
   interop brought the first video frame only 11–21 ms sooner (mpv's own GL setup got slower after an early load) and
   cost every session that never plays a 10-a-second NVIDIA thread and +18–28 MB (Examined). Next: step 9 (images to the
   user before its commit).
+- 2026-11-14: the user said yes to step 9's before/after images (Junction History, Vesper thumbnails and detail, Fluent
+  link cards) and its choices: a showing tooltip closes when its owner scrolls away, hover stays put while a button is
+  held, and every kind of scroll is followed. Its agent was resumed to test, measure and commit.
