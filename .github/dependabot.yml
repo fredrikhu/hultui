@@ -1,0 +1,71 @@
+# Dependabot version updates: NuGet packages, the .NET SDK pin in global.json,
+# and the actions the workflows use. One run a week, grouped so a week's
+# updates arrive as a few pull requests rather than one per package.
+#
+# Alerts and security updates are switched on in Settings → Advanced Security,
+# not here. Cooldown applies to version updates only: a fix for a known
+# vulnerability is never held back by it.
+#
+# CI (ci.yml) runs on every pull request into main, so each of these carries
+# the full suites' results before it merges.
+
+version: 2
+
+updates:
+  # Entry point is HultUI.slnx. Projects outside it (the spikes, AtSpiVerify, the
+  # two natives packagers) are not scanned.
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # Leave a new release a week to be pulled or patched before proposing it.
+    cooldown:
+      default-days: 7
+    ignore:
+      # Exact pin: SshExitStatus.cs reads an internal of this version, and its
+      # test fails on one that moved it (see HultUI.Terminal.Ssh.csproj). The agent
+      # package tracks it, so both move by hand.
+      - dependency-name: SSH.NET
+      - dependency-name: SshNet.Agent
+    groups:
+      # The managed packages and their native assets must stay on one release.
+      skia:
+        patterns:
+          - SkiaSharp*
+          - HarfBuzzSharp*
+      kiota:
+        patterns:
+          - Microsoft.Kiota.*
+      # Everything else that isn't a major version: one pull request a week.
+      # Majors still come one per package.
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  # A new major SDK is a deliberate move (target frameworks, analyzers), so only
+  # feature bands and patches within the current major are proposed.
+  - package-ecosystem: dotnet-sdk
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns:
+          - "*"

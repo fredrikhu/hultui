@@ -1,7 +1,12 @@
-# Tests every push to main.
+# Tests every push to main, and every pull request into it.
 #
 # The installer workflows gate each release on the same suites, but they only
 # run on a tag — so between releases nothing else checks main at all.
+#
+# Pull requests are mostly Dependabot's weekly updates (.github/dependabot.yml),
+# tested here before they merge. The trigger is pull_request, never
+# pull_request_target: a run for a fork or for Dependabot gets a read-only token
+# and no secrets, and this workflow uses none.
 #
 # Deliberately no packaging here: this answers "does main still work", and the
 # installer workflows answer "can we ship it".
@@ -16,6 +21,8 @@ name: CI
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -24,7 +31,8 @@ permissions:
 concurrency:
   group: ci-${{ github.ref }}
   # The opposite of the release workflows: a newer push supersedes an older one,
-  # because only the tip of main is interesting.
+  # because only the tip of main is interesting. A pull request's ref is its own
+  # (refs/pull/<n>/merge), so a new push to one cancels only that one's run.
   cancel-in-progress: true
 
 env:

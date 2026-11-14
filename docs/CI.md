@@ -13,7 +13,7 @@ setup guide is in the history: `git show d2bc157b:docs/SELF-HOSTED-RUNNERS.md`.
 
 | Workflow | Runs on | Jobs | Proves or produces |
 |---|---|---|---|
-| `ci.yml` | push to `main`, by hand | `test` (Windows), `test-linux`, `meridian-keyring` (Linux, macOS), `docs` | the whole solution's tests on both OSes; Meridian's secrets in the real Linux and macOS keyrings; the DocFX site with warnings as errors |
+| `ci.yml` | push to `main`, a pull request into `main`, by hand | `test` (Windows), `test-linux`, `meridian-keyring` (Linux, macOS), `docs` | the whole solution's tests on both OSes; Meridian's secrets in the real Linux and macOS keyrings; the DocFX site with warnings as errors |
 | `<app>-installer.yml` (Junction, Vesper, Meridian, Aperture, Reel) | an `<app>-vX.Y.Z` tag, by hand | `test`, `test-linux` (Junction, Meridian), `installer` | the app's tests, a NativeAOT build, an Inno Setup installer; a GitHub release on a tag |
 | `mpv-natives.yml` | an `mpv-natives-v*` tag, by hand | `windows`, `linux`, `package` | the trimmed LGPL libmpv for both OSes, proved by the backend tests, and `HultUI.Media.Mpv.Natives` |
 | `cef-natives.yml` | a `cef-natives-v*` tag, by hand | `pack` | `HultUI.WebView.Cef.Natives.<rid>` for linux-x64 and linux-arm64, proved by the engine tests |
@@ -80,11 +80,12 @@ The UI-automation tests in `HultUI.UiTests` open real windows and need a GPU. Th
 
 ## Rules for a public repository
 
-- **Triggers.** Pushes (which need write access), tags and `workflow_dispatch` only. No
-  `pull_request_target` and no `workflow_run`: both run with this repository's token on code
-  someone else chose. If CI for contributors' pull requests is wanted later, use
-  `pull_request`, which gives a fork's run a read-only token and no secrets, and keep the
-  repository setting that asks for approval before a first-time contributor's workflows run.
+- **Triggers.** Pushes (which need write access), tags, `workflow_dispatch`, and `pull_request`
+  for `ci.yml` alone, so Dependabot's weekly pull requests (`.github/dependabot.yml`) are tested
+  before they merge. `pull_request` gives a run for a fork or for Dependabot a read-only token
+  and no secrets. Keep the repository setting that asks for approval before a first-time
+  contributor's workflows run. No `pull_request_target` and no `workflow_run`: both run with
+  this repository's token on code someone else chose.
 - **Token.** The repository default is read-only (Settings → Actions → General → Workflow
   permissions). Every workflow declares `contents: read` at the top. Only a job that publishes a
   release declares `contents: write`, and only the steps that publish get `GH_TOKEN`. The
