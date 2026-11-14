@@ -15,7 +15,7 @@ using HultUI.Core.Threading;
 
 namespace HultUI;
 
-public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer, IPreFrameHost
+public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer, IPreFrameHost, IDisplayScaleHost
 {
     private readonly LayoutEngine _layoutEngine;
     private readonly FocusManager _focusManager = new();
