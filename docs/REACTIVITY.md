@@ -1623,7 +1623,12 @@ Four traps on the way, all in what a `FileSystemWatcher` on `.git` reports:
   `restore --staged`, a staged submodule bump), which writes nothing else, and Changes stays
   stale (round 14: 3 of 53 outside operations). Junction's watcher hears the renames and reads
   the index when one comes: it tells the rename only when the entries changed (their paths,
-  modes, object ids and flags), which a refresh of the file times never does.
+  modes, object ids and flags), which a refresh of the file times never does. It also reads the
+  index as it starts: the first rewrite is usually the app's own first `git diff` (which writes
+  the index even with optional locks off) over a repository whose files are newer than its index,
+  and with nothing to compare it with it was heard back as one more reload of every repository
+  opened. The print read then is kept only when the file was written well before the watcher
+  listened, so no change the app's first loads missed is taken as seen.
 - A reftable repository (`git init --ref-format=reftable`, `git refs migrate`; git 3.0 plans it as
   the default for new repositories) keeps every ref, the branch HEAD names included, in
   `.git/reftable`. HEAD and `refs/heads` are stubs that never change, so a watcher of them heard a

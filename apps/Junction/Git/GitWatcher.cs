@@ -59,6 +59,8 @@ public sealed class GitWatcher : IDisposable
     /// 0 until the config is read.</summary>
     private int _oidLength;
     private readonly string _gitDir, _repoPath;
+    /// <summary>When the watcher began listening (see <see cref="ReadFirstPrint"/>).</summary>
+    private readonly DateTime _listening;
 
     /// <summary>What git said of a folder in the work tree (its path with this platform's
     /// separator): <see cref="Folder.Ignored"/> when <c>git check-ignore</c> ignores
@@ -104,6 +106,7 @@ public sealed class GitWatcher : IDisposable
     /// the index did.</param>
     public GitWatcher(string repoPath, Action<bool> onChange, int debounceMs = 300)
     {
+        _listening = DateTime.UtcNow;
         _onChange = onChange;
         _debounceMs = debounceMs;
         _debounce = TimeProvider.System.CreateTimer(static w => ((GitWatcher)w!).OnDue(), this,
@@ -168,6 +171,38 @@ public sealed class GitWatcher : IDisposable
         _workTreeWatcher.Created += OnWorkTreeChanged;
         _workTreeWatcher.Deleted += OnWorkTreeChanged;
         _workTreeWatcher.Renamed += OnWorkTreeChanged;
+
+        _ = Task.Run(ReadFirstPrint);
+    }
+
+    /// <summary>
+    /// Reads the index once the watcher listens (on the thread pool), for the first rewrite to
+    /// be compared with: without it the first rename of a session was always told, and the
+    /// first is usually this app's own read refreshing the file times (a `git diff` or a status
+    /// over a repository whose files are newer than the index, as a fresh clone's or copy's are),
+    /// heard back as one more reload of each repository it opens. The print is kept only when
+    /// the file read was written well before the watcher began listening: then every load the
+    /// app starts from here on reads that same file, and any write since is newer and told.
+    /// One written while the watcher started is not kept, and the first rename is told as before.
+    /// </summary>
+    private void ReadFirstPrint()
+    {
+        lock (_lock)
+        {
+            if (_disposed || _busy || _indexPrint != null) return;
+            _busy = true;
+        }
+        try
+        {
+            if (_oidLength == 0) _oidLength = ObjectIdLength(_gitDir);
+            var print = IndexPrint(Path.Combine(_gitDir, "index"), _oidLength, out var written);
+            // File times trail the clock by a timer tick (16 ms at most on Windows), and git
+            // renames the index straight after writing it.
+            if (print != null && written < _listening - TimeSpan.FromMilliseconds(250) && _indexPrint is null)
+                _indexPrint = print;
+        }
+        catch (Exception) { /* told as before */ }
+        finally { lock (_lock) _busy = false; }
     }
 
     private void OnGitDirChanged(object sender, FileSystemEventArgs e)
@@ -517,13 +552,19 @@ public sealed class GitWatcher : IDisposable
     /// staged. Null when the file is missing, unreadable or not an index git wrote. Read with
     /// every share mode, so git can rename over it meanwhile.
     /// </summary>
-    internal static ulong? IndexPrint(string path, int oidLength)
+    internal static ulong? IndexPrint(string path, int oidLength) => IndexPrint(path, oidLength, out _);
+
+    /// <param name="written">When the file read was written (the file system's time), or
+    /// <see cref="DateTime.MaxValue"/> when it could not be read.</param>
+    private static ulong? IndexPrint(string path, int oidLength, out DateTime written)
     {
+        written = DateTime.MaxValue;
         byte[] buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(64 * 1024);
         try
         {
             using var file = new FileStream(path, FileMode.Open, FileAccess.Read,
                 FileShare.ReadWrite | FileShare.Delete, bufferSize: 0);
+            written = File.GetLastWriteTimeUtc(file.SafeFileHandle);
             var r = new IndexReader(file, buffer);
             if (!r.Fill(12)) return null;
             var header = r.Span(12);
