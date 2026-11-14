@@ -823,7 +823,7 @@ Round 14 questions (from the survey, 2026-11-13). Recommendations in brackets.
     (d): a key walk through the files stays one frame a key, a jump to a far file shows the old diff ~40 ms, and
     History keeps the −75 % bytes.] The change and its 7 tests wait in `r14b2\junction-detail-patch.diff` and
     `CommitPatchTests.cs` (session 41943a9b's scratchpad); step 2's agent resumes with the answer after the step then
-    building.
+    building. → **(b) with (d)** (2026-11-14; step 2 resumes after step 4).
 
 Reminder (expert 8): Aperture signed in to jellyfin.home as device "aperture-survey" in earlier rounds, as "aperture-r13" in round 13, and once in
 round 12 as "aperture-r12"; the user should remove those devices and revoke the API key when the work is done.
