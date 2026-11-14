@@ -1346,12 +1346,17 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
 
     // ──── Text Measurement ────
 
+    // MeasureText(...).Width of the range, through the context's width of a span
+    // (MeasureTextWidth): no string made, and the Skia context finds a width it measured before in
+    // its width cache. A line search measures a line no prefix table covers (BiDi text: right to
+    // left, emoji, Thai, marks) one probe at a time, and a drag asks for most of the same probes
+    // again at the next width, where each was laid out whole as a string of its own.
     private float MeasureSubstring(int start, int length, ResolvedInheritedStyle style)
     {
         if (length <= 0) return 0;
-        var sub = _text.Substring(start, length);
         if (_renderCtx is not null)
-            return _renderCtx.MeasureText(sub, style).Width;
+            return _renderCtx.MeasureTextWidth(_text.AsSpan(start, length), style);
+        var sub = _text.Substring(start, length);
         if (_measureCtx is not null)
             return _measureCtx.MeasureText(sub, style, float.PositiveInfinity, 1).Width;
         return sub.Length * style.FontSize * 0.6f; // fallback for tests

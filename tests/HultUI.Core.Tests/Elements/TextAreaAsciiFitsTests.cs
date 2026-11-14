@@ -22,7 +22,8 @@ public class TextAreaAsciiFitsTests
     private readonly LayoutEngine _layout = new(new StubMeasureContext());
 
     // Every printable ASCII character Advance wide, a tab four, anything else one and a half; a
-    // record of the lines measured whole.
+    // record of the lines measured whole. A line too long to fit is searched through a table of
+    // its prefixes, as the Skia context gives one for text like this.
     private sealed class Mono(bool proven) : NullRenderContext, IRenderContext
     {
         public const float Advance = 7f;
@@ -36,6 +37,15 @@ public class TextAreaAsciiFitsTests
         }
 
         public override Size MeasureText(string text, ResolvedInheritedStyle style) => new(Width(text), style.FontSize);
+
+        public ITextPrefixWidths? MeasureTextPrefixes(string text, int start, int length, ResolvedInheritedStyle style) =>
+            new Prefixes(text.Substring(start, length));
+
+        private sealed class Prefixes(string text) : ITextPrefixWidths
+        {
+            public int Length => text.Length;
+            public float Width(int length) => Mono.Width(text.AsSpan(0, length));
+        }
 
         public float MeasureTextWidth(ReadOnlySpan<char> text, ResolvedInheritedStyle style)
         {

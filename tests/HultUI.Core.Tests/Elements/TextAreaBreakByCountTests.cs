@@ -23,7 +23,8 @@ public class TextAreaBreakByCountTests
     private readonly LayoutEngine _layout = new(new StubMeasureContext());
 
     // Every printable ASCII character Advance wide, anything else one and a half; a record of
-    // the prefixes the search measured (MeasureSubstring asks MeasureText).
+    // the strings the search measured prefixes of (it reads a table of them, as the Skia context
+    // gives one for text like this).
     private sealed class Mono : NullRenderContext, IRenderContext
     {
         public const float Advance = 7f;
@@ -36,10 +37,19 @@ public class TextAreaBreakByCountTests
             return w;
         }
 
-        public override Size MeasureText(string text, ResolvedInheritedStyle style)
+        public override Size MeasureText(string text, ResolvedInheritedStyle style) => new(Width(text), style.FontSize);
+
+        public ITextPrefixWidths? MeasureTextPrefixes(string text, int start, int length, ResolvedInheritedStyle style)
         {
-            Searched.Add(text);
-            return new(Width(text), style.FontSize);
+            string measured = text.Substring(start, length);
+            Searched.Add(measured);
+            return new Prefixes(measured);
+        }
+
+        private sealed class Prefixes(string text) : ITextPrefixWidths
+        {
+            public int Length => text.Length;
+            public float Width(int length) => Mono.Width(text.AsSpan(0, length));
         }
 
         public float MeasureTextWidth(ReadOnlySpan<char> text, ResolvedInheritedStyle style) => Width(text);

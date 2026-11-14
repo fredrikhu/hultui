@@ -1590,7 +1590,13 @@ public sealed class TextPipeline
         var (levels, rtlParagraph) = bidi is null
             ? BidiAnalyzer.Levels(text, style.TextDirection)
             : (bidi.Levels!, bidi.RtlParagraph);
-        var allBreaks = bidi?.Breaks ?? BreakOffsets(text);
+        // One unbounded line without a newline never breaks: the loop below would find ICU's
+        // breaks and measure every segment between them to add no line, and the line after it is
+        // the whole text. So it runs over no breaks. A text area measures the prefixes of a line of
+        // BiDi text this way (MeasureWidth), several each time the line wraps at a new width.
+        var allBreaks = float.IsPositiveInfinity(maxWidth) && !text.AsSpan().Contains('\n')
+            ? NoBreaks
+            : bidi?.Breaks ?? BreakOffsets(text);
 
         var lines = RentLines();
         int textOffset = 0;
@@ -1653,6 +1659,9 @@ public sealed class TextPipeline
                 BuildBidiEllipsizedLine(text, start, tailEnd, style, levels, rtlParagraph, maxWidth, bidi, spans));
         return new TextLayout(LayoutLines(lines), new Size(maxLineWidth, totalHeight), rtlParagraph);
     }
+
+    // ComputeWrappedBidi's breaks for a line that cannot break. Never added to.
+    private static readonly List<int> NoBreaks = [];
 
     private int BidiFitPrefix(string text, int from, int to,
         ResolvedInheritedStyle style, byte[] levels, float maxWidth, TextMemo? bidi,
