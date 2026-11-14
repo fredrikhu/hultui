@@ -9,7 +9,9 @@ file after every step and commits it with the step's work. Full survey reports a
   e432c224, unmoved) and pushed 2026-11-14; primary checkout fast-forwarded. CI run 43637780093 on 5b2985be: attempt 1
   red on Windows `test` only (`HultUI.Syntax.Tests.LongLineTests.ALongJsonLine_IsColouredFurther`: one `:` at 1866
   coloured in one tokenize, not the other; no Syntax change this round; 5/5 local, 4/4 on 2 cores); attempt 2 (failed
-  job rerun) waiting; on green, Round 15 survey in a fresh context. Full suite: Windows and docfx at e21a0202, Fedora at 6ea0db3b. Steps 1–7 and 9 landed
+  job rerun) cancelled at 21:03 by the user's push a589b52b (Dependabot, CI on pull requests, SECURITY.md), then
+  Dependabot's 5aa1d25b (#1, actions bumps); neither touches code. Waiting for CI run 43642521961 on 5aa1d25b, which
+  carries round 14; on green, Round 15 survey in a fresh context (merge origin/main into the branch first). Full suite: Windows and docfx at e21a0202, Fedora at 6ea0db3b. Steps 1–7 and 9 landed
   (step 6 with its question 61 follow-up); step 8 measured and reverted. Questions 55–59 answered 2026-11-13 with the
   recommendations; 57 (asked again with step 1's numbers: not now) and 60 ((b) with (d)) answered 2026-11-14. Build briefs
   `brief-r14b<N>.md`, the agent ids in `r14-agents.txt`, survey probes `r14-<area>\` and build probes `r14b<N>\` in
