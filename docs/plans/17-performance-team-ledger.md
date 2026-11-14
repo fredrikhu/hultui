@@ -5,8 +5,9 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 14
-- **Phase:** build — round 14, all nine steps done (step 9 landed b62e22cf); next the full suite (Windows, Fedora, docfx)
-  on the branch, then release. Steps 1–7 and 9 landed
+- **Phase:** full suite — round 14 at e21a0202: Windows and docfx green; Fedora 1 failure, Vesper
+  `DrivePickerTests.TheVolumeIsTheMountAPathIsUnder_NotItsRoot` (3 of 3; passes cae1a0bd, fails from ae8429d3, step 6(b)).
+  Step 6's agent a81b11f648f39509d resumed to fix it; then the Fedora run again, then release. Steps 1–7 and 9 landed
   (step 6 with its question 61 follow-up); step 8 measured and reverted. Questions 55–59 answered 2026-11-13 with the
   recommendations; 57 (asked again with step 1's numbers: not now) and 60 ((b) with (d)) answered 2026-11-14. Build briefs
   `brief-r14b<N>.md`, the agent ids in `r14-agents.txt`, survey probes `r14-<area>\` and build probes `r14b<N>\` in
@@ -1185,3 +1186,7 @@ From 2026-11-12 (round 13's survey); earlier entries are in the archive ([to 202
   row under the pointer hovered 0/4 → 4/4; one more hit test of 12–33 visits a scroll frame, 0 B). Added after the
   images: a release after a scroll during a held press asks for the frame that moves hover. Round 14's build is done.
   Next: the full suite, then release.
+- 2026-11-14: round 14's full suite at e21a0202: Windows 0 failures (Junction 1,140 in 10 m 43 s), docfx 0 warnings;
+  Fedora 1: Vesper's picking the top volume ("/") left the pane on its folder, deterministic, since step 6(b) ae8429d3
+  (bisected on Fedora: cae1a0bd passes). Step 6's agent was sent back to fix it; no Fedora run in step 6's brief caught
+  it. For the guidelines: a step that changes when a navigation or a load applies runs its app's tests on Fedora too.
