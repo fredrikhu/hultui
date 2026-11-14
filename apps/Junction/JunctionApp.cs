@@ -474,6 +474,7 @@ public partial class JunctionApp : Component, IDisposable
         _compactTables = ContentWidth < CompactTableContentWidth;
         _narrowTables = ContentWidth < NarrowTableContentWidth;
         Ui.DisplayScale = _window.DisplayScale;
+        _resizeLayoutWidth = _window.LayoutWidth;
         _window.Resized += OnWindowResize;
 
         // Global keys land on the host when nothing is focused (see App.cs for
@@ -497,7 +498,17 @@ public partial class JunctionApp : Component, IDisposable
         float scale = _window.DisplayScale;
         bool scaleChanged = MathF.Abs(Ui.DisplayScale - scale) >= 0.001f;
         Ui.DisplayScale = scale;
-        if (RecomputeResponsive() || scaleChanged || DiffWrapNeedsRemeasure()) Rerender();
+        bool widthMoved = _window.LayoutWidth != _resizeLayoutWidth;
+        _resizeLayoutWidth = _window.LayoutWidth;
+        // The chrome only for what it shows (a breakpoint, the scale); a wrapped diff's view only
+        // when the width moved, since a height alone leaves every row as tall as it was.
+        bool chrome = RecomputeResponsive() || scaleChanged;
+        bool view = !chrome && widthMoved && DiffWrapNeedsRemeasure();
+        // A wrapped diff's rows are measured in the build at the diff's width, and the build reads
+        // the width of the frame before: it is handed the width this frame lays the diff out at.
+        if (chrome || view) LeadWrappedDiffWidth();
+        if (chrome) Rerender();
+        else if (view) RerenderView();
         // The diff takes the width the window gained or lost, which the pan takes now, for the
         // frame about to be laid out: a build reads the width of the frame before. The pan reads
         // the width again after the layout.
@@ -505,8 +516,13 @@ public partial class JunctionApp : Component, IDisposable
         FollowDiffWidthAfterFrame();
     }
 
+    // The window's layout width at the last resize: a resize that leaves it alone rebuilds no
+    // wrapped diff.
+    private float _resizeLayoutWidth;
+
     /// <summary>
-    /// Whether a wrapped diff is on screen, and so the resize has to reach the build.
+    /// Whether a wrapped diff is on screen, and so a resize that moves the width has to reach the
+    /// view's build (<see cref="LeadWrappedDiffWidth"/> hands it the width).
     ///
     /// <para>Every other row in this app is a fixed height, which is why an ordinary resize
     /// deliberately does not rebuild: layout alone repositions everything. A wrapped row is
@@ -1050,6 +1066,9 @@ public partial class JunctionApp : Component, IDisposable
 
     protected override void OnAfterBuild()
     {
+        // A lead is for the build that asked for it, which is done: from here on the diff's
+        // laid-out width is the one to read, the check after the frame first.
+        _diffWrapLead = float.NaN;
         SettleDiffScrollbar();
         ServiceReviewAfterBuild();
         ServiceBranchFromIssue();

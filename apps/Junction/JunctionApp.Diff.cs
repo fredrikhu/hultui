@@ -671,6 +671,10 @@ public partial class JunctionApp
     /// fewer lines than the row goes on to draw, and the overflow lands on top of the next
     /// row. That state sticks — the scrollbar half of this check has already agreed by then,
     /// so without the width half nothing asks for the build that would correct it.</para>
+    ///
+    /// <para>A window resize and a drag of the file list beside a wrapped diff hand their build
+    /// the width they lead to (<see cref="LeadWrappedDiffWidth"/>), and this is their check: it
+    /// finds nothing to do when the lead was right, and corrects a wrong one a frame later.</para>
     /// </summary>
     private void SettleDiffScrollbar()
     {
@@ -755,6 +759,51 @@ public partial class JunctionApp
         _diffPan.ViewportWidth = viewport;
     }
 
+    // The diff list's width a resize or a drag of the file list hands the build it starts
+    // (LeadWrappedDiffWidth, LeadWrappedDiffSplit); NaN otherwise. OnAfterBuild forgets it.
+    private float _diffWrapLead = float.NaN;
+
+    /// <summary>
+    /// A window resize hands a wrapped diff's build the width the frame is about to lay the list
+    /// out at, so the rows are measured at the width they are drawn at: the frame the resize lays
+    /// out draws each row as tall as its text, and the check after it
+    /// (<see cref="SettleDiffScrollbar"/>) finds nothing to correct.
+    /// </summary>
+    /// <remarks>
+    /// Without it the build read the list's width from the frame before, the frame drew every row
+    /// at the old width's height, and the check built and drew a second frame, the chrome with it:
+    /// each size change of a wrapped diff built twice and drew twice (plan 17 round 14). The list
+    /// takes the window's slack, so it moves by what the window gained or lost since the check last
+    /// read it, as the pan does (<see cref="LeadDiffWidth"/>) and as Vesper Commander's wrapped
+    /// viewer does. Only from a width the check saw: a list laid out since at some other width, or
+    /// never read, is left to the build to read and to the check to correct, as before.
+    /// </remarks>
+    private void LeadWrappedDiffWidth()
+    {
+        _diffWrapLead = float.NaN;
+        if (!DiffWrapNeedsRemeasure() || _diffLaidOutWindowWidth <= 0 || !DiffLaidOutAsSeen()) return;
+        _diffWrapLead = Math.Max(0, _diffLaidOutWidth + _window.LayoutWidth - _diffLaidOutWindowWidth);
+    }
+
+    /// <summary>
+    /// <see cref="LeadWrappedDiffWidth"/> for a move of a file list's splitter beside a wrapped
+    /// diff: the list gains what the file list (<paramref name="list"/>, laid out at its old width)
+    /// loses. The drag builds the view for the rows' heights, and that build read the width of the
+    /// frame before, so each step built and drew twice, the second time the chrome too.
+    /// </summary>
+    private void LeadWrappedDiffSplit(PaneSplitter split, Element? list)
+    {
+        _diffWrapLead = float.NaN;
+        if (!_diffWrap || list is not { IsHosted: true, Layout.Width: > 0 } || !DiffLaidOutAsSeen()) return;
+        _diffWrapLead = Math.Max(0, _diffLaidOutWidth + list.Layout.Width - split.Size);
+    }
+
+    /// <summary>Whether the diff list on screen is laid out at the width the check after the frame
+    /// last read (<see cref="FollowDiffWidth"/>), which a lead is made from.</summary>
+    private bool DiffLaidOutAsSeen() =>
+        _diffBodyRef.Current is { IsHosted: true, Layout.AbsoluteContentBox.Width: > 0 } body
+        && body.Layout.AbsoluteContentBox.Width == _diffLaidOutWidth;
+
     /// <summary>Tell the pan how wide the content and its window are. The width of one code
     /// column is what the fixed number and sign columns leave over, halved in split mode —
     /// taken from the laid-out body when there is one, otherwise from the body the last time
@@ -770,8 +819,10 @@ public partial class JunctionApp
         // patched, and a MarkDirty before the next frame lays the new one out lands in the gap.
         // Guessing the window there measured every wrapped row at several times the pane's
         // width — a line or two short — and that frame drew each line over its neighbour. The
-        // width the list last had is a far better guess; the window only bounds it.
-        float body = _diffBodyRef.Current is { Layout.AbsoluteContentBox.Width: > 0 } b
+        // width the list last had is a far better guess; the window only bounds it. A resize or a
+        // drag of the file list beside a wrapped diff hands the build the width it leads to.
+        float body = !float.IsNaN(_diffWrapLead) ? _diffWrapLead
+            : _diffBodyRef.Current is { Layout.AbsoluteContentBox.Width: > 0 } b
             ? _diffLaidOutWidth = b.Layout.AbsoluteContentBox.Width
             : _diffLaidOutWidth > 0 ? Math.Min(_diffLaidOutWidth, _window.LayoutWidth) : _window.LayoutWidth;
         // Split: two 44px number columns. Unified: two 46px number columns, a 16px sign,

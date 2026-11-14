@@ -694,7 +694,12 @@ check: it finds nothing to move when the guess was right, and corrects it a fram
 it was not. The same goes for anything a build measures at a laid-out width, such as
 wrapped rows whose heights a virtual list is handed: give the build the led width, or each
 size change builds and draws twice and its first frame shows the old width's heights (Vesper
-Commander's wrapped viewer and diff until plan 17 round 13, `LeadWrappedBodyWidth`).
+Commander's wrapped viewer and diff until plan 17 round 13, `LeadWrappedBodyWidth`). A pane
+splitter beside such a column leads it the same way, by what the pane beside it gave up.
+Then build only what reads the width: a resize that crosses no breakpoint and changes no scale
+builds the view that measures at it, not the chrome around it, and one that leaves the width
+alone builds nothing (Junction's wrapped diff until plan 17 round 14, `LeadWrappedDiffWidth`:
+two builds and two frames a step, the chrome in one, down to one view build and one frame).
 
 ---
 
