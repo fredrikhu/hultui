@@ -126,6 +126,68 @@ public class PaneMoveTests
         Assert.Equal(before + 60, t.Field<float>("_findW"), 1);
     }
 
+    /// <summary>A click on a row draws one frame, the press's: the cursor goes to the row. The
+    /// release changes nothing on screen, and draws nothing: the root heard it with an ordinary
+    /// handler, and every release in the window drew a frame of the same pixels (plan 17 round 14:
+    /// 20 frames for 10 clicks in a real window, 10 now).</summary>
+    [Fact]
+    public void AClickOnARow_DrawsThePressAndNotTheRelease()
+    {
+        using var t = FiveFiles();
+        var (x, y) = NameAt(t, "c.txt");
+        t.Session.Window.MoveMouse(x, y);
+        t.Session.PumpFrames(2);
+
+        t.Session.Window.MouseDown(x, y);
+        Assert.True(t.Session.PumpFrame(), "the press drew no frame");
+        t.Session.PumpFrames(2);
+        var pressed = Pixels(t);
+
+        t.Session.Window.MouseUp(x, y);
+        Assert.False(t.Session.PumpFrame(), "the release drew a frame");
+        Assert.Equal(pressed, Pixels(t));
+    }
+
+    /// <summary>A right click marks the row at the press, and that draws. The release, passive
+    /// now, still ends the mark, and the mark stays on screen. (The release can
+    /// still draw: the mark's rebuild under the held button made the hovered row again, and the
+    /// window settles the hover once the button is up.)</summary>
+    [Fact]
+    public void ARightClickStillDrawsItsMark()
+    {
+        using var t = FiveFiles();
+        var (x, y) = NameAt(t, "c.txt");
+        t.Session.Window.MoveMouse(x, y);
+        t.Session.PumpFrames(2);
+        var before = Pixels(t);
+        try
+        {
+            t.Session.Window.MouseDown(x, y, MouseButton.Right);
+            // The hold's timer is real time and opens the shell's menu: never let it run across
+            // the frames below (AMoveOffTheRowsEndsTheContextHold covers the hold).
+            CancelHold(t);
+            Assert.True(t.Session.PumpFrame(), "the right press drew no mark");
+            t.Session.PumpFrames(2);
+            var marked = Pixels(t);
+            Assert.NotEqual(before, marked);
+
+            t.Session.Window.MouseUp(x, y, MouseButton.Right);
+            t.Session.PumpFrames(2);
+            Assert.False(t.Field<bool>("_rmarkActive"), "the release left the right-drag mark going");
+            Assert.Equal(new[] { "c.txt" }, t.MarkNames('L'));
+            Assert.Equal(marked, Pixels(t));
+        }
+        finally { CancelHold(t); }
+    }
+
+    /// <summary>What a frame drawn now shows.</summary>
+    private static byte[] Pixels(DiffViewTests.Fixture t)
+    {
+        using var image = t.Session.Window.CapturePixels();
+        using var data = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+        return data.ToArray();
+    }
+
     /// <summary>A hold left armed opens the shell's menu from its timer; never leave one behind.</summary>
     private static void CancelHold(DiffViewTests.Fixture t) => t.Invoke("CancelContextHold");
 }

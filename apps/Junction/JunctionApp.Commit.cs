@@ -4,6 +4,7 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using Junction.Git;
@@ -219,9 +220,10 @@ public partial class JunctionApp
         if (string.IsNullOrEmpty(hash) || !HasActiveRepo) return;
         var h = hash;
         var path = _activeRepoPath;   // captured: the producer runs off-thread, after any switch
+        var open = _selectedFilePath; // the file PickInitialFile keeps open when the commit has it
         var key = CommitDetailKey(h);
         SelectionMovedTo(key);
-        _commitDetail.Load(key, () => LoadOrRetry(path, () => LoadDetail(path, h)),
+        _commitDetail.Load(key, () => LoadOrRetry(path, () => LoadDetail(path, h, open)),
             onLoaded: PickInitialFile);
     }
 
@@ -291,18 +293,190 @@ public partial class JunctionApp
         else PrefetchCommitDetail(_selectedCommitHash);
     }
 
+    /// <summary>
+    /// The longest patch a commit's detail reads whole, in characters. A longer one is read a file at a
+    /// time: the file the Commit tab opens on with the detail, each other file when it is first opened.
+    ///
+    /// <para>Only the open file's diff is ever shown, and the whole patch was read and parsed into
+    /// objects for it anyway — for every commit History's selection rested on, the Commit tab open or
+    /// not. On this repository's own last 300 commits that was 628.7 MB allocated, 8 gen-2 collections,
+    /// up to 87.4 MB for one load and up to 32 MB kept while a commit was selected (a plan merge, 8.0
+    /// million characters). 253 of those 300 are below this and load as they did. 262,144 characters
+    /// are 512 KB as a string, the apps' large-object threshold.</para>
+    /// </summary>
+    internal int WholePatchChars { get; set; } = 262_144;
+
+    /// <summary>Files read on their own for a commit read a file at a time, for tests.</summary>
+    internal int FilePatchLoads => _filePatchLoads;
+
+    private int _filePatchLoads;
+
     // Runs off the UI thread.
-    private CommitDetail LoadDetail(string path, string hash)
+    private CommitDetail LoadDetail(string path, string hash, string? open)
     {
         Interlocked.Increment(ref _detailLoads);
         var repo = RepoFor(path);
         var commit = repo.GetCommit(hash);
         var files = repo.GetCommitFiles(hash);
-        var diffs = repo.GetCommitDiff(hash, _settings.Git.IgnoreWhitespace);
-        var byPath = diffs
-            .GroupBy(d => d.Path)
-            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
-        return new CommitDetail(commit, files, byPath);
+        bool ignoreWhitespace = _settings.Git.IgnoreWhitespace;
+        // The file PickInitialFile opens: the one open now when this commit has it, else the first.
+        var opening = files.Find(f => f.Path == open) ?? (files.Count > 0 ? files[0] : null);
+        var (diffs, whole) = repo.GetCommitDiff(hash, ignoreWhitespace, WholePatchChars, opening);
+        var byPath = new Dictionary<string, GitFileDiff>(diffs.Count, StringComparer.Ordinal);
+        foreach (var d in diffs) byPath.TryAdd(d.Path, d);   // the first of a path, as before
+        return new CommitDetail(commit, files, byPath,
+            Patches: whole ? null : new FilePatches(path, hash, ignoreWhitespace));
+    }
+
+    /// <summary>
+    /// Where the rest of a commit read a file at a time (<see cref="WholePatchChars"/>) comes from: the
+    /// repository, commit and whitespace setting its detail was loaded with. One per detail, compared
+    /// by reference, so a file read for one load of a commit is never taken for another's.
+    /// </summary>
+    private sealed class FilePatches(string repoPath, string hash, bool ignoreWhitespace)
+    {
+        public string RepoPath { get; } = repoPath;
+        public string Hash { get; } = hash;
+        public bool IgnoreWhitespace { get; } = ignoreWhitespace;
+
+        /// <summary>Files git gave no patch for when asked, so they are not asked for again.</summary>
+        public HashSet<string> NoPatch { get; } = new(StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// One file's patch of a commit read a file at a time, read for the Commit tab: the open file's when
+    /// it is opened, and the files beside it ahead of the keys (<see cref="ReadAhead"/>). One read at a
+    /// time; a newer ask drops the one before it. No build reads this loader's state, so a patch read
+    /// ahead lands without drawing a frame; the open file's asks for one when it lands.
+    /// </summary>
+    private readonly HultUI.AsyncLoader<List<GitFileDiff>> _commitFilePatch = new([]);
+    private (FilePatches? Source, string? Path) _commitFilePatchAsked;
+    private Func<bool>? _commitFilePatchBusy;
+
+    /// <summary>Files read ahead of the keys, for tests (FilePatchLoads counts them too).</summary>
+    internal int FileReadAheads => _fileReadAheads;
+
+    private int _fileReadAheads;
+
+    /// <summary>The last diff the pane drew with its own patch, and the detail it belongs to.</summary>
+    private (object? Owner, string? Path, GitFileDiff? Diff) _commitPaneShown;
+
+    /// <summary>
+    /// The diff the Commit tab has for <paramref name="path"/>. For a commit read a file at a time, a
+    /// file not read yet is asked for now, when it is opened, and is null until it lands
+    /// (<see cref="FilePatchPending"/>); its patch then joins the detail's, so a second visit reads
+    /// nothing.
+    /// </summary>
+    private GitFileDiff? CommitDiffFor(CommitDetail detail, string? path)
+    {
+        if (path is null) return null;
+        if (detail.DiffByPath.TryGetValue(path, out var diff)) return diff;
+        AskFilePatch(detail, path, ahead: false);
+        return null;
+    }
+
+    /// <summary>
+    /// What the diff pane shows: the open file's diff, or, while the open file's patch is on its way,
+    /// the diff it showed last. A key or a click on a file not read yet draws the list's new
+    /// selection at once and keeps the old diff until the new one lands, rather than a "Loading…" frame
+    /// between two diffs. Once the open file's diff is here, the files beside it are read ahead.
+    /// </summary>
+    private (string Path, GitFileDiff? Diff) CommitPane(CommitDetail detail)
+    {
+        var open = _selectedFilePath;
+        var diff = CommitDiffFor(detail, open);
+        if (diff is not null)
+        {
+            _commitPaneShown = (detail.DiffByPath, open, diff);
+            ReadAhead(detail);
+            return (open!, diff);
+        }
+        if (FilePatchPending(detail, open)
+            && ReferenceEquals(_commitPaneShown.Owner, detail.DiffByPath) && _commitPaneShown.Diff is { } kept)
+            return (_commitPaneShown.Path!, kept);
+        return (open ?? "", null);
+    }
+
+    /// <summary>Whether <paramref name="path"/>'s patch is on its way: a file of a commit read a file
+    /// at a time, asked for and not landed. Read untracked: a landing that matters asks for its frame.</summary>
+    private bool FilePatchPending(CommitDetail detail, string? path) =>
+        path is not null && detail.Patches is { } source && !detail.DiffByPath.ContainsKey(path)
+        && !source.NoPatch.Contains(path)
+        && ReferenceEquals(_commitFilePatchAsked.Source, source) && _commitFilePatchAsked.Path == path
+        && ReactiveScope.Untracked(_commitFilePatchBusy ??= () => _commitFilePatch.IsLoading);
+
+    /// <summary>True while the Commit tab waits for <paramref name="path"/>'s patch with no diff of
+    /// this commit to keep on screen meanwhile.</summary>
+    private bool CommitPatchLoading(string path) =>
+        View == JunctionView.Commit && FilePatchPending(_commitDetail.Value, path);
+
+    /// <summary>Asks for <paramref name="path"/>'s patch unless it is read, has none, or is the one on
+    /// its way (the loader takes the same key as a no-op).</summary>
+    private void AskFilePatch(CommitDetail detail, string path, bool ahead)
+    {
+        if (detail.Patches is not { } source || source.NoPatch.Contains(path) || detail.DiffByPath.ContainsKey(path))
+            return;
+        int index = IndexOfPath(detail.Files, path);
+        if (index < 0) return;
+
+        var oldPath = detail.Files[index].OldPath;
+        var byPath = detail.DiffByPath;
+        _commitFilePatchAsked = (source, path);
+        _commitFilePatch.Load((source, path), () => LoadOrRetry(source.RepoPath, () =>
+            {
+                Interlocked.Increment(ref _filePatchLoads);
+                if (ahead) Interlocked.Increment(ref _fileReadAheads);
+                return RepoFor(source.RepoPath).GetCommitFileDiff(source.Hash, path, oldPath, source.IgnoreWhitespace);
+            }),
+            onLoaded: diffs =>
+            {
+                foreach (var d in diffs) byPath.TryAdd(d.Path, d);
+                if (!byPath.ContainsKey(path)) source.NoPatch.Add(path);
+                if (!ReferenceEquals(_commitDetail.Value.Patches, source)) return;
+                // The pane was keeping the previous diff for this one: draw it. A file read ahead
+                // draws nothing; the next one ahead is asked for instead.
+                if (path == _selectedFilePath)
+                {
+                    if (_diffFull) Rerender(); else RerenderView();
+                }
+                else ReadAhead(_commitDetail.Value);
+            });
+    }
+
+    /// <summary>
+    /// Reads the files beside the open one in the list ahead, the next first, then the previous, one at
+    /// a time, once the open file's own patch is here: a walk through the files with the arrow keys then
+    /// finds each one read and draws it on the key's own frame. A read for a file that is no longer
+    /// beside the open one is dropped by the next ask.
+    /// </summary>
+    private void ReadAhead(CommitDetail detail)
+    {
+        if (detail.Patches is not { } source || _selectedFilePath is not { } open || !detail.DiffByPath.ContainsKey(open))
+            return;
+        int i = CommitRowIndex(open);
+        if (i < 0) return;
+        var next = NeighbourFile(i, 1);
+        var previous = NeighbourFile(i, -1);
+        // The one on its way is one of them: let it land.
+        if (ReferenceEquals(_commitFilePatchAsked.Source, source)
+            && (_commitFilePatchAsked.Path == next || _commitFilePatchAsked.Path == previous)
+            && ReactiveScope.Untracked(_commitFilePatchBusy ??= () => _commitFilePatch.IsLoading))
+            return;
+        foreach (var path in (ReadOnlySpan<string?>)[next, previous])
+            if (path is not null && !detail.DiffByPath.ContainsKey(path) && !source.NoPatch.Contains(path))
+            {
+                AskFilePatch(detail, path, ahead: true);
+                return;
+            }
+    }
+
+    /// <summary>The first file row after (or before) row <paramref name="i"/> of the Commit tab's list,
+    /// past folder rows: where the next arrow key that opens a file lands.</summary>
+    private string? NeighbourFile(int i, int step)
+    {
+        for (int j = i + step; j >= 0 && j < _commitFileRows.Count; j += step)
+            if (!_commitFileRows[j].IsFolder) return _commitFileRows[j].Path;
+        return null;
     }
 
     private void PickInitialFile(CommitDetail detail)
@@ -523,11 +697,13 @@ public partial class JunctionApp
         // diff in VS Code with Ctrl+D — see OpenSelectedDiffExternally).
         row.AddChild(BuildFileTree(detail.Files, fill: _hideDiff));
 
+        // Asked for with the pane hidden too: Ctrl+D still opens the file elsewhere, and refuses a
+        // binary one by its patch.
+        var (panePath, paneDiff) = CommitPane(detail);
         if (!_hideDiff)
         {
             row.AddChild(_commitSplit.Handle(Nocturne.Alpha(Nocturne.Accent, 0.18), Nocturne.Alpha(Nocturne.Accent, 0.40)));
-            detail.DiffByPath.TryGetValue(_selectedFilePath ?? "", out var diff);
-            row.AddChild(BuildDiffPane(_selectedFilePath ?? "", diff));
+            row.AddChild(BuildDiffPane(panePath, paneDiff));
         }
         return row;
     }

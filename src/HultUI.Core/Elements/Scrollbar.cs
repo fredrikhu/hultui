@@ -88,12 +88,41 @@ internal sealed class Scrollbar
             return;
         }
 
+        // The ease-out's last steps move the bar by less than half a device pixel in all, and each
+        // one drew the whole window again: at 120 Hz and 150 % a visit drew 15 frames each way,
+        // the last 6 of them that half pixel, up to 6 the same pixels as the frame before (plan 17
+        // round 14). Once what is left is under half a pixel, and under half a step of the track's
+        // colour, the bar takes its end value in that step and the tween stops. The steps before
+        // it are the curve's own.
+        float reach = Reach(owner);
+
         // Scaled by the distance left to travel, so reversing part-way through does not take a
         // full duration to cover the little that remains.
-        _tween = Animate.Value(_t, target, v => { _t = v; owner.MarkPaintDirty(); })
+        _tween = Animate.Value(_t, target, v =>
+            {
+                if (MathF.Abs(target - v) * reach < 0.5f) { v = target; _tween.Cancel(); }
+                _t = v;
+                owner.MarkPaintDirty();
+            })
             .Duration(ExpandDuration * MathF.Abs(target - _t))
             .Ease(Easing.EaseOutCubic)
             .Start();
+    }
+
+    /// <summary>How far the whole way moves what is drawn: the track's width in device pixels
+    /// (the thumb's moves less), and, when the track changes colour too, the largest step of a
+    /// colour channel.</summary>
+    private float Reach(Element owner)
+    {
+        float scale = owner.OverlayHost is IDisplayScaleHost { DisplayScale: > 0f and var s } ? s : 1f;
+        float reach = MathF.Abs(ExpandedWidth - Width) * scale;
+        if (TrackHoverColor is { } hover)
+        {
+            reach = MathF.Max(reach, Math.Max(
+                Math.Max(Math.Abs(TrackColor.R - hover.R), Math.Abs(TrackColor.G - hover.G)),
+                Math.Max(Math.Abs(TrackColor.B - hover.B), Math.Abs(TrackColor.A - hover.A))));
+        }
+        return reach;
     }
 
     public void CopyFrom(Scrollbar other)

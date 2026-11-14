@@ -124,6 +124,34 @@ public class ExternalChangeTests
         });
     }
 
+    /// <summary>Staging from a terminal or an editor writes only the index, and Changes stayed as
+    /// it was until something else changed (plan 17 round 14: `git add`, `restore --staged` and a
+    /// staged submodule bump). The real watcher, real git.</summary>
+    [Fact]
+    public void AStageMadeOutside_ReachesChanges_AndSoDoesAnUnstage()
+    {
+        Hosted(repo =>
+        {
+            repo.Write("README.md", "changed\n");
+            repo.Settle();
+        }, (repo, session, app) =>
+        {
+            var path = repo.Path;
+            session.Window.PressKey(KeyCode.Digit4);
+            PumpUntil(session, () => Unstaged(app, path) == 1, "the Changes view never loaded the edit");
+            Quiet(session, app, path);
+
+            repo.Git("add", "README.md");
+            PumpUntil(session, () => Staged(app, path) == 1 && Unstaged(app, path) == 0,
+                "the stage made outside never reached Changes");
+            Quiet(session, app, path);
+
+            repo.Git("restore", "--staged", "README.md");
+            PumpUntil(session, () => Staged(app, path) == 0 && Unstaged(app, path) == 1,
+                "the unstage made outside never reached Changes");
+        });
+    }
+
     // ── Files ────────────────────────────────────────────────────────────
 
     [Fact]
@@ -515,6 +543,9 @@ public class ExternalChangeTests
 
     private static int Unstaged(JunctionApp app, string path) =>
         Count(LoaderValue(app, "_changesLoaders", path), "Unstaged");
+
+    private static int Staged(JunctionApp app, string path) =>
+        Count(LoaderValue(app, "_changesLoaders", path), "Staged");
 
     private static bool Shows(HeadlessSession session, string subject) =>
         LayoutProbe.Descendants<TextElement>(Root(session),

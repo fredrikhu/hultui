@@ -183,7 +183,7 @@ public class GlyphsOnFirstReadTests(ITestOutputHelper output)
     }
 
     // The word cache's entry bound (TextPipeline's _wordShapeCache).
-    private const int TextPipelineWordCacheEntries = 8192;
+    private const int TextPipelineWordCacheEntries = TextPipeline.WordCacheEntries;
 
     [Fact]
     public void ARun_IsNoBiggerForMakingItsGlyphsLater()

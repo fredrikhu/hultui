@@ -578,6 +578,85 @@ public class ChromePartTests
         });
     }
 
+    /// <summary>A save over Changes builds the view once, when its working tree lands, and draws
+    /// one frame then. The watcher's handler starts the view's loads itself; it used to build the
+    /// view at once as well, which patched the elements it keeps with what they already showed and
+    /// drew the window again a quarter of a second before the frame with the new rows (plan 17
+    /// round 14: 2 builds and 2 frames a save, the first one the pixels on screen; with a file the
+    /// app colours 3 and 3, the first one the diff uncoloured).</summary>
+    [Fact]
+    public void ASaveOverChanges_BuildsAndDrawsOnce_WhenItsWorkingTreeLands()
+    {
+        Hosted(fx =>
+        {
+            string a = fx.A.Path;
+            fx.A.Write("src/one.txt", "one, edited\n");
+            Switch(fx, KeyCode.Digit4);
+            fx.Session.PumpUntil(() => LoadedKey(fx.App, "_changesLoaders", a) is { } k && k.StartsWith($"{a}|{DataGen(fx.App, a)}|", StringComparison.Ordinal), Wait);
+            Settle(fx);
+            // The callback below is the one event: the watchers stay quiet (disposed, still listed,
+            // so a build does not start them again).
+            foreach (var w in ((System.Collections.IDictionary)typeof(JunctionApp)
+                         .GetField("_watchers", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(fx.App)!).Values)
+                ((IDisposable)w!).Dispose();
+            Settle(fx);
+            Assert.Equal(JunctionView.Changes, fx.App.View);
+
+            for (int save = 0; save < 2; save++)
+            {
+                int gen = DataGen(fx.App, a), builds = fx.App.Builds;
+                bool Landed() => DataGen(fx.App, a) > gen
+                    && LoadedKey(fx.App, "_changesLoaders", a) is { } k && k.StartsWith($"{a}|{DataGen(fx.App, a)}|", StringComparison.Ordinal);
+                // Posted to the UI thread, as the watcher posts its callback.
+                HultUI.Application.InvokeOnMainThread(() => Invoke(fx.App, "OnWorkingTreeChange", a));
+                int before = 0, after = 0;
+                for (int i = 0; i < 16; i++)
+                {
+                    bool drew = fx.Session.PumpFrame(TimeSpan.FromMilliseconds(16));
+                    if (drew) { if (Landed()) after++; else before++; }
+                }
+                Assert.True(Landed(), $"save {save}: the working tree never landed");
+                Assert.True(before == 0, $"save {save}: {before} frames drew before the working tree landed");
+                Assert.Equal(1, after);
+                Assert.Equal(builds + 1, fx.App.Builds);
+            }
+        });
+    }
+
+    /// <summary>With no build at the event, the diff's colours at the new generation are asked for
+    /// by the handler, for the diff on screen, as that build asked: git's quarter of a second is
+    /// the tokenize's time. Asked by the build that shows the new rows instead, the rows drew
+    /// uncoloured and the colours a frame later (plan 17 round 14, a save over Changes of a C#
+    /// file with the loads on the thread pool: 2 frames, the last 25 ms later, against 1).</summary>
+    [Fact]
+    public void ASaveOverChanges_AsksForTheDiffsColoursBeforeItsRowsLand()
+    {
+        Hosted(fx =>
+        {
+            string a = fx.A.Path;
+            fx.A.Write("code.cs", "class A\n{\n    int x = 1;\n}\n");
+            fx.A.Git("add", "-A");
+            fx.A.Git("commit", "-q", "-m", "code");
+            fx.A.Write("code.cs", "class A\n{\n    int x = 2;\n}\n");
+            Switch(fx, KeyCode.Digit4);
+            fx.Session.PumpUntil(() => fx.App.HighlightsPending == 0 && fx.App.HighlightLinesTokenized > 0, Wait);
+            Settle(fx);
+            foreach (var w in ((System.Collections.IDictionary)typeof(JunctionApp)
+                         .GetField("_watchers", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(fx.App)!).Values)
+                ((IDisposable)w!).Dispose();
+            Settle(fx);
+            Assert.Equal(0, fx.App.HighlightsPending);
+            int builds = fx.App.Builds;
+
+            Invoke(fx.App, "OnWorkingTreeChange", a);
+
+            Assert.Equal(builds, fx.App.Builds);
+            Assert.Equal(1, fx.App.HighlightsPending);
+            fx.Session.PumpUntil(() => fx.App.HighlightsPending == 0, Wait);
+            Settle(fx);
+        });
+    }
+
     /// <summary>A build asks for the summary of the repository on screen in many places; under a
     /// key that has not moved, none of them makes the load's key and callbacks again (plan 17
     /// round 13: 0.5 KB a build on History). A generation moving asks once.</summary>

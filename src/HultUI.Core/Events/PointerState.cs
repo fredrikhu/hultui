@@ -90,6 +90,10 @@ public sealed class PointerState(TimeProvider? timeProvider = null)
     /// which never lost the pointer and keeps its hover. The next <see cref="UpdateHover"/> goes
     /// on from there. Going on from the removed element instead finds no ancestor in common with
     /// anything shown: the surviving part of the chain was entered a second time and never left.
+    /// <para>The leave is not a drawn hover change (<see cref="DrawnHoverChanges"/>): a list's tint
+    /// under a removed row went with the row, and the frame that showed the build drew without
+    /// it. Counted, it drew that frame's pixels again: Meridian, a key switching tabs with the
+    /// pointer resting on the map list, two frames a switch (plan 17 round 14).</para>
     /// </summary>
     internal void LeaveRemoved(Element? survivor, Point position, KeyModifiers modifiers)
     {
@@ -97,7 +101,6 @@ public sealed class PointerState(TimeProvider? timeProvider = null)
         for (var el = _hoveredElement; el is not null && !ReferenceEquals(el, survivor); el = el.Parent)
         {
             el.SetInteractionHovered(false);
-            HoverChanged(el);
             if (el.HasEventHandler<PointerLeaveEvent>())
                 EventDispatcher.DispatchDirect(leaveEvt ??= new PointerLeaveEvent { Position = position, Modifiers = modifiers }, el);
         }

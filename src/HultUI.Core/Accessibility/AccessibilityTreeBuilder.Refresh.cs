@@ -506,7 +506,7 @@ public static partial class AccessibilityTreeBuilder
     }
 
     /// <summary>As a diff adds <paramref name="node"/>: it, then each of its children's subtrees.</summary>
-    private static void AddRecursive(List<AddedNode> added, AccessibilityNode node, AccessibilityNode parent)
+    internal static void AddRecursive(List<AddedNode> added, AccessibilityNode node, AccessibilityNode parent)
     {
         added.Add(new AddedNode(node, parent));
         var children = node.Children;   // by index: foreach over the interface boxes an enumerator
@@ -515,7 +515,7 @@ public static partial class AccessibilityTreeBuilder
     }
 
     /// <summary>As a diff removes <paramref name="node"/>: its children's subtrees, then it.</summary>
-    private static void RemoveRecursive(List<RemovedNode> removed, AccessibilityNode node, AccessibilityNode parent)
+    internal static void RemoveRecursive(List<RemovedNode> removed, AccessibilityNode node, AccessibilityNode parent)
     {
         var children = node.Children;
         for (int i = 0; i < children.Count; i++)

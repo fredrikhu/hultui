@@ -69,7 +69,7 @@ public partial class JunctionApp
     {
         // The ignore-whitespace flag is part of the key so toggling it reloads the diffs.
         bool ws = _settings.Git.IgnoreWhitespace;
-        _changesLoaders.For(path).Load($"{path}|{DataGen(path)}|w{ws}",
+        _changesLoaders.For(path).Load($"{path}|{ChangesGen(path)}|w{ws}",
             () => LoadOrRetry(path, () => LoadChanges(path, ws)),
             onLoaded: data => { if (PathEquals(path, _activeRepoPath)) OnChangesLoaded(data); });
     }
@@ -510,7 +510,9 @@ public partial class JunctionApp
     /// move built the view, 42 KB with Changes' diff (plan 17 round 10 step 13). The press, which
     /// lights the handle, the release, which remembers the width, and the arrow keys build the
     /// view, which reads the width; so does a move while the diff's rows are measured at its
-    /// width (wrapped, or a review's cards), where the rows have to be measured again.
+    /// width (wrapped, or a review's cards), where the rows have to be measured again. A wrapped
+    /// diff's build is handed the width the move leaves it (LeadWrappedDiffSplit), so it measures
+    /// the rows once, at the width they are drawn at.
     /// </summary>
     private void FileListSplitMoved(PaneSplitter split, Element? list)
     {
@@ -523,6 +525,7 @@ public partial class JunctionApp
             FollowDiffWidthAfterFrame();
             return;
         }
+        LeadWrappedDiffSplit(split, list);
         MarkViewDirty();
     }
 

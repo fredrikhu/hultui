@@ -54,6 +54,17 @@ public class FileSystemTests : IDisposable
         Assert.Equal("", FileSystem.PreviewTextFromBytes(bytes));
     }
 
+    /// <summary>The top of the tree lists, with no ".." above it. "/" (and "\" on Windows) trims
+    /// to nothing, and Directory.GetParent threw on that: the listing never landed, so on Linux
+    /// picking "/" in the drive picker never moved the pane (plan 17 round 14, on Fedora).</summary>
+    [Fact]
+    public void TheTopOfTheTree_ListsWithNoParentRow()
+    {
+        var l = FileSystem.List(Path.DirectorySeparatorChar.ToString());
+        Assert.Contains(l.State, new[] { PaneState.Ok, PaneState.Empty });
+        Assert.DoesNotContain(l.Entries, e => e.IsParent);
+    }
+
     [Fact]
     public void NameAscending_IsAlphabetical()
     {

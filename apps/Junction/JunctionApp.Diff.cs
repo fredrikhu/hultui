@@ -127,6 +127,12 @@ public partial class JunctionApp
         // get a before/after view instead of the empty "No textual changes" pane.
         if (IsImagePath(path) && BuildImageDiffBody(path) is { } imagePane)
             return imagePane;
+        // A file of a commit read a file at a time whose patch is on its way, with no diff of the
+        // commit to keep on screen meanwhile (CommitPane keeps the last one when there is).
+        if (diff is null && CommitPatchLoading(path))
+            return Box.New().FlexGrow(1)
+                .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
+                .Children(Text.New("Loading…").FontSize(13f).TextColor(Nocturne.On(0.45)));
         // Every other binary — archive, font, PDF, compiled output — says it differs and
         // by how much, and stops there.
         if (diff?.Binary is { } binary)
@@ -352,16 +358,27 @@ public partial class JunctionApp
     /// <summary>The code label for a diff line, wrapped or clipped to one line and panned.
     /// Wrapping and sideways scrolling are alternatives, so a wrapped line takes neither the
     /// one-line clip nor the panning cell.</summary>
-    private Element DiffCodeCell(TextElement label)
+    private Element DiffCodeCell(TextElement label, float padX)
     {
-        // Wrapped, the cell takes what the fixed columns leave and nothing more. A zero basis
-        // is what says so: with the default `auto` the item is sized to its own content first,
-        // and the content width of a line holding one unbreakable token is that token — a
+        // Wrapped, the cell takes what the fixed columns leave and nothing more. A definite
+        // basis is what says so: with the default `auto` the item is sized to its own content
+        // first, and the content width of a line holding one unbreakable token is that token — a
         // minified bundle, a base64 blob, a long hash. The label then grew to a thousand
         // pixels inside a three-hundred-pixel column, wrapped its text at the width it had
         // taken rather than the one on screen, and let the pane clip the overflow. The row
         // was the right height for the wrap nobody could see.
-        if (_diffWrap) return label.FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0));
+        //
+        // The basis is the width the label will have, the code width the rows' heights were
+        // measured at plus the label's padding, and only the label grows or shrinks (the fixed
+        // columns do not), so it takes what they leave as a zero basis did. Not zero: an item
+        // is measured at its basis before it grows, and at zero width a wrapped line is laid out
+        // a word to a line, its most expensive layout (~20 KB for a line of 290 characters).
+        // That layout lived in the text pipeline's layout cache only while the rows a build
+        // measures left room for it: once a resize's build measured 400 wrapped rows just
+        // before the frame (LeadWrappedDiffWidth), the frame laid the rows on screen out at zero
+        // width again, 372 KB a step (plan 17 round 14). At the code width the measure is the
+        // layout the build made for the row's height.
+        if (_diffWrap) return label.FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(Math.Max(0, _diffCodeWidth + padX)));
         return _diffPan.Cell(label.MaxLines(1).OverflowMode(TextOverflow.Clip).FlexGrow(1));
     }
     // Review is the review's height version, so a card opening or a composer appearing
@@ -671,6 +688,10 @@ public partial class JunctionApp
     /// fewer lines than the row goes on to draw, and the overflow lands on top of the next
     /// row. That state sticks — the scrollbar half of this check has already agreed by then,
     /// so without the width half nothing asks for the build that would correct it.</para>
+    ///
+    /// <para>A window resize and a drag of the file list beside a wrapped diff hand their build
+    /// the width they lead to (<see cref="LeadWrappedDiffWidth"/>), and this is their check: it
+    /// finds nothing to do when the lead was right, and corrects a wrong one a frame later.</para>
     /// </summary>
     private void SettleDiffScrollbar()
     {
@@ -755,6 +776,51 @@ public partial class JunctionApp
         _diffPan.ViewportWidth = viewport;
     }
 
+    // The diff list's width a resize or a drag of the file list hands the build it starts
+    // (LeadWrappedDiffWidth, LeadWrappedDiffSplit); NaN otherwise. OnAfterBuild forgets it.
+    private float _diffWrapLead = float.NaN;
+
+    /// <summary>
+    /// A window resize hands a wrapped diff's build the width the frame is about to lay the list
+    /// out at, so the rows are measured at the width they are drawn at: the frame the resize lays
+    /// out draws each row as tall as its text, and the check after it
+    /// (<see cref="SettleDiffScrollbar"/>) finds nothing to correct.
+    /// </summary>
+    /// <remarks>
+    /// Without it the build read the list's width from the frame before, the frame drew every row
+    /// at the old width's height, and the check built and drew a second frame, the chrome with it:
+    /// each size change of a wrapped diff built twice and drew twice (plan 17 round 14). The list
+    /// takes the window's slack, so it moves by what the window gained or lost since the check last
+    /// read it, as the pan does (<see cref="LeadDiffWidth"/>) and as Vesper Commander's wrapped
+    /// viewer does. Only from a width the check saw: a list laid out since at some other width, or
+    /// never read, is left to the build to read and to the check to correct, as before.
+    /// </remarks>
+    private void LeadWrappedDiffWidth()
+    {
+        _diffWrapLead = float.NaN;
+        if (!DiffWrapNeedsRemeasure() || _diffLaidOutWindowWidth <= 0 || !DiffLaidOutAsSeen()) return;
+        _diffWrapLead = Math.Max(0, _diffLaidOutWidth + _window.LayoutWidth - _diffLaidOutWindowWidth);
+    }
+
+    /// <summary>
+    /// <see cref="LeadWrappedDiffWidth"/> for a move of a file list's splitter beside a wrapped
+    /// diff: the list gains what the file list (<paramref name="list"/>, laid out at its old width)
+    /// loses. The drag builds the view for the rows' heights, and that build read the width of the
+    /// frame before, so each step built and drew twice, the second time the chrome too.
+    /// </summary>
+    private void LeadWrappedDiffSplit(PaneSplitter split, Element? list)
+    {
+        _diffWrapLead = float.NaN;
+        if (!_diffWrap || list is not { IsHosted: true, Layout.Width: > 0 } || !DiffLaidOutAsSeen()) return;
+        _diffWrapLead = Math.Max(0, _diffLaidOutWidth + list.Layout.Width - split.Size);
+    }
+
+    /// <summary>Whether the diff list on screen is laid out at the width the check after the frame
+    /// last read (<see cref="FollowDiffWidth"/>), which a lead is made from.</summary>
+    private bool DiffLaidOutAsSeen() =>
+        _diffBodyRef.Current is { IsHosted: true, Layout.AbsoluteContentBox.Width: > 0 } body
+        && body.Layout.AbsoluteContentBox.Width == _diffLaidOutWidth;
+
     /// <summary>Tell the pan how wide the content and its window are. The width of one code
     /// column is what the fixed number and sign columns leave over, halved in split mode —
     /// taken from the laid-out body when there is one, otherwise from the body the last time
@@ -770,8 +836,10 @@ public partial class JunctionApp
         // patched, and a MarkDirty before the next frame lays the new one out lands in the gap.
         // Guessing the window there measured every wrapped row at several times the pane's
         // width — a line or two short — and that frame drew each line over its neighbour. The
-        // width the list last had is a far better guess; the window only bounds it.
-        float body = _diffBodyRef.Current is { Layout.AbsoluteContentBox.Width: > 0 } b
+        // width the list last had is a far better guess; the window only bounds it. A resize or a
+        // drag of the file list beside a wrapped diff hands the build the width it leads to.
+        float body = !float.IsNaN(_diffWrapLead) ? _diffWrapLead
+            : _diffBodyRef.Current is { Layout.AbsoluteContentBox.Width: > 0 } b
             ? _diffLaidOutWidth = b.Layout.AbsoluteContentBox.Width
             : _diffLaidOutWidth > 0 ? Math.Min(_diffLaidOutWidth, _window.LayoutWidth) : _window.LayoutWidth;
         // Split: two 44px number columns. Unified: two 46px number columns, a 16px sign,
@@ -1354,15 +1422,19 @@ public partial class JunctionApp
 
         row.AddChild(NumCell(line.OldLineNumber, 46f));
         row.AddChild(NumCell(line.NewLineNumber, 46f));
-        row.AddChild(Box.New().Width(16).JustifyContent(JustifyContent.Center)
-            .Children(CodeText(sign, signColor)));
+        // Wrapped, a fixed column: only the code label gives way when its basis is more than the
+        // row has (DiffCodeCell). Unwrapped it shrinks with the panned cell as it always has (the
+        // cell's basis is the line, so the two share what the row lacks: 2-3 px of the 16).
+        var signCell = Box.New().Width(16).JustifyContent(JustifyContent.Center);
+        if (_diffWrap) signCell.FlexShrink(0);
+        row.AddChild(signCell.Children(CodeText(sign, signColor)));
         // Clip rather than ellipsise: the line is scrollable now, so cutting it at the edge
         // says "there is more that way", where an ellipsis says "this is all there is".
         row.AddChild(DiffCodeCell(
             CodeText(line.Content.Length == 0 ? " " : ExpandTabs(line.Content), code)
                 .Selectable().SelectionGroup(_diffGroupUnified, rowIndex)
                 .Spans(RemapSpans(spans, line.Content))
-                .Padding(new Thickness(2, UnifiedCodePadX, 2, 0))));
+                .Padding(new Thickness(2, UnifiedCodePadX, 2, 0)), UnifiedCodePadX));
 
         if (selectable)
         {
@@ -1428,7 +1500,7 @@ public partial class JunctionApp
             CodeText(ExpandTabs(text), code).Selectable()
                 .SelectionGroup(isLeft ? _diffGroupLeft : _diffGroupRight, rowIndex)
                 .Spans(RemapSpans(spans, text))
-                .Padding(new Thickness(2, SplitCodePadX, 2, 0))));
+                .Padding(new Thickness(2, SplitCodePadX, 2, 0)), SplitCodePadX));
         return half;
     }
 
@@ -1479,10 +1551,7 @@ public partial class JunctionApp
     private (string Path, GitFileDiff? Diff) CurrentDiffTarget()
     {
         if (View == JunctionView.Commit && _selectedFilePath != null)
-        {
-            _commitDetail.Value.DiffByPath.TryGetValue(_selectedFilePath, out var d);
-            return (_selectedFilePath, d);
-        }
+            return CommitPane(_commitDetail.Value);
         if (View == JunctionView.Changes && _changeSelPath != null)
         {
             // ChangesView, not the raw load: a file whose staging is still in flight has

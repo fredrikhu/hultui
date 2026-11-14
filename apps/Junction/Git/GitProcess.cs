@@ -255,6 +255,65 @@ public static class GitProcess
     }
 
     /// <summary>
+    /// Runs git and reads no more than <paramref name="maxChars"/> characters of what it writes. Output
+    /// shorter than that comes back whole, as <see cref="Run"/> returns it, with <c>Whole</c> true. Longer
+    /// output is not read past that point: git is stopped, the exit code is -1, and the output is what
+    /// <paramref name="keep"/> keeps of what was read — it is given those characters and returns how many
+    /// from the start to keep.
+    ///
+    /// <para>For output that can be far longer than what the caller shows, a commit's patch above all:
+    /// reading and decoding all of it, and the strings made from it, were most of what loading it cost.
+    /// What was read goes into a pooled buffer, so a stopped command leaves nothing behind but the part
+    /// kept, and a whole one only its string.</para>
+    /// </summary>
+    public static (GitResult Result, bool Whole) RunUpTo(string workingDirectory, int maxChars,
+        Func<ReadOnlySpan<char>, int> keep, params string[] args)
+    {
+        var psi = StartInfo(workingDirectory, args);
+        psi.RedirectStandardOutput = true;
+        psi.RedirectStandardError = true;
+        psi.StandardOutputEncoding = Utf8NoBom;
+        psi.StandardErrorEncoding = Utf8NoBom;
+
+        using var process = Process.Start(psi)!;
+        // Read alongside: a git that fills the error pipe while the output is read would wait forever.
+        var stderr = process.StandardError.ReadToEndAsync();
+        var pool = System.Buffers.ArrayPool<char>.Shared;
+        var buffer = pool.Rent(Math.Min(maxChars, 16 * 1024));
+        try
+        {
+            int length = 0;
+            while (length < maxChars)
+            {
+                if (length == buffer.Length)
+                {
+                    var larger = pool.Rent(Math.Min(maxChars, buffer.Length * 2));
+                    buffer.AsSpan(0, length).CopyTo(larger);
+                    pool.Return(buffer);
+                    buffer = larger;
+                }
+                int read = process.StandardOutput.Read(buffer, length, Math.Min(buffer.Length, maxChars) - length);
+                if (read == 0)
+                {
+                    process.WaitForExit();
+                    return (new GitResult(process.ExitCode, new string(buffer, 0, length),
+                        stderr.GetAwaiter().GetResult()), true);
+                }
+                length += read;
+            }
+
+            var kept = new string(buffer, 0, Math.Clamp(keep(buffer.AsSpan(0, length)), 0, length));
+            // Stopped where it is. Closing the pipe as well covers a git started through a launcher,
+            // whose own child would otherwise go on writing into it.
+            try { process.Kill(); } catch (InvalidOperationException) { } catch (System.ComponentModel.Win32Exception) { }
+            process.StandardOutput.Close();
+            process.WaitForExit();
+            return (new GitResult(-1, kept, stderr.GetAwaiter().GetResult()), false);
+        }
+        finally { pool.Return(buffer); }
+    }
+
+    /// <summary>
     /// Runs git and returns stdout as raw bytes. Needed for blob content (images and
     /// other binaries) — <see cref="Run"/> decodes stdout as UTF-8, which corrupts
     /// any non-text payload.
@@ -292,6 +351,42 @@ public static class GitProcess
         process.WaitForExit();
 
         return new GitResult(process.ExitCode, stdout, stderr);
+    }
+
+    /// <summary>
+    /// As <see cref="RunWithStdin(string, string, string[])"/>, for a command that answers as it
+    /// reads (<c>check-ignore --stdin</c>): its output is read while the input is still being
+    /// written, since a command whose output pipe is full stops reading, and a writer waiting on
+    /// it would wait forever. Killed, with exit code -1, when it runs past
+    /// <paramref name="timeout"/>.
+    /// </summary>
+    internal static GitResult RunWithStdin(string workingDirectory, string stdin, TimeSpan timeout, params string[] args)
+    {
+        var psi = StartInfo(workingDirectory, args);
+        psi.RedirectStandardInput = true;
+        psi.RedirectStandardOutput = true;
+        psi.RedirectStandardError = true;
+        psi.StandardOutputEncoding = Utf8NoBom;
+        psi.StandardErrorEncoding = Utf8NoBom;
+        psi.StandardInputEncoding = Utf8NoBom;
+
+        using var process = Process.Start(psi)!;
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        try
+        {
+            process.StandardInput.Write(stdin);
+            process.StandardInput.Close();
+        }
+        catch (IOException) { /* git stopped reading (a fatal error): its exit code says so */ }
+        if (!process.WaitForExit(timeout))
+        {
+            try { process.Kill(entireProcessTree: true); } catch { /* already gone */ }
+            process.WaitForExit();
+            return new GitResult(-1, "", $"git {string.Join(' ', args)} timed out");
+        }
+        process.WaitForExit();
+        return new GitResult(process.ExitCode, stdout.Result, stderr.Result);
     }
 }
 

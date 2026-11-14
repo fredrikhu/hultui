@@ -1570,6 +1570,41 @@ The discipline in one line: **`Refresh()` bumps the generation (data changed →
 
 Because `Build()` renders from the cached `Value`, you can keep the previous result on screen while the next one loads instead of blanking to a spinner — gate the placeholder on "have we ever loaded anything" rather than "is a load in flight." Since the result is applied in a single batch, the view swaps from old to new in one frame with no empty state in between.
 
+### Move to the next screen with its data
+
+Keeping the previous rows on screen while the next ones load is half of it: what names them has
+to wait too. Vesper's navigation set the folder, put the cursor on the first row, cleared the
+marks and the filter and built the pane's tab strip, trail, header and footer at the key, over
+the rows of the folder it was leaving, and built again when the next folder's rows landed a few
+milliseconds later. When a frame fell between the two (in a real window 34 of 40 navigations), it
+showed one folder's name over another's rows, and a key in that gap acted on a folder whose rows
+were not on screen. The navigation now asks for the rows and changes nothing; when they land it
+moves the pane, its history included, in the build they land with. A source that is slow to
+answer or may not answer (a share, a server, an archive) still moves the pane at once: its name,
+and past the connecting delay its connecting block, are what the reader sees while it waits. A
+local folder still out 50 ms after the key moves the pane then: its name over the waiting block,
+never over the rows it is leaving, and its rows land into it. A local listing is far inside that
+(a real window: 61 files 2.5 ms, 20,000 files 12–17 ms, warm), so a waiting navigation shows
+nothing but its one frame; a cold or slow disk shows its name and the block by about 65 ms
+instead of the rows it left.
+
+Two traps on the way:
+
+- A build that reads a loader's `IsLoading` builds again when a load starts. Vesper's pane asked
+  first thing whether it was waiting, so the next folder's load, started outside a build, built
+  the window anyway. Read the plain fields that settle the answer first (a pane showing its own
+  folder's rows is not waiting), and the flag only when they do not.
+- An ordinary handler that ran draws the window, since it may have changed something without
+  marking it: a key whose only effect is a load started draws what is already on screen. Vesper's
+  root hears keys passively (`OnPassive`) and asks for that frame itself (`MarkPaintDirty`), but
+  for a navigation that waits for its rows.
+
+A navigation (round 14, NativeAOT; Enter, Backspace, Alt+← and Alt+→ in turn): in a real window
+1.90 → 1.00 frames, 0.90 → 0 frames of one folder's name over another's rows, 2 → 1 window builds
+and 5 → 4 part builds, 308.4 → 289.2 KB on the UI thread, the last frame 9.6 → 2.5 ms after the
+key; headless with the loads on the thread pool the same counts, and every last frame what a full
+build draws.
+
 ### A reload that finds the same hands back what is shown
 
 A loader's readers rebuild when its value changes, and `Signal<T>` compares values with the
@@ -1615,9 +1650,20 @@ Four traps on the way, all in what a `FileSystemWatcher` on `.git` reports:
 - Git writes HEAD, the config and the packed refs to a lock file and renames it over the old
   one. A watcher that listens for Changed and Created never hears them: a checkout that changed
   no file in the working tree, and a remote added, went unseen until something else changed.
-- `git status` replaces the index the same way when it refreshes it, which it did on three runs
-  in a row on a fresh repository, unless optional locks are off (as in the tests). A watcher of
-  the index's renames hears the app's own reads, reloads, and reads again.
+- Git writes the index the same way, and not only to stage: `git status` (optional locks on,
+  as outside the tests) replaces it to refresh the file times it keeps, after a checkout, a
+  fresh copy or a file rewritten with the same bytes (not after an ordinary save: 0 of 8 in
+  round 14). A watcher of the index's renames hears the app's own reads, reloads, and reads
+  again; one that ignores them never hears staging from a terminal or an editor (`git add`,
+  `restore --staged`, a staged submodule bump), which writes nothing else, and Changes stays
+  stale (round 14: 3 of 53 outside operations). Junction's watcher hears the renames and reads
+  the index when one comes: it tells the rename only when the entries changed (their paths,
+  modes, object ids and flags), which a refresh of the file times never does. It also reads the
+  index as it starts: the first rewrite is usually the app's own first `git diff` (which writes
+  the index even with optional locks off) over a repository whose files are newer than its index,
+  and with nothing to compare it with it was heard back as one more reload of every repository
+  opened. The print read then is kept only when the file was written well before the watcher
+  listened, so no change the app's first loads missed is taken as seen.
 - A reftable repository (`git init --ref-format=reftable`, `git refs migrate`; git 3.0 plans it as
   the default for new repositories) keeps every ref, the branch HEAD names included, in
   `.git/reftable`. HEAD and `refs/heads` are stubs that never change, so a watcher of them heard a
@@ -1636,6 +1682,26 @@ Four traps on the way, all in what a `FileSystemWatcher` on `.git` reports:
   Not dropped: a move that writes only a reflog entry (`merge --abort`'s reset, `reflog expire`)
   shows the watcher nothing else, so the reflog keys on the data generation (round 13; see
   docs/DECISIONS.md).
+
+The working tree reports what git never shows, too. A build beside the app writes hundreds of
+files under `bin\` and `obj\`, which git ignores, and every quiet gap of a debounce in it reloaded
+the repository: a small project's build 2 reloads, 22 git commands, 4 frames and 3 MB over
+Changes (round 14). Junction's watcher asks `git check-ignore --stdin` about a folder the first
+time a window meets it, as `folder/` and without `--no-index`: git then says a folder holding a
+tracked file is not ignored, so a file force-added under `obj\` is still heard. It keeps the
+answers until a `.gitignore`, `.git/info/exclude`, the config or the index's entries change, and
+drops an event under an ignored folder, and a folder's own change (a folder made in it changes
+it; the folder's events say the rest). A first build now asks git once and reloads nothing, a
+rebuild asks nothing: over Changes 2 reloads, 22 git commands, 4 frames and 3.0 MB a build → 0,
+0–1, 0 and 0.13–0.26 MB, headless and in a real window (NativeAOT). Three traps:
+
+- `check-ignore` stops at the first path inside a submodule ("Pathspec ... is in submodule") and
+  answers nothing after it: ask again without it, and tell what is under it.
+- It answers as it reads, so its output has to be read while the input is still being written,
+  or a long question fills the pipe and both sides wait.
+- A `.gitignore` under an ignored folder (`node_modules` holds many) changes nothing git shows;
+  only one outside them is a rule changing. The global excludes file (`core.excludesFile`) is not
+  watched: a change to it is seen at the next of the changes above.
 
 ### An event builds only the view whose loads it re-keys
 
@@ -1660,6 +1726,25 @@ builds and frames headless, 91.1 → 71.9 KB in a real window (NativeAOT); a fil
 18.4 → 2.4 KB and 1 → 0 builds and frames; a save over History 166.4 → 150.8 KB and 2 → 1
 frames headless, 205.6 → 187.8 KB in a real window, a touch 21.5 → 1.9 KB and 1 → 0; Changes
 unchanged. The same frames and accessibility trees.
+
+A view whose re-keyed loads the handler can start itself needs no build at the event either: it
+builds when they land, as the parts do for the summary. Junction's Changes view keys its
+working-tree load and its diff's colours on the data generation, so an editor's save over it still
+built the view at once. That build patched the 30 elements the view keeps with what they already
+showed, and the window drew those pixels again a quarter of a second before the frame with the new
+rows; with a file the app colours, that first frame drew the diff uncoloured, the colours landing
+drew a second and the rows a third. The handler now starts both loads and builds nothing: the
+view's last build read the working tree's loader, so the load landing builds the view. Their
+generation is read through an accessor of its own (`ChangesGen`), so the handler can tell them
+from a load it cannot start, which still builds the view at once (an image's diff, a conflict, the
+reflog). The colours are asked for the diff on screen, as that build asked, so they are on their
+way while git runs: left to the build that shows the new rows, those rows drew uncoloured and the
+colours a frame later.
+
+A save over Changes (round 14, NativeAOT): a text file 2 → 1 builds and frames, 184.7 → 137.6 KB
+on the UI thread headless and 177.3 → 137.1 KB in a real window; a C# file 3 → 1, 393.2 → 154.0 KB
+headless (the loads on the thread pool) and 375.1 → 149.3 KB in a real window. The last frame comes
+when it did, and is what a full build draws.
 
 ### The app's own change, heard again
 

@@ -203,12 +203,16 @@ state of the last rebuild until the next one, which reported the move late.
 The window finds the two nodes down their elements' ancestors from the root, as a
 patch finds its nodes (`FindNodeDown`): it looks only at the children of the nodes
 on the way. Where that finds none (an element taken out, moved, or given a node of
-its own or an ancestor's since the tree was built, an overlay closed or opened
-since), one walk of the whole tree looks for it. Until plan 17's round 10 that walk
-was all there was: with the focused controls after a long list in the tree's order
-(Meridian's request pane after its endpoint map) it went past nearly every node,
-6,072 of 6,073 with the map at 2,000 endpoints. A focus that waited for its node
-and an announcement's source are found the same way.
+its own or an ancestor's since the tree was built), one walk of the whole tree looks
+for it. Until plan 17's round 10 that walk was all there was: with the focused
+controls after a long list in the tree's order (Meridian's request pane after its
+endpoint map) it went past nearly every node, 6,072 of 6,073 with the map at 2,000
+endpoints. A focus that waited for its node and an announcement's source are found
+the same way. An element of an overlay closed since the last frame is found down from
+that overlay's part, still in the tree until the frame takes it out (the focus leaving
+a closing palette's field); one of an overlay opened since has no node yet, and no walk
+looks for it (a palette's field taking the focus as the palette opens walked every node
+of the window).
 
 A move of a list's selection rebuilds no tree either (2026-10-11). The frame marks
 `IsSelected` on the item nodes it changed, in the applied tree, and hands the bridge
@@ -523,8 +527,12 @@ reader at the scroll's layout refresh five frames on, and the frame a hover move
 step 2 only hid that from the staleness audit (it walked nothing).
 Where a build would make other nodes than a walk can, it builds the tree, as before: a described
 node or a list's item with children whose own properties changed, a list whose items cross the 2,000
-served on demand, described content in another number, an overlay opened or closed (its own refresh),
-the root's own node, or a change no diff tells (whether a node is focusable, another text source). A node's selected state, selected or not before and after, is no
+served on demand, described content in another number,
+the root's own node, or a change no diff tells (whether a node is focusable, another text source). An
+overlay opened or closed in the walk's frame is no such change since plan 17 round 14 step 7: its part
+is put in under the root node or taken out first, and the walk takes the tree with the parts there are
+now; the part's nodes go in the walk's diff after the walk's own, as in a build's, and when the walk
+then cannot be made in place, the root node gets its children back and the tree is built. A node's selected state, selected or not before and after, is no
 such change: the walk writes it in place and tells it, children or not. A frame something else asks
 a tree of (a property no patch takes, the first frame a reader is there) builds it too. A composite
 list's own selection move was such a property, and a kept composite row whose `AccessibleSelected`
@@ -1037,7 +1045,32 @@ providers), a UIA `ItemContainer` on virtualized lists.
   told as selected, which it never was: `AccessibleSelected`, so UIA SelectionItem and AT-SPI's
   selectable and selected states. Selecting a row from assistive technology clicks it, as for a tab,
   and a click runs the command. A selected state changing inside an overlay builds that overlay's
-  part of the tree, in that frame; it built the window's whole tree. **A composite list in the
+  part of the tree, in that frame; it built the window's whole tree. **An overlay opening or closing
+  (2026-11-14, plan 17 round 14 step 7)** builds only its part. Each built the whole window's tree:
+  over Junction's History (1,114 nodes) a context menu's 14 nodes and the palette's 55 cost about
+  100 KB each way. An overlay opened since the last frame (`OverlayEntry.A11yOpened`) has its part
+  built and put after the other parts under the root node, and one closed has its part taken out:
+  one new array of the root node's children (`SwapOverlayParts`). The diff lists what a build's would,
+  in its order: what the frame's patches found first (a dropdown's expanded state, kept back from
+  `TryPatchA11y` for it), the open parts' own changes, the new part's nodes, the closed part's nodes
+  last under a stand-in for the root node as it was; the bridges take it as a build's diff. A frame
+  that walks the elements (a layout refresh due, children changed) swaps the parts first and walks the
+  tree with them; a popover's anchor, a button with its label, says it is expanded through that walk
+  now (an expanded state of an element with children built the tree). A frame something else asks a
+  tree of builds it, as before; so does an overlay closed and opened again with the same content. A
+  menu's entry whose flyout opens or closes says so in its menu's part, built again in that frame
+  (`PinContextMenuItem`): only the whole tree's build had told it. The focus moving into an opening
+  palette's field is told once the part is in, as when the tree was built for it, and the focus
+  leaving a closing one finds the field's node in the part still there. Real windows, NativeAOT, the
+  machine's own UIA listener, before → after, a11y bytes and the UI thread's frame bytes (bridge off
+  in brackets): Junction's History, a row's context menu opening 102.3 → 8.6 and 213.4 → 119.8 KB
+  (113.8), closing 99.9 → 0.8 and 100.8 → 1.8 (1.0); the palette opening 117.0 → 16.3 and 267.7 →
+  166.1 (150.7), closing 101.4 → 1.4 and 101.7 → 1.7 (0.2). Vesper (a folder of 18 entries): the palette
+  34.6 → 17.1 and 18.7 → 1.6, the recent-folders popover 22.4 → 5.6 and 17.2 → 0.4, a tab's context menu
+  21.1 → 1.7 and 16.9 → 0.4. Meridian's palette 17.9 → 11.3 and 8.0 → 1.4. Whole trees 1 → 0 for each
+  opening and each closing. Meridian's menus and pickers and Junction's own menus and cards are drawn
+  in the app's tree and walked, as before. The UIA bridge still points each wrapper at its node in the
+  tree after such a diff (one lookup a node, nothing made). **A composite list in the
   window's own tree (2026-10-31, plan 17 round 6 step 9b):** the same gap outside overlays, where
   nothing came back for it: the tree of a mount had none of a `RowsAreComposite` list's rows, and a
   change was told a key late or not at all (Junction's Commit list 28 nodes short on opening,

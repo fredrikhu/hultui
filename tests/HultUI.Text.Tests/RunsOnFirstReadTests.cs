@@ -214,7 +214,7 @@ public class RunsOnFirstReadTests(ITestOutputHelper output)
     }
 
     // The word cache's entry bound (TextPipeline's _wordShapeCache).
-    private const int WordCacheEntries = 8192;
+    private const int WordCacheEntries = TextPipeline.WordCacheEntries;
 
     [Fact]
     public void EveryReaderOfALine_AnswersAsItDidWithTheRunsMade()

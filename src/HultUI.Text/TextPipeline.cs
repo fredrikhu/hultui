@@ -31,7 +31,7 @@ public sealed class TextPipeline
     // never do, and WordShapeCacheTests verifies equivalence on this system.
     // Looked up by a span of the text: a segment becomes a string of its own only on a miss, to
     // be the entry's key.
-    private readonly WordCache _wordShapeCache = new(capacity: 8192, maxWeight: WordCacheBytes);
+    private readonly WordCache _wordShapeCache = new(capacity: WordCacheEntries, maxWeight: WordCacheBytes);
 
     // Widths of whole strings on one unbounded line, for MeasureWidth (Widths, below). Made at
     // the first width asked for: a pipeline that measures none — no TextArea — has none.
@@ -57,13 +57,20 @@ public sealed class TextPipeline
     // few words; at 4 MB the perf suite's 5,000-block rich text document no longer fitted and
     // took twice as long to open. (It was 24 MB while a TextArea found each of its lines' widths
     // here on every keystroke — 8 MB made typing in a 10,000-line JSON document go from 2 to
-    // 26 ms — until the TextArea kept its own widths.) The word and layout bounds hold all that
-    // the perf suite, Junction and Vesper Commander find in them again: ordinary words fill
-    // the word cache's 8,192 entries with ~2 MB, and no scenario reuses more than ~1.5 MB of
-    // laid-out text. The width cache holds the distinct lines of a 19,000-line JSON response
-    // (~7,000 of them, ~1.8 MB) with room for the next one's.
+    // 26 ms — until the TextArea kept its own widths.) The layout bound holds all that the perf
+    // suite, Junction and Vesper Commander find in it again: no scenario reuses more than
+    // ~1.5 MB of laid-out text. The word cache holds the words a TextArea's prefix tables shape
+    // at one width of a long document without spaces, which every row is wrapped again from at
+    // the next width of a drag: walked in the same order each time, words that outgrow the cache
+    // are all let go before they are read again. Both READMEs of Chinese and Japanese in one
+    // file (154,000 characters) want ~19,000 entries and ~11 MB, README.zh-CN.md alone at 960
+    // logical px ~10,000 and ~5 MB; 8,192 entries and 4 MB made every frame of a drag over them
+    // shape the whole document again (plan 17, round 14). Ordinary words fill ~2 MB. The width
+    // cache holds the distinct lines of a 19,000-line JSON response (~7,000 of them, ~1.8 MB)
+    // with room for the next one's.
     internal const long ShapeCacheBytes = 8L << 20;
-    internal const long WordCacheBytes = 4L << 20;
+    internal const int WordCacheEntries = 32768;
+    internal const long WordCacheBytes = 16L << 20;
     internal const long LayoutCacheBytes = 4L << 20;
     internal const long WidthCacheBytes = 4L << 20;
 
@@ -1590,7 +1597,13 @@ public sealed class TextPipeline
         var (levels, rtlParagraph) = bidi is null
             ? BidiAnalyzer.Levels(text, style.TextDirection)
             : (bidi.Levels!, bidi.RtlParagraph);
-        var allBreaks = bidi?.Breaks ?? BreakOffsets(text);
+        // One unbounded line without a newline never breaks: the loop below would find ICU's
+        // breaks and measure every segment between them to add no line, and the line after it is
+        // the whole text. So it runs over no breaks. A text area measures the prefixes of a line of
+        // BiDi text this way (MeasureWidth), several each time the line wraps at a new width.
+        var allBreaks = float.IsPositiveInfinity(maxWidth) && !text.AsSpan().Contains('\n')
+            ? NoBreaks
+            : bidi?.Breaks ?? BreakOffsets(text);
 
         var lines = RentLines();
         int textOffset = 0;
@@ -1653,6 +1666,9 @@ public sealed class TextPipeline
                 BuildBidiEllipsizedLine(text, start, tailEnd, style, levels, rtlParagraph, maxWidth, bidi, spans));
         return new TextLayout(LayoutLines(lines), new Size(maxLineWidth, totalHeight), rtlParagraph);
     }
+
+    // ComputeWrappedBidi's breaks for a line that cannot break. Never added to.
+    private static readonly List<int> NoBreaks = [];
 
     private int BidiFitPrefix(string text, int from, int to,
         ResolvedInheritedStyle style, byte[] levels, float maxWidth, TextMemo? bidi,
@@ -2037,11 +2053,20 @@ public sealed class TextPipeline
         end < text.Length && text[end] is not (' ' or '\n') && text[start] != ' '
         && (start != from || from == 0 || text[from - 1] is ' ' or '\n');
 
-    // Where such a word ends at every width: the next space or line end, at most MaxNaturalWord
-    // characters from its start.
+    // Where such a word ends at every width: the first change between ASCII letters or digits and
+    // other characters after its start, when the table's end does not pass it, else the next space
+    // or line end; at most MaxNaturalWord characters from its start. Chinese and Japanese set Latin
+    // names, commands and numbers among their ideographs, often with no space between: a word run
+    // on to the next space shaped a clause where the table needed a name (plan 17, round 14: on
+    // README.zh-CN.md, 58 % of the characters such words shaped were past such a change).
     private static int NaturalEnd(string text, int start, int end)
     {
         int stop = Math.Min(text.Length, start + MaxNaturalWord);
+        bool latin = char.IsAsciiLetterOrDigit(text[start]);
+        int change = start + 1;
+        while (change < stop && text[change] is not (' ' or '\n') && char.IsAsciiLetterOrDigit(text[change]) == latin)
+            change++;
+        if (change >= end) return change;
         while (end < stop && text[end] is not (' ' or '\n')) end++;
         return end;
     }
@@ -2054,19 +2079,20 @@ public sealed class TextPipeline
     // (CutsWordShortAtEnd): ShapeSegment's answer, but read off the word to its natural end where a cut
     // there is safe. That word is shaped once with its cuts and kept, so the next width's table, which
     // ends somewhere else, reads its own end off it instead of shaping a new string; the reads are
-    // RunCuts', exact to the bit.
+    // RunCuts', exact to the bit. A segment the word cache has is its own answer: the word to its
+    // natural end is neither looked up nor made for it.
     private WordShape TableEndSegment(string text, int start, int end, IResolvedFont font, float fontSize, int fontHash)
     {
         var segment = text.AsSpan(start, end - start);
         if (DigitTableFor(segment, font, fontSize) is { } digits)
             return DigitSegment(segment, digits, start);
-        int natural = NaturalEnd(text, start, end);
-        if (natural > end && CutsOfNaturalWord(text, start, natural, font, fontSize, fontHash)
-                .TryPrefix(end - start, out float width, out int glyphs))
-            return new WordShape(null, null, start, width, glyphs);
-        // The segment itself, with its cuts, which the line search's probes then read (LastCuts).
         if (!_wordShapeCache.TryGet(segment, font, fontSize, fontHash, out var run))
         {
+            int natural = NaturalEnd(text, start, end);
+            if (natural > end && CutsOfNaturalWord(text, start, natural, font, fontSize, fontHash)
+                    .TryPrefix(end - start, out float width, out int glyphs))
+                return new WordShape(null, null, start, width, glyphs);
+            // The segment itself, with its cuts, which the line search's probes then read (LastCuts).
             string word = segment.ToString();
             run = _cutShaper!.Shape(word, font, fontSize, out var cuts);
             cuts ??= RunCuts.None;

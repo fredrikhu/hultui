@@ -137,6 +137,55 @@ public class ScrollbarHoverTests
         Assert.Contains("#123456", Bars(session));
     }
 
+    /// <summary>
+    /// The ease-out's last steps move the bar by less than half a device pixel, and each one drew
+    /// the window again: in the apps 2 to 11 frames of a visit were the same pixels as the frame
+    /// before (plan 17 round 14). The tween now ends at its target once less than half a device
+    /// pixel is left, so every frame it draws shows something new, and it still ends at the full
+    /// width (and back at the hairline). Device pixels: a larger scale has more of them to cover,
+    /// so it draws more frames. At 120 Hz the 120 ms expansion took 15 frames each way.
+    /// </summary>
+    [Theory]
+    [InlineData(1f, 10)]
+    [InlineData(1.5f, 10)]
+    [InlineData(2f, 11)]
+    public void TheExpansionEndsWithinHalfADevicePixel_AndEveryFrameShowsSomethingNew(float scale, int frames)
+    {
+        using var session = HeadlessSession.Create(200, 150, scale,
+            options: new HeadlessOptions { RecordDrawCalls = true });
+        var scroll = ScrollView.New().Height(150f).Children(Box.New().Height(900f).FlexShrink(0));
+        scroll.ScrollbarWidth = RestWidth;
+        scroll.ScrollbarExpandedWidth = ExpandedWidth;
+        session.Application.SetRoot(scroll);
+        session.PumpFrames(2);
+
+        PointAtTheBar(session);
+        Assert.Equal(frames, DistinctFrames(session));
+        Assert.Contains(" 12x150", Bars(session));
+
+        PointAway(session);
+        Assert.Equal(frames, DistinctFrames(session));
+        Assert.Contains(" 2x150", Bars(session));
+    }
+
+    /// <summary>Frames drawn at 120 Hz until they stop, each checked against the one before.</summary>
+    private static int DistinctFrames(HeadlessSession session)
+    {
+        var step = TimeSpan.FromSeconds(1 / 120.0);
+        byte[]? last = null;
+        int drawn = 0;
+        for (int i = 0; i < 60; i++)
+        {
+            if (!session.PumpFrame(step)) continue;
+            drawn++;
+            using var image = session.Window.CapturePixels();
+            var pixels = image.PeekPixels().GetPixelSpan().ToArray();
+            Assert.False(last is not null && pixels.AsSpan().SequenceEqual(last), $"frame {drawn} drew the pixels already on screen");
+            last = pixels;
+        }
+        return drawn;
+    }
+
     // ──────────────────────────────────────────────────────────────────────
     // The same bar on a text area
     // ──────────────────────────────────────────────────────────────────────

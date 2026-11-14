@@ -418,11 +418,66 @@ public class GitRepository
 
     public List<GitFileDiff> GetCommitDiff(string commitHash, bool ignoreWhitespace = false)
     {
+        return ParseUnifiedDiff(Query(CommitDiffArgs(commitHash, ignoreWhitespace).ToArray()).Stdout);
+    }
+
+    private static List<string> CommitDiffArgs(string commitHash, bool ignoreWhitespace)
+    {
         // --root so the initial (parentless) commit diffs against the empty tree.
         var args = new List<string>
             { "diff-tree", "--no-commit-id", "-p", "-M", "-m", "--first-parent", "--root" };
         if (ignoreWhitespace) args.Add(IgnoreWhitespaceFlag);
         args.Add(commitHash);
+        return args;
+    }
+
+    /// <summary>
+    /// A commit's patch, read whole only when it is shorter than <paramref name="maxChars"/> characters
+    /// (<c>Whole</c>). A longer one is not read past that many: git is stopped there, and what comes back is
+    /// the first file's patch when it ended inside them, and <paramref name="opening"/>'s from a run of its
+    /// own (<see cref="GetCommitFileDiff"/>) when it was not that one. The other files' patches are read the
+    /// same way when they are wanted.
+    ///
+    /// <para>The Commit tab shows one file's diff at a time, and the whole patch was read and parsed into
+    /// objects for it anyway: on this repository's own last 300 commits that was 628.7 MB allocated and 8
+    /// gen-2 collections, up to 87.4 MB for one load, and up to 32 MB kept while a commit was selected (a
+    /// plan merge of 8.0 million characters, 223,012 lines). Below 262,144 characters, where 253 of those
+    /// 300 commits are, it is read whole as it always was.</para>
+    /// </summary>
+    public (List<GitFileDiff> Diffs, bool Whole) GetCommitDiff(string commitHash, bool ignoreWhitespace, int maxChars,
+        GitFileChange? opening)
+    {
+        var args = CommitDiffArgs(commitHash, ignoreWhitespace).ToArray();
+        var (result, whole) = GitProcess.RunUpTo(Path, maxChars, FirstFilePatchLength, args);
+        if (whole && !result.Success) throw new GitCommandException(args, result);
+        var diffs = ParseUnifiedDiff(result.Stdout);
+        if (!whole && opening is not null && !diffs.Exists(d => d.Path == opening.Path))
+            diffs.AddRange(GetCommitFileDiff(commitHash, opening.Path, opening.OldPath, ignoreWhitespace));
+        return (diffs, whole);
+    }
+
+    /// <summary>How much of the start of a patch is its first file's: up to the second file's
+    /// <c>diff --git</c> line, or nothing when the first one runs past what there is.</summary>
+    internal static int FirstFilePatchLength(ReadOnlySpan<char> patch)
+    {
+        if (!patch.StartsWith("diff --git ", StringComparison.Ordinal)) return 0;
+        int next = patch[1..].IndexOf("\ndiff --git ", StringComparison.Ordinal);
+        return next < 0 ? 0 : next + 2;
+    }
+
+    /// <summary>
+    /// One file's patch in a commit, as the commit's whole patch (<see cref="GetCommitDiff(string, bool)"/>)
+    /// has it: the same command limited to that file and, for a rename, to the path it came from as well —
+    /// limited to the new path alone, git finds nothing it was renamed from and calls the file added. The
+    /// paths are literal, so a name with <c>*</c> or <c>[</c> in it matches only itself.
+    /// </summary>
+    public List<GitFileDiff> GetCommitFileDiff(string commitHash, string path, string? oldPath,
+        bool ignoreWhitespace = false)
+    {
+        var args = CommitDiffArgs(commitHash, ignoreWhitespace);
+        args.Add("--");
+        args.Add(":(literal)" + path);
+        if (oldPath is { Length: > 0 } && oldPath != path) args.Add(":(literal)" + oldPath);
         return ParseUnifiedDiff(Query(args.ToArray()).Stdout);
     }
 
@@ -2260,9 +2315,14 @@ public class GitRepository
         var headerKind = FileChangeKind.Modified;
         string? oldBlob = null, newBlob = null;
 
+        // Every marker is matched ordinally. git writes them byte for byte, and StartsWith(string)
+        // without a comparison asks the current culture: on a Swedish machine four collation
+        // lookups a line, for every line of every patch, and a line that started with a
+        // character the culture ignores (a soft hyphen) would have matched a marker it does not
+        // begin with.
         foreach (var rawLine in diffText.Split('\n'))
         {
-            if (rawLine.StartsWith("diff --git "))
+            if (rawLine.StartsWith("diff --git ", StringComparison.Ordinal))
             {
                 var parts = rawLine.Split(" b/", 2);
                 var path = parts.Length > 1 ? parts[1] : rawLine;
@@ -2272,42 +2332,42 @@ public class GitRepository
                 headerKind = FileChangeKind.Modified;
                 oldBlob = newBlob = null;
             }
-            else if (rawLine.StartsWith("--- ") && currentFile != null && currentHunk == null)
+            else if (rawLine.StartsWith("--- ", StringComparison.Ordinal) && currentFile != null && currentHunk == null)
             {
                 currentFile.OldPathHeader = rawLine;
             }
-            else if (rawLine.StartsWith("+++ ") && currentFile != null && currentHunk == null)
+            else if (rawLine.StartsWith("+++ ", StringComparison.Ordinal) && currentFile != null && currentHunk == null)
             {
                 currentFile.NewPathHeader = rawLine;
             }
-            else if (currentFile != null && currentHunk == null && rawLine.StartsWith("new file mode "))
+            else if (currentFile != null && currentHunk == null && rawLine.StartsWith("new file mode ", StringComparison.Ordinal))
             {
                 headerKind = FileChangeKind.Added;
             }
-            else if (currentFile != null && currentHunk == null && rawLine.StartsWith("deleted file mode "))
+            else if (currentFile != null && currentHunk == null && rawLine.StartsWith("deleted file mode ", StringComparison.Ordinal))
             {
                 headerKind = FileChangeKind.Deleted;
             }
-            else if (currentFile != null && currentHunk == null && rawLine.StartsWith("rename from "))
+            else if (currentFile != null && currentHunk == null && rawLine.StartsWith("rename from ", StringComparison.Ordinal))
             {
                 headerKind = FileChangeKind.Renamed;
                 currentFile.RenamedFrom = rawLine["rename from ".Length..];
             }
-            else if (currentFile != null && currentHunk == null && rawLine.StartsWith("index "))
+            else if (currentFile != null && currentHunk == null && rawLine.StartsWith("index ", StringComparison.Ordinal))
             {
                 // "similarity index 90%" does not match — that line has no trailing space
                 // after "similarity", and this one is anchored at the start.
                 (oldBlob, newBlob) = ParseIndexBlobs(rawLine);
             }
             else if (currentFile != null && currentHunk == null
-                     && (rawLine.StartsWith("Binary files ") || rawLine.StartsWith("GIT binary patch")))
+                     && (rawLine.StartsWith("Binary files ", StringComparison.Ordinal) || rawLine.StartsWith("GIT binary patch", StringComparison.Ordinal)))
             {
                 // git's stand-in for a patch it will not produce. Recorded rather than
                 // dropped, so the viewer can say what changed instead of showing an empty
                 // pane — and so nothing downstream tries to tokenize bytes that aren't text.
                 currentFile.Binary = new GitBinaryDiff(headerKind, oldBlob, newBlob);
             }
-            else if (rawLine.StartsWith("@@ ") && currentFile != null)
+            else if (rawLine.StartsWith("@@ ", StringComparison.Ordinal) && currentFile != null)
             {
                 // Parse hunk header: @@ -oldStart,oldCount +newStart,newCount @@
                 var header = rawLine;

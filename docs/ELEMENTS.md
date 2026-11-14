@@ -136,6 +136,25 @@ round 9, hover stayed on the removed element until the pointer moved, and throug
 that element kept the whole old view alive: in Meridian with a 2,000-endpoint spec, 7.8 MB of
 a 28 MB heap after a key switched the view.
 
+**Hover follows a scroll under a still pointer.** When content scrolls under a resting pointer —
+the wheel, a key, a scrollbar, a reveal, an offset set from code, and a sticky header moving with
+them — the frame that draws the scroll hit-tests the pointer again before it draws, as a browser
+does: the element that scrolled away gets its `PointerLeave`, the one now under the pointer its
+`PointerEnter`, its `.OnHover` look, its list's tint (`.HoverHighlight`) and its cursor, all in the
+scroll's own frame, with no frame of its own. A list first makes the rows its offset now shows, so
+a long jump lands on a real row. A tooltip showing for what scrolled away closes, as on a move off
+it; the new element's opens after the usual delay. An enter or leave handler that marks style or
+layout is styled and laid out in that same frame. Nothing follows while a press holds the pointer
+(a drag, a selection, the scrollbar's thumb, an autoscroll keeps its target); the release draws a
+frame, and that frame follows. Nothing follows when the pointer is outside the window. Touch
+arrives as mouse events and is followed the same way. A pan made with a negative margin
+(`HorizontalPan`) or a layout that moves content without scrolling is not a scroll and is not
+followed. It costs one hit test in a frame that scrolled (12–33 elements visited in Junction,
+Vesper Commander and the Fluent sample) and allocates nothing of its own; an enter or leave event
+an app listens to, or a tooltip's delay, is made as on a move. Until plan 17's round 14 hover
+stayed on the row that scrolled away until the pointer moved: Junction's History tinted a row the
+pointer had left after every wheel series.
+
 So an enter or leave handler must not rebuild the element the pointer is over into a new one:
 the next frame's hit-test enters the new one, the handler builds another, and the window
 rebuilds every frame while the pointer rests. Keep the element (the same kind at the same
@@ -1746,9 +1765,9 @@ step 11). What to carry over:
   item has none, so what only they said (Meridian's "seen 4× · 200") goes in the item label.
 
 Two things change for good. A wheel notch makes the rows it brings in (Meridian: 1.5 rows,
-7.4 KB a notch) where the scroll view moved the ones it had (0.1 KB). And the row under a still
-pointer: a long scroll lets go of the hovered row, so the window hits the pointer again and the row
-now under it takes its hover at once, where a scroll view's row tinted only when the pointer moved.
+7.4 KB a notch) where the scroll view moved the ones it had (0.1 KB). The row under a still pointer
+takes its hover in the scroll's own frame in both (see "Hover follows a scroll under a still
+pointer" above).
 
 **No sideways scroll.** The content width is pinned to the viewport, so `ScrollOffsetX`
 is always 0 and a wide row simply clips. A virtual list that has to pan sideways uses a

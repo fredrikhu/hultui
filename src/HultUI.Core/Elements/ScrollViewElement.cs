@@ -68,6 +68,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         float clamped = ClampX(value);
         if (clamped == _scrollOffsetX) return;
         _scrollOffsetX = clamped;
+        NoteContentMoved();
         MarkPaintDirty();
         // Children's on-screen positions shifted, so every descendant node's
         // accessibility bounds changed — refresh the a11y tree.
@@ -81,8 +82,32 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         float clamped = ClampY(value);
         if (clamped == _scrollOffsetY) return;
         _scrollOffsetY = clamped;
+        NoteContentMoved();
         MarkPaintDirty();
         NotifyAccessibilityPropertyChanged(AccessibilityProperties.BoundingRect);
+    }
+
+    /// <summary>
+    /// How many times the content of a scroll view, in any window, has moved: an offset changed by
+    /// the user (the wheel, a key, the scrollbar, the autoscroll), by code (the setters, a reveal) or
+    /// by the layout (a clamp after the content shrank, an offset held for it). A window compares it
+    /// from one drawn frame to the next and, when it changed, hit-tests hover again where the pointer
+    /// rests, so the row that scrolled under a still pointer takes its hover in the scroll's own frame.
+    /// Bumped with <see cref="Interlocked"/>: headless tests drive windows on several threads at once.
+    /// </summary>
+    internal static int ContentMoves => Volatile.Read(ref s_contentMoves);
+    private static int s_contentMoves;
+
+    private static void NoteContentMoved() => Interlocked.Increment(ref s_contentMoves);
+
+    /// <summary>Writes both offsets as a pass clamps or applies them (the layout's, drawing's), and
+    /// counts a change in <see cref="ContentMoves"/>.</summary>
+    private protected void SetOffsets(float x, float y)
+    {
+        if (x == _scrollOffsetX && y == _scrollOffsetY) return;
+        _scrollOffsetX = x;
+        _scrollOffsetY = y;
+        NoteContentMoved();
     }
 
     /// <summary>Whether an offset set now can be clamped to the content: the view has a width and
@@ -106,12 +131,12 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     {
         if (!float.IsNaN(_heldOffsetX) && CanClampX)
         {
-            _scrollOffsetX = ClampX(_heldOffsetX);
+            SetOffsets(ClampX(_heldOffsetX), _scrollOffsetY);
             _heldOffsetX = float.NaN;
         }
         if (!float.IsNaN(_heldOffsetY) && CanClampY)
         {
-            _scrollOffsetY = ClampY(_heldOffsetY);
+            SetOffsets(_scrollOffsetX, ClampY(_heldOffsetY));
             _heldOffsetY = float.NaN;
         }
     }
@@ -298,8 +323,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         _contentHeight = maxBottom;
 
         // Re-clamp offsets after content size change
-        _scrollOffsetX = ClampX(_scrollOffsetX);
-        _scrollOffsetY = ClampY(_scrollOffsetY);
+        SetOffsets(ClampX(_scrollOffsetX), ClampY(_scrollOffsetY));
         ApplyHeldOffsets();
         ApplyPendingReveal();
     }
@@ -506,7 +530,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         float target = band.Top < _scrollOffsetY ? band.Top
             : bottom > _scrollOffsetY + viewportHeight ? bottom - viewportHeight
             : _scrollOffsetY;
-        _scrollOffsetY = ClampY(target);
+        SetOffsets(_scrollOffsetX, ClampY(target));
     }
 
     /// <summary>

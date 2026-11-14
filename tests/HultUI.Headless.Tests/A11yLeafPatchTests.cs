@@ -377,6 +377,113 @@ public class A11yLeafPatchTests
                     }
                 });
             }
+            case "dropdown opened and closed":
+            {
+                // The list's part comes and goes, with the dropdown's expanded state patched in the same
+                // frame: told in one diff, the state before the list, as a build tells them.
+                var dropdown = Dropdown.New(["Alpha", "Bravo", "Charlie"], selectedIndex: 0).Width(Dimension.Px(160));
+                HeadlessSession? live = null;
+                return With(dropdown, s =>
+                {
+                    s.Steps.Add(("open", session => live = session, () => live!.Window.Click(dropdown),
+                        (session, force) => { force(); session.PumpFrame(); }));
+                    s.Step("down", () => live!.Window.PressKey(KeyCode.Down));
+                    s.Step("escape", () => live!.Window.PressKey(KeyCode.Escape));
+                    s.Step("open again", () => live!.Window.Click(dropdown));
+                    s.Step("enter", () => live!.Window.PressKey(KeyCode.Enter));
+                });
+            }
+            case "popover, focus in and back":
+            {
+                // The click focuses the popover's first field as it opens (no node yet: told when its part
+                // is in), Escape gives the focus back to the anchor as the part goes.
+                var anchor = Button.New("Filters");
+                var popover = new Popover(() => Flex.Column(gap: 6).Padding(10).Children(TextInput.New("p1"), TextInput.New("p2")));
+                anchor.OnClick(_ => popover.Toggle(anchor));
+                HeadlessSession? live = null;
+                return With(anchor, s =>
+                {
+                    s.Steps.Add(("open", session => { live = session; anchor.Focus(); session.PumpFrame(); }, () => live!.Window.Click(anchor),
+                        (session, force) => { force(); session.PumpFrame(); }));
+                    s.Step("tab", () => live!.Window.PressKey(KeyCode.Tab));
+                    s.Step("escape", () => live!.Window.PressKey(KeyCode.Escape));
+                    s.Step("open again", () => live!.Window.Click(anchor));
+                    s.Step("escape again", () => live!.Window.PressKey(KeyCode.Escape));
+                });
+            }
+            case "palette opened and closed":
+            {
+                var palette = new CommandPalette(() => Enumerable.Range(0, 12).Select(i => new PaletteCommand($"Command {i}", () => { })));
+                var before = Button.New("Before");
+                HeadlessSession? live = null;
+                return With(before, s =>
+                {
+                    s.Steps.Add(("open", session => { live = session; before.Focus(); session.PumpFrame(); },
+                        () => palette.Open(live!.Window.Window), (session, force) => { force(); session.PumpFrame(); }));
+                    s.Step("down", () => live!.Window.PressKey(KeyCode.Down));
+                    s.Step("escape", () => live!.Window.PressKey(KeyCode.Escape));
+                    s.Step("open again", () => palette.Open(live!.Window.Window));
+                    s.Step("escape again", () => live!.Window.PressKey(KeyCode.Escape));
+                });
+            }
+            case "context menu opened and closed":
+            {
+                var items = new ContextMenuItem[5];
+                for (int i = 0; i < items.Length; i++) items[i] = new ContextMenuItem { Label = $"Item {i}", Action = () => { } };
+                var field = TextInput.New("x").Width(Dimension.Px(200));
+                HeadlessSession? live = null;
+                return With(field, s =>
+                {
+                    s.Steps.Add(("open", session => { live = session; field.Focus(); session.PumpFrame(); },
+                        () => live!.Window.Window.OpenContextMenu(items, new Point(40, 60)), (session, force) => { force(); session.PumpFrame(); }));
+                    s.Step("down", () => live!.Window.PressKey(KeyCode.Down));
+                    s.Step("escape", () => live!.Window.PressKey(KeyCode.Escape));
+                });
+            }
+            case "context menu's flyout opened and closed":
+            {
+                // The flyout's part comes and goes, and the entry it hangs from says it is expanded, then not.
+                ContextMenuItem[] items =
+                [
+                    new() { Label = "Copy", Action = () => { } },
+                    new() { Label = "Export", Children = [new() { Label = "As PDF", Action = () => { } }, new() { Label = "As PNG", Action = () => { } }] },
+                    new() { Label = "Delete", Action = () => { } },
+                ];
+                HeadlessSession? live = null;
+                return With(Box.New().Width(Dimension.Px(10)).Height(Dimension.Px(10)), s =>
+                {
+                    s.Steps.Add(("open", session => live = session,
+                        () => live!.Window.Window.OpenContextMenu(items, new Point(40, 60)), (session, force) => { force(); session.PumpFrame(); }));
+                    s.Step("down x2", () => { live!.Window.PressKey(KeyCode.Down); live.Window.PressKey(KeyCode.Down); });
+                    s.Step("right, the flyout", () => live!.Window.PressKey(KeyCode.Right));
+                    s.Step("left, back", () => live!.Window.PressKey(KeyCode.Left));
+                    s.Step("right again", () => live!.Window.PressKey(KeyCode.Right));
+                    s.Step("escape", () => live!.Window.PressKey(KeyCode.Escape));
+                    s.Step("escape again", () => live!.Window.PressKey(KeyCode.Escape));
+                });
+            }
+            case "overlays, a leaf in the same frame":
+            {
+                // An overlay opened with a check box toggled and a field typed into in the window in the same
+                // frame; two open, the lower one closed, then the other, each with a toggle.
+                var check = Checkbox.New(false, "Remember");
+                var input = TextInput.New("").Width(Dimension.Px(200));
+                var lower = Flex.Column(gap: 4).Padding(8).Children(TextB.New("Lower"), Button.New("One"), Button.New("Two"));
+                var upper = Flex.Column(gap: 4).Padding(8).Children(TextB.New("Upper"), Checkbox.New(true, "Inside"));
+                OverlayHandle a = default, b = default;
+                HeadlessSession? live = null;
+                return With(Flex.Column(gap: 4).Children(check, input), s =>
+                {
+                    s.Steps.Add(("lower, toggle", session => live = session,
+                        () => { a = live!.Window.Window.ShowOverlay(lower, 300, 40); check.IsChecked = true; },
+                        (session, force) => { force(); session.PumpFrame(); }));
+                    s.Step("upper, type", () => { input.Text = "q"; b = live!.Window.Window.ShowOverlay(upper, 320, 120); });
+                    s.Step("lower closes, toggle", () => { live!.Window.Window.CloseOverlay(a); check.IsChecked = false; });
+                    s.Step("upper closes", () => live!.Window.Window.CloseOverlay(b));
+                    s.Step("both, one frame", () => { a = live!.Window.Window.ShowOverlay(lower, 300, 40); b = live.Window.Window.ShowOverlay(upper, 320, 120); });
+                    s.Step("both go, one frame", () => { live!.Window.Window.CloseOverlay(b); live.Window.Window.CloseOverlay(a); });
+                });
+            }
             case "overlay children" or "move in an overlay":
             {
                 var count = new HultUI.Core.Reactivity.Signal<int>(2);
@@ -612,6 +719,38 @@ public class A11yLeafPatchTests
         Assert.All(parts.TreesPerStep, built => Assert.Equal(0, built));
     }
 
+    /// <summary>Cases an overlay opens or closes in, with its part added under the root node or taken out,
+    /// and no tree built (plan 17, round 14): each opening and each closing built the whole tree.</summary>
+    public static TheoryData<string> OverlaysComeAndGo => new()
+    {
+        "dropdown opened and closed", "popover, focus in and back", "palette opened and closed",
+        "context menu opened and closed", "context menu's flyout opened and closed", "overlays, a leaf in the same frame",
+    };
+
+    [Theory]
+    [MemberData(nameof(OverlaysComeAndGo))]
+    public void ATSPI_AnOverlayComingOrGoing_TellsWhatARebuildTells_AndBuildsNoTree(string which)
+    {
+        var parts = Play(which, forceRebuild: false, AtSpi);
+        var rebuilt = Play(which, forceRebuild: true, AtSpi);
+        Assert.Equal(rebuilt.Told, parts.Told);
+        Assert.Equal(rebuilt.Trees, parts.Trees);
+        Assert.All(parts.TreesPerStep, built => Assert.Equal(0, built));
+        Assert.All(rebuilt.TreesPerStep, built => Assert.True(built >= 1));
+    }
+
+    [WindowsTheory]
+    [MemberData(nameof(OverlaysComeAndGo))]
+    [SupportedOSPlatform("windows")]
+    public void UIA_AnOverlayComingOrGoing_RaisesWhatARebuildRaises_AndBuildsNoTree(string which)
+    {
+        var parts = PlayUia(which, forceRebuild: false);
+        var rebuilt = PlayUia(which, forceRebuild: true);
+        Assert.Equal(rebuilt.Told, parts.Told);
+        Assert.Equal(rebuilt.Trees, parts.Trees);
+        Assert.All(parts.TreesPerStep, built => Assert.Equal(0, built));
+    }
+
     /// <summary>What a run told and built: the bridge's lines, a dump of the tree after each step,
     /// the patches and trees per step.</summary>
     private sealed record Run(List<string> Told, List<string> Trees, int Patches, int[] TreesPerStep);
@@ -625,7 +764,8 @@ public class A11yLeafPatchTests
         var scene = Make(which);
         ulong baseId = MinId(scene.Root);
         string Map(ulong raw) => raw == 0 ? "root" : VirtualItemId.TryDecode(new ElementId(raw), out var list, out int index)
-            ? $"v{list.Value - baseId}#{index}" : $"e{raw - baseId}";
+            // A list whose slot went with it (a closed menu's) decodes to no list.
+            ? list == default ? $"v(gone)#{index}" : $"v{list.Value - baseId}#{index}" : $"e{raw - baseId}";
         var (inner, told) = bridge(Map);
         var counting = new Counting(inner);
         session.Window.InstallAccessibilityBridge(counting);

@@ -14,10 +14,22 @@ public static class HitTester
     /// </summary>
     public static Element? HitTest(Element root, Point point)
     {
-        return HitTestRecursive(root, point, clipRect: null);
+        return HitTestRecursive(root, point, clipRect: null, realize: false);
     }
 
-    private static Element? HitTestRecursive(Element element, Point point, Rect? clipRect)
+    /// <summary>
+    /// <see cref="HitTest(Element, Point)"/> that first brings the content of every scroll view the
+    /// point is over up to date, as drawing does before it draws one
+    /// (<see cref="ScrollViewElement.UpdateContentSize"/>): a virtual list makes the rows its offset
+    /// now shows. For a hit test between a scroll and the frame that draws it, which would otherwise
+    /// find the rows the list had before the scroll, or none where new ones come.
+    /// </summary>
+    internal static Element? HitTestRealizing(Element root, Point point)
+    {
+        return HitTestRecursive(root, point, clipRect: null, realize: true);
+    }
+
+    private static Element? HitTestRecursive(Element element, Point point, Rect? clipRect, bool realize)
     {
         // If we have a clip rect, check if the point is inside it (parent space).
         if (clipRect.HasValue && !clipRect.Value.Contains(point))
@@ -51,6 +63,7 @@ public static class HitTester
 
         if (element is ScrollViewElement scrollView)
         {
+            if (realize) scrollView.UpdateContentSize();
             // ScrollView clips to content box and offsets hit test point.
             // Both point and clip rect must be transformed into content-space
             // so that child AbsoluteX/Y (which don't account for scroll) can be
@@ -76,7 +89,7 @@ public static class HitTester
         var children = ZOrderHelper.GetChildrenInZOrder(element);
         for (int i = children.Count - 1; i >= 0; i--)
         {
-            var hit = HitTestRecursive(children[i], childPoint, childClip);
+            var hit = HitTestRecursive(children[i], childPoint, childClip, realize);
             if (hit is not null)
                 return hit;
         }

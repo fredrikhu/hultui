@@ -187,7 +187,10 @@ public static class FileSystem
         var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         // A share root's parent is its server, which Directory.GetParent has no answer for —
         // it stops at "\\server\share" and reports null, leaving the share with no way out.
-        var parent = PathProbe.UncParentOf(trimmed) ?? Directory.GetParent(trimmed)?.FullName;
+        // "/" (and "\" on Windows) trims to nothing, which GetParent throws on: the top of the
+        // tree has no parent. Thrown, the listing never landed, and Linux's root never listed.
+        var parent = trimmed.Length == 0 ? null
+            : PathProbe.UncParentOf(trimmed) ?? Directory.GetParent(trimmed)?.FullName;
         if (parent != null)
             result.Add(new FileEntry("..", parent, IsDir: true, 0, DateTime.Now, IsParent: true));
 
