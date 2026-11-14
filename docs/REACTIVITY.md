@@ -1570,6 +1570,37 @@ The discipline in one line: **`Refresh()` bumps the generation (data changed →
 
 Because `Build()` renders from the cached `Value`, you can keep the previous result on screen while the next one loads instead of blanking to a spinner — gate the placeholder on "have we ever loaded anything" rather than "is a load in flight." Since the result is applied in a single batch, the view swaps from old to new in one frame with no empty state in between.
 
+### Move to the next screen with its data
+
+Keeping the previous rows on screen while the next ones load is half of it: what names them has
+to wait too. Vesper's navigation set the folder, put the cursor on the first row, cleared the
+marks and the filter and built the pane's tab strip, trail, header and footer at the key, over
+the rows of the folder it was leaving, and built again when the next folder's rows landed a few
+milliseconds later. When a frame fell between the two (in a real window 34 of 40 navigations), it
+showed one folder's name over another's rows, and a key in that gap acted on a folder whose rows
+were not on screen. The navigation now asks for the rows and changes nothing; when they land it
+moves the pane, its history included, in the build they land with. A source that is slow to
+answer or may not answer (a share, a server, an archive) still moves the pane at once: its name,
+and past the connecting delay its connecting block, are what the reader sees while it waits. A
+local folder still out at that delay moves the pane then, with the block.
+
+Two traps on the way:
+
+- A build that reads a loader's `IsLoading` builds again when a load starts. Vesper's pane asked
+  first thing whether it was waiting, so the next folder's load, started outside a build, built
+  the window anyway. Read the plain fields that settle the answer first (a pane showing its own
+  folder's rows is not waiting), and the flag only when they do not.
+- An ordinary handler that ran draws the window, since it may have changed something without
+  marking it: a key whose only effect is a load started draws what is already on screen. Vesper's
+  root hears keys passively (`OnPassive`) and asks for that frame itself (`MarkPaintDirty`), but
+  for a navigation that waits for its rows.
+
+A navigation (round 14, NativeAOT; Enter, Backspace, Alt+← and Alt+→ in turn): in a real window
+1.90 → 1.00 frames, 0.90 → 0 frames of one folder's name over another's rows, 2 → 1 window builds
+and 5 → 4 part builds, 308.4 → 289.2 KB on the UI thread, the last frame 9.6 → 2.5 ms after the
+key; headless with the loads on the thread pool the same counts, and every last frame what a full
+build draws.
+
 ### A reload that finds the same hands back what is shown
 
 A loader's readers rebuild when its value changes, and `Signal<T>` compares values with the

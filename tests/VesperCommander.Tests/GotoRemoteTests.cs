@@ -113,8 +113,10 @@ public class GotoRemoteTests : IDisposable
 
         Assert.Equal(0, dials);
         Assert.Null(fx.Probe);
-        Assert.Equal(fx.Sub, fx.Dir('L'));
         Assert.False(fx.PromptOpen);
+        // The pane moves there with the folder's rows, which land on the next frame.
+        fx.Session.PumpFrame();
+        Assert.Equal(fx.Sub, fx.Dir('L'));
     }
 
     /// <summary>The command line's "cd" shares the resolution path but has no dialog to hold

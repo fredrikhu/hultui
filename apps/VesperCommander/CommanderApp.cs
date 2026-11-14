@@ -489,7 +489,26 @@ public partial class CommanderApp : Component, IDisposable
         InitBookmarks();
 
         // Global keys land on the host when nothing is focused.
-        Mount().On<KeyDownEvent>(HandleKeyDown);
+        Mount().OnPassive<KeyDownEvent>(OnKeyDown);
+    }
+
+    // Navigations that waited for their rows (see Navigate), and whether the key being handled is
+    // one of the pane's plain navigation keys: Enter, Backspace, Alt+← and Alt+→.
+    private int _navsWaited;
+    private bool _plainNavKey;
+
+    /// <summary>The root hears every key passively, and asks for the frame an ordinary handler's
+    /// key gets itself (a handler may change something without marking it, so the window draws
+    /// after every key one ran for) — except for a plain navigation key whose navigation waits
+    /// for its rows. That key changes nothing on screen until they land, and the build they land
+    /// with draws the frame: drawn at the key as well, a navigation drew the folder it was leaving
+    /// once more, the same pixels.</summary>
+    private void OnKeyDown(KeyDownEvent e)
+    {
+        int waited = _navsWaited;
+        _plainNavKey = false;
+        HandleKeyDown(e);
+        if (!(_plainNavKey && _navsWaited != waited)) Mount().MarkPaintDirty();
     }
 
     /// <summary>Whether a saved tab is worth reopening. A local folder is checked as it always
@@ -591,10 +610,20 @@ public partial class CommanderApp : Component, IDisposable
     private bool IsConnecting(char side)
     {
         int i = side == 'L' ? 0 : 1;
-        if (!Loader(side).IsLoading) return false;
+        // A navigation still waiting for its rows waits on a folder the pane does not show yet; past
+        // the delay the next build moves the pane there and says so (SettleOverdueNavs).
+        if (NavWaiting(side) is not null) return LoadOverdue(side) && Loader(side).IsLoading;
+        // The folder on screen first: a plain field, so a pane showing its own folder's rows reads
+        // no loading flag, and the load of the next folder, asked for before the pane moves to it,
+        // builds nothing as it starts.
         if (PathEquals(_shownDir[i], Dir(side))) return false;
-        return _app.Time.GetElapsedTime(_loadStarted[i]).TotalMilliseconds >= ConnectingDelayMs;
+        if (!Loader(side).IsLoading) return false;
+        return LoadOverdue(side);
     }
+
+    /// <summary>Whether the load the pane is timing has been out for the connecting delay.</summary>
+    private bool LoadOverdue(char side) =>
+        _app.Time.GetElapsedTime(_loadStarted[Si(side)]).TotalMilliseconds >= ConnectingDelayMs;
 
     // One per side, cancelled when the pane stops wanting the listing it started.
     private readonly CancellationTokenSource?[] _loadCts = new CancellationTokenSource?[2];
@@ -625,9 +654,17 @@ public partial class CommanderApp : Component, IDisposable
     private void NudgeWhenConnectingIsDue(char side)
     {
         if (ConnectingDelayMs <= 0) return;   // already due; the build in progress will show it
-        // The connecting block is the pane's view: the parts stay.
+        // The connecting block is the pane's view: the parts stay — unless the navigation that
+        // asked for the folder is still waiting for its rows, which moves the pane now, its tab
+        // strip, trail, header and footer with it. A nudge of an earlier load that finds a later
+        // one waiting leaves it to its own.
         _ = Task.Delay(ConnectingDelayMs + 20).ContinueWith(_ =>
-            HultUI.Application.InvokeOnMainThread(() => { if (Loader(side).IsLoading) MarkViewDirty(); }));
+            HultUI.Application.InvokeOnMainThread(() =>
+            {
+                if (!Loader(side).IsLoading) return;
+                if (NavWaiting(side) is not { } nav) MarkViewDirty();
+                else if (LoadOverdue(side)) { _pendingNav[Si(side)] = null; ApplyNav(side, nav); PaneDirty(side); }
+            }));
     }
 
     /// <summary>The Cancel in the connecting block: stop waiting and go back to the folder the
@@ -654,36 +691,59 @@ public partial class CommanderApp : Component, IDisposable
         // A fed-in result set short-circuits the directory loader entirely: there is no
         // folder to read, and the held set is what the pane is for.
         if (ActiveTab(side).Results is { } results) return ResultRows(side, results);
+        // A navigation waiting for its rows: the pane shows the folder it is leaving until they land.
+        if (NavWaiting(side) is not null) return Loader(side).Value.Entries;
+        // One the pane moved on from (another tab): it goes into its tab, out of sight.
+        if (_pendingNav[Si(side)] is { } left) { _pendingNav[Si(side)] = null; ApplyNavUnseen(left); }
 
-        var loader = Loader(side);
         var dir = Dir(side);
+        LoadListing(side, dir, ListingKey(dir, Gen(side)));
+        return Loader(side).Value.Entries;
+    }
+
+    private static string ListingKey(string dir, int gen) => $"{dir}#{gen}";
+
+    /// <summary>Asks for <paramref name="dir"/>'s rows under <paramref name="key"/>, off the UI
+    /// thread; <see cref="ListingLanded"/> takes them.</summary>
+    private void LoadListing(char side, string dir, string key)
+    {
+        var loader = Loader(side);
         var sort = SortOf(side); var desc = SortDescOf(side);   // per-tab; captured for the worker
-        var key = $"{dir}#{Gen(side)}";
         var ct = LoadToken(side, key);
         loader.Load(key,
             () => FileSystem.List(dir, _settings.ShowHidden, sort, _settings.DirsFirst, desc, _sevenZip, PasswordFor(dir), ct),
-            onLoaded: _ =>
+            onLoaded: _ => ListingLanded(side, loader, dir, key));
+    }
+
+    private void ListingLanded(char side, AsyncLoader<DirListing> loader, string dir, string key)
+    {
+        // The navigation that asked for these rows moves the pane with them, in one build.
+        bool moved = false;
+        if (_pendingNav[Si(side)] is { } nav && nav.Key == key && ReferenceEquals(nav.Tab, ActiveTab(side)))
         {
-            if (side == 'L') _loadedL = true; else _loadedR = true;
-            _shownDir[side == 'L' ? 0 : 1] = dir;   // these rows belong to this folder now
-            var listed = loader.Value.Entries;
-            // If we ascended, land the cursor on the folder we came out of.
-            var want = _pendingFocusChild[side == 'L' ? 0 : 1];
-            if (want != null)
-            {
-                _pendingFocusChild[side == 'L' ? 0 : 1] = null;
-                int found = IndexOfName(listed, want);
-                if (found >= 0) SetCursor(side, found);
-            }
-            // Clamp the cursor into the freshly-loaded range and scroll to it.
-            SetCursor(side, Math.Clamp(Cursor(side), 0, Math.Max(0, listed.Count - 1)));
-            RequestScroll(side);
-            // The rows reach the view; this pane's footer reads them too, and builds again on its
-            // own (see Part). The rest of its parts show the folder, which the navigation that
-            // asked for these rows built them for.
-            MarkViewDirty();
-        });
-        return loader.Value.Entries;
+            _pendingNav[Si(side)] = null;
+            ApplyNav(side, nav);
+            moved = true;
+        }
+        if (side == 'L') _loadedL = true; else _loadedR = true;
+        _shownDir[side == 'L' ? 0 : 1] = dir;   // these rows belong to this folder now
+        var listed = loader.Value.Entries;
+        // If we ascended, land the cursor on the folder we came out of.
+        var want = _pendingFocusChild[side == 'L' ? 0 : 1];
+        if (want != null)
+        {
+            _pendingFocusChild[side == 'L' ? 0 : 1] = null;
+            int found = IndexOfName(listed, want);
+            if (found >= 0) SetCursor(side, found);
+        }
+        // Clamp the cursor into the freshly-loaded range and scroll to it.
+        SetCursor(side, Math.Clamp(Cursor(side), 0, Math.Max(0, listed.Count - 1)));
+        RequestScroll(side);
+        // The rows reach the view; this pane's footer reads them too, and builds again on its own
+        // (see Part). The rest of its parts show the folder: a navigation that waited for these
+        // rows builds them now, one that did not built them when it moved the pane.
+        if (moved) PaneDirty(side);
+        else MarkViewDirty();
     }
 
     /// <summary>Keep the OS window title on the folder you are looking at. Vesper draws its
@@ -708,6 +768,7 @@ public partial class CommanderApp : Component, IDisposable
     public override Element Build()
     {
         _builds++;
+        SettleOverdueNavs();
         SyncWindowTitle();
         var body = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
 
@@ -925,32 +986,151 @@ public partial class CommanderApp : Component, IDisposable
     }
 
     // ── Navigation ───────────────────────────────────────────────────────
-    private void NavigateTo(char side, string path, string? focusChildName = null, bool recordHistory = true)
+    //
+    // A local folder's rows land a few milliseconds after they are asked for, and a navigation
+    // used to move the pane at once and again when they landed: the folder, the cursor at the top,
+    // the marks cleared, the history and the pane's tab strip, trail, header and footer built over
+    // the rows of the folder being left, then the rows. A frame between the two showed the new
+    // folder's name over the old folder's rows, the cursor on its first (in a real window 14 of 20
+    // navigations drew both frames, plan 17 round 14). Now the navigation waits for the rows and
+    // moves the pane with them, in one build: until then the pane shows, and the keys act on, the
+    // folder it is leaving. A folder that is slow to answer, or may not answer (a share, a server,
+    // an archive), moves the pane at once as before, where its name and, past the connecting
+    // delay, the connecting block say what is being waited for; so does any folder whose rows are
+    // still out at that delay.
+
+    /// <summary>How a navigation moves through the tab's history.</summary>
+    private enum HistoryStep { None, Back, Forward }
+
+    /// <summary>A navigation not applied yet: its tab, where it goes, and the listing it waits for
+    /// (<paramref name="Key"/>, at generation <paramref name="Gen"/>).</summary>
+    private sealed record PendingNav(PaneTab Tab, string Path, string? FocusChild, bool RecordHistory, HistoryStep Step,
+        int Gen = 0, string Key = "");
+
+    private readonly PendingNav?[] _pendingNav = new PendingNav?[2];
+
+    /// <summary>The navigation the pane's active tab is waiting to make, if any.</summary>
+    private PendingNav? NavWaiting(char side) =>
+        _pendingNav[Si(side)] is { } nav && ReferenceEquals(nav.Tab, ActiveTab(side)) ? nav : null;
+
+    private void NavigateTo(char side, string path, string? focusChildName = null, bool recordHistory = true) =>
+        Navigate(side, new PendingNav(ActiveTab(side), path, focusChildName, recordHistory, HistoryStep.None));
+
+    private void Navigate(char side, PendingNav nav)
+    {
+        int i = Si(side);
+        _pendingNav[i] = null;   // one waiting is replaced: the keys act on the folder on screen
+        if (!WaitsForRows(side, nav.Path))
+        {
+            ApplyNav(side, nav);
+            // Another folder is this pane's tab strip, trail, column header and footer and nothing
+            // else's: the other pane, the rail and the title bar stay (a filter cleared or a pane
+            // made active on the way here reach the parts that show them through MarkViewDirty).
+            PaneDirty(side);
+            return;
+        }
+        int gen = Gen(side) + 1;
+        var key = ListingKey(nav.Path, gen);
+        _pendingNav[i] = nav with { Gen = gen, Key = key };
+        _navsWaited++;
+        LoadListing(side, nav.Path, key);
+        // Already there (a key the loader holds): nothing will land, so the pane moves now.
+        if (!Loader(side).IsLoading && NavWaiting(side) is { Key: var k } && k == key)
+            ListingLanded(side, Loader(side), nav.Path, key);
+    }
+
+    /// <summary>Whether a navigation to <paramref name="path"/> waits for its rows before it moves
+    /// the pane: a local folder, from a pane showing its own folder's rows (not a cold start, a
+    /// fed-in result set or a folder still connecting), to a folder whose rows are not already on
+    /// screen. With no connecting delay there is nothing to wait out.</summary>
+    private bool WaitsForRows(char side, string path)
     {
         var tab = ActiveTab(side);
+        var shown = _shownDir[Si(side)];
+        return ConnectingDelayMs > 0
+            && tab.Results is null
+            && PathEquals(shown, tab.Dir)
+            && !PathEquals(shown, path)
+            && !PathProbe.IsRemote(path)
+            && PathProbe.ServerRootOf(path) is null
+            && ArchivePath.TryParse(path) is null;
+    }
+
+    /// <summary>Moves the pane's active tab to the navigation's folder: the history, the folder,
+    /// the cursor at the top (the listing's landing puts it on the folder ascended out of), the
+    /// marks and the filter cleared. Builds nothing; the caller does.</summary>
+    private void ApplyNav(char side, PendingNav nav)
+    {
+        var tab = nav.Tab;
+        MoveTab(tab, nav);
+        // The listing a waiting navigation asked for is at its own generation, which the pane takes
+        // (unless a reload of the folder it left went past it: then the pane reads its folder again).
+        if (nav.Key.Length == 0 || Gen(side) > nav.Gen) BumpGen(side);
+        else if (side == 'L') _genL = nav.Gen;
+        else _genR = nav.Gen;
+        SetCursor(side, 0);
+        Marks(side).Clear();
+        _search = "";
+        _previewFocused = false;
+        _pendingFocusChild[Si(side)] = nav.FocusChild;
+    }
+
+    /// <summary>The navigation's history step and folder, into its tab.</summary>
+    private static void MoveTab(PaneTab tab, PendingNav nav)
+    {
+        if (nav.Step == HistoryStep.Back && tab.Back.Count > 0)
+        {
+            tab.Back.RemoveAt(tab.Back.Count - 1);
+            tab.Fwd.Add(tab.Dir);
+        }
+        else if (nav.Step == HistoryStep.Forward && tab.Fwd.Count > 0)
+        {
+            tab.Fwd.RemoveAt(tab.Fwd.Count - 1);
+            tab.Back.Add(tab.Dir);
+        }
         // Record the folder we're leaving so Back can return to it. Skip on a no-op
         // (same folder) and on history replay (GoBack/GoForward set recordHistory:false).
-        if (recordHistory && !PathEquals(tab.Dir, path))
+        if (nav.RecordHistory && !PathEquals(tab.Dir, nav.Path))
         {
             tab.Back.Add(tab.Dir);
             if (tab.Back.Count > 64) tab.Back.RemoveAt(0);
             tab.Fwd.Clear();   // a fresh forward move invalidates the redo stack
         }
-        tab.Dir = path;
+        tab.Dir = nav.Path;
         tab.Results = null;   // navigating anywhere leaves a fed-in result set behind
         tab.BriefLeft = null;   // another folder's Brief starts at the start
-        BumpGen(side);
-        // Cursor reset now; the loader's onLoaded re-clamps once the listing lands.
-        // If we ascended, try to land on the folder we came from.
-        SetCursor(side, 0);
-        Marks(side).Clear();
-        _search = "";
-        _previewFocused = false;
-        _pendingFocusChild[side == 'L' ? 0 : 1] = focusChildName;
-        // Another folder is this pane's tab strip, trail, column header and footer and nothing
-        // else's: the other pane, the rail and the title bar stay (a filter cleared or a pane
-        // made active on the way here reach the parts that show them through MarkViewDirty).
-        PaneDirty(side);
+    }
+
+    /// <summary>A waiting navigation of a tab the pane no longer shows: its tab moves, out of sight.</summary>
+    private static void ApplyNavUnseen(PendingNav nav)
+    {
+        MoveTab(nav.Tab, nav);
+        nav.Tab.Cursor = 0;
+        nav.Tab.Marks.Clear();
+    }
+
+    /// <summary>Before the pane changes tabs, or the panes swap: a navigation still waiting for its
+    /// rows moves its tab now, as it did before navigations waited.</summary>
+    private void SettleNav(char side)
+    {
+        if (_pendingNav[Si(side)] is not { } nav) return;
+        _pendingNav[Si(side)] = null;
+        if (ReferenceEquals(nav.Tab, ActiveTab(side))) ApplyNav(side, nav);
+        else ApplyNavUnseen(nav);
+    }
+
+    /// <summary>At the start of a build: a navigation whose rows are still out at the connecting
+    /// delay moves the pane, so the build shows the connecting block for the folder being waited
+    /// for (the delay's nudge usually gets there first, see NudgeWhenConnectingIsDue).</summary>
+    private void SettleOverdueNavs()
+    {
+        foreach (char side in "LR")
+        {
+            if (NavWaiting(side) is not { } nav || !LoadOverdue(side) || !Loader(side).IsLoading) continue;
+            _pendingNav[Si(side)] = null;
+            ApplyNav(side, nav);
+            _parts.Invalidate();   // this build builds the parts that show the folder
+        }
     }
 
     private bool CanGoBack(char side) => ActiveTab(side).Back.Count > 0;
@@ -961,10 +1141,7 @@ public partial class CommanderApp : Component, IDisposable
     {
         var tab = ActiveTab(side);
         if (tab.Back.Count == 0) return;
-        string target = tab.Back[^1];
-        tab.Back.RemoveAt(tab.Back.Count - 1);
-        tab.Fwd.Add(tab.Dir);
-        NavigateTo(side, target, recordHistory: false);
+        Navigate(side, new PendingNav(tab, tab.Back[^1], null, false, HistoryStep.Back));
     }
 
     /// <summary>Alt+→ — redo a navigation undone by <see cref="GoBack"/>.</summary>
@@ -972,10 +1149,7 @@ public partial class CommanderApp : Component, IDisposable
     {
         var tab = ActiveTab(side);
         if (tab.Fwd.Count == 0) return;
-        string target = tab.Fwd[^1];
-        tab.Fwd.RemoveAt(tab.Fwd.Count - 1);
-        tab.Back.Add(tab.Dir);
-        NavigateTo(side, target, recordHistory: false);
+        Navigate(side, new PendingNav(tab, tab.Fwd[^1], null, false, HistoryStep.Forward));
     }
 
     /// <summary>Ctrl+G — prompt for a path (relative or absolute) and jump the pane there.
@@ -2804,6 +2978,7 @@ public partial class CommanderApp : Component, IDisposable
     /// re-reveal their cursor.</para></summary>
     private void SwapPanes()
     {
+        SettleNav('L'); SettleNav('R');
         ExitSearch(_active);
         _active = _active == 'L' ? 'R' : 'L';
         _previewFocused = false;
@@ -2843,6 +3018,7 @@ public partial class CommanderApp : Component, IDisposable
     {
         var tabs = Tabs(side);
         if (index < 0 || index >= tabs.Count) return;
+        SettleNav(side);
         ExitSearch(_active);
         _active = side;
         SetTabIndex(side, index);
@@ -2860,6 +3036,7 @@ public partial class CommanderApp : Component, IDisposable
     /// make it the active one.</summary>
     private void InsertTab(char side, PaneTab tab)
     {
+        SettleNav(side);
         ExitSearch(_active);
         var tabs = Tabs(side);
         int at = TabIndex(side) + 1;
@@ -2874,6 +3051,7 @@ public partial class CommanderApp : Component, IDisposable
     {
         var tabs = Tabs(side);
         if (tabs.Count <= 1 || index < 0 || index >= tabs.Count) return;
+        SettleNav(side);
         tabs.RemoveAt(index);
         int cur = TabIndex(side);
         if (index < cur) cur--;
@@ -2886,6 +3064,7 @@ public partial class CommanderApp : Component, IDisposable
     {
         var tabs = Tabs(side);
         if (tabs.Count <= 1 || keep < 0 || keep >= tabs.Count) return;
+        SettleNav(side);
         var survivor = tabs[keep];
         tabs.Clear();
         tabs.Add(survivor);
@@ -2897,6 +3076,7 @@ public partial class CommanderApp : Component, IDisposable
     {
         var tabs = Tabs(side);
         if (index < 0 || index >= tabs.Count) return;
+        SettleNav(side);
         var src = tabs[index];
         // A duplicate keeps the source's view mode and sort — set before the new tab's build,
         // which is the build that shows them: set after it, the trail's view toggle and the
@@ -3180,8 +3360,8 @@ public partial class CommanderApp : Component, IDisposable
         }
 
         // Alt+← / Alt+→ move back / forward through the active pane's history.
-        if (_keys.Matches("Back", e)) { GoBack(_active); e.StopPropagation = true; return; }
-        if (_keys.Matches("Forward", e)) { GoForward(_active); e.StopPropagation = true; return; }
+        if (_keys.Matches("Back", e)) { _plainNavKey = true; GoBack(_active); e.StopPropagation = true; return; }
+        if (_keys.Matches("Forward", e)) { _plainNavKey = true; GoForward(_active); e.StopPropagation = true; return; }
 
         // Alt+F1 / Alt+F2 open the drive picker for the left / right pane.
         if (_keys.Matches("LeftDrive", e) || _keys.Matches("RightDrive", e))
@@ -3197,7 +3377,7 @@ public partial class CommanderApp : Component, IDisposable
         // Backspace goes up a folder (when not editing / searching).
         if (e.Key == KeyCode.Backspace && _search.Length == 0)
         {
-            GoUp(side); e.StopPropagation = true; return;
+            _plainNavKey = true; GoUp(side); e.StopPropagation = true; return;
         }
 
         // Rebindable per-pane commands (bare / Shift chords) resolve through the keymap.
@@ -3243,7 +3423,7 @@ public partial class CommanderApp : Component, IDisposable
             case KeyCode.End:
                 MoveCursor(side, int.MaxValue / 2); e.StopPropagation = true; return;
             case KeyCode.Enter:
-                ActivateCursor(side); e.StopPropagation = true; return;   // nav clears the filter; file-open keeps it
+                _plainNavKey = true; ActivateCursor(side); e.StopPropagation = true; return;   // nav clears the filter; file-open keeps it
             case KeyCode.Backspace:
                 BackspaceSearch(side); e.StopPropagation = true; return;
             case KeyCode.Left:     // focus the command line (type a shell command)
