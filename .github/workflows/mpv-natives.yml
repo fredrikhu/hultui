@@ -44,7 +44,7 @@ jobs:
     permissions:
       contents: write # the binary goes to the release
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -94,7 +94,7 @@ jobs:
     permissions:
       contents: write # the binary goes to the release
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -131,7 +131,7 @@ jobs:
     permissions:
       contents: write # the package goes to the release
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -175,7 +175,7 @@ jobs:
             bash scripts/release-transport.sh upload "$RELEASE_TAG" "$f" "$(basename "$f")"
           done
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         continue-on-error: true
         with:
           name: HultUI.Media.Mpv.Natives

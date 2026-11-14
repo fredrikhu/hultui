@@ -244,6 +244,10 @@ these carry a whole product's worth of them.
 - OpenGL 3.3+ capable GPU
 - Linux (X11 or Wayland), Windows, or macOS
 
+## Security
+
+Report a vulnerability privately, not in a public issue: see [SECURITY.md](SECURITY.md).
+
 ## License
 
 [Mozilla Public License 2.0](LICENSE) (MPL-2.0).
