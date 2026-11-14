@@ -134,6 +134,23 @@ public class NavigationArrivalTests
         }
     }
 
+    /// <summary>The top of the tree is somewhere a navigation can go: its listing lands and moves
+    /// the pane. It threw on Linux ("/" trims to nothing, and Directory.GetParent threw on that),
+    /// and a navigation waiting for a listing that never lands never moved the pane: picking "/"
+    /// in the drive picker did nothing (plan 17 round 14, DrivePickerTests on Fedora). A listing
+    /// that throws moves the pane too, as navigations did before they waited.</summary>
+    [Fact]
+    public void ANavigationToTheTopOfTheTree_MovesThePane()
+    {
+        using var t = new DiffViewTests.Fixture();
+        t.Open();
+        string top = Path.DirectorySeparatorChar.ToString();
+        t.Invoke("NavigateTo", 'L', top, null, true);
+        t.Session.PumpFrames(2);
+        Assert.Equal(top, t.Dir('L'));
+        Assert.Equal(top, ((string?[])t.Field<string?[]>("_shownDir"))[0]);
+    }
+
     /// <summary>A local folder whose rows are not there by LocalMoveMs (50 ms) moves the pane then:
     /// its name over the waiting block, never over the rows it is leaving, and its rows land into
     /// it. A share moves the pane at once, as it did, and says it is connecting at the delay.</summary>

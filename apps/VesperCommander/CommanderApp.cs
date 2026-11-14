@@ -751,8 +751,27 @@ public partial class CommanderApp : Component, IDisposable
         var sort = SortOf(side); var desc = SortDescOf(side);   // per-tab; captured for the worker
         var ct = LoadToken(side, key);
         loader.Load(key,
-            () => FileSystem.List(dir, _settings.ShowHidden, sort, _settings.DirsFirst, desc, _sevenZip, PasswordFor(dir), ct),
+            () =>
+            {
+                try { return FileSystem.List(dir, _settings.ShowHidden, sort, _settings.DirsFirst, desc, _sevenZip, PasswordFor(dir), ct); }
+                catch
+                {
+                    // The loader keeps what it had and tries again; the navigation goes ahead.
+                    HultUI.Application.InvokeOnMainThread(() => ListingFailed(side, key));
+                    throw;
+                }
+            },
             onLoaded: _ => ListingLanded(side, loader, dir, key));
+    }
+
+    /// <summary>A listing that threw lands nothing (the loader keeps its rows and tries again),
+    /// so a navigation waiting for it would never move the pane: it moves now, as navigations did
+    /// before they waited (a listing of "/" that threw on Linux left the picked root unvisited).</summary>
+    private void ListingFailed(char side, string key)
+    {
+        if (NavWaiting(side) is not { } nav || nav.Key != key) return;
+        MoveAhead(side, nav);
+        PaneDirty(side);
     }
 
     private void ListingLanded(char side, AsyncLoader<DirListing> loader, string dir, string key)
