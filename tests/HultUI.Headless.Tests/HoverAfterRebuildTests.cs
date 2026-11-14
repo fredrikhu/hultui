@@ -240,6 +240,64 @@ public class HoverAfterRebuildTests
         Assert.Equal((tint.R, tint.G, tint.B), (pixel.Red, pixel.Green, pixel.Blue));
     }
 
+    /// <summary>A build that removes a list with the row the pointer rests on: the list's tint under
+    /// the row went with it, and the frame that showed the build drew without it, so the removed
+    /// row's leave asks for no frame. It was counted as a drawn hover change and drew that frame's
+    /// pixels again: Meridian, a key switching tabs with the pointer resting on the map list, two
+    /// frames a switch (plan 17 round 14).</summary>
+    [Fact]
+    public void AListRemovedUnderAStillPointer_DrawsOnce()
+    {
+        using var session = HeadlessSession.Create(400, 300);
+        var host = Box.New().Width(400f).Height(300f).Children(TintedList("a", new Color(30, 150, 90)));
+        session.Window.SetRoot(Flex.Column().Children(host));
+        session.PumpFrames(2);
+        session.Window.MoveMouse(200, 36);   // the second row
+        session.PumpFrames(2);
+        Assert.Contains(host.Children[0].Children, row => row.IsHovered);
+
+        var next = Box.New().Width(400f).Height(300f);
+        host.ReplaceChildren(next);
+
+        Assert.True(session.PumpFrame());    // the build's; its end hit-tests hover again
+        Assert.True(next.IsHovered);
+        Assert.False(session.PumpFrame());   // the tint went with the list
+    }
+
+    /// <summary>A list replaced by another under a still pointer: the row now under it enters, and
+    /// the tint the new list draws under it gets its frame.</summary>
+    [Fact]
+    public void AListReplacedUnderAStillPointer_TintsTheNewRow()
+    {
+        var tint = new Color(30, 150, 90);
+        using var session = HeadlessSession.Create(400, 300);
+        var host = Box.New().Width(400f).Height(300f).Children(TintedList("a", tint));
+        session.Window.SetRoot(Flex.Column().Children(host));
+        session.PumpFrames(2);
+        session.Window.MoveMouse(200, 36);
+        session.PumpFrames(2);
+
+        var next = TintedList("b", tint);
+        host.ReplaceChildren(next);
+
+        Assert.True(session.PumpFrame());    // the new list; the end of the frame hovers its row
+        Assert.Contains(next.Children, row => row.IsHovered);
+        Assert.True(session.PumpFrame());    // the tint under it
+        Assert.False(session.PumpFrame());
+        using var image = session.Window.CapturePixels();
+        using var bitmap = SKBitmap.FromImage(image);
+        var pixel = bitmap.GetPixel(380, 36);
+        Assert.Equal((tint.R, tint.G, tint.B), (pixel.Red, pixel.Green, pixel.Blue));
+    }
+
+    /// <summary>Twenty rows of 24 px that draw <paramref name="tint"/> under the hovered one.</summary>
+    private static VirtualListElement<string> TintedList(string name, Color tint) =>
+        VirtualListElement<string>.New().ItemHeight(24f)
+            .Items(Enumerable.Range(0, 20).Select(i => $"{name}{i}").ToList())
+            .RenderWith((item, _) => Flex.Row().Children(HultUI.Core.Builders.Text.New(item).FontSize(12f)))
+            .HoverHighlight(tint)
+            .FlexGrow(1);
+
     [Fact]
     public void ACapturedPointer_KeepsHoverUntilTheRelease()
     {
