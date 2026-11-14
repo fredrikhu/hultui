@@ -293,6 +293,42 @@ public static class GitProcess
 
         return new GitResult(process.ExitCode, stdout, stderr);
     }
+
+    /// <summary>
+    /// As <see cref="RunWithStdin(string, string, string[])"/>, for a command that answers as it
+    /// reads (<c>check-ignore --stdin</c>): its output is read while the input is still being
+    /// written, since a command whose output pipe is full stops reading, and a writer waiting on
+    /// it would wait forever. Killed, with exit code -1, when it runs past
+    /// <paramref name="timeout"/>.
+    /// </summary>
+    internal static GitResult RunWithStdin(string workingDirectory, string stdin, TimeSpan timeout, params string[] args)
+    {
+        var psi = StartInfo(workingDirectory, args);
+        psi.RedirectStandardInput = true;
+        psi.RedirectStandardOutput = true;
+        psi.RedirectStandardError = true;
+        psi.StandardOutputEncoding = Utf8NoBom;
+        psi.StandardErrorEncoding = Utf8NoBom;
+        psi.StandardInputEncoding = Utf8NoBom;
+
+        using var process = Process.Start(psi)!;
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        try
+        {
+            process.StandardInput.Write(stdin);
+            process.StandardInput.Close();
+        }
+        catch (IOException) { /* git stopped reading (a fatal error): its exit code says so */ }
+        if (!process.WaitForExit(timeout))
+        {
+            try { process.Kill(entireProcessTree: true); } catch { /* already gone */ }
+            process.WaitForExit();
+            return new GitResult(-1, "", $"git {string.Join(' ', args)} timed out");
+        }
+        process.WaitForExit();
+        return new GitResult(process.ExitCode, stdout.Result, stderr.Result);
+    }
 }
 
 public record GitResult(int ExitCode, string Stdout, string Stderr)

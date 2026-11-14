@@ -222,6 +222,86 @@ public class GitWatcherTests
         finally { TempRepo.ForceDelete(path); }
     }
 
+    /// <summary>A build beside the app writes hundreds of files under bin\ and obj\, which git
+    /// ignores and never shows, and each quiet gap in it reloaded the repository (plan 17 round
+    /// 14: 2-4 reloads a build, 22-33 git commands over Changes). Git is asked about a folder the
+    /// first time a window meets it, and nothing under a folder it ignores is told; a file git
+    /// tracks there (force-added) is, and so is one force-added later, when the index's entries
+    /// change and git is asked again.</summary>
+    [Fact]
+    public void WritesUnderAFolderGitIgnores_AreNotTold_AndATrackedFileThereIs()
+    {
+        using var repo = TempRepo.CreateWithInitialCommit();
+        repo.Write(".gitignore", "bin/\nobj/\n");
+        repo.Write("proj/Program.cs", "x\n");
+        repo.Write("proj/obj/keep/kept.txt", "kept\n");
+        repo.Git("add", "-A");
+        repo.Git("add", "-f", "proj/obj/keep/kept.txt");
+        repo.Git("commit", "-q", "-m", "project");
+        repo.Settle();
+        using var session = HeadlessSession.Create(400, 300);
+        var seen = new List<bool>();
+        using var watcher = new GitWatcher(repo.Path, refs => seen.Add(refs), debounceMs: 100);
+        var after = Observer(session, seen);
+
+        void Build()
+        {
+            var obj = Path.Combine(repo.Path, "proj", "obj", "Debug", "net");
+            var bin = Path.Combine(repo.Path, "proj", "bin", "Debug", "net");
+            Directory.CreateDirectory(obj);
+            Directory.CreateDirectory(bin);
+            for (int i = 0; i < 20; i++)
+            {
+                File.WriteAllText(Path.Combine(obj, $"f{i}.cs"), "x");
+                File.WriteAllText(Path.Combine(bin, $"f{i}.dll"), "x");
+            }
+            File.Delete(Path.Combine(obj, "f0.cs"));
+        }
+
+        // The first build makes the folders, and git is asked about them; a rebuild asks nothing.
+        Assert.Empty(after(Build, true));
+        int asked = watcher.IgnoreQuestions;
+        Assert.InRange(asked, 1, 2);
+        Assert.Empty(after(Build, true));
+        Assert.Equal(asked, watcher.IgnoreQuestions);
+
+        // A file git tracks under obj\ is heard, and so is a source file.
+        Assert.Equal([false], after(() => repo.Write("proj/obj/keep/kept.txt", "edited\n"), false));
+        Assert.Equal([false], after(() => repo.Write("proj/Program.cs", "y\n"), false));
+
+        // Force-added later: the index's entries change, and what git ignores is asked again.
+        Assert.Empty(after(() => repo.Write("proj/obj/Debug/net/later.txt", "later\n"), true));
+        Assert.Equal([false], after(() => repo.Git("add", "-f", "proj/obj/Debug/net/later.txt"), false));
+        Assert.Equal([false], after(() => repo.Write("proj/obj/Debug/net/later.txt", "edited\n"), false));
+    }
+
+    /// <summary>What git ignores is in .gitignore files and .git/info/exclude: a change to either
+    /// is told (git status may show other files now) and what git said of folders is forgotten.</summary>
+    [Fact]
+    public void AChangedIgnoreRule_IsTold_AndTheFoldersAreAskedAgain()
+    {
+        using var repo = TempRepo.CreateWithInitialCommit();
+        repo.Write(".gitignore", "obj/\n");
+        repo.Write("proj/a.txt", "a\n");
+        repo.Git("add", "-A");
+        repo.Git("commit", "-q", "-m", "project");
+        repo.Settle();
+        using var session = HeadlessSession.Create(400, 300);
+        var seen = new List<bool>();
+        using var watcher = new GitWatcher(repo.Path, refs => seen.Add(refs), debounceMs: 100);
+        var after = Observer(session, seen);
+
+        Assert.Empty(after(() => repo.Write("proj/obj/x.txt", "x\n"), true));
+        Assert.Equal([false], after(() => repo.Write(".gitignore", "bin/\n"), false));
+        Assert.Equal([false], after(() => repo.Write("proj/obj/y.txt", "y\n"), false));
+        Assert.Equal([false], after(() => repo.Write("proj/.gitignore", "obj/\n"), false));
+        Assert.Empty(after(() => repo.Write("proj/obj/z.txt", "z\n"), true));
+
+        Assert.Equal([false], after(() => repo.Write("out/a.log", "1\n"), false));
+        Assert.Equal([false], after(() => repo.Write(".git/info/exclude", "out/\n"), false));
+        Assert.Empty(after(() => repo.Write("out/c.log", "3\n"), true));
+    }
+
     /// <summary>A build writes hundreds of files in a burst. The burst is one callback, as
     /// before, and costs no exception: the debounce used to make a token, a task and a delay per
     /// event and cancel the one before, which threw (plan 17 round 14: a Junction build of this

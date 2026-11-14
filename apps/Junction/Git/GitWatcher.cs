@@ -18,7 +18,9 @@ namespace Junction.Git;
 /// a storm of refreshes. The callback says whether anything but the working
 /// tree and the index changed in that window: HEAD, a ref, the config or
 /// the packed refs, which are what the log, the branches, the tags and the
-/// remotes are read from.
+/// remotes are read from. What git never shows is not told: a write under a
+/// folder git ignores (a build's bin and obj), and an index rewritten with the
+/// entries it had.
 /// </summary>
 public sealed class GitWatcher : IDisposable
 {
@@ -56,7 +58,43 @@ public sealed class GitWatcher : IDisposable
     /// <summary>The length of an object id in the index: 20 bytes, 32 in a SHA-256 repository;
     /// 0 until the config is read.</summary>
     private int _oidLength;
-    private readonly string _gitDir;
+    private readonly string _gitDir, _repoPath;
+
+    /// <summary>What git said of a folder in the work tree (its path with this platform's
+    /// separator): <see cref="Folder.Ignored"/> when <c>git check-ignore</c> ignores
+    /// "folder/", which it does only when no file under it is tracked, so nothing written
+    /// under it shows in git; <see cref="Folder.Opaque"/> when git could not answer (a folder
+    /// inside a submodule), and what is under it is told. Emptied when what git ignores may
+    /// have changed: a .gitignore, .git/info/exclude, the config, the index's entries.
+    /// Guarded by <see cref="_lock"/>.</summary>
+    private readonly Dictionary<string, Folder> _folders = new(PathComparer);
+    private readonly Dictionary<string, Folder>.AlternateLookup<ReadOnlySpan<char>> _folderBySpan;
+    /// <summary>The folders to ask git about when the window closes, and the paths waiting for
+    /// the answer (a folder's own event ends in the separator). Guarded by <see cref="_lock"/>.</summary>
+    private readonly HashSet<string> _ask = new(PathComparer);
+    private readonly HashSet<string>.AlternateLookup<ReadOnlySpan<char>> _askBySpan;
+    private readonly List<string> _waiting = [];
+    /// <summary>Moved on whenever <see cref="_folders"/> is emptied, so that an answer to a
+    /// question asked before is not kept. Guarded by <see cref="_lock"/>.</summary>
+    private int _foldersGen;
+    private int _asked;
+
+    private enum Folder : byte { Heard, Ignored, Opaque }
+
+    /// <summary>What an event in the work tree is: under a folder git ignores (nothing to
+    /// tell), waiting for git to say whether a folder above it is one, or told.</summary>
+    private enum Verdict : byte { Ignored, Waiting, Told }
+
+    private const int MaxAsk = 256, MaxWaiting = 4096, MaxFolders = 8192;
+    private static readonly TimeSpan AskTimeout = TimeSpan.FromSeconds(10);
+    private static readonly StringComparer PathComparer =
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+    private static readonly char Sep = Path.DirectorySeparatorChar;
+    private static readonly string SepGitignore = Path.DirectorySeparatorChar + ".gitignore";
+    private static readonly string InfoExclude = Path.Combine(".git", "info", "exclude");
+
+    /// <summary>How many times the watcher has asked git which folders it ignores.</summary>
+    internal int IgnoreQuestions => Volatile.Read(ref _asked);
 
     private static readonly string GitInside = Path.DirectorySeparatorChar + ".git" + Path.DirectorySeparatorChar;
     private static readonly string GitAtEnd = Path.DirectorySeparatorChar + ".git";
@@ -70,6 +108,9 @@ public sealed class GitWatcher : IDisposable
         _debounceMs = debounceMs;
         _debounce = TimeProvider.System.CreateTimer(static w => ((GitWatcher)w!).OnDue(), this,
             Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+        _repoPath = repoPath;
+        _folderBySpan = _folders.GetAlternateLookup<ReadOnlySpan<char>>();
+        _askBySpan = _ask.GetAlternateLookup<ReadOnlySpan<char>>();
 
         var gitDir = _gitDir = Path.Combine(repoPath, ".git");
 
@@ -134,7 +175,7 @@ public sealed class GitWatcher : IDisposable
         // Only care about HEAD, the index and the files beside them that a ref moving writes
         var name = Path.GetFileName(e.FullPath);
         if (name == "index") ScheduleIndex();
-        else if (IsRefsFile(name)) ScheduleRefresh(refs: true);
+        else if (IsRefsFile(name)) ScheduleRefresh(refs: true, rules: name == "config");
     }
 
     // Git writes HEAD, the config, the packed refs and the index to a lock file and renames it
@@ -148,7 +189,7 @@ public sealed class GitWatcher : IDisposable
     {
         var name = Path.GetFileName(e.FullPath);
         if (name == "index") ScheduleIndex();
-        else if (IsRefsFile(name)) ScheduleRefresh(refs: true);
+        else if (IsRefsFile(name)) ScheduleRefresh(refs: true, rules: name == "config");
     }
 
     private static bool IsRefsFile(string name) =>
@@ -159,14 +200,154 @@ public sealed class GitWatcher : IDisposable
         if (e.Name == "tables.list") ScheduleRefresh(refs: true);
     }
 
+    // A build beside the app writes hundreds of files under bin\ and obj\, which git ignores and
+    // never shows, and every quiet gap of a debounce in it reloaded the repository (plan 17 round
+    // 14: 2-4 reloads a build of a small project, 22-33 git commands over Changes). An event under
+    // a folder git ignores is dropped: git is asked once, at the end of the window that first
+    // meets the folder, and its answer is kept until the rules can have changed.
     private void OnWorkTreeChanged(object sender, FileSystemEventArgs e)
     {
-        // Ignore changes inside .git/
+        string? old = (e as RenamedEventArgs)?.OldName;
+        // Ignore changes inside .git/, but for the ignore rules kept there
         if (e.FullPath.Contains(GitInside, StringComparison.Ordinal)
             || e.FullPath.EndsWith(GitAtEnd, StringComparison.Ordinal))
+        {
+            if (PathComparer.Equals(e.Name, InfoExclude) || PathComparer.Equals(old, InfoExclude))
+                ScheduleRefresh(refs: false, rules: true);
             return;
+        }
+        if (e.Name is not { } name) { ScheduleRefresh(refs: false); return; }
 
-        ScheduleRefresh(refs: false);
+        var verdict = Classify(name, e.ChangeType == WatcherChangeTypes.Deleted ? null : e.FullPath,
+            e.ChangeType == WatcherChangeTypes.Changed);
+        if (old != null && verdict != Verdict.Told)
+        {
+            var was = Classify(old, null, changed: false);
+            if (was > verdict) verdict = was;
+        }
+        if (verdict != Verdict.Ignored && (IsGitignore(name) || IsGitignore(old)))
+            ScheduleRefresh(refs: false, rules: true);
+        else if (verdict == Verdict.Told)
+            ScheduleRefresh(refs: false);
+    }
+
+    private static bool IsGitignore(string? path) =>
+        path != null && (path == ".gitignore" || path.EndsWith(SepGitignore, StringComparison.Ordinal));
+
+    /// <summary>
+    /// What an event at <paramref name="path"/> (relative to the work tree) is. Ignored under a
+    /// folder git ignores whole, or when it is a folder's own change (a build that makes bin\
+    /// in a project changes the project's folder: the events of what changed in it say all
+    /// there is). Told when every folder above it is known to show. Otherwise noted, with the
+    /// folders git has not been asked about, until the window closes. <paramref name="full"/>
+    /// is the full path, or null when the path is gone.
+    /// </summary>
+    private Verdict Classify(string path, string? full, bool changed)
+    {
+        bool unknown = false, selfKnown = false;
+        lock (_lock)
+        {
+            for (int i = 0; ;)
+            {
+                int sep = path.AsSpan(i).IndexOf(Sep);
+                var folder = sep < 0 ? path.AsSpan() : path.AsSpan(0, i + sep);
+                if (_folderBySpan.TryGetValue(folder, out var f))
+                {
+                    if (f == Folder.Ignored) return Verdict.Ignored;
+                    if (f == Folder.Opaque) return Verdict.Told;
+                    if (sep < 0) selfKnown = true;
+                }
+                else if (sep >= 0) unknown = true;
+                if (sep < 0) break;
+                i += sep + 1;
+            }
+        }
+        bool isFolder = full != null && Directory.Exists(full);
+        if (changed && isFolder) return Verdict.Ignored;
+        if (!unknown && (selfKnown || !isFolder)) return Verdict.Told;
+        lock (_lock)
+        {
+            if (_disposed) return Verdict.Ignored;
+            if (_waiting.Count >= MaxWaiting || _ask.Count >= MaxAsk) return Verdict.Told;   // too much to ask about
+            for (int i = 0; ;)
+            {
+                int sep = path.AsSpan(i).IndexOf(Sep);
+                if (sep < 0 && !isFolder) break;
+                var folder = sep < 0 ? path.AsSpan() : path.AsSpan(0, i + sep);
+                if (!_folderBySpan.ContainsKey(folder) && !_askBySpan.Contains(folder)) _ask.Add(folder.ToString());
+                if (sep < 0) break;
+                i += sep + 1;
+            }
+            _waiting.Add(isFolder ? path + Sep : path);
+            Heard();
+        }
+        return Verdict.Waiting;
+    }
+
+    /// <summary>Whether a path noted in <see cref="Classify"/> is told, now that git has been
+    /// asked: not when a folder above it (or the folder itself) is ignored, and always when one
+    /// is still unknown. Under <see cref="_lock"/>.</summary>
+    private bool Shows(string path)
+    {
+        for (int i = path.IndexOf(Sep); i >= 0; i = path.IndexOf(Sep, i + 1))
+        {
+            if (!_folderBySpan.TryGetValue(path.AsSpan(0, i), out var f)) return true;
+            if (f == Folder.Ignored) return false;
+            if (f == Folder.Opaque) return true;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Asks git which of <paramref name="folders"/> it ignores: <c>git check-ignore</c> on
+    /// "folder/", which says a folder holding a tracked file is not (the file is heard), and so
+    /// a file force-added under bin\ keeps its folders told. A folder git cannot answer for (it
+    /// stops at a folder inside a submodule) is opaque: what is under it is told, as before.
+    /// Off the UI thread.
+    /// </summary>
+    private Dictionary<string, Folder> AskGit(string[] folders)
+    {
+        var answers = new Dictionary<string, Folder>(folders.Length, PathComparer);
+        int start = 0;
+        for (int attempt = 0; start < folders.Length; attempt++)
+        {
+            var input = new System.Text.StringBuilder();
+            for (int i = start; i < folders.Length; i++)
+                input.Append(Sep == '/' ? folders[i] : folders[i].Replace(Sep, '/')).Append('/').Append('\0');
+            Interlocked.Increment(ref _asked);
+            GitResult result;
+            try
+            {
+                result = GitProcess.RunWithStdin(_repoPath, input.ToString(), AskTimeout,
+                    "check-ignore", "--stdin", "-z", "--verbose", "--non-matching");
+            }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException)
+            {
+                result = new GitResult(-1, "", ex.Message);
+            }
+            // Four fields a path, in the order asked: the rule's file, its line, the rule ("!" is
+            // one that takes a path back; none when no rule matched), the path.
+            var fields = result.Stdout.Split('\0');
+            int answered = 0;
+            for (int f = 0; f + 3 < fields.Length && start + answered < folders.Length; f += 4, answered++)
+            {
+                var rule = fields[f + 2];
+                answers[folders[start + answered]] = rule.Length > 0 && rule[0] != '!' ? Folder.Ignored : Folder.Heard;
+            }
+            start += answered;
+            if (result.ExitCode is 0 or 1 || start >= folders.Length) break;
+            answers[folders[start++]] = Folder.Opaque;   // the one git stopped at
+            if (attempt == 2)
+                for (; start < folders.Length; start++) answers[folders[start]] = Folder.Opaque;
+        }
+        return answers;
+    }
+
+    /// <summary>Forgets what git said of folders (a rule may have changed). Under <see cref="_lock"/>.</summary>
+    private void ForgetFolders()
+    {
+        _folders.Clear();
+        _foldersGen++;
     }
 
     // Git writes a ref to X.lock and renames that over X. A ref transaction that changes
@@ -184,11 +365,14 @@ public sealed class GitWatcher : IDisposable
         ScheduleRefresh(refs: !lockOnly);
     }
 
-    private void ScheduleRefresh(bool refs)
+    /// <param name="rules">The rules of what git ignores may have changed (a .gitignore, the
+    /// config, .git/info/exclude): what git said of folders is forgotten.</param>
+    private void ScheduleRefresh(bool refs, bool rules = false)
     {
         lock (_lock)
         {
             if (_disposed) return;
+            if (rules) ForgetFolders();
             _refsMoved |= refs;
             _windowTold = true;
             Heard();
@@ -222,11 +406,14 @@ public sealed class GitWatcher : IDisposable
     /// <summary>The debounce timer fired (on the thread pool): if an event came since it was
     /// set, wait out the rest of that event's debounce; otherwise tell what the window heard.
     /// An index rewritten with the entries it had (file times refreshed, by this app's own
-    /// `git status` as much as anyone's) is not a change anything shows.</summary>
+    /// `git status` as much as anyone's) is not a change anything shows, and nor is an event
+    /// under a folder git ignores: git is asked about the folders met for the first time.</summary>
     private void OnDue()
     {
         bool moved, told, index;
         long heard;
+        string[]? waiting = null, ask = null;
+        int gen;
         lock (_lock)
         {
             if (_disposed || !_armed) return;   // stopped by Forget or Dispose
@@ -239,20 +426,44 @@ public sealed class GitWatcher : IDisposable
             _armed = false;
             told = _windowTold;
             index = _windowIndex;
-            if (!told && !index) return;
+            if (_waiting.Count > 0) { waiting = [.. _waiting]; _waiting.Clear(); }
+            if (_ask.Count > 0) { ask = [.. _ask]; _ask.Clear(); }
+            if (!told && !index && waiting == null) return;
             _windowTold = _windowIndex = false;
             moved = _refsMoved;
             _refsMoved = false;
             heard = _heard;
+            gen = _foldersGen;
             if (told) _posted = heard;
-            _busy = index;
+            _busy = index || waiting != null;
         }
-        if (index)
+        if (index || waiting != null)
         {
-            bool changed;
-            try { changed = IndexChanged(); }
+            try
+            {
+                if (index && IndexChanged())
+                {
+                    told = true;
+                    lock (_lock) ForgetFolders();   // a file may be tracked under a folder now, or no longer
+                }
+                if (!told && waiting != null)
+                {
+                    var answers = ask != null ? AskGit(ask) : null;
+                    lock (_lock)
+                    {
+                        if (answers != null && gen == _foldersGen)
+                        {
+                            if (_folders.Count + answers.Count > MaxFolders) _folders.Clear();
+                            foreach (var (folder, answer) in answers) _folders[folder] = answer;
+                        }
+                        foreach (var path in waiting)
+                            if (Shows(path)) { told = true; break; }
+                    }
+                }
+            }
+            catch (Exception) { told = true; }   // nothing on the thread pool may throw; tell rather than miss
             finally { lock (_lock) _busy = false; }
-            if (!changed && !told) return;
+            if (!told) return;
         }
         lock (_lock) _posted = Math.Max(_posted, heard);
         HultUI.Application.InvokeOnMainThread(() => Tell(moved, heard));
@@ -439,12 +650,14 @@ public sealed class GitWatcher : IDisposable
     {
         lock (_lock)
         {
-            bool untold = _windowTold || _posted > Math.Max(_told, _forgotten);
+            bool untold = _windowTold || _waiting.Count > 0 || _posted > Math.Max(_told, _forgotten);
             _forgotten = _heard;
             _refsMoved = false;
             // An index write forgotten is not read either: the next one is compared with what
             // was read before it, so a change the reload may have missed is never taken as seen.
             _windowTold = _windowIndex = false;
+            _waiting.Clear();
+            _ask.Clear();
             if (_armed)
             {
                 _armed = false;

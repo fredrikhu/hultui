@@ -1643,6 +1643,26 @@ Four traps on the way, all in what a `FileSystemWatcher` on `.git` reports:
   shows the watcher nothing else, so the reflog keys on the data generation (round 13; see
   docs/DECISIONS.md).
 
+The working tree reports what git never shows, too. A build beside the app writes hundreds of
+files under `bin\` and `obj\`, which git ignores, and every quiet gap of a debounce in it reloaded
+the repository: a small project's build 2 reloads, 22 git commands, 4 frames and 3 MB over
+Changes (round 14). Junction's watcher asks `git check-ignore --stdin` about a folder the first
+time a window meets it, as `folder/` and without `--no-index`: git then says a folder holding a
+tracked file is not ignored, so a file force-added under `obj\` is still heard. It keeps the
+answers until a `.gitignore`, `.git/info/exclude`, the config or the index's entries change, and
+drops an event under an ignored folder, and a folder's own change (a folder made in it changes
+it; the folder's events say the rest). A first build now asks git once and reloads nothing, a
+rebuild asks nothing: over Changes 2 reloads, 22 git commands, 4 frames and 3.0 MB a build → 0,
+0–1, 0 and 0.13–0.26 MB, headless and in a real window (NativeAOT). Three traps:
+
+- `check-ignore` stops at the first path inside a submodule ("Pathspec ... is in submodule") and
+  answers nothing after it: ask again without it, and tell what is under it.
+- It answers as it reads, so its output has to be read while the input is still being written,
+  or a long question fills the pipe and both sides wait.
+- A `.gitignore` under an ignored folder (`node_modules` holds many) changes nothing git shows;
+  only one outside them is a rule changing. The global excludes file (`core.excludesFile`) is not
+  watched: a change to it is seen at the next of the changes above.
+
 ### An event builds only the view whose loads it re-keys
 
 A new generation re-keys loads; it needs a build only when something on screen keys a load on
