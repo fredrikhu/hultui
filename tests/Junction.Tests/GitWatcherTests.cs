@@ -170,6 +170,29 @@ public class GitWatcherTests
         Assert.True(File.GetLastWriteTimeUtc(Path.Combine(repo.Path, ".git", "index")) > index, "status did not write the index");
     }
 
+    /// <summary>The first rewrite of the index in a session is compared too: the first callback
+    /// reads the index before the reload it starts, so this app's own status refreshing the index
+    /// after that is not heard back as one more reload, as it was for want of something to compare
+    /// with (plan 17 round 14: a source file touched beside Changes, 11 git commands more).</summary>
+    [Fact]
+    public void TheSessionsFirstIndexRefresh_IsNotToldEither()
+    {
+        using var repo = TempRepo.CreateWithInitialCommit();
+        repo.Settle();
+        using var session = HeadlessSession.Create(400, 300);
+        var seen = new List<bool>();
+        using var watcher = new GitWatcher(repo.Path, refs => seen.Add(refs), debounceMs: 100);
+        var after = Observer(session, seen);
+
+        var readme = Path.Combine(repo.Path, "README.md");
+        Assert.Equal([false], after(() => File.WriteAllBytes(readme, File.ReadAllBytes(readme)), false));
+        var index = File.GetLastWriteTimeUtc(Path.Combine(repo.Path, ".git", "index"));
+        Assert.Empty(after(() => GitWithOptionalLocks(repo.Path, "status", "--porcelain=v1"), true));
+        Assert.True(File.GetLastWriteTimeUtc(Path.Combine(repo.Path, ".git", "index")) > index, "status did not write the index");
+        Assert.Equal([false], after(() => repo.Write("README.md", "changed\n"), false));
+        Assert.Equal([false], after(() => repo.Git("add", "README.md"), false));
+    }
+
     /// <summary>What the watcher compares an index by: its entries' paths, modes, object ids and
     /// flags, in every index version git writes (2; 3 with an intent-to-add entry; 4 with its
     /// paths shortened) and with SHA-256 object ids, never the file times a status refreshes.</summary>

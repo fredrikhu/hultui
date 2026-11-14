@@ -410,7 +410,7 @@ public sealed class GitWatcher : IDisposable
     /// under a folder git ignores: git is asked about the folders met for the first time.</summary>
     private void OnDue()
     {
-        bool moved, told, index;
+        bool moved, told, index, baseline;
         long heard;
         string[]? waiting = null, ask = null;
         int gen;
@@ -435,9 +435,19 @@ public sealed class GitWatcher : IDisposable
             heard = _heard;
             gen = _foldersGen;
             if (told) _posted = heard;
-            _busy = index || waiting != null;
+            // The first callback reads the index too, before its reload starts, so that the
+            // first rewrite of the session (this app's own status refreshing it, as often as not)
+            // is compared with what that reload read rather than told for want of a print.
+            baseline = told && !index && _indexPrint is null;
+            _busy = index || waiting != null || baseline;
         }
-        if (index || waiting != null)
+        if (baseline)
+        {
+            try { IndexChanged(); }
+            catch (Exception) { }
+            finally { lock (_lock) _busy = false; }
+        }
+        else if (index || waiting != null)
         {
             try
             {
