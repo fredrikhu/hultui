@@ -811,6 +811,18 @@ Round 14 questions (from the survey, 2026-11-13). Recommendations in brackets.
     draws, no extra frame; it changes where the tint is drawn during a scroll. [Yes, with before/after images from
     headless frames first.] → **yes, with before/after images first** (2026-11-13; step 9: the images go to the user
     before the change is committed).
+60. **Junction's commit detail, per-file patches** (step 2): reading only the shown file's patch for a commit over
+    262,144 characters cuts History browsing to 2.0–2.9 MB a key on all threads (from 10.4–10.5; GCs 15/12–13/4 →
+    3–4/1/0 per 20 keys; over HultUI's last 300 commits 628.7 → 115.4 MB, up to 32 → 1 MB kept) and the first diff row
+    of a big commit 323–369 → 193–204 ms. The cost: in such a commit, a file's first visit takes a git run the user
+    waits for, 2.2–2.8 ms → 33.4–47.0 ms with a "Loading…" frame (2 frames; c655b411, 278 files, real window AOT);
+    revisits unchanged. (a) Keep it so; (b) keep the previous file's diff on screen until the new one lands (no
+    "Loading…" frame, the git run stays); (c) once the Commit tab is open on a big commit, read the whole patch in the
+    background (switching instant after ~0.2 s, today's bytes); (d) read the next and previous files ahead. [(b) with
+    (d): a key walk through the files stays one frame a key, a jump to a far file shows the old diff ~40 ms, and
+    History keeps the −75 % bytes.] The change and its 7 tests wait in `r14b2\junction-detail-patch.diff` and
+    `CommitPatchTests.cs` (session 41943a9b's scratchpad); step 2's agent resumes with the answer after the step then
+    building.
 
 Reminder (expert 8): Aperture signed in to jellyfin.home as device "aperture-survey" in earlier rounds, as "aperture-r13" in round 13, and once in
 round 12 as "aperture-r12"; the user should remove those devices and revoke the API key when the work is done.
