@@ -178,7 +178,7 @@ public partial class JunctionApp
         // exactly like the Changes loader, so stale highlights die with the gen bump.
         string key = mode == ExternalDiffMode.Commit
             ? $"{repo.Path}|{baseHash ?? commitHash + "^"}..{commitHash}|{path}"
-            : $"{repo.Path}|{DataGen(_activeRepoPath)}|{mode}|{path}";
+            : $"{repo.Path}|{ChangesGen(_activeRepoPath)}|{mode}|{path}";
 
         if (onScreen) _highlightShown = key;
         if (!ReferenceEquals(_highlightLinesOf.Diff, diff)) _highlightLinesOf = (diff, DiffShownLines.Of(diff));

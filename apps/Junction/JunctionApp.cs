@@ -666,10 +666,20 @@ public partial class JunctionApp : Component, IDisposable
     // screen was keyed on since its last build began: a watcher event that moves neither builds
     // no view (see Reload). The summary and the worktrees read theirs apart, since Reload starts
     // those loads itself and the parts hear them land; so does the preload, which warms views
-    // that are not on screen.
+    // that are not on screen. The Changes view's own loads are noted apart too
+    // (_viewKeysChanges): Reload starts them as well, and the view hears its working tree land.
     private readonly HashSet<string> _viewKeysData = new(PathComparer);
     private readonly HashSet<string> _viewKeysRefs = new(PathComparer);
+    private readonly HashSet<string> _viewKeysChanges = new(PathComparer);
     private bool _preloading;
+
+    /// <summary><see cref="DataGen"/> for the Changes view's own loads, its working tree and the
+    /// colours of the diff it shows, which <see cref="Reload"/> can start itself: noted apart.</summary>
+    private int ChangesGen(string path)
+    {
+        if (!_preloading) _viewKeysChanges.Add(path);
+        return _dataGen.GetValueOrDefault(path);
+    }
 
     /// <summary>Invalidate a repo's cached data (views + summary) so it reloads
     /// on next display. Called by our own git actions and by the change watcher.</summary>
@@ -860,10 +870,36 @@ public partial class JunctionApp : Component, IDisposable
         // their own), and an event in the working tree re-keys only what reads it — Changes,
         // a working-tree diff, the submodules, the reflog — not History, Branches or Tags:
         // their build found what it had, and the sidebar's dirty count is a part's.
-        if (!ViewKeysOn(path, refs)) return;
-        // RerenderView, not MarkViewDirty: the view's own loaders are re-keyed by the
-        // generation, and a tracked rebuild is what subscribes to the new ones (see RefreshAll).
-        RerenderView();
+        if (ViewKeysOn(path, refs))
+        {
+            // RerenderView, not MarkViewDirty: the view's own loaders are re-keyed by the
+            // generation, and a tracked rebuild is what subscribes to the new ones (see RefreshAll).
+            RerenderView();
+            return;
+        }
+        // The Changes view, when its own loads are all the event re-keys: they start here, and
+        // the view builds when its working tree lands (its build read that loader), not now as
+        // well. Built now, it patched the 30 elements it keeps with what they already showed and
+        // drew the window again, the same pixels, a quarter of a second before the frame with
+        // the new rows: an editor's save over Changes was two builds and two frames.
+        if (_viewKeysChanges.Contains(path)) ReloadChangesView(path);
+    }
+
+    /// <summary>Starts the Changes view's own loads at the new generation, as a build of it would:
+    /// the working tree, and the colours of the diff on screen. Those are asked for the diff the
+    /// screen shows now, as that build asked, so a save's colours are on their way while git
+    /// still runs: left to the build that shows the new rows, the rows drew uncoloured and the
+    /// colours a frame later. Not as the screen's, since the screen is not waiting for them yet
+    /// (a tokenize that landed before the rows would build the view for the diff it shows).</summary>
+    private void ReloadChangesView(string path)
+    {
+        EnsureChangesLoaded(path);
+        if (!PathEquals(path, _activeRepoPath) || View != JunctionView.Changes) return;
+        var data = ChangesView;
+        if ((_hideDiff && !data.InSequencer) || _changeSelPath == null || _changeSelConflicted) return;
+        var diffs = _changeSelStaged ? data.StagedDiffs : data.UnstagedDiffs;
+        if (diffs.TryGetValue(_changeSelPath, out var diff) && diff.Hunks.Count > 0)
+            _ = HighlightFor(diff, _changeSelStaged ? ExternalDiffMode.Staged : ExternalDiffMode.Unstaged, null);
     }
 
     /// <summary>Whether an event in <paramref name="path"/> re-keys a load of the view on
@@ -967,6 +1003,7 @@ public partial class JunctionApp : Component, IDisposable
                                             // (held, it kept the Changes view behind the next one)
         _viewKeysData.Clear();   // noted again by the loads the view below keys (see Reload)
         _viewKeysRefs.Clear();
+        _viewKeysChanges.Clear();
         Builds++;
 
         // Track the revision signal so a Rerender() re-runs Build through the

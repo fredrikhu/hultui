@@ -1692,6 +1692,25 @@ builds and frames headless, 91.1 → 71.9 KB in a real window (NativeAOT); a fil
 frames headless, 205.6 → 187.8 KB in a real window, a touch 21.5 → 1.9 KB and 1 → 0; Changes
 unchanged. The same frames and accessibility trees.
 
+A view whose re-keyed loads the handler can start itself needs no build at the event either: it
+builds when they land, as the parts do for the summary. Junction's Changes view keys its
+working-tree load and its diff's colours on the data generation, so an editor's save over it still
+built the view at once. That build patched the 30 elements the view keeps with what they already
+showed, and the window drew those pixels again a quarter of a second before the frame with the new
+rows; with a file the app colours, that first frame drew the diff uncoloured, the colours landing
+drew a second and the rows a third. The handler now starts both loads and builds nothing: the
+view's last build read the working tree's loader, so the load landing builds the view. Their
+generation is read through an accessor of its own (`ChangesGen`), so the handler can tell them
+from a load it cannot start, which still builds the view at once (an image's diff, a conflict, the
+reflog). The colours are asked for the diff on screen, as that build asked, so they are on their
+way while git runs: left to the build that shows the new rows, those rows drew uncoloured and the
+colours a frame later.
+
+A save over Changes (round 14, NativeAOT): a text file 2 → 1 builds and frames, 184.7 → 137.6 KB
+on the UI thread headless and 177.3 → 137.1 KB in a real window; a C# file 3 → 1, 393.2 → 154.0 KB
+headless (the loads on the thread pool) and 375.1 → 149.3 KB in a real window. The last frame comes
+when it did, and is what a full build draws.
+
 ### The app's own change, heard again
 
 An app that watches what it also writes hears its own writes. Junction's actions (a checkout, a
