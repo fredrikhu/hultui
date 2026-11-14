@@ -102,6 +102,24 @@ decision in Needs the user; the rest of their step goes ahead.
 
 Re-ranked by the next survey.
 
+- **reactivity-posted-drain-bound** (6, with 4; a framework user's report, 2026-11-14; **the user: into round 15's build
+  order**, its batching half is question 62) — `DrainMainThreadQueue` (src/HultUI/Application.cs:1132–1138) runs
+  `while (TryDequeue) action();`, so a post made while it drains runs in the same pass: background work that posts
+  faster than the UI thread runs it never leaves the drain, and since `PumpEvents` comes first (:691) no input is
+  handled and no frame drawn until the stream stops. The report: a list component and a loader posting every ~50 ms,
+  7–9 rebuilds inside one ~2 s frame (500 rebuilds in one 10.6 s frame before the app batched its own posts). Fix: a
+  pass runs at least one action, then stops once a budget (about half the display interval, read on the platform's
+  `TimeProvider`) is spent; order kept; a throwing action still leaves the pass with the rest queued (nothing catches
+  it today); `_liveFrameQueued` = the count left (its doc, :505), not 0. Checked in the code 2026-11-14: the headless
+  clock moves only in `PumpFrame` and the idle wait (HeadlessSession.cs:189), so a headless pass drains everything as
+  today (a test advances the clock inside actions to reach the budget); the two real-window tests that post and pump
+  once post one cheap action (LiveResizeFrameTests.cs:184, SdlLoopPassTests.cs:137); leftovers start the next pass at
+  once with nothing dirty (NextDeadline's Posted, :909) and wait out the interval with a dirty window (:851; a
+  UI-thread post never wakes that wait), so they run right after the frame; passes with nothing dirty take a 1 ms
+  wait every third (:875). Limit: a stream faster than the UI thread still grows the queue, and only batching
+  (question 62) lets it catch up. Measure: the report's repro as PerfSuite rows (a list component bumped per posted
+  change: a burst of 500; a stream every 50 ms, each action advancing the virtual clock) and a stream into a real
+  window. Small; no API, no pixels.
 - **live-reader check of menus** (user) — the six-step script in ACCESSIBILITY-PLAN.md (round 7 step 13) for Narrator,
   NVDA and Orca; a silent move would mean moving focus to the selected item (needs the user's approval).
 - **junction-changes-leads** (6/7/8, reader behaviour, no perf number) — only the caret is told to a reader, not a
@@ -701,6 +719,28 @@ and 51 (after-layout-callback) were answered "not yet" and "only if another app 
 Round 14's a11y-items-on-demand-sooner and apps-junction-ref-move-a11y wait with question 50 (Waiting); question
 57 (text-open-measures-every-line, full) was answered "not now" (Waiting).
 
+Round 15 questions. Recommendations in brackets.
+
+62. **Batch posted work** (2026-11-14; the other half of reactivity-posted-drain-bound, from a framework user's report):
+    each posted action and await continuation runs outside a batch, so N posts that each write a signal a component
+    reads are N rebuilds in one pass (the report's repro: 100 posts, 100 builds, expected 1), where an event handler's
+    writes coalesce (`ReactiveRuntime.AutoBatch`). Round 8 declined batching the drain (Examined: "an await continuation
+    that writes and then reads would see the old tree, in 5 apps"). An audit on 2026-11-14 of apps/, samples/ and src/
+    (not tests/) found 0 such sites: posted code ends in a rebuild request with nothing read after it; focus and scroll
+    go through pending flags read in `OnAfterBuild` (JunctionApp.cs:1107–1200, CommanderApp.cs:974–1030,
+    MeridianApp.cs:344–371, VideoPlayer.cs:306); `AsyncLoader` landings (AsyncLoader.cs:147) and the media, web view and
+    terminal applies batch themselves; nothing calls `FlushNow` or `SuspendBatching`; the drain runs before layout and
+    render, so a deferred rebuild still lands in the same frame. Limits: `MarkDirty()` rebuilds at once even in a
+    batch (ComponentHost.cs:67–92), so only signal writes (`Rerender`, `[Reactive]`) coalesce; a posted action that
+    runs a nested loop (a file dialog under the WinForms host, whose timer runs whole frames: HultUIApplicationHost.cs:
+    174–184) would hold the batch open across them, as a click handler already can (no app does either). (a) Keep it
+    so: apps coalesce their own posts (REACTIVITY.md's rule), the user's app keeps its workaround. (b) Batch every
+    drain pass by default under the existing `AutoBatch` switch, a nested pass suspending the outer batch (which also
+    fixes the click handler's case), REACTIVITY.md updated; code elsewhere that writes a signal after an await and then
+    reads an element that rebuild makes would read the old tree. (c) An opt-in batched post: new public API, nothing
+    existing changes. [(b): posts then behave as event handlers do, none of our code breaks, and `AutoBatch = false`
+    turns both off.]
+
 Reminder (expert 8): Aperture signed in to jellyfin.home as device "aperture-survey" in earlier rounds, as "aperture-r13" in round 13, and once in
 round 12 as "aperture-r12"; the user should remove those devices and revoke the API key when the work is done.
 
@@ -875,3 +915,11 @@ From 2026-11-13 (round 14's survey); earlier entries are in the archive ([to 202
   1440p to its left; the primary reads 119 Hz); Steam is not running. The eight experts survey round 14's build,
   06d4db59..5b2985be (58 commits, one merge: round 14's own into main), in their own worktrees on this commit, in real
   windows too.
+- 2026-11-14: a framework user reported that posted actions run unbatched and that a steady stream of posts starves
+  frames. Both are true in the code. The user put the bounded drain into round 15's build order
+  (reactivity-posted-drain-bound, Waiting until the survey merge ranks it) and asked for the batching half as
+  question 62, after checking the concerns. Code checks found nothing that blocks the bounded drain (headless clock,
+  real-window tests, leftovers' wait, exceptions, `_liveFrameQueued`). A read-only audit found 0 posted actions or
+  continuations that read a rebuild's result after writing a signal, where round 8 had counted 5 apps; `MarkDirty`
+  bypasses batches. Expert 2's report is in (r15-2): one review objection (b62e22cf's release clause draws a same-pixel
+  frame on a Meridian row click) and four candidates.
