@@ -8,7 +8,7 @@ file after every step and commits it with the step's work. Full survey reports a
 - **Phase:** build — round 14, step 4 next (the round 14 build order below; 9 steps; steps 1 and 3 landed; step 2's ordinal
   parser landed and its per-file load waits for question 60: resume step 2's agent, a68a4a007051cd141 in
   `r14-agents.txt`, with the answer once no other agent builds). Questions 55–59 answered 2026-11-13 with the
-  recommendations; 57 asked again 2026-11-14 with step 1's numbers; 60 open. Build briefs
+  recommendations; 57 (asked again with step 1's numbers: not now) and 60 ((b) with (d)) answered 2026-11-14. Build briefs
   `brief-r14b<N>.md`, the agent ids in `r14-agents.txt`, survey probes `r14-<area>\` and build probes `r14b<N>\` in
   session 41943a9b's scratchpad
   `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\41943a9b-f657-4483-971a-a2b346b967f7\scratchpad\`. One build
@@ -799,7 +799,8 @@ Round 14 questions (from the survey, 2026-11-13). Recommendations in brackets.
     the 154k-character file 2,178 / 251k / 23 and 5,288 / 335k / 129; Arabic 1,845 BiDi probes and 5,429 calls at 1440,
     4,870 and 9,142 at 960. The shaping is gone; the O(document) itemizing stays: the largest drags now take ~11–12 ms a
     frame (the 154k file 451 ms and Arabic 460 ms per 40 frames, headless AOT), inside a 60 Hz frame. [Not now: what is
-    left fits a frame on the largest real documents; keep it Waiting for a document that does not.]
+    left fits a frame on the largest real documents; keep it Waiting for a document that does not.] → **not now**
+    (2026-11-14; Waiting).
 58. **reactivity-junction-watch-index-staging** (r14-6): staging from a terminal or IDE (`git add`, `restore --staged`, a
     staged submodule bump) is never heard, so Changes stays stale until the next working-tree event. Hearing index
     renames again (and answering with a status) fixes 3 of 53 real git operations on both backends with 0 regressions,
