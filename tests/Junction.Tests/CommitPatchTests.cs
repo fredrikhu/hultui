@@ -124,7 +124,8 @@ public class CommitPatchTests
         });
     }
 
-    /// <summary>A commit above it parses only the file the tab opens on: one file, its lines and no more.</summary>
+    /// <summary>A commit above it parses only the file the tab opens on — its lines and no more — and the one
+    /// file after it is then read ahead (the first file has none before it).</summary>
     [Fact]
     public void ABigCommit_ParsesOnlyTheOpeningFile()
     {
@@ -132,40 +133,80 @@ public class CommitPatchTests
         {
             OpenCommit(session, app);
             Assert.NotNull(Patches(app));
-            Assert.Equal(["a.txt"], DiffPaths(app));
-            Assert.Equal(5, ParsedLines(app));   // a.txt's hunk: its header and four lines
-            Assert.Equal(0, app.FilePatchLoads);
+            Assert.Equal(5, Diffs(app)["a.txt"] is GitFileDiff a ? a.Hunks.Sum(h => h.Lines.Count) : -1);   // header + 4
+            session.PumpFrames(5);
+            Assert.Equal(["a.txt", "b.txt"], DiffPaths(app));
+            Assert.Equal(1, app.FilePatchLoads);
+            Assert.Equal(1, app.FileReadAheads);
         });
     }
 
-    /// <summary>Another file is read when it is first opened, and not again when it is opened again.</summary>
+    /// <summary>
+    /// A walk through the files with the arrow keys: the file beside the open one is read ahead, so each key
+    /// draws the new file's diff on its own frame — no "Loading…", no earlier diff — and nothing is read on
+    /// a key. Going back reads nothing either.
+    /// </summary>
     [Fact]
-    public void AnotherFile_IsReadOnItsFirstVisit_AndNotOnItsSecond()
+    public void AKeyWalk_FindsEachFileReadAhead()
     {
         Hosted(64, (session, app) =>
         {
             OpenCommit(session, app);
+            session.PumpFrames(5);
+            Assert.Equal(1, app.FileReadAheads);   // b.txt
 
-            // The key's own frame: the file is open, its patch on its way (it lands a frame later).
-            session.Window.PressKey(KeyCode.Down);   // b.txt
-            Assert.Equal("b.txt", Field(app, "_selectedFilePath"));
-            Assert.True(Shows(session, "Loading…"), "the pane does not say the file is on its way");
+            foreach (var (key, file, text) in new[]
+                     {
+                         (KeyCode.Down, "b.txt", "line seven, edited"), (KeyCode.Down, "c.cs", "class C0 "),
+                         (KeyCode.Down, "d.txt", "to be deleted"), (KeyCode.Up, "c.cs", "class C0 "),
+                         (KeyCode.Up, "b.txt", "line seven, edited"),
+                     })
+            {
+                int loads = app.FilePatchLoads;
+                session.Window.PressKey(key);   // the key's own frame
+                Assert.Equal(file, Field(app, "_selectedFilePath"));
+                Assert.Equal(file, PaneLabel(session));
+                Assert.False(Shows(session, "Loading…"), $"{file}: the pane waited");
+                session.PumpFrame();
+                Assert.True(Shows(session, text), $"{file}'s diff is not on screen");
+                // What the key itself asked git for: nothing (a read ahead of the next file may follow).
+                Assert.Equal(app.FileReadAheads, app.FilePatchLoads);
+                Assert.True(app.FilePatchLoads <= loads + 1);
+                session.PumpFrames(5);
+            }
+            Assert.Equal(4, app.FileReadAheads);   // b, c, d and e: one each, never twice
+        });
+    }
+
+    /// <summary>
+    /// A click on a file not read yet (not beside the open one) shows the new selection in the list at
+    /// once and keeps the old diff on screen until the new one lands — never a "Loading…" frame between
+    /// two diffs — and then shows the new diff and none of the old one.
+    /// </summary>
+    [Fact]
+    public void AClickOnAFarFile_KeepsTheOldDiffUntilTheNewOneLands()
+    {
+        Hosted(64, (session, app) =>
+        {
+            OpenCommit(session, app);
+            session.PumpFrames(5);
+            int onDemand = app.FilePatchLoads - app.FileReadAheads;
+
+            // The click's own build: the file is open, its patch asked for, the old diff still there.
+            session.Window.Click(Descendants(Root(session)).First(e => e.Key == "f[1].txt"));
+            Assert.Equal("f[1].txt", Field(app, "_selectedFilePath"));
+            Assert.Equal("a.txt", PaneLabel(session));
+            Assert.True(Shows(session, "two changed"), "the old diff left before the new one came");
+            Assert.False(Shows(session, "Loading…"));
             Assert.False(Shows(session, "Select a file"));
-            session.PumpUntil(() => app.FilePatchLoads == 1 && DiffCount(app) == 2, TimeSpan.FromSeconds(20));
-            session.PumpFrame();
-            Assert.True(Shows(session, "line seven, edited"), "b.txt's diff is not on screen");
 
-            session.Window.PressKey(KeyCode.Down);   // c.cs
-            session.PumpUntil(() => app.FilePatchLoads == 2 && Shows(session, "class C0 "), TimeSpan.FromSeconds(20));
-
-            session.Window.PressKey(KeyCode.Up);     // b.txt again: on the key's own frame
-            Assert.Equal("b.txt", Field(app, "_selectedFilePath"));
-            Assert.False(Shows(session, "Loading…"), "a file already read was asked for again");
+            session.PumpUntil(() => PaneLabel(session) == "f[1].txt", TimeSpan.FromSeconds(20));
             session.PumpFrame();
-            Assert.True(Shows(session, "line seven, edited"));
-            session.PumpFrames(3);
-            Assert.Equal(2, app.FilePatchLoads);
-            Assert.Equal(3, DiffCount(app));
+            Assert.True(Descendants(Root(session)).Any(e => e.Key?.StartsWith("f[1].txt#s", StringComparison.Ordinal) == true),
+                "the list does not show the selection");
+            Assert.True(Shows(session, "first, edited"), "the new diff is not on screen");
+            Assert.False(Shows(session, "two changed"), "the old diff stayed after the new one came");
+            Assert.Equal(onDemand + 1, app.FilePatchLoads - app.FileReadAheads);   // the click's one read
         });
     }
 
@@ -186,9 +227,10 @@ public class CommitPatchTests
             OpenCommit(session, app);
             for (int i = 0; i < files.Length; i++)
                 Assert.True(whole[i].AsSpan().SequenceEqual(PaneAt(session, app, files[i])), $"{files[i]} differs on its first visit");
+            int loads = app.FilePatchLoads;
             for (int i = 0; i < files.Length; i++)
                 Assert.True(whole[i].AsSpan().SequenceEqual(PaneAt(session, app, files[i])), $"{files[i]} differs on its second visit");
-            Assert.Equal(2, app.FilePatchLoads);
+            Assert.Equal(loads, app.FilePatchLoads);   // a second visit reads nothing
         });
     }
 
@@ -228,6 +270,18 @@ public class CommitPatchTests
 
     private static Element Root(HeadlessSession session) =>
         (Element)typeof(HultUI.Window).GetField("_root", All)!.GetValue(session.Window.Window)!;
+
+    /// <summary>The path the diff pane's header shows.</summary>
+    private static string? PaneLabel(HeadlessSession session) =>
+        Descendants(Root(session)).OfType<TextElement>().SingleOrDefault(t => t.Key == "diff-path")?.Content;
+
+    /// <summary>What a click on a file row does (FileTreeRow's handler).</summary>
+    private static void Click(JunctionApp app, string path)
+    {
+        typeof(JunctionApp).GetField("_commitCursorPath", All)!.SetValue(app, path);
+        typeof(JunctionApp).GetField("_selectedFilePath", All)!.SetValue(app, path);
+        typeof(JunctionApp).GetMethod("Rerender", All, Type.EmptyTypes)!.Invoke(app, null);
+    }
 
     private static bool Shows(HeadlessSession session, string text) =>
         Descendants(Root(session)).OfType<TextElement>().Any(t => t.Content.Contains(text, StringComparison.Ordinal));

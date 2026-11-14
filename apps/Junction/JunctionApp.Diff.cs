@@ -127,7 +127,8 @@ public partial class JunctionApp
         // get a before/after view instead of the empty "No textual changes" pane.
         if (IsImagePath(path) && BuildImageDiffBody(path) is { } imagePane)
             return imagePane;
-        // A file of a commit read a file at a time, on its first visit: its patch is on its way.
+        // A file of a commit read a file at a time whose patch is on its way, with no diff of the
+        // commit to keep on screen meanwhile (CommitPane keeps the last one when there is).
         if (diff is null && CommitPatchLoading(path))
             return Box.New().FlexGrow(1)
                 .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
@@ -1550,7 +1551,7 @@ public partial class JunctionApp
     private (string Path, GitFileDiff? Diff) CurrentDiffTarget()
     {
         if (View == JunctionView.Commit && _selectedFilePath != null)
-            return (_selectedFilePath, CommitDiffFor(_commitDetail.Value, _selectedFilePath));
+            return CommitPane(_commitDetail.Value);
         if (View == JunctionView.Changes && _changeSelPath != null)
         {
             // ChangesView, not the raw load: a file whose staging is still in flight has
