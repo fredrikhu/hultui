@@ -40,7 +40,7 @@ jobs:
     permissions:
       contents: write # the helpers and the package go to the release
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 

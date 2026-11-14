@@ -38,7 +38,7 @@ jobs:
     permissions:
       contents: write # the packages go to the release
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
