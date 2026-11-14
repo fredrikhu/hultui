@@ -960,6 +960,43 @@ next probe in the same frame. No rule can do much better: the walk is about 2.5 
 and a cache that keeps any fixed share of it finds at most that share. The user approved the larger
 bounds (question 56); the word cache now holds 32,768 entries and 16 MB.
 
+### A Vulkan window's video loads the GL driver in its first frame: a preload measured and declined (round 14)
+
+The first frame that draws a GPU source on a Vulkan window makes the video interop's hidden GL
+context (`SdlVulkanHost.EnableInterop`), and with it loads the GL driver on the UI thread. Plan 17's
+round 14, step 8 (question 55 (b)) built the preload behind `HULTUI_GL_PRELOAD`'s opt-in, Windows
+only: `SDL_GL_LoadLibrary` on a worker once the device is made, joined only by `EnableInterop`, and
+Aperture taking the opt-in as Reel does. NativeAOT probe host built as each app's `Main` builds it,
+real windows on the 4K at 150 % (120 Hz), idle-gated, the old and new builds alternated in each
+hold; means of 4 and 6 launches (Reel at rest), 4 and 4 (Aperture), 3 and 3 (Reel with a film),
+2 and 2 (the empty player):
+
+| | Before | After |
+|---|---|---|
+| Reel opens a film at rest: Open → "vulkan interop ready" | 96.5 ms | 44.0 ms |
+| the same: Open → first window frame | 154.5 ms | 133.1 ms |
+| the same: Open → mpv's position past 0 | 196.5 ms | 177.3 ms |
+| Aperture's first playback: Open → interop ready | 96.6 ms | 46.1 ms |
+| the same: Open → first window frame | 149.4 ms | 138.5 ms |
+| the same: Open → position past 0 (streamed) | 236 ms | 230 ms |
+| Reel started with a film: device → first frame shown | 150.7 ms | 137.1 ms |
+| the same: Open → interop ready / → position past 0 | 58.9 / 177 ms | 59.5 / 162 ms |
+| A window that never plays (Reel's empty player): NVIDIA's threads at rest | 4, 113 wakes a second | 5, 123 a second |
+| the same: working set / private bytes | 108 / 106 MB | 127 / 132 MB |
+| Aperture signed in, before any playback: working set / private bytes | 143 / 153 MB | 161 / 181 MB |
+
+The load saves ~50 ms in `EnableInterop`, but only 11–21 ms reaches the frame: mpv's
+`mpv_render_context_create` takes 76–88 ms instead of 49–62 when the driver was loaded seconds
+earlier, whether on the worker or on the UI thread (both measured), so most of what the load moved
+reappears in the same frame. Started with a film, the load overlaps only ~13 ms before the first
+frame joins it. And a session that never plays a video now holds the GL driver: one more NVIDIA
+thread waking ten times a second at rest for the life of the process, ~19 MB of working set and
+~27 MB of private bytes. The first UI frame was not held (device → first frame: Reel's empty
+player 25 ms either way, Aperture 50.3 → 50.9 ms). Declined: a first video frame 11–21 ms sooner,
+once a process, against an idle and memory cost on every session that plays nothing. The
+off-thread load itself held on WGL: SDL's probe pumps nothing on the calling thread (a message
+posted to the worker's queue before `SDL_GL_LoadLibrary` was still queued after it).
+
 ### A ref's lock file alone is a working-tree event, not dropped (round 13)
 
 Plan 17's round 13, step 1 stopped Junction's repository watcher from reading a ref transaction
