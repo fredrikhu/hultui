@@ -1000,8 +1000,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         _contentHeight = TotalHeight;
         _contentWidth = Layout.AbsoluteContentBox.Width;
 
-        _scrollOffsetX = ClampX(_scrollOffsetX);
-        _scrollOffsetY = ClampY(_scrollOffsetY);
+        SetOffsets(ClampX(_scrollOffsetX), ClampY(_scrollOffsetY));
         ApplyHeldOffsets();
         ApplyPendingReveal();
     }

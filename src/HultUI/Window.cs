@@ -33,6 +33,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     // Whether the hovered element may have left the window since hover was last settled: a frame
     // changed some tree's children, a hit-testable overlay closed, or the root was replaced.
     private bool _hoverMayBeStale;
+    // How far hover has followed content that scrolled under the pointer: ScrollViewElement.ContentMoves
+    // when this window last hit-tested hover again for it (FollowScrollWithHover).
+    private int _contentMovesFollowed;
     // The cursor the pointer move last took from the hovered element's style, and whether
     // the cursor on screen is still that one (not a scrollbar's, a drag's, an autoscroll's).
     // Lets a style change show without waiting for the next move.
@@ -1952,6 +1955,27 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // Outside the style and layout timers, as when the overlays were done with their drawing.
         var overlayChanges = _overlays.Count > 0 ? PrepareOverlays(theme) : OverlayChanges.None;
 
+        // Content that scrolled under a resting pointer takes the hover in this frame, before the
+        // accessibility phase and the drawing: one hit test a frame that some scroll view moved in.
+        if (draws && _contentMovesFollowed != ScrollViewElement.ContentMoves && FollowScrollWithHover())
+        {
+            // An enter or leave handler ran for it and may have marked style or layout: both are done
+            // again for what it marked (nothing else is marked by now), so this frame draws it.
+            if ((_root.DirtyFlags & DirtyFlags.Style) != 0)
+            {
+                StyleResolver.Resolve(_root, theme);
+                ClearFlags(_root, DirtyFlags.Style | DirtyFlags.StyleSubtree);
+                ReapplyHoverCursor();
+                styleWasDirty = true;
+            }
+            if ((_root.DirtyFlags & DirtyFlags.Layout) != 0)
+            {
+                _layoutEngine.PerformLayout(_root, PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight);
+                layoutWasDirty = true;
+            }
+            if (_overlays.Count > 0) overlayChanges |= PrepareOverlays(theme);
+        }
+
         // Accessibility: rebuild + diff when the tree changed and something is
         // actually listening. The Null bridge's IsActive is false, so this is a
         // single boolean read for apps with no AT attached. The first frame after
@@ -3017,6 +3041,13 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             if (_lastHoveredElement is { } hovered && !IsShownInWindow(hovered)) _root.MarkPaintDirty();
             else _hoverMayBeStale = false;
         }
+
+        // Content scrolled under the pointer while a press held it (a drag, a selection's edge scroll, the
+        // autoscroll): the first frame drawn after the release follows it with the hover
+        // (FollowScrollWithHover), so the release has to have one.
+        if (evt is InputEvent.MouseButtonInput { IsDown: false } && !PointerHeld && _lastHoveredElement is not null
+            && _contentMovesFollowed != ScrollViewElement.ContentMoves)
+            _root.MarkPaintDirty();
     }
 
     // ── Cross-label (group) text selection ──
@@ -3284,11 +3315,13 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// Points hover at what is under <paramref name="pos"/> (the overlays first, the topmost
     /// layer, then the main tree), and the cursor, the scrollbar's hover, the tooltip and the
     /// DevTools inspector with it. Returns the element and the point in its tree's coordinates.
+    /// <paramref name="realize"/>: between a scroll and the drawing of its frame, the lists the
+    /// point is over make the rows their offsets now show first (<see cref="HitTestRealizing"/>).
     /// </summary>
-    private (Element? Target, Point At) HoverAt(Point pos, KeyModifiers modifiers)
+    private (Element? Target, Point At) HoverAt(Point pos, KeyModifiers modifiers, bool realize = false)
     {
-        var (overlayTarget, overlayOffset) = HitTestOverlays(pos);
-        var target = overlayTarget ?? HitTester.HitTest(_root!, pos);
+        var (overlayTarget, overlayOffset) = HitTestOverlays(pos, realize);
+        var target = overlayTarget ?? (realize ? HitTestRealizing(_root!, pos) : HitTester.HitTest(_root!, pos));
         // The Windows custom frame owns the maximize button as non-client
         // (HTMAXBUTTON); keep the client pipeline out of it.
         if (overlayTarget is null && IsNonClientMaximizeButton(target)) target = null;
@@ -3374,6 +3407,51 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         if (EventDispatcher.HandlerInvocationCount != handlers || _pointerState.DrawnHoverChanges != drawn
             || _devTools.IsEnabled)
             _root?.MarkPaintDirty();
+    }
+
+    /// <summary>
+    /// Hit-tests hover again where the pointer rests after some scroll view's content moved
+    /// (<see cref="ScrollViewElement.ContentMoves"/>): the wheel, a key, a reveal, an offset set from
+    /// code, a clamp, and with them a sticky header's shift. Called from a frame that draws, after its
+    /// style, layout and overlays and before its accessibility phase and its drawing, so the frame
+    /// that shows the scroll shows the hover where the pointer is, as browsers do: the row that
+    /// scrolled away gets its leave, the row now under the pointer its enter, its hover look, a list's
+    /// tint under it, the cursor it asks for, and a tooltip after the usual delay; a tooltip showing for
+    /// what scrolled away closes, as on a move off it. Until plan 17's round 14 hover stayed on the row
+    /// that scrolled away until the pointer moved (Junction's History after 4 of 4 wheel series).
+    ///
+    /// <para>The lists under the pointer make the rows their offsets now show first, as drawing would
+    /// next (<see cref="HitTestRealizing"/>). Nothing while a press holds the pointer (a drag keeps
+    /// its target; the release asks for a frame, and that frame follows), and nothing but a read when the
+    /// pointer is outside the window or has never been in it. Touch arrives as SDL's mouse events and
+    /// is followed as the mouse is.</para>
+    /// </summary>
+    /// <returns>Whether an enter or leave handler ran, which may have marked style or layout.</returns>
+    private bool FollowScrollWithHover()
+    {
+        if (PointerHeld) return false;
+        _contentMovesFollowed = ScrollViewElement.ContentMoves;
+        if (_lastHoveredElement is null) return false;
+        long handlers = EventDispatcher.HandlerInvocationCount;
+        HoverAt(_pointerAt, _pointerModifiers, realize: true);
+        return EventDispatcher.HandlerInvocationCount != handlers;
+    }
+
+    /// <summary>
+    /// A hit test under <paramref name="top"/> (the root or an open overlay's content) that first
+    /// makes the rows of the lists the point is over (<see cref="HitTester.HitTestRealizing"/>), as
+    /// drawing would next, and drops what that marks on the way up, as the end of the frame drops what
+    /// drawing marks: the style and layout the lists have done themselves for their new rows, and their
+    /// change of children unless the tree had one already (a build). Left set, the layout marks would
+    /// lay the window out again and the children's change would build the accessibility tree again
+    /// in a scroll's frame, which drawing's rows never did.
+    /// </summary>
+    private static Element? HitTestRealizing(Element top, Point point)
+    {
+        var children = top.DirtyFlags & DirtyFlags.Children;
+        var hit = HitTester.HitTestRealizing(top, point);
+        ClearFlags(top, DirtyFlags.Style | DirtyFlags.StyleSubtree | DirtyFlags.Layout | (DirtyFlags.Children & ~children));
+        return hit;
     }
 
     /// <summary>Whether a press holds the pointer: a button is down (a press, a capture, a drag, a
@@ -4301,7 +4379,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         }
     }
 
-    private (Element? element, Point offset) HitTestOverlays(Point pos)
+    private (Element? element, Point offset) HitTestOverlays(Point pos, bool realize = false)
     {
         // Test back-to-front: last overlay = topmost, checked first
         for (int i = _overlays.Count - 1; i >= 0; i--)
@@ -4309,7 +4387,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             var overlay = _overlays[i];
             if (!overlay.IsHitTestable) continue;
             var localPoint = new Point(pos.X - overlay.X, pos.Y - overlay.Y);
-            var hit = HitTester.HitTest(overlay.Content, localPoint);
+            var hit = realize ? HitTestRealizing(overlay.Content, localPoint) : HitTester.HitTest(overlay.Content, localPoint);
             if (hit is not null)
                 return (hit, new Point(overlay.X, overlay.Y));
         }
