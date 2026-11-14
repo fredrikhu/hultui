@@ -189,7 +189,7 @@ public class PrefixCutsTests
         "有用户反映在高分辨率屏幕上缩放比例为 150 % 时文字看起来有些模糊。把线条和填充对齐到像素边界以后，这个问题就解决了。如果仍然觉得不清楚，可以设置环境变量切换绘制方式，然后再试一次。",
         "打开很长的文档时如果感觉变慢，可以关闭自动换行，或者把窗口稍微拉宽一些。一行越长，每次改变宽度时需要测量的文字就越多。");
 
-    public static TheoryData<string> Paragraphs => new() { "ja", "zh" };
+    public static TheoryData<string> Paragraphs => new() { "ja", "zh", "zh-messages" };
 
     [Fact]
     public void AWordCutShortThatHasNoCuts_GetsThemAtItsFirstCut()
@@ -223,38 +223,64 @@ public class PrefixCutsTests
         // read off the word to its natural end 484 (0.67), without that and cuts made at need (round
         // 12's cuts alone) 0.7 and more.
         string text = Japanese + "\n" + Chinese;
-        var (calls, rows) = NewWidths(new TextPipeline(new SkiaFontCollection(), new CountingShaper(new SkiaTextShaper())), text);
-        var (reference, _) = NewWidths(new TextPipeline(new SkiaFontCollection(), new CountingShaper(new SkiaTextShaper()))
+        var (calls, rows, _) = NewWidths(new TextPipeline(new SkiaFontCollection(), new CountingShaper(new SkiaTextShaper())), text);
+        var (reference, _, _) = NewWidths(new TextPipeline(new SkiaFontCollection(), new CountingShaper(new SkiaTextShaper()))
             { PrefixesFromCuts = false }, text);
         Assert.True(rows > 500, $"only {rows} rows");
         Assert.True(calls.Sum() * 16 < reference.Sum() * 9,
             $"{string.Join(", ", calls)} = {calls.Sum()} shaper calls at new widths, the reference {reference.Sum()}");
     }
 
+    // Chinese as a translated README has it (gettext's messages): commands, options, numbers and
+    // %s set among the ideographs, some with spaces around them and some without.
+    private static readonly string ChineseMessages = string.Join('\n',
+        "提示：用 dotnet build 构建以后，运行%s来启动示例程序；如果启动失败，请查看第2行第%d列的错误信息，详见 GUIDE.md 的第3节。配置项 'ui.scale=1.5' 已被弃用，请改用%s，旧的设置将在 HultUI 2.0 中移除。",
+        "%s 期望一个非负整数以及可选的k/m/g后缀，必须介于 0（不含）和 1 之间，否则使用默认值%s。无法打开文件 '%s'：没有找到第%d个参数，也没有找到pkg-config的输出；请检查 PATH 环境变量，然后再试一次。",
+        "（使用 \"git restore <文件>...\" 丢弃工作区的改动）分支 '%s' 设置为跟踪 '%s'，要么合并提交%s要么更新至已合并这些变更的提交；新的引用将存储于 refs/remotes/%s，共%d个对象，压缩后为%s。",
+        "窗口的大小改变时，文本区域里的每一行都按新的宽度重新排列，一行有200个字符时每次需要测量的文字就越多；把HarfBuzz和Skia的结果按词记住，并记下哪些位置可以安全地切开，下一次就不必再整形。");
+
+    [Fact]
+    public void ANewWidth_MakesNoWordToItsNaturalEnd_ForASegmentTheCacheHas_OrPastALatinName()
+    {
+        // A table's last word is read off the word to its natural end only where the word cache does
+        // not have the segment the table cuts, and that word stops where ASCII letters or digits
+        // meet ideographs when that is past the table's end. Measured on Windows: 750 characters
+        // shaped with their cuts at the ten new widths; 936 with the cached segment read off the word
+        // to its natural end, 874 with that word run on to the next space, 1,123 with both (round 13).
+        string text = Chinese + "\n" + ChineseMessages;
+        var shaper = new CountingShaper(new SkiaTextShaper());
+        var (calls, rows, chars) = NewWidths(new TextPipeline(new SkiaFontCollection(), shaper), text);
+        var (reference, _, _) = NewWidths(new TextPipeline(new SkiaFontCollection(), new CountingShaper(new SkiaTextShaper()))
+            { PrefixesFromCuts = false }, text);
+        Assert.True(rows > 300, $"only {rows} rows");
+        Assert.True(chars < 830, $"{chars} characters shaped with cuts at new widths in {calls.Sum()} calls (the reference {reference.Sum()})");
+    }
+
     // The shaper calls of each of ten new widths of `text`, a character or so apart (the rows move),
-    // opened at one width and resized to two more first, as a user drags a pane; and their rows.
-    private static (List<int> Calls, int Rows) NewWidths(TextPipeline pipeline, string text)
+    // opened at one width and resized to two more first, as a user drags a pane; their rows, and the
+    // characters shaped with their cuts at those widths.
+    private static (List<int> Calls, int Rows, int CharsWithCuts) NewWidths(TextPipeline pipeline, string text)
     {
         var shaper = (CountingShaper)pipeline.Shaper;
         Wrap(pipeline, text, 520f, Sans);
         Wrap(pipeline, text, 470f, Sans);
         Wrap(pipeline, text, 495f, Sans);
         var calls = new List<int>();
-        int rows = 0;
+        int rows = 0, chars = shaper.CharsWithCuts;
         for (float width = 450f; width > 300f; width -= 15f)
         {
             int before = shaper.Calls;
             rows += Wrap(pipeline, text, width, Sans).Count;
             calls.Add(shaper.Calls - before);
         }
-        return (calls, rows);
+        return (calls, rows, shaper.CharsWithCuts - chars);
     }
 
     [Theory]
     [MemberData(nameof(Paragraphs))]
     public void WrappingAtNewWidths_ReadsOffCuts_TheReferencesWidthsAndRows(string language)
     {
-        string text = language == "ja" ? Japanese : Chinese;
+        string text = language switch { "ja" => Japanese, "zh" => Chinese, _ => ChineseMessages };
         var withCuts = new TextPipeline(new SkiaFontCollection(), new SkiaTextShaper());
         var reference = new TextPipeline(new SkiaFontCollection(), new SkiaTextShaper()) { PrefixesFromCuts = false };
         var styles = new[] { Sans, Sans with { FontSize = 15f }, Sans with { LetterSpacing = 0.6f } };
@@ -391,8 +417,9 @@ public class PrefixCutsTests
     {
         public int Calls;
 
-        // How many times each text was shaped with its cuts.
+        // How many times each text was shaped with its cuts, and their characters.
         public readonly Dictionary<string, int> WithCuts = new();
+        public int CharsWithCuts;
 
         public ShapedRun Shape(string text, IResolvedFont font, float fontSize, bool rtl = false)
         {
@@ -404,6 +431,7 @@ public class PrefixCutsTests
         {
             Calls++;
             WithCuts[text] = WithCuts.GetValueOrDefault(text) + 1;
+            CharsWithCuts += text.Length;
             return ((IShapesWithCuts)inner).Shape(text, font, fontSize, out cuts);
         }
     }

@@ -2037,11 +2037,20 @@ public sealed class TextPipeline
         end < text.Length && text[end] is not (' ' or '\n') && text[start] != ' '
         && (start != from || from == 0 || text[from - 1] is ' ' or '\n');
 
-    // Where such a word ends at every width: the next space or line end, at most MaxNaturalWord
-    // characters from its start.
+    // Where such a word ends at every width: the first change between ASCII letters or digits and
+    // other characters after its start, when the table's end does not pass it, else the next space
+    // or line end; at most MaxNaturalWord characters from its start. Chinese and Japanese set Latin
+    // names, commands and numbers among their ideographs, often with no space between: a word run
+    // on to the next space shaped a clause where the table needed a name (plan 17, round 14: on
+    // README.zh-CN.md, 58 % of the characters such words shaped were past such a change).
     private static int NaturalEnd(string text, int start, int end)
     {
         int stop = Math.Min(text.Length, start + MaxNaturalWord);
+        bool latin = char.IsAsciiLetterOrDigit(text[start]);
+        int change = start + 1;
+        while (change < stop && text[change] is not (' ' or '\n') && char.IsAsciiLetterOrDigit(text[change]) == latin)
+            change++;
+        if (change >= end) return change;
         while (end < stop && text[end] is not (' ' or '\n')) end++;
         return end;
     }
@@ -2054,19 +2063,20 @@ public sealed class TextPipeline
     // (CutsWordShortAtEnd): ShapeSegment's answer, but read off the word to its natural end where a cut
     // there is safe. That word is shaped once with its cuts and kept, so the next width's table, which
     // ends somewhere else, reads its own end off it instead of shaping a new string; the reads are
-    // RunCuts', exact to the bit.
+    // RunCuts', exact to the bit. A segment the word cache has is its own answer: the word to its
+    // natural end is neither looked up nor made for it.
     private WordShape TableEndSegment(string text, int start, int end, IResolvedFont font, float fontSize, int fontHash)
     {
         var segment = text.AsSpan(start, end - start);
         if (DigitTableFor(segment, font, fontSize) is { } digits)
             return DigitSegment(segment, digits, start);
-        int natural = NaturalEnd(text, start, end);
-        if (natural > end && CutsOfNaturalWord(text, start, natural, font, fontSize, fontHash)
-                .TryPrefix(end - start, out float width, out int glyphs))
-            return new WordShape(null, null, start, width, glyphs);
-        // The segment itself, with its cuts, which the line search's probes then read (LastCuts).
         if (!_wordShapeCache.TryGet(segment, font, fontSize, fontHash, out var run))
         {
+            int natural = NaturalEnd(text, start, end);
+            if (natural > end && CutsOfNaturalWord(text, start, natural, font, fontSize, fontHash)
+                    .TryPrefix(end - start, out float width, out int glyphs))
+                return new WordShape(null, null, start, width, glyphs);
+            // The segment itself, with its cuts, which the line search's probes then read (LastCuts).
             string word = segment.ToString();
             run = _cutShaper!.Shape(word, font, fontSize, out var cuts);
             cuts ??= RunCuts.None;

@@ -890,7 +890,7 @@ reader must hear what came and went. Holding their bounds back while the size ch
 walking without writing the boxes and a second walk at rest; not built (2.8 to 5.4 ms of raises are
 left in a drag of about a second in Junction and Vesper).
 
-### A prefix table's row-start words are still shaped at every width (rounds 12 and 13)
+### A prefix table's row-start words are still shaped at every width (rounds 12 to 14)
 
 Plan 17's round 12, step 4 (7a753337) reads a word a prefix table cuts short off the whole word's
 cuts where HarfBuzz says the cut is safe. In Junction's Files view on a Japanese README, NativeAOT,
@@ -920,6 +920,18 @@ file +4 % and the first new width 9.3 → 10.5 ms (+290 KB). A document whose wo
 outgrow the word cache lets those words go before the next width reads them, and there making them
 only shapes more: they are made only while words read again earn more credit than words let go
 spend, and both READMEs in one file (154,000 characters) resize within −2 … +7 % of before.
+
+Round 14's review found that cost paid at every new width on Chinese, not only the first: its
+gettext text sets spaces around Latin words and `%s`, so each width's table ends in a segment that
+starts somewhere new, and 460 to 693 such words were made at each width; 58 % of the characters
+they shaped ran past a change between ASCII letters or digits and ideographs on to the next space.
+Round 14, step 1 keeps the words and trims what they cost: a table's last segment the word cache
+already has is its own answer (no word to its natural end is looked up or made for it), and such a
+word also ends at the first change between ASCII letters or digits and other characters after its
+start, when that is at or past the table's end. Headless, NativeAOT, UI-thread CPU: Chinese resize
+to 1000 px 11.4 → 10.6 ms (808 → 555 KB, 1,433 → 1,141 HarfBuzz calls), to 960 11.5 → 10.6 ms, a
+drag at 960 1,928 → 1,353 KB; Japanese to 1000 px 12.1 → 11.2 ms; the 154,000-character file within
+±1 %. What is left at a new width is still the row-start words above and short words cut at need.
 
 ### A ref's lock file alone is a working-tree event, not dropped (round 13)
 
