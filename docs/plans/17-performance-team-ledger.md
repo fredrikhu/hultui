@@ -5,8 +5,10 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 14
-- **Phase:** build — round 14, step 9 next (the round 14 build order below; 9 steps; steps 1–7 landed, step 6 with its
-  question 61 follow-up; step 8 measured and reverted). Step 9's before/after images go to the user before its commit. Questions 55–59 answered 2026-11-13 with the
+- **Phase:** build — round 14, step 9 waits for the user's look at its images (sent 2026-11-14; `r14b9\png\*-compare.png`
+  in session 41943a9b's scratchpad); the change is uncommitted in the worktree (4 files, also `r14b9\hover-follows-scroll.patch`):
+  on a yes, resume step 9's agent aa1e7c71f5434fef1 to test, measure and commit; on a no, it reverts. Steps 1–7 landed
+  (step 6 with its question 61 follow-up); step 8 measured and reverted. Questions 55–59 answered 2026-11-13 with the
   recommendations; 57 (asked again with step 1's numbers: not now) and 60 ((b) with (d)) answered 2026-11-14. Build briefs
   `brief-r14b<N>.md`, the agent ids in `r14-agents.txt`, survey probes `r14-<area>\` and build probes `r14b<N>\` in
   session 41943a9b's scratchpad
