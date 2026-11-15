@@ -58,6 +58,45 @@ public class GitProcessTests
         Assert.False(res.Success);
     }
 
+    /// <summary>
+    /// A long read leaves nothing in <see cref="System.Buffers.ArrayPool{T}.Shared"/>: its buffers come from a pool
+    /// of their own. The shared pool keeps the last array of each size a thread returned in that thread's own
+    /// slots, so every pool thread that read a long patch kept one of each, about 1 MB, until it retired or two
+    /// gen-2 collections ≥30 s apart — and Junction has almost none. Read on a thread of its own, the read grows
+    /// its buffer through every size (16K to 256K characters) and is stopped at the limit; renting each size
+    /// from the shared pool on that thread afterwards must not hand back one holding what git wrote (an added
+    /// line, "+" and the marker: the file's own text, which other code may have pooled, has no "+").
+    /// </summary>
+    [Fact]
+    public void ALongRead_LeavesNoBufferInTheSharedPool()
+    {
+        using var repo = TempRepo.CreateWithInitialCommit();
+        var marker = Guid.NewGuid().ToString("N");
+        repo.Write("long.txt", string.Concat(Enumerable.Range(0, 8000).Select(i => $"{marker} {i}\n")));
+        repo.Git("add", "-A");
+        repo.Git("commit", "-q", "-m", "a long file");
+        var added = "\n+" + marker;
+
+        var found = new List<int>();
+        (GitResult Result, bool Whole) read = default;
+        var thread = new Thread(() =>
+        {
+            read = GitProcess.RunUpTo(repo.Path, 262_144, _ => 0, "show", "HEAD");
+            for (int size = 16 * 1024; size <= 262_144; size *= 2)
+            {
+                var array = System.Buffers.ArrayPool<char>.Shared.Rent(size);
+                if (array.AsSpan().IndexOf(added.AsSpan()) >= 0) found.Add(size);
+                System.Buffers.ArrayPool<char>.Shared.Return(array);
+            }
+        });
+        thread.Start();
+        thread.Join();
+
+        Assert.False(read.Whole);   // the patch runs past the limit: every size was rented
+        Assert.Equal(-1, read.Result.ExitCode);
+        Assert.True(found.Count == 0, $"the shared pool kept this thread's {string.Join(", ", found)}-character buffers");
+    }
+
     /// <summary>Stdin still reaches git — the patch-application path, which builds its
     /// arguments the same way.</summary>
     [Fact]

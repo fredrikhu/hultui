@@ -162,6 +162,26 @@ pieces the code reads (`JsonDocument.ParseValue(ref reader)`, disposed before th
 holds what one piece needs, and the next piece takes the same arrays again. Meridian's spec parsed a
 path at a time left 51 KB (round 9 of plan 17, `OpenApi.Parse` of bytes).
 
+### The shared pool keeps a set of arrays on every thread
+
+`ArrayPool<T>.Shared` keeps the last array of each size a thread gave back in slots of that thread's
+own, and lets them go only when the thread exits or when gen-2 collections trim them (an array unused
+across two of them at least 30 s apart). The apps have almost no gen-2 collections, and work on the
+thread pool runs on whichever thread is free, so a buffer that background work grows keeps one array of
+every size it passed through on every pool thread that ever ran that work. Junction's patch reads double
+a buffer from 16K to 256K characters: 120 commits read on 4 threads kept 4.9–5.9 MB after a full GC,
+2.5–3.0 MB of it on the large object heap, against 1.0 MB on one thread. Give such a buffer a pool of
+its own, which every thread shares and which keeps a bounded number of each size:
+
+```csharp
+static readonly ArrayPool<char> Buffers = ArrayPool<char>.Create(maxArrayLength: 262_144, maxArraysPerBucket: 2);
+```
+
+The same 120 commits on 4 threads then kept 2.0 MB (LOH 1.0) and allocated less, 15.6 against 18.5 MB
+on the first pass and the same 13.6 MB once warm (round 15 of plan 17). In Junction's real window, a
+120-key History walk at a reading pace ended at 15.1 / 18.6 MB after a full GC instead of 17.0 / 19.7,
+the large object heap 1.6 MB instead of 2.6 / 3.1.
+
 ## Measured results (HultUI.Samples.HelloWorld, win-x64)
 
 | | NativeAOT | Framework-dependent | Self-contained (no AOT) |

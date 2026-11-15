@@ -274,8 +274,8 @@ public static class GitProcess
     ///
     /// <para>For output that can be far longer than what the caller shows, a commit's patch above all:
     /// reading and decoding all of it, and the strings made from it, were most of what loading it cost.
-    /// What was read goes into a pooled buffer, so a stopped command leaves nothing behind but the part
-    /// kept, and a whole one only its string.</para>
+    /// What was read goes into a pooled buffer (<see cref="ReadBuffers"/>), so a stopped command leaves
+    /// nothing behind but the part kept, and a whole one only its string.</para>
     /// </summary>
     public static (GitResult Result, bool Whole) RunUpTo(string workingDirectory, int maxChars,
         Func<ReadOnlySpan<char>, int> keep, params string[] args)
@@ -289,7 +289,7 @@ public static class GitProcess
         using var process = Process.Start(psi)!;
         // Read alongside: a git that fills the error pipe while the output is read would wait forever.
         var stderr = process.StandardError.ReadToEndAsync();
-        var pool = System.Buffers.ArrayPool<char>.Shared;
+        var pool = ReadBuffers;
         var buffer = pool.Rent(Math.Min(maxChars, 16 * 1024));
         try
         {
@@ -323,6 +323,19 @@ public static class GitProcess
         }
         finally { pool.Return(buffer); }
     }
+
+    /// <summary>
+    /// The buffers <see cref="RunUpTo"/> reads into, doubling from 16K characters to the 262,144 a commit's
+    /// patch is read whole below: a pool of their own, two of each size for the whole process.
+    ///
+    /// <para>Not <see cref="System.Buffers.ArrayPool{T}.Shared"/>. It keeps the last array of each size a
+    /// thread returned in that thread's own slots, and gives them up only when the thread retires or after two
+    /// gen-2 collections at least 30 s apart — and this app has almost none. The detail loads run on whichever
+    /// pool thread is free, so every thread that had read a long patch kept one of each, about 1 MB, half of it
+    /// on the large object heap.</para>
+    /// </summary>
+    private static readonly System.Buffers.ArrayPool<char> ReadBuffers =
+        System.Buffers.ArrayPool<char>.Create(maxArrayLength: 262_144, maxArraysPerBucket: 2);
 
     /// <summary>
     /// Runs git and returns stdout as raw bytes. Needed for blob content (images and
