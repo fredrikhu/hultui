@@ -209,6 +209,13 @@ right-button hold) and each file row's (a right-drag marking rows), drew a full 
 every move over the panes as ordinary handlers: 60 idle moves along a row drew 60 frames.
 Passive and listening only during their gesture, the same moves draw 1 (where the hover left
 the file's name), and a move allocates 40 bytes instead of 104.
+So does a handler that acts on one button or one key only and marks what it does then: an
+ordinary one draws a frame for every event it hears and ignores. Junction's rows hear
+`PointerDownEvent` only to collapse the selection to the row on a right press, and mark it
+(`row.OnPassive<PointerDownEvent>(e => { if (e.Button == 2 && ...) { ...; MarkDirty(); } })`).
+As ordinary handlers, every left press on a row drew the window again, the same pixels, before
+the click's frame: 10 History row clicks drew 20 frames in a real window, 10 since plan 17's
+round 15.
 A callback a control calls
 (`OnChanged`, `LinkActivated`, a toast's action) is not a handler: it shares the frame the
 control's own change asks for, so one that changes something on screen while the control

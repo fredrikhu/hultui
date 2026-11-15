@@ -126,7 +126,7 @@ public partial class JunctionApp
         row.AddChild(Ui.Tag("conflict", Nocturne.Alpha(Nocturne.DangerText, 0.16), Nocturne.DangerText, 9.5f).FlexShrink(0));
 
         row.OnClick(e => OnChangeRowClick(self, e.Modifiers));
-        row.On<PointerDownEvent>(e =>
+        row.OnPassive<PointerDownEvent>(e =>
         {
             if (e.Button == 2 && !_changeSelection.Contains(self))
             {

@@ -1284,8 +1284,10 @@ public partial class JunctionApp
 
         row.OnClick(e => OnCommitRowClick(commit, e.Modifiers));
         // Right-click outside the selection collapses to that row first, then the
-        // framework opens the menu; inside it the selection is left alone.
-        row.On<PointerDownEvent>(e =>
+        // framework opens the menu; inside it the selection is left alone. Passive, as every
+        // right-click-only press handler on a row here: it marks when it acts, and an ordinary one
+        // drew every left press on the row as a frame of the same pixels (plan 17 round 15).
+        row.OnPassive<PointerDownEvent>(e =>
         {
             if (e.Button == 2 && !SelectionContains(commit.Hash))
             {

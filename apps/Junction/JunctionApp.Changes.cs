@@ -956,7 +956,7 @@ public partial class JunctionApp
             // collapsing under a Shift range would take rows out from under it.
             if (e.Modifiers == KeyModifiers.None) tree.Toggle(node);
         });
-        row.On<PointerDownEvent>(e =>
+        row.OnPassive<PointerDownEvent>(e =>
         {
             if (e.Button == 2 && !_changeSelection.Contains(self))
             {
@@ -1020,7 +1020,7 @@ public partial class JunctionApp
         row.OnClick(e => OnChangeRowClick(self, e.Modifiers));
         // Right-click outside the selection collapses to that row first, then the
         // framework opens the menu; inside it the selection is left alone.
-        row.On<PointerDownEvent>(e =>
+        row.OnPassive<PointerDownEvent>(e =>
         {
             if (e.Button == 2 && !_changeSelection.Contains(self))
             {

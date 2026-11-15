@@ -222,7 +222,7 @@ public partial class JunctionApp
         row.AddChild(Box.New().FlexGrow(1));
 
         row.OnClick(_ => { select(index); ToggleFolder(kind, node); });
-        row.On<PointerDownEvent>(e => { if (e.Button == 2) select(index); });
+        row.OnPassive<PointerDownEvent>(e => { if (e.Button == 2) select(index); });
         row.ContextMenu(() => RefFolderMenuItems(kind, node));
         return row;
     }

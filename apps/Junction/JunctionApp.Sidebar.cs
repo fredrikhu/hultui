@@ -135,7 +135,7 @@ public partial class JunctionApp
         row.AddChild(Text.New(ws.RepoPaths.Count.ToString()).FontSize(11f).TextColor(Nocturne.On(0.45)));
 
         row.OnClick(_ => SelectWorkspace(ws.Id));
-        row.On<PointerDownEvent>(e => { if (e.Button == 2) SelectWorkspace(ws.Id); });
+        row.OnPassive<PointerDownEvent>(e => { if (e.Button == 2) SelectWorkspace(ws.Id); });
         row.ContextMenu(() => WorkspaceMenuItems(ws));
         if (!active) row.HoverBg(Nocturne.Neutral900, Color.Transparent);
         return row;
@@ -193,7 +193,7 @@ public partial class JunctionApp
         row.AddChild(status);
 
         row.OnClick(_ => SelectRepo(path));
-        row.On<PointerDownEvent>(e => { if (e.Button == 2) SelectRepo(path); });
+        row.OnPassive<PointerDownEvent>(e => { if (e.Button == 2) SelectRepo(path); });
         row.ContextMenu(() => RepoMenuItems(path));
         if (!active) row.HoverBg(Nocturne.Neutral900, Color.Transparent);
         return row;

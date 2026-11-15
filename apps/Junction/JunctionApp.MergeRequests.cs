@@ -490,7 +490,7 @@ public partial class JunctionApp
             if (_mrSel == index) { _mrOpen = (r.Path, mr.Iid); Rerender(); }
             else { _mrSel = index; MarkDirty(); }
         });
-        row.On<PointerDownEvent>(e => { if (e.Button == 2 && _mrSel != index) { _mrSel = index; MarkDirty(); } });
+        row.OnPassive<PointerDownEvent>(e => { if (e.Button == 2 && _mrSel != index) { _mrSel = index; MarkDirty(); } });
         row.ContextMenu(() => MrMenuItems(r));
         if (!selected) row.HoverBg(Nocturne.Neutral900, Color.Transparent);
         return row;

@@ -387,9 +387,10 @@ public partial class MeridianApp
         return b;
     }
 
-    /// <summary>Right-click on a row opens its menu at the pointer.</summary>
+    /// <summary>Right-click on a row opens its menu at the pointer. Passive: opening the menu marks the
+    /// view, and an ordinary handler drew every left press on a row as a frame of the same pixels.</summary>
     private void RowContextMenu(Element row, Func<IReadOnlyList<(string, Action)>> items) =>
-        row.On<PointerDownEvent>(e =>
+        row.OnPassive<PointerDownEvent>(e =>
         {
             if (e.Button != PointerEvent.RightButton) return;
             e.StopPropagation = true;

@@ -520,7 +520,7 @@ public partial class JunctionApp
 
         row.OnClick(e => OnBranchRowClick(b, index, e.Modifiers));
         // Right-click selects the row first, then the framework opens the menu.
-        row.On<PointerDownEvent>(e => { if (e.Button == 2) SelectBranch(index); });
+        row.OnPassive<PointerDownEvent>(e => { if (e.Button == 2) SelectBranch(index); });
         row.ContextMenu(() => BranchMenuItems(b));
         return row;
     }
