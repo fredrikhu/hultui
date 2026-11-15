@@ -536,9 +536,15 @@ public partial class JunctionApp : Component, IDisposable
     ///
     /// <para>Narrowed by dragging the pane's own splitter this never showed, because that
     /// drag is app state and rebuilds anyway; it took a window resize, which does not.</para>
+    ///
+    /// <para>A review's cards are measured the same way, at the card's text width, wrapped or
+    /// not (<see cref="ReviewRowsActive"/>, the Commit view only). Until plan 17 round 15 a
+    /// resize with the cards on and wrap off never measured them again: each card kept the
+    /// height of the width it was first measured at and laid its text out at the new one,
+    /// clipped or with a gap under it, until something else built the view.</para>
     /// </summary>
     private bool DiffWrapNeedsRemeasure() =>
-        _diffWrap && (_diffFull || View is JunctionView.Commit or JunctionView.Changes);
+        (_diffWrap || ReviewRowsActive) && (_diffFull || View is JunctionView.Commit or JunctionView.Changes);
 
     // Recompute the responsive flags from the current content width; returns true
     // if any flipped. Called on resize and when the sidebar collapses/expands

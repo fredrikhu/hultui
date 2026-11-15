@@ -183,6 +183,83 @@ public class ReviewTests
     }
 
     /// <summary>
+    /// A window resize measures the review's cards again at the new width with lines unwrapped,
+    /// in one build of the view a step, so a card whose note wraps still fits its row. Until plan 17
+    /// round 15 only a wrapped diff was measured again on a resize: each card kept the height of the
+    /// width it was first measured at and laid its text out at the new one, until something else
+    /// built the view. The widths cross no breakpoint, so nothing else builds.
+    /// </summary>
+    [Fact]
+    public void AResizeMeasuresTheCardsAgain_WithLinesUnwrapped()
+    {
+        var note = string.Join(" ", Enumerable.Repeat("a refund that splits across tenders must skip the voided ones", 24));
+        var handler = Routes().Map(Discussions, _ => FakeGitLabHandler.Json(FakeGitLabHandler.Recording("discussions")
+            .Replace("\"Refunds should not count voided tenders.\"", System.Text.Json.JsonSerializer.Serialize(note))));
+        Hosted((repo, _, session, app) =>
+        {
+            app.StartReview(repo.Path, 412);
+            session.PumpUntil(() => ById(session, "review-thread") is not null, TimeSpan.FromSeconds(20));
+            session.PumpFrames(2);
+            session.Window.Click(ById(session, "review-thread")!);
+            session.PumpUntil(() => TreeHas(session, "Good catch, fixed in the next push."), TimeSpan.FromSeconds(10));
+            session.PumpFrames(2);
+            AssertCardFitsItsRow(session);
+            float tall = LayoutProbe.Painted(ById(session, "review-thread")!).Height;
+            // Until the review's loads have all landed: a build of their own inside a step is not the step's.
+            DiffScrollTests.Quiet(session, app);
+
+            foreach (int width in new[] { 1600, 1520, 1500, 1460, 1900, 1440 })
+            {
+                int builds = app.Builds, chrome = app.ChromeBuilds;
+                session.Window.SetClientSize(width, 900);
+                int frames = FramesDrawn(session);
+                Assert.True((frames, app.Builds - builds, app.ChromeBuilds - chrome) == (1, 1, 0), $"at {width} px: {frames} frames, {app.Builds - builds} builds, {app.ChromeBuilds - chrome} chrome part builds");
+                AssertCardFitsItsRow(session);
+            }
+
+            // The Commit view's file list splitter dragged beside the cards: the same, each step
+            // built at the width the step leaves the diff (before, at the width of the frame before,
+            // and the check after the frame built and drew it again).
+            var files = ((HultUI.Core.Reactivity.Ref<ScrollViewElement>)typeof(JunctionApp)
+                .GetField("_fileScrollRef", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!).Current!;
+            float edge = files.Layout.AbsoluteBorderBox.Right;
+            var handle = LayoutProbe.Descendants<SplitterHandleElement>(Root(session), h => h.Layout.AbsoluteBorderBox.Height > 0)
+                .MinBy(h => MathF.Abs(h.Layout.AbsoluteBorderBox.X - edge))!;
+            var box = handle.ScreenBorderBox;
+            float x = box.X + box.Width / 2, y = box.Y + box.Height / 2;
+            session.Window.MoveMouse(x, y);
+            session.Window.MouseDown(x, y);
+            DiffScrollTests.Quiet(session, app);
+            foreach (var step in new[] { 40f, 40f, -120f, 60f })
+            {
+                int builds = app.Builds, chrome = app.ChromeBuilds;
+                x += step;
+                session.Window.MoveMouse(x, y);
+                Assert.Equal(1, FramesDrawn(session));
+                Assert.Equal((1, 0), (app.Builds - builds, app.ChromeBuilds - chrome));
+                AssertCardFitsItsRow(session);
+            }
+            session.Window.MouseUp(x, y);
+            FramesDrawn(session);
+
+            // The steps moved the card's height, or they prove nothing.
+            session.Window.SetClientSize(1900, 900);
+            FramesDrawn(session);
+            Assert.True(LayoutProbe.Painted(ById(session, "review-thread")!).Height < tall - 10f, "the note wraps the same at every width");
+        }, handler);
+    }
+
+    /// <summary>Frames drawn over sixteen pumps of 16 ms, so whatever runs after a frame and asks
+    /// for another is inside the count.</summary>
+    private static int FramesDrawn(HeadlessSession session)
+    {
+        int frames = 0;
+        for (int i = 0; i < 16; i++)
+            if (session.PumpFrame(TimeSpan.FromMilliseconds(16))) frames++;
+        return frames;
+    }
+
+    /// <summary>
     /// A card whose height changes after it was measured: its picture arrives a frame after
     /// the card opens, and its section opens on a click. Each time the row is measured again,
     /// so the card fits it throughout. Without the layout generation in the row signature the

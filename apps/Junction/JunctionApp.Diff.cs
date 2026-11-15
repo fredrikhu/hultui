@@ -849,12 +849,13 @@ public partial class JunctionApp
     /// <see cref="LeadWrappedDiffWidth"/> for a move of a file list's splitter beside a wrapped
     /// diff: the list gains what the file list (<paramref name="list"/>, laid out at its old width)
     /// loses. The drag builds the view for the rows' heights, and that build read the width of the
-    /// frame before, so each step built and drew twice, the second time the chrome too.
+    /// frame before, so each step built and drew twice, the second time the chrome too. A review's
+    /// cards are measured at the width as wrapped lines are, so the same while reviewing.
     /// </summary>
     private void LeadWrappedDiffSplit(PaneSplitter split, Element? list)
     {
         _diffWrapLead = float.NaN;
-        if (!_diffWrap || list is not { IsHosted: true, Layout.Width: > 0 } || !DiffLaidOutAsSeen()) return;
+        if (!(_diffWrap || ReviewRowsActive) || list is not { IsHosted: true, Layout.Width: > 0 } || !DiffLaidOutAsSeen()) return;
         _diffWrapLead = Math.Max(0, _diffLaidOutWidth + list.Layout.Width - split.Size);
     }
 
