@@ -6,6 +6,7 @@ using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Primitives;
+using HultUI.Platform.Accessibility.Linux;
 using HultUI.Platform.Accessibility.Windows;
 using Xunit;
 using TextB = HultUI.Core.Builders.Text;
@@ -688,6 +689,135 @@ public class A11yCurrentItemFocusTests
         Assert.Equal(f.Document.Id, rig.GetFocus());
         Assert.Equal(f.Document.Id, rig.FocusEvents().Last());
         Assert.False(rig.HasFocus(f.Title(2)));
+    }
+
+    // ── AT-SPI ──
+
+    private sealed class Signals : IAtSpiSignals
+    {
+        public readonly List<string> Lines = [];
+        private static string Short(string path) => path[(path.LastIndexOf('/') + 1)..];
+        public void EmitChildrenChanged(string parentPath, string childPath, int index, bool isAdd) => Lines.Add($"children-changed {Short(childPath)}");
+        public void EmitPropertyChange(string path, string atSpiProperty, string newValue) => Lines.Add($"property-change:{atSpiProperty} {Short(path)}");
+        public void EmitValueChanged(string path, double value) => Lines.Add($"property-change:accessible-value {Short(path)}");
+        public void EmitRoleChange(string path, uint role) => Lines.Add($"property-change:accessible-role {Short(path)}");
+        public void EmitStateChanged(string path, string state, bool active) => Lines.Add($"state-changed:{state} {Short(path)} {(active ? 1 : 0)}");
+        public void EmitTextChanged(string path, bool insert, int offset, string text) => Lines.Add($"text-changed {Short(path)}");
+        public void EmitTextCaretMoved(string path, int offset) => Lines.Add($"text-caret-moved {Short(path)}");
+        public void EmitTextSelectionChanged(string path) => Lines.Add($"text-selection-changed {Short(path)}");
+        public void EmitAnnouncement(string path, string text, int politeness) => Lines.Add($"announcement {Short(path)}");
+        public void EmitCacheAdd(IAtSpiTree tree, AtSpiAccessible node) => Lines.Add($"cache-add {Short(node.Path)}");
+        public void EmitCacheRemove(string path) => Lines.Add($"cache-remove {Short(path)}");
+
+        /// <summary>The focused and selected states sent, in order.</summary>
+        public List<string> States() => Lines.Where(l => l.StartsWith("state-changed:focused", StringComparison.Ordinal)
+            || l.StartsWith("state-changed:selected", StringComparison.Ordinal)).ToList();
+    }
+
+    private sealed class AtSpiRig : IDisposable
+    {
+        public HeadlessSession Session { get; } = HeadlessSession.Create(600, 500);
+        public readonly Signals Signals = new();
+        public LinuxAccessibilityBridge Bridge { get; }
+
+        public AtSpiRig()
+        {
+            Bridge = new LinuxAccessibilityBridge(Signals);
+            Session.Window.InstallAccessibilityBridge(new Active(Bridge));
+        }
+
+        /// <summary>The object of <paramref name="id"/> as a client finds it by its path: a node's, or
+        /// an item served on demand.</summary>
+        public AtSpiAccessible Object(ElementId id) => ((IAtSpiTree)Bridge).Find(AtSpiAccessible.PathFor(id))!;
+
+        public void Dispose()
+        {
+            Bridge.Dispose();
+            Session.Dispose();
+        }
+    }
+
+    private static string Focused(ElementId id, bool on) => $"state-changed:focused {id.Value} {(on ? 1 : 0)}";
+    private static string Selected(ElementId id, bool on) => $"state-changed:selected {id.Value} {(on ? 1 : 0)}";
+
+    [Theory]
+    [InlineData(40)]
+    [InlineData(AccessibilityTreeBuilder.MaxEagerVirtualItems + 500)]
+    public void ATSPI_AList_TheFocusedStateGoesToItsCurrentItem_AndMovesWithIt(int count)
+    {
+        using var rig = new AtSpiRig();
+        var (before, list, after, root) = FocusableList(count, selected: 3);
+        rig.Session.Window.SetRoot(root);
+        Settle(rig.Session);
+        before.Focus();
+        rig.Session.PumpFrame();
+        rig.Signals.Lines.Clear();
+
+        rig.Session.Window.PressKey(KeyCode.Tab);
+        rig.Session.PumpFrame();
+        Assert.Equal([Focused(before.Id, false), Focused(Item(list, 3), true)], rig.Signals.States());
+        Assert.True(rig.Object(Item(list, 3)).Focused);
+        Assert.True(rig.Object(Item(list, 3)).Focusable);
+        Assert.False(rig.Object(list.Id).Focused);
+
+        rig.Signals.Lines.Clear();
+        list.SelectedIndex = 4;
+        rig.Session.PumpFrame();
+        Assert.Equal(
+        [
+            Selected(Item(list, 3), false), Selected(Item(list, 4), true),
+            Focused(Item(list, 3), false), Focused(Item(list, 4), true),
+        ], rig.Signals.States());
+        Assert.False(rig.Object(Item(list, 3)).Focused);
+        Assert.True(rig.Object(Item(list, 4)).Focused);
+
+        // A rebuild for something else keeps the states: the tree marks the list's node focused.
+        rig.Signals.Lines.Clear();
+        after.AccessibleName = "After, renamed";
+        rig.Session.PumpFrame();
+        Assert.DoesNotContain(rig.Signals.Lines, l => l.StartsWith("state-changed:focused", StringComparison.Ordinal));
+        Assert.True(rig.Object(Item(list, 4)).Focused);
+        Assert.False(rig.Object(list.Id).Focused);
+
+        rig.Signals.Lines.Clear();
+        rig.Session.Window.PressKey(KeyCode.Tab);
+        rig.Session.PumpFrame();
+        Assert.Equal([Focused(Item(list, 4), false), Focused(after.Id, true)], rig.Signals.States());
+        Assert.False(rig.Object(Item(list, 4)).Focused);
+    }
+
+    [Fact]
+    public void ATSPI_AContextMenu_TheFocusedStateWalksItsEntries_AndGoesBackToTheOpener()
+    {
+        using var rig = new AtSpiRig();
+        var (opener, root) = Opener();
+        rig.Session.Window.SetRoot(root);
+        Settle(rig.Session);
+        opener.Focus();
+        rig.Session.PumpFrame();
+        rig.Signals.Lines.Clear();
+
+        rig.Session.Window.Window.OpenMenu([Entry("Copy hash"), Entry("Revert")], new Point(20, 40), new MenuRequest { HighlightFirst = true });
+        rig.Session.PumpFrame();
+        var menu = Walk(rig.Session.Window.AccessibilityTree).First(n => n.Role == AccessibilityRole.Menu);
+        Assert.Equal([Focused(opener.Id, false), Focused(Item(menu, 0), true)], rig.Signals.States());
+
+        rig.Signals.Lines.Clear();
+        rig.Session.Window.PressKey(KeyCode.Down);
+        rig.Session.PumpFrame();
+        Assert.Equal(
+        [
+            Selected(Item(menu, 0), false), Selected(Item(menu, 1), true),
+            Focused(Item(menu, 0), false), Focused(Item(menu, 1), true),
+        ], rig.Signals.States());
+
+        // Its items' ids before it closes: the menu gives its slot back as it goes.
+        var entry = Item(menu, 1);
+        rig.Signals.Lines.Clear();
+        rig.Session.Window.PressKey(KeyCode.Escape);
+        rig.Session.PumpFrame();
+        Assert.Equal([Focused(entry, false), Focused(opener.Id, true)],
+            rig.Signals.Lines.Where(l => l.StartsWith("state-changed:focused", StringComparison.Ordinal)));
     }
 
     [WindowsFact]

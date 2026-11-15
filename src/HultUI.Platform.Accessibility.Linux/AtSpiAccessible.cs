@@ -372,7 +372,9 @@ internal sealed class AtSpiAccessible
             Value = node.TextSource is null ? node.Value : null,
             // Its box and offscreen state, read from it; AT-SPI reports device pixels (Scale).
             Node = node,
-            Focusable = node.IsFocusable,
+            // A list's or a menu's item can have the reader's focus (its container's current item), as
+            // a GTK list's row can.
+            Focusable = node.IsFocusable || VirtualItemId.IsItem(node.ElementId),
             Focused = node.IsFocused,
             Enabled = node.IsEnabled,
             Selectable = SelectableOf(node),
@@ -414,7 +416,8 @@ internal sealed class AtSpiAccessible
         if (!string.Equals(Value, value)) Value = value;
         var range = node.Range;
         if (Range != range) Range = range;
-        if (_focusable != node.IsFocusable) Focusable = node.IsFocusable;
+        bool focusable = node.IsFocusable || VirtualItemId.IsItem(node.ElementId);
+        if (_focusable != focusable) Focusable = focusable;
         if (_focused != node.IsFocused) Focused = node.IsFocused;
         if (_enabled != node.IsEnabled) Enabled = node.IsEnabled;
         bool selectable = SelectableOf(node);

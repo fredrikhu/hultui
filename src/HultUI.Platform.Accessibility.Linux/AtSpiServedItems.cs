@@ -127,6 +127,8 @@ internal sealed class AtSpiServedItems
             ItemOf = this,
             ItemIndex = index,
             Selectable = true,
+            // The list's current item has the reader's focus while the list holds it.
+            Focusable = true,
             Scale = list.Scale,
             ParentPath = list.Path,
             IndexInParent = index,
