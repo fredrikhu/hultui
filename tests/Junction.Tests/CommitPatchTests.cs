@@ -142,6 +142,38 @@ public class CommitPatchTests
     }
 
     /// <summary>
+    /// Once another commit's detail lands, the one the Commit tab showed can be collected. The pane kept the last
+    /// diff it drew together with its detail's whole <c>DiffByPath</c>, and held it until the tab's next build: back
+    /// in History after a walk through a plan merge's files, its parsed diffs (6–12 MB) stayed for as long as the
+    /// tab stayed closed.
+    /// </summary>
+    [Fact]
+    public void AnotherCommitsDetail_LetsTheShownOneGo()
+    {
+        Hosted(64, (session, app) =>
+        {
+            OpenCommit(session, app);
+            session.PumpFrames(5);
+            var shown = Weakly(Diffs(app));
+
+            session.Window.PressKey(KeyCode.Digit2);   // History
+            session.PumpFrame();
+            string parent = GitProcess.Run((string)Field(app, "_activeRepoPath")!, "rev-parse", "HEAD~1").Stdout.Trim();
+            typeof(JunctionApp).GetMethod("SetCommitSelection", All)!.Invoke(app, [parent]);
+            typeof(JunctionApp).GetMethod("Rerender", All, Type.EmptyTypes)!.Invoke(app, null);
+            session.PumpUntil(() => Property(Detail(app), "Commit") is GitCommit c && c.Hash == parent, TimeSpan.FromSeconds(30));
+            session.PumpFrames(3);
+
+            GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+            Assert.False(shown.IsAlive, "the Commit tab's last detail is still held");
+        });
+    }
+
+    /// <summary>A weak reference made in a frame of its own, so no local keeps the object alive.</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static WeakReference Weakly(object o) => new(o);
+
+    /// <summary>
     /// A walk through the files with the arrow keys: the file beside the open one is read ahead, so each key
     /// draws the new file's diff on its own frame — no "Loading…", no earlier diff — and nothing is read on
     /// a key. Going back reads nothing either.

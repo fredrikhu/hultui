@@ -1581,6 +1581,22 @@ The discipline in one line: **`Refresh()` bumps the generation (data changed →
 
 Because `Build()` renders from the cached `Value`, you can keep the previous result on screen while the next one loads instead of blanking to a spinner — gate the placeholder on "have we ever loaded anything" rather than "is a load in flight." Since the result is applied in a single batch, the view swaps from old to new in one frame with no empty state in between.
 
+### What a view kept on screen goes when its owner is replaced
+
+A field that keeps the last thing a view showed, so that it can stay on screen while the next loads, keeps
+everything that thing reaches, not only what was drawn, and nothing on screen shows it once the view is
+gone. Junction's Commit tab reads a long commit a file at a time and keeps the last diff it drew while the
+next file's patch is on its way. The field held that diff with its owner, the commit's detail, whose map
+holds every file's diff read so far, and only the tab's next build set it again: after a walk through a plan
+merge's files and back in History, the merge's parsed diffs stayed on the heap for as long as the tab
+stayed closed. The kept diff is only ever shown with the same detail, so it now goes when another detail
+lands, in the load's `onLoaded`, not in a build: a view that is not on screen does not build.
+
+Round 15 of plan 17, a real window (NativeAOT, alternated ×2): a 60-key History walk, 40 files of a
+314-file plan merge in the Commit tab, then History on a small commit and 10 rests. The heap after a full
+GC in History was 28.1 / 32.2 MB, and 6.0 MB of it went only when the Commit tab was shown again; with
+the field let go 25.3 / 25.5 MB, and showing the tab again freed nothing.
+
 ### Move to the next screen with its data
 
 Keeping the previous rows on screen while the next ones load is half of it: what names them has

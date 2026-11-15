@@ -358,7 +358,10 @@ public partial class JunctionApp
 
     private int _fileReadAheads;
 
-    /// <summary>The last diff the pane drew with its own patch, and the detail it belongs to.</summary>
+    /// <summary>The last diff the pane drew with its own patch, and the detail it belongs to. Dropped when a
+    /// new detail lands (<see cref="PickInitialFile"/>): the owner is the detail's whole <c>DiffByPath</c>, and
+    /// kept until the Commit tab's next build it held a plan merge's parsed diffs in History, 6–12 MB, for as
+    /// long as the tab stayed closed.</summary>
     private (object? Owner, string? Path, GitFileDiff? Diff) _commitPaneShown;
 
     /// <summary>
@@ -481,6 +484,9 @@ public partial class JunctionApp
 
     private void PickInitialFile(CommitDetail detail)
     {
+        // A new detail: the diff the pane kept for the last one is never shown again (CommitPane keeps only its
+        // own detail's), and through its owner it held all of that detail's diffs read so far.
+        if (!ReferenceEquals(_commitPaneShown.Owner, detail.DiffByPath)) _commitPaneShown = default;
         if (detail.Files.Count == 0) { _selectedFilePath = null; _commitCursorPath = null; return; }
         if (_selectedFilePath == null || detail.Files.All(f => f.Path != _selectedFilePath))
         {
