@@ -1078,8 +1078,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             foreach (var (target, node) in remade)
                 target.Node.Parent!.ReplaceChild(_a11yPaths[target.PathStart + target.PathLength - 1], node);
             foreach (var (node, count, selected) in served) node.ReplaceServedItems(count, selected);
-            // No diff tells a current item: the bridge reads it again at the phase's end, and after
-            // the patch below.
+            // No diff tells a current item: the bridge reads it again at the phase's end
+            // (NotifyChangesApplied), after the patch below.
             foreach (var (node, current) in currents) node.ReplaceCurrentItem(current);
             if (currents.Count > 0) _a11yCurrentMoved = true;
             if (changes.Count == 0) return true;   // moved back: nothing to tell
