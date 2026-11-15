@@ -502,12 +502,15 @@ public partial class CommanderApp : Component, IDisposable
     /// after every key one ran for) — except for a plain navigation key whose navigation waits
     /// for its rows. That key changes nothing on screen until they land, and the build they land
     /// with draws the frame: drawn at the key as well, a navigation drew the folder it was leaving
-    /// once more, the same pixels.</summary>
+    /// once more, the same pixels. And except for a modifier key on its own (Shift, Ctrl, Alt) and
+    /// its auto-repeats, which change nothing on screen: each press drew a frame of the same pixels,
+    /// and a Shift or Ctrl held for a range or Ctrl+click about 30 a second (plan 17 round 15).</summary>
     private void OnKeyDown(KeyDownEvent e)
     {
         int waited = _navsWaited;
         _plainNavKey = false;
         HandleKeyDown(e);
+        if (KeyChord.IsModifierKey(e.Key)) return;
         if (!(_plainNavKey && _navsWaited != waited)) Mount().MarkPaintDirty();
     }
 

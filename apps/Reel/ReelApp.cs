@@ -86,7 +86,15 @@ public sealed partial class ReelApp : Component, IDisposable
         _settings = settings ?? new ReelSettings();
         _backends = backends;
 
-        Mount().On<KeyDownEvent>(OnKey);
+        // Passive, and it asks for the frame an ordinary handler's key gets (a handler may change
+        // something without marking it), except for a modifier key on its own (Shift, Ctrl, Alt)
+        // and its auto-repeats, which change nothing on screen: each drew a frame of the same
+        // pixels, and a held Shift about 30 a second (plan 17 round 15).
+        Mount().OnPassive<KeyDownEvent>(e =>
+        {
+            OnKey(e);
+            if (!KeyChord.IsModifierKey(e.Key)) Mount().MarkPaintDirty();
+        });
     }
 
     /// <summary>The file on screen, or null when nothing is open.</summary>

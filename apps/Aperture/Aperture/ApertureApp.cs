@@ -132,7 +132,17 @@ public sealed partial class ApertureApp : Component, IDisposable
         _window.Resized += OnWindowResize;
 
         // Global keys land on the host when nothing is focused.
-        Mount().On<KeyDownEvent>(HandleKeyDown);
+        Mount().OnPassive<KeyDownEvent>(OnRootKeyDown);
+    }
+
+    /// <summary>The root hears every key passively and asks for the frame an ordinary handler's key
+    /// gets (a handler may change something without marking it), except for a modifier key on its
+    /// own (Shift, Ctrl, Alt) and its auto-repeats, which change nothing on screen: each drew a frame
+    /// of the same pixels, and a held Shift about 30 a second (plan 17 round 15).</summary>
+    private void OnRootKeyDown(KeyDownEvent e)
+    {
+        HandleKeyDown(e);
+        if (!KeyChord.IsModifierKey(e.Key)) Mount().MarkPaintDirty();
     }
 
     /// <summary>The signed-in server, for tests and the views.</summary>

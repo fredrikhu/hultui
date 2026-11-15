@@ -1597,7 +1597,8 @@ Two traps on the way:
 - An ordinary handler that ran draws the window, since it may have changed something without
   marking it: a key whose only effect is a load started draws what is already on screen. Vesper's
   root hears keys passively (`OnPassive`) and asks for that frame itself (`MarkPaintDirty`), but
-  for a navigation that waits for its rows.
+  for a navigation that waits for its rows and for a modifier key on its own (ELEMENTS.md, "A
+  root key handler").
 
 A navigation (round 14, NativeAOT; Enter, Backspace, Alt+← and Alt+→ in turn): in a real window
 1.90 → 1.00 frames, 0.90 → 0 frames of one folder's name over another's rows, 2 → 1 window builds

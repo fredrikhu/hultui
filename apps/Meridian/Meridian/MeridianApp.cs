@@ -226,7 +226,18 @@ public partial class MeridianApp : Component, IDisposable
 
         // Global keys land on the host when nothing is focused. Materialise the
         // host so the handler is wired.
-        Mount().On<KeyDownEvent>(HandleKeyDown);
+        Mount().OnPassive<KeyDownEvent>(OnRootKeyDown);
+    }
+
+    /// <summary>The root hears every key passively and asks for the frame an ordinary handler's key
+    /// gets (a handler may change something without marking it), except for a modifier key on its
+    /// own (Shift, Ctrl, Alt) and its auto-repeats, which change nothing on screen: each drew a frame
+    /// of the same pixels, a shortcut two frames, and a held Shift about 30 a second (plan 17
+    /// round 15).</summary>
+    private void OnRootKeyDown(KeyDownEvent e)
+    {
+        HandleKeyDown(e);
+        if (!KeyChord.IsModifierKey(e.Key)) Mount().MarkPaintDirty();
     }
 
 

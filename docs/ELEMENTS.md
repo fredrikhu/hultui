@@ -216,6 +216,24 @@ ordinary one draws a frame for every event it hears and ignores. Junction's rows
 As ordinary handlers, every left press on a row drew the window again, the same pixels, before
 the click's frame: 10 History row clicks drew 20 frames in a real window, 10 since plan 17's
 round 15.
+**A root key handler** — an app's handler for its global keys, on its root — hears every key,
+Shift, Ctrl and Alt on their own and their auto-repeats included. As an ordinary handler it
+draws a frame for each, and those show nothing new: a shortcut such as Ctrl+S drew two frames,
+one of them the same pixels, a capital letter one more, and a Shift or Ctrl held for a range or
+a multi-select about 30 a second after the repeat delay. Register it passively and ask for the
+frame an ordinary handler gets for every other key, as all five apps do since plan 17's
+round 15:
+
+```csharp
+Mount().OnPassive<KeyDownEvent>(e =>
+{
+    HandleKeyDown(e);
+    if (!KeyChord.IsModifierKey(e.Key)) Mount().MarkPaintDirty();
+});
+```
+
+A handler that shows something for a modifier on its own (a hint while Alt is held) marks that
+itself. The chords still act and draw: the key that comes with the modifier is not a modifier.
 A callback a control calls
 (`OnChanged`, `LinkActivated`, a toast's action) is not a handler: it shares the frame the
 control's own change asks for, so one that changes something on screen while the control
