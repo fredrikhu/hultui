@@ -890,7 +890,9 @@ public partial class JunctionApp : Component, IDisposable
     /// screen shows now, as that build asked, so a save's colours are on their way while git
     /// still runs: left to the build that shows the new rows, the rows drew uncoloured and the
     /// colours a frame later. Not as the screen's, since the screen is not waiting for them yet
-    /// (a tokenize that landed before the rows would build the view for the diff it shows).</summary>
+    /// (a tokenize that landed before the rows would build the view for the diff it shows). A few
+    /// lines wider than that diff (<see cref="SaveAskMargin"/>): the rows that land are the diff after
+    /// the save, and a save that adds lines inside a hunk shows lines the diff before it did not.</summary>
     private void ReloadChangesView(string path)
     {
         EnsureChangesLoaded(path);
@@ -899,7 +901,8 @@ public partial class JunctionApp : Component, IDisposable
         if ((_hideDiff && !data.InSequencer) || _changeSelPath == null || _changeSelConflicted) return;
         var diffs = _changeSelStaged ? data.StagedDiffs : data.UnstagedDiffs;
         if (diffs.TryGetValue(_changeSelPath, out var diff) && diff.Hunks.Count > 0)
-            _ = HighlightFor(diff, _changeSelStaged ? ExternalDiffMode.Staged : ExternalDiffMode.Unstaged, null);
+            _ = HighlightFor(diff, _changeSelStaged ? ExternalDiffMode.Staged : ExternalDiffMode.Unstaged, null,
+                margin: SaveAskMargin);
     }
 
     /// <summary>Whether an event in <paramref name="path"/> re-keys a load of the view on

@@ -657,6 +657,59 @@ public class ChromePartTests
         });
     }
 
+    /// <summary>A save that adds lines inside the hunk on screen, or moves a hunk below the one it
+    /// edits, still tokenizes the file once and builds the view once: the colours the handler asks
+    /// for reach a few lines past the diff on screen, and so cover the rows that land. Asked for the
+    /// lines of the diff on screen alone, they did not cover the lines the save added: the build
+    /// that showed the new rows asked again, and the second tokenize's colours built the view again
+    /// (plan 17 round 15: a save that adds a line, 2 tokenizes and 2 builds, against 1 and 1 for one
+    /// that keeps the diff's lines).</summary>
+    [Fact]
+    public void ASaveThatAddsLinesInsideAHunk_TokenizesAndBuildsOnce()
+    {
+        Hosted(fx =>
+        {
+            string a = fx.A.Path;
+            var body = Enumerable.Range(1, 40).Select(i => $"    int f{i} = {i};").ToList();
+            void Save() => fx.A.Write("code.cs", "class A\n{\n" + string.Join("\n", body) + "\n}\n");
+            Save();
+            fx.A.Git("add", "-A");
+            fx.A.Git("commit", "-q", "-m", "code");
+            body[5] = "    int f6 = 60;";
+            body[30] = "    int f31 = 310;";
+            Save();
+            Switch(fx, KeyCode.Digit4);
+            fx.Session.PumpUntil(() => fx.App.HighlightsPending == 0 && fx.App.HighlightLinesTokenized > 0, Wait);
+            Settle(fx);
+            foreach (var w in ((System.Collections.IDictionary)typeof(JunctionApp)
+                         .GetField("_watchers", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(fx.App)!).Values)
+                ((IDisposable)w!).Dispose();
+            Settle(fx);
+
+            foreach (var (name, edit) in new (string, Action)[]
+                     {
+                         ("a line inside the second hunk", () => body.Insert(31, "    int added = 1;")),
+                         ("three lines inside the second hunk", () => body.InsertRange(32, ["    int b = 2;", "    int c = 3;", "    int d = 4;"])),
+                         ("a line inside the first hunk, which moves the second", () => body.Insert(6, "    int top = 0;")),
+                     })
+            {
+                edit();
+                Save();
+                int builds = fx.App.Builds, read = fx.App.HighlightsRead, posted = fx.App.HighlightsPosted, gen = DataGen(fx.App, a);
+                Invoke(fx.App, "OnWorkingTreeChange", a);
+                // The colours are on their way before git is: let them land first, as they do beside
+                // git's quarter of a second.
+                Assert.True(SpinWait.SpinUntil(() => fx.App.HighlightsPosted > posted, Wait), $"{name}: no tokenize ended");
+                fx.Session.PumpUntil(() => LoadedKey(fx.App, "_changesLoaders", a) is { } k
+                    && k.StartsWith($"{a}|{DataGen(fx.App, a)}|", StringComparison.Ordinal) && DataGen(fx.App, a) > gen
+                    && fx.App.HighlightsPending == 0, Wait);
+                Settle(fx);
+                Assert.True(read + 1 == fx.App.HighlightsRead, $"{name}: {fx.App.HighlightsRead - read} tokenizes");
+                Assert.True(builds + 1 == fx.App.Builds, $"{name}: {fx.App.Builds - builds} builds");
+            }
+        });
+    }
+
     /// <summary>A build asks for the summary of the repository on screen in many places; under a
     /// key that has not moved, none of them makes the load's key and callbacks again (plan 17
     /// round 13: 0.5 KB a build on History). A generation moving asks once.</summary>

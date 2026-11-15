@@ -1747,6 +1747,19 @@ on the UI thread headless and 177.3 → 137.1 KB in a real window; a C# file 3 �
 headless (the loads on the thread pool) and 375.1 → 149.3 KB in a real window. The last frame comes
 when it did, and is what a full build draws.
 
+A load started early has to cover what will land, not only what is on screen. The colours were
+asked for the lines of the diff on screen, and the rows that land are the diff after the save: a
+save that adds a line inside a hunk, joins a line to one or moves a later hunk shows lines that
+ask did not cover, so the build that showed them asked again, and the file was tokenized twice and
+the view built twice. The ask now reaches eight lines past both ends of every range the diff shows
+(`SaveAskMargin`): a hunk's three lines of context mean a one-line edit that joins it grows it by
+seven lines at most, and a paste of up to eight lines inside one is covered too. The tokenizer walks
+from the file's first line anyway, so the cost is eight lines at the end. Round 15: a save that adds
+a line inside the hunk 2 → 1 frames, builds and tokenizes, 490–552 → 298–309 KB on the UI thread
+headless (NativeAOT) and 309–358 → 187–208 KB in a real window, where it drew 3 frames and now 1; a
+save in place tokenizes eight lines more (3–5 % more bytes on the tokenizer's thread) and is
+otherwise as it was.
+
 ### The app's own change, heard again
 
 An app that watches what it also writes hears its own writes. Junction's actions (a checkout, a
