@@ -377,9 +377,38 @@ public partial class JunctionApp
         // measures left room for it: once a resize's build measured 400 wrapped rows just
         // before the frame (LeadWrappedDiffWidth), the frame laid the rows on screen out at zero
         // width again, 372 KB a step (plan 17 round 14). At the code width the measure is the
-        // layout the build made for the row's height.
-        if (_diffWrap) return label.FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(Math.Max(0, _diffCodeWidth + padX)));
+        // layout the build made for the row's height. A row kept over a width change is given the
+        // new basis (RebaseCodeLabels).
+        if (_diffWrap) return label.FlexGrow(1).FlexShrink(1).FlexBasis(CodeBasis(_diffCodeWidth, padX));
         return _diffPan.Cell(label.MaxLines(1).OverflowMode(TextOverflow.Clip).FlexGrow(1));
+    }
+
+    /// <summary>A wrapped code label's flex basis: the code width plus the label's padding.</summary>
+    private static Dimension CodeBasis(float codeWidth, float padX) => Dimension.Px(Math.Max(0, codeWidth + padX));
+
+    /// <summary>
+    /// Gives the wrapped code labels of the rows on screen, made at <paramref name="was"/>, the basis
+    /// <paramref name="now"/> a row made now gets (<see cref="DiffCodeCell"/>), so a kept row lays out
+    /// as a new one does.
+    /// </summary>
+    /// <remarks>
+    /// A kept row with its old basis is laid out at it and then grows or shrinks into the column, and
+    /// that is not the same: a shrinking item stops at its content's min-content width, so a line of
+    /// one unbreakable token stayed as wide as the old column in a narrowed one; and the label was
+    /// measured at the old width first, a text layout the build's heights had not just made, which a
+    /// split diff of long tokens laid out again on every step (plan 17 round 15: 465 → 779 KB a step).
+    /// A few elements a row; nothing is made (only the selectable labels, the code, have their flex style read).
+    /// </remarks>
+    private static void RebaseCodeLabels(Element e, Dimension was, Dimension now)
+    {
+        if (e is TextElement { Selectable: true } && e.Flex.FlexBasis == was)
+        {
+            e.Flex.FlexBasis = now;
+            e.MarkLayoutDirty();
+            return;
+        }
+        var children = e.Children;
+        for (int i = 0; i < children.Count; i++) RebaseCodeLabels(children[i], was, now);
     }
     // Review is the review's height version, so a card opening or a composer appearing
     // measures the rows again; -1 when no review is on.
@@ -543,9 +572,23 @@ public partial class JunctionApp
         if (_diffHeightShape != shape)
         {
             if (perRow) RebuildDiffHeights(rows, codeWidth); else _diffHeights = [];
+            // Wrapped and with no review, a width alone changes how tall the rows are and, but
+            // for its code labels' basis, nothing they show: a code label wraps into whatever
+            // column it is laid out in. The rows on screen are kept, their labels take the new
+            // basis, and the list gives them their new heights (plan 17 round 15: a resize step or
+            // a file list drag made every row on screen again, 279 → 153 KB a 4 px step).
+            bool widthOnly = _diffWrap && review is null && _diffHeightShape with { Width = shape.Item3 } == shape;
+            if (widthOnly && _diffBodyRef.Current is VirtualListElement<DiffRow> kept)
+            {
+                float pad = _diffSplit ? SplitCodePadX : UnifiedCodePadX;
+                var was = CodeBasis(_diffHeightShape.Width, pad);
+                var now = CodeBasis(codeWidth, pad);
+                var onScreen = kept.Children;
+                for (int i = 0; i < onScreen.Count; i++) RebaseCodeLabels(onScreen[i], was, now);
+            }
             // Not on the first build: there is nothing realized yet to throw away, and doing
             // it mid-build disturbs the rows the very first frame lays out.
-            if (_diffHeightShape.Rows >= 0 && _diffBodyRef.Current is VirtualListElement<DiffRow> mounted)
+            else if (_diffHeightShape.Rows >= 0 && _diffBodyRef.Current is VirtualListElement<DiffRow> mounted)
                 mounted.InvalidateRows();
             _diffHeightShape = shape;
         }

@@ -711,7 +711,12 @@ nothing: a height-only step then measures nothing at all. Vesper Commander's wra
 compare view built the whole window and made every row on screen again on each step until plan
 17 round 15 (`FitWrappedRowsInPlace`): 281 → 24 KB a 4 px step of the reader over a
 1,000-line file, 62 → 2 KB a height-only step, with byte-identical frames. Keep the check after
-the frame: a wrong lead still builds once, and that build keeps the rows too.
+the frame: a wrong lead still builds once, and that build keeps the rows too. A row that carries
+the width it was made at must be given the new one, or a kept row lays out unlike a new one:
+Junction's wrapped code labels have the code width as their flex basis, and with the old basis a
+shrinking label stops at its min-content width, so a line of one unbreakable token stayed as wide
+as the old column (`RebaseCodeLabels`, plan 17 round 15: 279 → 153 KB a 4 px step of a Commit
+view).
 
 ---
 
