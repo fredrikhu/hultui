@@ -18,7 +18,8 @@ static class Report
             if (g != group) { Console.WriteLine(); group = g; }
             string flag = r.UnrenderedSteps > 0 ? $"  ! {r.UnrenderedSteps}/{r.N} steps rendered nothing" : "";
             string figure = r.Figure is { } f ? $"  {f:0.0} {r.FigureUnit}" : "";
-            Console.WriteLine($"{r.Name,-44}{r.Elements,7}{r.MinMs,9:0.000}{r.MedianMs,9:0.000}{r.BuildMs,8:0.00}{r.StyleMs,8:0.00}{r.LayoutMs,8:0.00}{r.RenderMs,8:0.00}{r.OtherMs,8:0.00}{r.AllocKB,10:N0}{figure}{flag}");
+            string detail = r.Detail is { } d ? $" ({d})" : "";
+            Console.WriteLine($"{r.Name,-44}{r.Elements,7}{r.MinMs,9:0.000}{r.MedianMs,9:0.000}{r.BuildMs,8:0.00}{r.StyleMs,8:0.00}{r.LayoutMs,8:0.00}{r.RenderMs,8:0.00}{r.OtherMs,8:0.00}{r.AllocKB,10:N0}{figure}{detail}{flag}");
         }
         Console.WriteLine();
     }
@@ -71,6 +72,7 @@ static class Report
                 w.WriteNumber("figure", Math.Round(figure, 2));
                 w.WriteString("figureUnit", r.FigureUnit ?? "");
             }
+            if (r.Detail is { } detail) w.WriteString("detail", detail);
             w.WriteEndObject();
         }
         w.WriteEndArray();
@@ -96,7 +98,8 @@ static class Report
                 e.GetProperty("otherMs").GetDouble(), e.GetProperty("allocKB").GetDouble(),
                 e.GetProperty("unrenderedSteps").GetInt32(),
                 e.TryGetProperty("figure", out var figure) ? figure.GetDouble() : null,
-                e.TryGetProperty("figureUnit", out var unit) ? unit.GetString() : null);
+                e.TryGetProperty("figureUnit", out var unit) ? unit.GetString() : null,
+                e.TryGetProperty("detail", out var detail) ? detail.GetString() : null);
             results[r.Name] = r;
             order.Add(r.Name);
         }
@@ -140,6 +143,8 @@ static class Report
             if (verdict == "  faster") faster++;
             string figures = x.Figure is { } fx && y.Figure is { } fy ? $"  {fx:0.0} → {fy:0.0} {y.FigureUnit}" : "";
             Console.WriteLine($"{name,-44}{x.MinMs,10:0.000}{y.MinMs,10:0.000}{Pct(dMin),8}{x.MedianMs,10:0.000}{y.MedianMs,10:0.000}{Pct(dMed),8}{Pct(dAlloc),9}{verdict}{figures}");
+            if (x.Detail is not null || y.Detail is not null)
+                Console.WriteLine($"{"",-44}  {x.Detail ?? "—"}  →  {y.Detail ?? "—"}");
         }
         Console.WriteLine();
         Console.WriteLine($"{slower} slower, {faster} faster (both min and median past ±{threshold:P0}).");
