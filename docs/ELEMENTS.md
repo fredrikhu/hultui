@@ -75,6 +75,13 @@ These propagate to child elements unless overridden.
   drawing, return a `FontMetrics`: the ascent, descent and line gap, `LineHeight`, the
   `CharacterWidth` (the advance of `0`, which in a monospace face is the cell width), whether the
   face is fixed-pitch, the face actually used, and where an underline and a strikeout go.
+- **Wrapped heights at each width of a resize.** `TextMeasure.MeasureWrapped(text, style, width)` is
+  cheap to ask again at a new width while the text keeps its lines: a wrapped layout is kept for
+  every width that breaks it into the same lines, so a list that measures every row's height at
+  each step of a resize lays out only the rows whose lines change (Vesper Commander's reader over a
+  602,000-character file: 2.2 MB to 44 KB a 1 px step). That holds for plain text clipped; text with
+  bold, italic or resized spans, text that can need bidirectional layout (right-to-left scripts,
+  emoji, combining marks) and `TextOverflow.Ellipsis` are laid out again at each width.
 - **Glyph coverage.** `HasGlyph(style, codePoint)` says whether the face itself has a glyph, not a
   fallback font. A character grid draws a missing one on its own, since a fallback glyph's advance
   need not be the cell's.

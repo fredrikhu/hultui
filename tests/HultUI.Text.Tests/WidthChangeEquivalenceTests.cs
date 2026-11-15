@@ -251,7 +251,7 @@ public class WidthChangeEquivalenceTests
     [Fact]
     public void Rewrapping_ItemizesOnlyTheLinesItKeeps_AtEachNewWidth()
     {
-        var reuse = Counted(reuse: true, out var fonts);
+        var reuse = Counted(reuse: true, out var fonts, keepsWrapRanges: false);
         var reference = Counted(reuse: false, out var referenceFonts);
         const string text = "pretty red table chair house keyboard pretty red table chair house keyboard";
 
@@ -314,10 +314,11 @@ public class WidthChangeEquivalenceTests
         }
     }
 
-    private static TextPipeline Counted(bool reuse, out TwoFonts fonts)
+    // keepsWrapRanges false: every new width breaks the text again, as what a break does is counted.
+    private static TextPipeline Counted(bool reuse, out TwoFonts fonts, bool keepsWrapRanges = true)
     {
         fonts = new TwoFonts(negativeDescent: false);
-        return new TextPipeline(fonts, new ContextShaper()) { ReuseAcrossWidths = reuse };
+        return new TextPipeline(fonts, new ContextShaper()) { ReuseAcrossWidths = reuse, KeepsWrapRanges = keepsWrapRanges };
     }
 
     /// <summary>

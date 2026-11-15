@@ -357,7 +357,9 @@ internal sealed class LruCache<TKey, TValue> where TKey : notnull
 
     /// <summary>Puts <paramref name="value"/> under <paramref name="key"/>, replacing what was
     /// there, as the most recently used entry. <paramref name="weight"/> counts towards the
-    /// cache's weight bound (the caller's estimate of the bytes the entry keeps alive).</summary>
+    /// cache's weight bound (the caller's estimate of the bytes the entry keeps alive). An entry
+    /// replaced gives its node to the new one: a cache whose keys are put again and again (a
+    /// paragraph's wrap at each new range of widths) does not allocate for it.</summary>
     public void Put(TKey key, TValue value, int weight = 0)
     {
         weight = Counted(weight);
@@ -366,6 +368,7 @@ internal sealed class LruCache<TKey, TValue> where TKey : notnull
             _order.Remove(existing);
             _map.Remove(key);
             _weight -= existing.Value.Weight;
+            Keep(existing);
         }
 
         _map[key] = FirstNode(key, value, weight);
