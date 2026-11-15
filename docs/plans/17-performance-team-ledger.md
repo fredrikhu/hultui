@@ -5,7 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 15
-- **Phase:** build — round 15, step 8 next (step 1 done: 6c7a6cab, docs only; step 2 landed b258f4fb..ff6922f0; step 3
+- **Phase:** release — round 15's full suite passed at 6cf0f79b (Windows 30 projects, Fedora the slnf plus Junction,
+  Meridian, Aperture and Reel, docfx 0 warnings); merge into main, push, wait for CI. Build record: (step 1 done: 6c7a6cab, docs only; step 2 landed b258f4fb..ff6922f0; step 3
   fdd795bd..bc2426aa; a Fedora test race fixed 17e13e63; step 4 a9321aac..38629c1e; step 5 dae30194..49c7b384; step 6
   29f1ddc0..2d5d96ee; step 7 52852f6e, 83034345; step 8 eb68bbca..da63c3d0; step 9 9fcc1397; ReviewTests races fixed
   1d852da7, a32c8b9f, 37b9e96b; step 10 c6a19b06, 870a6fc7). The build order is done: the full suite runs
@@ -1206,3 +1207,9 @@ From 2026-11-13 (round 14's survey); earlier entries are in the archive ([to 202
   frame by ~96 ms in a real window) and said "Commit it": History's rest warms the colours only once the Commit tab was
   opened (History walk −25…−27 % all-thread bytes at 250 ms, −89…−91 % at 400 ms). Round 15's build order is done.
   Next: the full suite (Windows, Fedora with the four app projects, docfx), then release.
+- 2026-11-15: round 15's full suite at 6cf0f79b, 19:40–19:56: Windows `HultUI.slnx` 30 projects, 0 failures (Junction
+  1,160 in 7 m 20 s; the whole run 8.5 min); Fedora the slnf 22 projects (Headless 1,540, Vesper 949) and, each in a
+  private D-Bus session with an unlocked keyring, Junction 1,160, Meridian 684, Aperture 385, Reel 52 — the first round
+  whose Fedora run covers the four apps; docfx 0 warnings. origin/main 5aa1d25b unmoved (in the branch). Phase release.
+  Meanwhile the user asked for the screen-reader variant builds (today / items200 / gate) for questions 50 and 64: an
+  expert 7 agent builds them in its own worktree, never committed, into `sr-variants\` in this session's scratchpad.
