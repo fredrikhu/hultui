@@ -444,6 +444,15 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     // ──── Scroll into view ────
 
     /// <summary>
+    /// How far out of the viewport, in layout units, a band <see cref="ScrollRangeIntoView"/> is
+    /// asked for may be and still count as in view. A reveal asked before the layout and checked
+    /// after it (Junction's caret, plan 17 round 15) reads the viewport of two layouts, and the
+    /// same box can lay out 711 high in one and 711.00006 in the next: the check moved the content
+    /// by the difference and the window drew a second frame of the same pixels.
+    /// </summary>
+    private const float RevealSlack = 0.01f;
+
+    /// <summary>
     /// Scrolls the minimum distance needed to bring the vertical band
     /// <c>[top, top + height]</c> fully into the viewport, and no further. A no-op
     /// when the band is already visible. Coordinates are in this scroll's own
@@ -471,9 +480,11 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         float bottom = top + height;
         // Layout is unscrolled, so the band's coordinates don't move as we scroll;
         // only the [cur, cur + viewportHeight] window does. Reveal the nearer edge.
-        // (The setter clamps, so an over-shoot near the ends is corrected.)
-        if (top < cur) ScrollOffsetY = top;
-        else if (bottom > cur + viewportHeight) ScrollOffsetY = bottom - viewportHeight;
+        // (The setter clamps, so an over-shoot near the ends is corrected.) A band out by
+        // less than RevealSlack is in view: that is the rounding of two layouts' sums, and
+        // moving by it drew another frame of the same pixels.
+        if (top < cur - RevealSlack) ScrollOffsetY = top;
+        else if (bottom > cur + viewportHeight + RevealSlack) ScrollOffsetY = bottom - viewportHeight;
 
         // A sticky header held at the top would now cover the band's top — a row revealed by
         // arrowing up would land under its own section's header. Scroll back by as much.

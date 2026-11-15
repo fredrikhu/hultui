@@ -202,6 +202,50 @@ public class ChangeTreeTests
         }
     }
 
+    /// <summary>A key that moves the caret past the edge of the Commit view's file list, or the
+    /// Changes view's, draws one frame, and that frame shows the caret's row: the list scrolls
+    /// before the layout. It scrolled only after the frame, which drew the key's frame with the
+    /// row outside the list and then a second frame to bring it in (plan 17 round 15: a real
+    /// window, 10 keys at the edge 43 → 30 frames).</summary>
+    [Fact]
+    public void AKeyPastTheListsEdge_DrawsOneFrame_WithTheCaretInView()
+    {
+        Hosted(repo =>
+        {
+            for (int i = 0; i < 60; i++) repo.Write($"notes/n{i:000}.txt", $"{i}\n");
+            repo.Git("add", "-A");
+            repo.Git("commit", "-q", "-m", "sixty notes");
+            for (int i = 0; i < 60; i++) repo.Write($"notes/n{i:000}.txt", $"{i} changed\n");
+        }, (repo, session, app) =>
+        {
+            void Settle()
+            {
+                for (int quiet = 0, guard = 0; quiet < 20 && guard < 2000; guard++)
+                    quiet = session.PumpFrame() ? 0 : quiet + 1;
+            }
+            void Walk(string view, Func<ScrollViewElement> list, int keys)
+            {
+                Settle();
+                float start = list().ScrollOffsetY;
+                for (int k = 0; k < keys; k++)
+                {
+                    session.Window.PressKey(KeyCode.Down);
+                    int drawn = 0;
+                    for (int f = 0; f < 6; f++) if (session.PumpFrame()) drawn++;
+                    Assert.True(drawn == 1, $"{view}, key {k + 1}: {drawn} frames");
+                }
+                Assert.True(list().ScrollOffsetY > start + 100f, $"{view}: the list stayed at {list().ScrollOffsetY}");
+            }
+
+            Assert.True(OpenCommit(session, app).Count > 50);
+            Walk("Commit", () => TreeList(app), 50);
+
+            OpenChanges(session, app);
+            var changes = Field(app, "_changeScrollRef")!;
+            Walk("Changes", () => (ScrollViewElement)changes.GetType().GetProperty("Current")!.GetValue(changes)!, 50);
+        });
+    }
+
     // ── The Changes view's lists ─────────────────────────────────────────
 
     [Fact]

@@ -12,6 +12,10 @@ public sealed class TextPipeline
     private readonly ITextShaper _shaper;
     // Fully laid-out results, keyed on width (used only when the text must wrap).
     private readonly LruCache<MeasurementKey, TextLayout> _cache = new(capacity: 2048, maxWeight: LayoutCacheBytes);
+    // Wrapped plain layouts keyed without their width, each with the widths that break the text into
+    // the same lines (WrapRange, below).
+    private readonly LruCache<WrapKey, WrapRange> _wrapRanges = new(capacity: WrapRangeEntries,
+        maxWeight: WrapRangeBytes);
     // Width-independent shaping, so the same string measured at different
     // available widths is shaped once. Covers the common single-line case fully.
     // Sized to hold the working set of a large list laid out in one frame (the
@@ -67,17 +71,26 @@ public sealed class TextPipeline
     // logical px ~10,000 and ~5 MB; 8,192 entries and 4 MB made every frame of a drag over them
     // shape the whole document again (plan 17, round 14). Ordinary words fill ~2 MB. The width
     // cache holds the distinct lines of a 19,000-line JSON response (~7,000 of them, ~1.8 MB)
-    // with room for the next one's.
+    // with room for the next one's. The wrap ranges hold a wrapped layout of each paragraph a view
+    // measures again at every width of a drag: walked in the same order each time, paragraphs that
+    // outgrow them are all let go before they are asked for again. So they hold the largest real
+    // document here, the 602,000-character ledger archive in Vesper Commander's wrapped reader: 403
+    // layouts and 5.8 MB as counted at 1,440 px, ~1,900 and 10.4 MB down at 724 px. What a paragraph
+    // not drawn keeps is far less than it counts: its lines are measured and not shaped, and LayoutBytes
+    // counts them as drawn.
     internal const long ShapeCacheBytes = 8L << 20;
     internal const int WordCacheEntries = 32768;
     internal const long WordCacheBytes = 16L << 20;
     internal const long LayoutCacheBytes = 4L << 20;
     internal const long WidthCacheBytes = 4L << 20;
+    internal const int WrapRangeEntries = 4096;
+    internal const long WrapRangeBytes = 16L << 20;
 
     // What each holds now, for the tests that hold them to their bounds.
     internal (int Entries, long Bytes) ShapeCacheUse => (_shapeCache.Count, _shapeCache.Weight);
     internal (int Entries, long Bytes) WordCacheUse => (_wordShapeCache.Count, _wordShapeCache.Weight);
     internal (int Entries, long Bytes) LayoutCacheUse => (_cache.Count, _cache.Weight);
+    internal (int Entries, long Bytes) WrapRangeUse => (_wrapRanges.Count, _wrapRanges.Weight);
     internal (int Entries, long Bytes) WidthCacheUse => _widths is { } w ? (w.Cache.Count, w.Cache.Weight) : (0, 0);
 
     // Roughly the bytes a cached result keeps alive: object headers and fields, the key's
@@ -254,6 +267,7 @@ public sealed class TextPipeline
             if (_culture is not null)
             {
                 _cache.Clear();
+                _wrapRanges.Clear();
                 _shapeCache.Clear();
                 _widths?.Cache.Clear();
                 _minContentCache.Clear();
@@ -460,8 +474,15 @@ public sealed class TextPipeline
 
         var shapeKey = new ShapeKey(text, style.FontFamily, style.FontSize, style.FontWeight,
             style.FontSlant, style.LineHeight, style.LetterSpacing);
+        WrapKey wrapKey = default;   // made by the first ask (KeptWrap), for the put after a miss
+        bool rangeAsked = false;
         if (!_shapeCache.TryGet(shapeKey, out var shaped))
         {
+            // A wrap kept for this width needs no shaping (WrapRange): a paragraph whose shaping the
+            // cache has let go is not shaped again to be broken into the lines it was last broken into.
+            if (KeptWrap(text, style, maxWidth, maxLines, overflow, ref wrapKey) is { } keptBeforeShaping)
+                return keptBeforeShaping;
+            rangeAsked = true;
             shaped = ComputeShaping(text, style);
             _shapeCache.Put(shapeKey, shaped, ShapedBytes(text, shaped));
         }
@@ -475,6 +496,12 @@ public sealed class TextPipeline
             return shaped.SingleLine!;
         }
 
+        // Text that wraps: the layout kept for the widths this one is in. (One clipped line without
+        // newlines is a cut at a character, kept by its width only.)
+        if (!rangeAsked && !(maxLines == 1 && !shaped.HasNewline)
+            && KeptWrap(text, style, maxWidth, maxLines, overflow, ref wrapKey) is { } kept)
+            return kept;
+
         // Explicit newlines or overflow: line breaking depends on the width, so
         // fall back to the width-keyed cache. Overflow is part of the key because
         // Ellipsis rewrites the truncated line, producing a different layout.
@@ -484,6 +511,7 @@ public sealed class TextPipeline
             return cached;
 
         TextLayout layout;
+        float fitsFrom = float.NaN, fitsBelow = float.NaN;
         if (maxLines == 1 && overflow == TextOverflow.Clip && !shaped.HasNewline)
         {
             // One clipped line is the longest prefix that fits, cut at a character.
@@ -501,9 +529,88 @@ public sealed class TextPipeline
             layout = oneLine;
         }
         else
-            layout = ComputeWrapped(text, style, maxWidth, maxLines, overflow, shaped);
-        _cache.Put(key, layout, LayoutBytes(text, layout));
+            layout = ComputeWrapped(text, style, maxWidth, maxLines, overflow, shaped, out fitsFrom, out fitsBelow);
+        int bytes = LayoutBytes(text, layout);
+        _cache.Put(key, layout, bytes);
+        // The widths the break pass's decisions hold for; below the text's own width only, as from
+        // there it is one line. NaN (from a NaN width or one not laid out by the break pass) keeps nothing.
+        if (!shaped.HasNewline)
+            fitsBelow = Math.Min(fitsBelow, shaped.TotalWidth);
+        if (overflow == TextOverflow.Clip && KeepsWrapRanges && ReuseAcrossWidths
+            && fitsFrom <= maxWidth && maxWidth < fitsBelow)
+            _wrapRanges.Put(wrapKey.IsMade ? wrapKey : new WrapKey(text, style, maxLines),
+                new WrapRange(layout, fitsFrom, fitsBelow), bytes);
         return layout;
+    }
+
+    // ── Wrapped layouts kept for a range of widths ──
+    //
+    // A resize drag lays every wrapped paragraph of a view out again at each width it passes, and a
+    // paragraph's lines rarely change from one width to the next: Vesper Commander's wrapped reader made
+    // 1,683 layouts a 1 px step over the 602,000-character ledger archive, every row's height asked
+    // again (TextMeasure.MeasureWrapped), with the same lines for nearly all of them. A wrapped plain
+    // layout is kept with the widths at which the greedy break pass takes every decision it took
+    // (BreakIntoLines notes them: Over, Within), and a layout at any width among them is that one, the
+    // same to the bit: the same tests come out the same over the same measured widths. Kept by text and
+    // style, not by width, one range a paragraph (the latest), and asked before the shape cache: a
+    // kept paragraph is not shaped again (the archive's shapings did not fit the shape cache and were
+    // all made again each step). Only Clip: truncation reads the width again (TruncatedTail). The
+    // width-keyed cache above keeps answering widths seen before.
+    private readonly record struct WrapRange(TextLayout Layout, float From, float Below);
+
+    // A paragraph's key in _wrapRanges: a layout cache key with no width, and its hash. A layout makes
+    // it once, for its ask and the put after a miss: a long paragraph is hashed once, not four times
+    // (TryGet; then TryGetValue, Remove and the store of LruCache.Put).
+    private readonly struct WrapKey : IEquatable<WrapKey>
+    {
+        private readonly MeasurementKey _key;
+        private readonly int _hash;
+
+        public WrapKey(string text, ResolvedInheritedStyle style, int? maxLines)
+        {
+            _key = new(text, style.FontFamily, style.FontSize, style.FontWeight, style.FontSlant, 0f, maxLines ?? -1,
+                TextOverflow.Clip, style.LineHeight, style.LetterSpacing);
+            _hash = _key.GetHashCode();
+        }
+
+        public bool IsMade => _key.Text is not null;
+        public bool Equals(WrapKey other) => _hash == other._hash && _key.Equals(other._key);
+        public override bool Equals(object? obj) => obj is WrapKey other && Equals(other);
+        public override int GetHashCode() => _hash;
+    }
+
+    // The layout kept for text at maxWidth, or null; key is made here if it is not yet.
+    private TextLayout? KeptWrap(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+        TextOverflow overflow, ref WrapKey key)
+    {
+        if (overflow != TextOverflow.Clip || !KeepsWrapRanges || !ReuseAcrossWidths)
+            return null;
+        if (!key.IsMade)
+            key = new WrapKey(text, style, maxLines);
+        if (!_wrapRanges.TryGet(key, out var kept) || !(kept.From <= maxWidth && maxWidth < kept.Below))
+            return null;
+        WrapRangeHits++;
+        return kept.Layout;
+    }
+
+    /// <summary>
+    /// When false, a wrapped layout is kept for its own width only — the reference: every width a
+    /// paragraph is laid out at breaks it again. When true (the default), it is kept for every width
+    /// the break pass would break it the same at (<see cref="WrapRange"/>). Tests hold the two to the
+    /// same layouts.
+    /// </summary>
+    internal bool KeepsWrapRanges { get; init; } = true;
+
+    // How many layouts a kept wrap answered, for the tests.
+    internal int WrapRangeHits { get; private set; }
+
+    // The widths the layout kept for text holds for, for the tests: false when none is kept.
+    internal bool KeptWrapRange(string text, ResolvedInheritedStyle style, int? maxLines, out float from,
+        out float below)
+    {
+        bool found = _wrapRanges.TryGet(new WrapKey(text, style, maxLines), out var kept);
+        (from, below) = (kept.From, kept.Below);
+        return found;
     }
 
     /// <summary>
@@ -561,7 +668,7 @@ public sealed class TextPipeline
         PrefixWidths? prefixes = null, bool keptTable = false)
     {
         int span = 1;
-        while (from + span < to && Measure(from + span) <= maxWidth)
+        while (from + span < to && Within(Measure(from + span), maxWidth))
             span <<= 1;
 
         int lo = from + Math.Min(span >> 1, to - from);
@@ -570,7 +677,7 @@ public sealed class TextPipeline
         while (lo <= hi)
         {
             int mid = (lo + hi) >> 1;
-            if (Measure(mid) <= maxWidth) { best = mid; lo = mid + 1; }
+            if (Within(Measure(mid), maxWidth)) { best = mid; lo = mid + 1; }
             else hi = mid - 1;
         }
         return SnapPrefix(text, best);   // never split a surrogate pair
@@ -582,6 +689,42 @@ public sealed class TextPipeline
             : prefixes is null
                 ? MeasureRange(text, from, end, style)
                 : PrefixWidth(prefixes, end - from, style);
+    }
+
+    // ── The widths a wrap holds for ──
+    //
+    // Each decision the break pass (BreakIntoLines, SplitByCharacter, FitPrefix) takes on the width
+    // holds a width it measured against maxWidth: a line's segments so far, a segment alone, a prefix.
+    // Each is noted as it is taken, _fitsFrom the widest that fitted and _fitsBelow the narrowest that
+    // did not, so at any width in [_fitsFrom, _fitsBelow) every test comes out as it did, over the
+    // same widths (none depends on the width), and the pass breaks the text into the same lines
+    // (WrapRange). Only a width that fitted raises the first and only one that did not lowers the second:
+    // a pass that notes more than its own decisions only narrows the range. A NaN width measured
+    // makes it NaN, and a NaN range or maxWidth keeps nothing. ComputeWrapped starts them over.
+    private float _fitsFrom = float.NegativeInfinity, _fitsBelow = float.PositiveInfinity;
+
+    // width > maxWidth, noted.
+    private bool Over(float width, float maxWidth)
+    {
+        if (width > maxWidth)
+        {
+            _fitsBelow = Math.Min(_fitsBelow, width);
+            return true;
+        }
+        _fitsFrom = Math.Max(_fitsFrom, width);
+        return false;
+    }
+
+    // width <= maxWidth, noted.
+    private bool Within(float width, float maxWidth)
+    {
+        if (width <= maxWidth)
+        {
+            _fitsFrom = Math.Max(_fitsFrom, width);
+            return true;
+        }
+        _fitsBelow = Math.Min(_fitsBelow, width);
+        return false;
     }
 
     /// <summary>
@@ -656,11 +799,18 @@ public sealed class TextPipeline
     // limit dropped trailing text, or because a single unbreakable token is wider than the
     // available width. Only the final line is touched; earlier lines keep their exact
     // shaping and positions.
+    //
+    // fitsFrom and fitsBelow are the widths the break pass's decisions hold for (Over, Within).
     private TextLayout ComputeWrapped(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
-        TextOverflow overflow, ShapedText shaped)
+        TextOverflow overflow, ShapedText shaped, out float fitsFrom, out float fitsBelow)
     {
         var lines = RentLines();
+        // A layout made in the middle of another's notes its own decisions, and the other's resume after.
+        var outer = (_fitsFrom, _fitsBelow);
+        (_fitsFrom, _fitsBelow) = (float.NegativeInfinity, float.PositiveInfinity);
         var size = BreakIntoLines(lines, text, style, maxWidth, maxLines, BreakSegmentsOf(shaped, text));
+        (fitsFrom, fitsBelow) = (_fitsFrom, _fitsBelow);
+        (_fitsFrom, _fitsBelow) = outer;
         if (overflow == TextOverflow.Ellipsis && TruncatedTail(text, lines, maxWidth, out int start, out int tailEnd))
         {
             string tail = text[start..tailEnd];
@@ -3272,7 +3422,8 @@ public sealed class TextPipeline
 
             float segWidth = SegmentWidth(text, allBreaks, segments, s, style);
 
-            if (lineWidth + segWidth > maxWidth && lineWidth > 0)
+            // (The width is noted only where it decides: on a line with something on it.)
+            if (lineWidth > 0 && Over(lineWidth + segWidth, maxWidth))
             {
                 // Break here — emit line up to previous segment
                 lines.Add(NewLine(textOffset, allBreaks[s - 1]));
@@ -3285,7 +3436,7 @@ public sealed class TextPipeline
             // A segment that overflows a line all by itself offers nowhere to break: cut it
             // by character rather than let it run out of the box. Only reachable at the start
             // of a line — anywhere else the block above has just broken.
-            if (lineWidth == 0 && segWidth > maxWidth)
+            if (lineWidth == 0 && Over(segWidth, maxWidth))
             {
                 textOffset = SplitByCharacter(text, allBreaks[s - 1], segEnd, style, maxWidth, lines, maxLines,
                     measureOnly: measureOnly);
@@ -3312,7 +3463,7 @@ public sealed class TextPipeline
             // of its own — the line cut out as a string, exact arrays of its runs and segments —
             // was 7 % of what wrapping a paragraph allocated, and more once glyphs were made only
             // where they are read (plan 17, round 5).
-            bool lastLineTable = segments is not null && lineWidth <= maxWidth;
+            bool lastLineTable = segments is not null && Within(lineWidth, maxWidth);
             if (lastLineTable)
                 FillPrefixTable(text, textOffset, text.Length, style, _prefixRuns, _prefixSegments);
             textOffset = SplitByCharacter(text, textOffset, text.Length, style, maxWidth, lines, maxLines, lastLineTable,

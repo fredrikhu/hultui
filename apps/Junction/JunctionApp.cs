@@ -482,7 +482,7 @@ public partial class JunctionApp : Component, IDisposable
 
         // Global keys land on the host when nothing is focused (see App.cs for
         // the same rationale). Materialise the host so the handler is wired.
-        Mount().On<KeyDownEvent>(HandleKeyDown);
+        Mount().OnPassive<KeyDownEvent>(OnRootKeyDown);
 
         RestartAutoFetch();
         RestartGitLabRefresh();
@@ -536,9 +536,15 @@ public partial class JunctionApp : Component, IDisposable
     ///
     /// <para>Narrowed by dragging the pane's own splitter this never showed, because that
     /// drag is app state and rebuilds anyway; it took a window resize, which does not.</para>
+    ///
+    /// <para>A review's cards are measured the same way, at the card's text width, wrapped or
+    /// not (<see cref="ReviewRowsActive"/>, the Commit view only). Until plan 17 round 15 a
+    /// resize with the cards on and wrap off never measured them again: each card kept the
+    /// height of the width it was first measured at and laid its text out at the new one,
+    /// clipped or with a gap under it, until something else built the view.</para>
     /// </summary>
     private bool DiffWrapNeedsRemeasure() =>
-        _diffWrap && (_diffFull || View is JunctionView.Commit or JunctionView.Changes);
+        (_diffWrap || ReviewRowsActive) && (_diffFull || View is JunctionView.Commit or JunctionView.Changes);
 
     // Recompute the responsive flags from the current content width; returns true
     // if any flipped. Called on resize and when the sidebar collapses/expands
@@ -631,8 +637,9 @@ public partial class JunctionApp : Component, IDisposable
         int refsGen = _refsGen.GetValueOrDefault(path);
         RepoSummary? refs = _summaryRefsRead.TryGetValue(path, out var read) && read.Gen == refsGen
             && ReferenceEquals(read.Branches, shown.Branches) ? shown : null;
+        var status = SharedStatusAt(path, gen);
         loader.Load($"{path}#{gen}",
-            () => LoadSummary(path, refs) is var loaded && loaded.SameAs(shown) ? shown : loaded,
+            () => LoadSummary(path, refs, status) is var loaded && loaded.SameAs(shown) ? shown : loaded,
             onLoaded: landed => _summaryRefsRead[path] = (refsGen, landed.Branches));
     }
 
@@ -681,6 +688,40 @@ public partial class JunctionApp : Component, IDisposable
         return _dataGen.GetValueOrDefault(path);
     }
 
+    /// <summary>
+    /// One <c>git status</c> a data generation, for the two loads that read it while the Changes
+    /// view shows the repository: the summary (the dirty count) and the Changes view's working tree.
+    /// Each ran its own, and with <c>-uall</c> git walks the whole working tree for one: a save over
+    /// Changes walked it twice (plan 17 round 15). Made when such a repository's generation moves
+    /// (<see cref="ShareStatus"/>), before either load is asked for; whichever runs first runs git,
+    /// the other has its answer, and the Changes load, the one it is made for, lets it go once it
+    /// has read it. A load asked for at another generation runs its own.
+    /// </summary>
+    private sealed class SharedStatus(GitRepository repo, int gen)
+    {
+        private readonly Lazy<GitResult> _result = new(repo.RunStatus);
+
+        public int Gen { get; } = gen;
+
+        /// <summary>The status, run on the first read; off the UI thread only.</summary>
+        public GitResult Result => _result.Value;
+    }
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, SharedStatus> _sharedStatus = new(PathComparer);
+
+    /// <summary>The data generation of <paramref name="path"/> moved: its two status readers share
+    /// one when the Changes view's loads key on it (see <see cref="SharedStatus"/>).</summary>
+    private void ShareStatus(string path)
+    {
+        if (_viewKeysChanges.Contains(path))
+            _sharedStatus[path] = new SharedStatus(RepoFor(path), _dataGen.GetValueOrDefault(path));
+        else
+            _sharedStatus.TryRemove(path, out _);
+    }
+
+    private SharedStatus? SharedStatusAt(string path, int gen) =>
+        _sharedStatus.TryGetValue(path, out var shared) && shared.Gen == gen ? shared : null;
+
     /// <summary>Invalidate a repo's cached data (views + summary) so it reloads
     /// on next display. Called by our own git actions and by the change watcher.</summary>
     private void BumpDataGen(string path)
@@ -695,6 +736,7 @@ public partial class JunctionApp : Component, IDisposable
     {
         _dataGen[path] = _dataGen.GetValueOrDefault(path) + 1;
         _refsGen[path] = _refsGen.GetValueOrDefault(path) + 1;
+        ShareStatus(path);
     }
 
     // ── Refused loads ────────────────────────────────────────────────────
@@ -846,6 +888,7 @@ public partial class JunctionApp : Component, IDisposable
     {
         if (string.IsNullOrEmpty(path)) return;
         _dataGen[path] = _dataGen.GetValueOrDefault(path) + 1;
+        ShareStatus(path);
         _loadRetries.Remove(path);
         Reload(path, refs: false);
     }
@@ -890,7 +933,9 @@ public partial class JunctionApp : Component, IDisposable
     /// screen shows now, as that build asked, so a save's colours are on their way while git
     /// still runs: left to the build that shows the new rows, the rows drew uncoloured and the
     /// colours a frame later. Not as the screen's, since the screen is not waiting for them yet
-    /// (a tokenize that landed before the rows would build the view for the diff it shows).</summary>
+    /// (a tokenize that landed before the rows would build the view for the diff it shows). A few
+    /// lines wider than that diff (<see cref="SaveAskMargin"/>): the rows that land are the diff after
+    /// the save, and a save that adds lines inside a hunk shows lines the diff before it did not.</summary>
     private void ReloadChangesView(string path)
     {
         EnsureChangesLoaded(path);
@@ -899,7 +944,8 @@ public partial class JunctionApp : Component, IDisposable
         if ((_hideDiff && !data.InSequencer) || _changeSelPath == null || _changeSelConflicted) return;
         var diffs = _changeSelStaged ? data.StagedDiffs : data.UnstagedDiffs;
         if (diffs.TryGetValue(_changeSelPath, out var diff) && diff.Hunks.Count > 0)
-            _ = HighlightFor(diff, _changeSelStaged ? ExternalDiffMode.Staged : ExternalDiffMode.Unstaged, null);
+            _ = HighlightFor(diff, _changeSelStaged ? ExternalDiffMode.Staged : ExternalDiffMode.Unstaged, null,
+                margin: SaveAskMargin);
     }
 
     /// <summary>Whether an event in <paramref name="path"/> re-keys a load of the view on
@@ -914,7 +960,8 @@ public partial class JunctionApp : Component, IDisposable
 
     // Runs off the UI thread — no UI / reactive access. With <paramref name="refs"/>, a summary
     // whose HEAD, refs and config have not moved since it was read: only the status is read again.
-    private RepoSummary LoadSummary(string path, RepoSummary? refs = null)
+    // With <paramref name="shared"/>, the status the Changes view's load of this generation reads.
+    private RepoSummary LoadSummary(string path, RepoSummary? refs = null, SharedStatus? shared = null)
     {
         var repo = RepoFor(path);
         // One status, read twice: the dirty count and — when git is half way through a
@@ -922,7 +969,7 @@ public partial class JunctionApp : Component, IDisposable
         // only inside an operation matches what the Changes view lists (LoadChanges). The
         // operation is four File.Exists calls, read every time: a cherry-pick or a revert
         // stopping writes no file the watcher reports as a ref moving.
-        var status = repo.GetStatus();
+        var status = GitRepository.ParseStatus(shared?.Result ?? repo.RunStatus());
         var op = repo.GetSequencerOp();
         var conflicts = op == SequencerOp.None
             ? 0
@@ -1197,14 +1244,20 @@ public partial class JunctionApp : Component, IDisposable
             else if (View == JunctionView.Commit)
             {
                 // A virtual list of rows: the cursor's row may not be an element yet, so its
-                // band comes from the row heights. After the frame, as before, so the list has
-                // its new items and viewport.
+                // band comes from the row heights. Now, before the layout, so this frame draws the
+                // row in view: the list keeps its viewport from the frame before, which a key does
+                // not change. Done only after the frame, as it was, every key that moved the cursor
+                // past the list's edge drew its frame with the row outside the list and then a
+                // second frame to scroll it in. After the frame again as the check, for a list that
+                // got new items or a new size in this build; it finds nothing to do otherwise.
+                ScrollCommitCursorIntoView();
                 _window.RequestPostFrameCallback(ScrollCommitCursorIntoView);
             }
             else if (View == JunctionView.Changes)
             {
-                // The same list of tagged rows: its band comes from the row heights, after the
-                // frame, so the list has its new items and viewport.
+                // The same list of tagged rows, the same two calls: its band comes from the row
+                // heights, now so this frame shows it, and after the frame as the check.
+                ScrollChangeCaretIntoView();
                 _window.RequestPostFrameCallback(ScrollChangeCaretIntoView);
             }
         }
@@ -1461,6 +1514,17 @@ public partial class JunctionApp : Component, IDisposable
     }
 
     // ── Keyboard ─────────────────────────────────────────────────────────
+
+    /// <summary>The root hears every key passively and asks for the frame an ordinary handler's key
+    /// gets (a handler may change something without marking it), except for a modifier key on its
+    /// own (Shift, Ctrl, Alt) and its auto-repeats, which change nothing on screen: each drew a frame
+    /// of the same pixels, a shortcut two frames, and a Shift held for a range about 30 a second
+    /// (plan 17 round 15).</summary>
+    private void OnRootKeyDown(KeyDownEvent e)
+    {
+        HandleKeyDown(e);
+        if (!KeyChord.IsModifierKey(e.Key)) Mount().MarkPaintDirty();
+    }
 
     private void HandleKeyDown(KeyDownEvent e)
     {

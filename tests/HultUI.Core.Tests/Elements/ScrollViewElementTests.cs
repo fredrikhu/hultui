@@ -157,6 +157,29 @@ public class ScrollViewElementTests
         Assert.Equal(370, below.ScrollOffsetY);   // 470 - 100
     }
 
+    /// <summary>A band out of view by a float's rounding is in view: a reveal does not move the
+    /// content for it, or mark anything to draw. A reveal asked before the layout and checked after
+    /// it read a viewport 711 high and then 711.00006, and moved the content by the difference: a
+    /// second frame of the same pixels (plan 17 round 15, Junction's caret on Linux). A band out
+    /// by a pixel is revealed as before.</summary>
+    [Fact]
+    public void ScrollRangeIntoView_ABandOutByARoundingsWorth_MovesNothing()
+    {
+        var sv = Tall();
+        LayOut(sv);
+        sv.ScrollOffsetY = 200;
+
+        sv.ScrollRangeIntoView(280, 20.00006f);    // bottom 300.00006 against 300
+        Assert.Equal(200, sv.ScrollOffsetY);
+        sv.ScrollRangeIntoView(199.99994f, 20f);   // top just above 200
+        Assert.Equal(200, sv.ScrollOffsetY);
+
+        sv.ScrollRangeIntoView(281, 20);
+        Assert.Equal(201, sv.ScrollOffsetY);
+        sv.ScrollRangeIntoView(199, 20);
+        Assert.Equal(199, sv.ScrollOffsetY);
+    }
+
     /// <summary>A sideways reveal before the view has a width has no least distance to scroll and
     /// leaves the offset as it is. Set from it, the kept offset would be the band's right edge,
     /// which scrolls the band out of view on the left.</summary>

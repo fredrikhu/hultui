@@ -2,6 +2,7 @@
 using Aperture.Core;
 using Aperture.Core.Testing;
 using HultUI.Core.Accessibility;
+using HultUI.Core.Events;
 using HultUI.Core.Platform;
 using HultUI.Headless;
 using HultUI.Media;
@@ -187,6 +188,34 @@ public class ApertureAppHostTests
     }
 
     // ── The shell ────────────────────────────────────────────────────────
+
+    /// <summary>The root's key handler asks for no frame for a modifier key on its own, nor for its
+    /// auto-repeats: each drew a frame of the same pixels, a held Shift about 30 a second (plan 17
+    /// round 15). Any other key still gets its frame, and a shortcut still acts.</summary>
+    [Fact]
+    public void ABareModifierDrawsNoFrame_AndAShortcutStillActs()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            for (int i = 0; i < 300 && session.PumpFrame(); i++) { }
+            Assert.False(session.PumpFrame(), "the window did not settle");
+
+            foreach (var (key, mods) in new[] { (KeyCode.ShiftLeft, KeyModifiers.Shift), (KeyCode.CtrlLeft, KeyModifiers.Ctrl) })
+            {
+                session.Window.KeyDown(key, mods);
+                Assert.False(session.PumpFrame(), $"{key} drew a frame");
+                session.Window.KeyDown(key, mods, repeat: true);
+                Assert.False(session.PumpFrame(), $"{key}'s repeat drew a frame");
+                session.Window.KeyUp(key);
+                Assert.False(session.PumpFrame());
+            }
+
+            session.Window.PressKey(KeyCode.Slash);
+            Assert.True(session.PumpFrame(), "the shortcut drew no frame");
+            Assert.Equal(ApertureView.Search, app.Current.View);
+        });
+    }
 
     [Fact]
     public void ASignedInAppOpensOnHomeWithALibraryPerRailButton()

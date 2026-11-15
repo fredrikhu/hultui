@@ -50,6 +50,22 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
     private ISkiaExternalSurface? _glSurface;
     private readonly Dictionary<IGpuImageSource, (GpuFrame Frame, SKImage Image)> _wrappedTextures = new();
 
+    /// <summary>
+    /// Sources that will not draw again (<see cref="IExternalGLSurface.ReleaseFrameTarget"/>), from
+    /// any thread: their wrappers go when the next frame begins. Kept, a wrapper's key held the
+    /// source for the window's life, and the source its renderer and its pixel ring: a player
+    /// disposed on the GL renderer stayed reachable, with every frame buffer its sink had written
+    /// (plan 17 round 15: 230 KB a player with the fake backend's frame, ~20 KB with mpv).
+    /// </summary>
+    private readonly System.Collections.Concurrent.ConcurrentQueue<IGpuImageSource> _releasedSources = new();
+
+    /// <summary>The wrappers kept for GPU sources' own textures. For tests.</summary>
+    internal int WrappedTextureCount => _wrappedTextures.Count;
+
+    /// <summary><paramref name="source"/> will not draw again: its wrapper, if it has one, is
+    /// disposed as the next frame begins. Any thread.</summary>
+    internal void ReleaseGpuSource(IGpuImageSource source) => _releasedSources.Enqueue(source);
+
     internal SKPaint PooledPaint => _pooledPaint;
     internal SKPath PooledPath => _pooledPath;
     internal SKFont PooledCanvasFont => _pooledCanvasFont;
@@ -313,6 +329,7 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
         // Nothing should be held here; a frame that threw between a draw and its
         // EndFrame would have leaked its borrows into this one.
         ReleaseHeldFrames();
+        while (_releasedSources.TryDequeue(out var released)) ForgetGpuSource(released);
         // Nor should a push: a clip or layer left by a frame that threw would hold every later
         // frame, its clear included, inside it. Back to the count the surface handed the canvas
         // over at, not to 1: restored to 1, a Vulkan drag frame lost the clip to the window its
@@ -1644,9 +1661,10 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
     }
 
     /// <summary>
-    /// Drops the wrapper kept for a source, freeing its reference to the texture. A
-    /// source that is about to delete its texture calls this first; one that simply
-    /// stops being drawn may leave it, since a wrapper is a few bytes and a reference.
+    /// Drops the wrapper kept for a source, freeing its reference to the texture and to the
+    /// source. Render thread. A source that goes for good says so through its surface's
+    /// <see cref="IExternalGLSurface.ReleaseFrameTarget"/>, which drops it as the next frame
+    /// begins; one that simply stops being drawn keeps it.
     /// </summary>
     public void ForgetGpuSource(IGpuImageSource source)
     {

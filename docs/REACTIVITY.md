@@ -139,13 +139,17 @@ box.On<ClickEvent>(_ =>
 
 This is safe because event handlers already read cached layout from the previous frame (layout runs once per frame, after the whole event burst), and the batch always flushes before the next frame. The one thing it changes: a handler no longer sees its *own* rebuild partway through — if you write a signal and then need the resulting element to exist (to focus or measure it), the rebuild hasn't happened yet.
 
+**Work posted to the UI thread is batched the same way**, one batch for each pass of the frame loop: what `Application.InvokeOnMainThread` and `Application.Post` queued, and every `await` continuation that resumes on the UI thread, runs inside a batch that flushes when the pass's posted work is done, before animations, layout and drawing, so the rebuild still lands in that frame. A hundred posts that each bump a signal a component reads rebuild it once; until plan 17's round 15 they rebuilt it a hundred times in that pass, and one post that wrote a signal 500 times, 500 times. What a posted action or a continuation writes is therefore not built yet when its next line runs, as in a handler: write, then let `OnAfterBuild` do what needs the new elements (the apps' focus and scroll requests all go through a flag it reads), or call `FlushNow()`. What the flush's rebuilds post in turn (an `OnAfterBuild` that posts a follow-up) still runs in the same pass while it has time.
+
+A posted action or a handler that runs a loop of its own — a modal dialog under a host whose timer runs whole frames, such as HultUI.WinForms — would otherwise hold its batch open across the dialog's frames, which would show nothing it wrote. A pass of the loop run inside an open batch sets it aside: what the batch held so far is flushed first, the pass's own batches flush as they close, and the outer batch is open again when the pass returns. Before round 15 a click handler that did this drew none of its writes until it returned.
+
 For that, prefer the existing pattern of deferring to `OnAfterBuild` (see the Component Model section). When you genuinely need the rebuild mid-handler, escape hatches are available:
 
 | API | Effect |
 |---|---|
 | `ReactiveRuntime.FlushNow()` | Runs pending effects immediately, even inside the batch. Write your signals, call it, then read the rebuilt element. |
 | `using (ReactiveRuntime.SuspendBatching())` | Within the scope, writes flush immediately (pre-auto-batch behaviour). |
-| `ReactiveRuntime.AutoBatch = false` | Global off switch — restores immediate per-write flushing everywhere. A last resort. |
+| `ReactiveRuntime.AutoBatch = false` | Global off switch — restores immediate per-write flushing everywhere, in event handlers and in posted work. A last resort. |
 
 ```csharp
 input.On<KeyDownEvent>(_ =>
@@ -161,11 +165,14 @@ input.On<KeyDownEvent>(_ =>
 The two ways of asking for a rebuild behave differently inside a handler, and it pays
 to know which one you are holding:
 
-| Call | Inside an event handler | Elsewhere on the UI thread |
+| Call | Inside an event handler, or posted work | Elsewhere on the UI thread |
 |---|---|---|
-| a `Signal<T>` write (or a `[Reactive]` setter) | queued; the rebuild runs once when the dispatch ends | runs the dependent effects immediately |
+| a `Signal<T>` write (or a `[Reactive]` setter, or an app's `Rerender()` that bumps a revision signal, as the apps' do) | queued; the rebuild runs once when the dispatch ends, or when the pass's posted work is done | runs the dependent effects immediately |
 | `Component.MarkDirty()` | rebuilds **and reconciles on the calling stack**, right now | the same |
 | `Application.InvokeOnMainThread(...)` | always queued for the next frame, even from the UI thread | the same |
+
+Only signal writes coalesce in a batch. `MarkDirty()` does not wait for one: ten posts that each
+call it are ten builds in one pass, batch or not.
 
 The synchronous one has consequences. A `MarkDirty()` inside a handler replaces
 elements *while the event is still bubbling*; the dispatcher pins the handler list of
@@ -299,10 +306,21 @@ What is read after the frame shows a frame later, in a frame of its own; where t
 before the layout (a column taking the window's slack moves by the window's change), give it in
 the `Resized` handler too and keep the read as the check (LAYOUT.md, "Nesting scroll views").
 
+A key's reveal is such a move. `ScrollRangeIntoView` called in `OnAfterBuild` scrolls by the
+viewport the list had the frame before, which a key does not change, and holds the request for
+the layout when the list has none yet. Junction's Commit tab and Changes revealed the caret only
+after the frame, so a key past the list's edge drew its frame with the row outside the list and a
+second frame to bring it in; they now reveal in `OnAfterBuild` too and keep the call after the
+frame as the check, which finds nothing to do when the first was right (History and the Files
+tree already did). Plan 17 round 15, keys past the edge: Changes with 61 files 2.0–2.75 → 1.0–2.0
+frames a key headless (NativeAOT), and in a real window 39 → 30 frames for 10 keys 400 ms apart and
+42–45 → 23 for 20 held; the Commit tab 2.9–3.0 → 1.9–2.0 headless, 40 → 30 and 43–51 → 25–32 in a
+real window. The same builds and bytes, and the settled frame is a full build's.
+
 ### A background callback that fires once per item posts one build at a time
 
 A cache or a worker that calls back once per item it finishes, on another thread, usually
-ends in `Application.InvokeOnMainThread(MarkDirty)`. The UI thread runs everything posted
+ends in `Application.InvokeOnMainThread(MarkDirty)`. The UI thread runs what was posted
 since the last frame in one go, and `MarkDirty()` rebuilds on the calling stack, so N items
 that land between two frames are N builds in that frame, each making the whole view again for
 one more picture. Aperture's `PosterCache` and Vesper's `ThumbnailCache` call back once per
@@ -348,6 +366,16 @@ after 15–30 ms; JIT, then NativeAOT):
 The same pictures are drawn at the end, and the settled frame has the same pixels. With
 pictures served more slowly (60–120 ms) fewer land together: Home 41 → 26 builds (−29 %), the
 grid 46 → 25 (−26 %).
+
+**With a signal write the flag is optional.** Since plan 17's round 15 the posted work a pass
+of the loop runs is one batch (see [Automatic batching](#automatic-batching-of-event-handlers)),
+so a callback that ends in a signal write a `Build()` reads — a `[Reactive]` setter, an app's
+`Rerender()` — coalesces on its own: N landings between two frames are one build in that frame.
+The flag still saves N posts and N closures, and it is still needed where the callback ends in
+`MarkDirty()`, which rebuilds on the calling stack, batch or not. A pass also runs posted work
+for at most half a display interval ([THREADING.md](THREADING.md)), so a worker that posts
+faster than the UI thread runs it no longer holds back input and frames; batched, it catches
+up, since a pass's writes cost one build however many posts it ran.
 
 ### A value that changes ten times a second
 
@@ -1570,6 +1598,22 @@ The discipline in one line: **`Refresh()` bumps the generation (data changed →
 
 Because `Build()` renders from the cached `Value`, you can keep the previous result on screen while the next one loads instead of blanking to a spinner — gate the placeholder on "have we ever loaded anything" rather than "is a load in flight." Since the result is applied in a single batch, the view swaps from old to new in one frame with no empty state in between.
 
+### What a view kept on screen goes when its owner is replaced
+
+A field that keeps the last thing a view showed, so that it can stay on screen while the next loads, keeps
+everything that thing reaches, not only what was drawn, and nothing on screen shows it once the view is
+gone. Junction's Commit tab reads a long commit a file at a time and keeps the last diff it drew while the
+next file's patch is on its way. The field held that diff with its owner, the commit's detail, whose map
+holds every file's diff read so far, and only the tab's next build set it again: after a walk through a plan
+merge's files and back in History, the merge's parsed diffs stayed on the heap for as long as the tab
+stayed closed. The kept diff is only ever shown with the same detail, so it now goes when another detail
+lands, in the load's `onLoaded`, not in a build: a view that is not on screen does not build.
+
+Round 15 of plan 17, a real window (NativeAOT, alternated ×2): a 60-key History walk, 40 files of a
+314-file plan merge in the Commit tab, then History on a small commit and 10 rests. The heap after a full
+GC in History was 28.1 / 32.2 MB, and 6.0 MB of it went only when the Commit tab was shown again; with
+the field let go 25.3 / 25.5 MB, and showing the tab again freed nothing.
+
 ### Move to the next screen with its data
 
 Keeping the previous rows on screen while the next ones load is half of it: what names them has
@@ -1597,7 +1641,8 @@ Two traps on the way:
 - An ordinary handler that ran draws the window, since it may have changed something without
   marking it: a key whose only effect is a load started draws what is already on screen. Vesper's
   root hears keys passively (`OnPassive`) and asks for that frame itself (`MarkPaintDirty`), but
-  for a navigation that waits for its rows.
+  for a navigation that waits for its rows and for a modifier key on its own (ELEMENTS.md, "A
+  root key handler").
 
 A navigation (round 14, NativeAOT; Enter, Backspace, Alt+← and Alt+→ in turn): in a real window
 1.90 → 1.00 frames, 0.90 → 0 frames of one folder's name over another's rows, 2 → 1 window builds
@@ -1745,6 +1790,37 @@ A save over Changes (round 14, NativeAOT): a text file 2 → 1 builds and frames
 on the UI thread headless and 177.3 → 137.1 KB in a real window; a C# file 3 → 1, 393.2 → 154.0 KB
 headless (the loads on the thread pool) and 375.1 → 149.3 KB in a real window. The last frame comes
 when it did, and is what a full build draws.
+
+A load started early has to cover what will land, not only what is on screen. The colours were
+asked for the lines of the diff on screen, and the rows that land are the diff after the save: a
+save that adds a line inside a hunk, joins a line to one or moves a later hunk shows lines that
+ask did not cover, so the build that showed them asked again, and the file was tokenized twice and
+the view built twice. The ask now reaches eight lines past both ends of every range the diff shows
+(`SaveAskMargin`): a hunk's three lines of context mean a one-line edit that joins it grows it by
+seven lines at most, and a paste of up to eight lines inside one is covered too. The tokenizer walks
+from the file's first line anyway, so the cost is eight lines at the end. Round 15: a save that adds
+a line inside the hunk 2 → 1 frames, builds and tokenizes, 490–552 → 298–309 KB on the UI thread
+headless (NativeAOT) and 309–358 → 187–208 KB in a real window, where it drew 3 frames and now 1; a
+save in place tokenizes eight lines more (3–5 % more bytes on the tokenizer's thread) and is
+otherwise as it was.
+
+### Two loads of one generation can read one answer
+
+Loads keyed on the same generation that run the same command can share its run. Junction's summary
+(the sidebar's dirty count) and the Changes view's working tree each ran `git status -uall`, which
+walks the whole working tree, at every save over Changes. A save now makes one status for the new
+generation (`SharedStatus`) before either load is asked for; whichever runs first runs git, the
+other reads its answer, and the Changes load lets it go once read, so nothing is kept for a
+repository whose Changes view is not on screen. What an event cannot change keeps the value it
+had, as the refs do (`RefsGen`): HEAD's message, which the amend box offers, moves only with HEAD,
+so a save keeps the one read at the refs generation that still stands. And two outputs git can
+print together come from one command: `--raw` and `--numstat` together give each file's letter (what
+`--name-status` prints) and counts from one diff. Round 15: a save over Changes 11 → 7 git commands
+(the status 2 → 1, the four list diffs 4 → 2, `git log` 1 → 0), its rows on screen about 180 ms
+sooner (721–802 → 537–588 ms after the write headless, 699–831 → 519–590 ms in a real window, the
+watcher's 300 ms debounce included) and 4–6 % fewer bytes on all threads. Over 12 outside operations
+(a save, `git add`, `restore --staged`, a stash and its pop, commits, an amend, checkouts), each view
+reads what a load that shares nothing reads.
 
 ### The app's own change, heard again
 

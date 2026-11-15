@@ -260,6 +260,8 @@ public partial class JunctionApp
         b.AddChild(Ui.Icon(glyph, 12f, fg));
         if (!_compactChrome)
             b.AddChild(Text.New(label).FontSize(11.5f).FontWeight(FontWeight.Medium).TextColor(fg));
+        else
+            b.AccessibleName(label);   // icon-only: named as the labelled one reads (a tooltip is no name)
         b.OnClick(e => { e.StopPropagation = true; onClick(); });
         return b;
     }
@@ -377,9 +379,38 @@ public partial class JunctionApp
         // measures left room for it: once a resize's build measured 400 wrapped rows just
         // before the frame (LeadWrappedDiffWidth), the frame laid the rows on screen out at zero
         // width again, 372 KB a step (plan 17 round 14). At the code width the measure is the
-        // layout the build made for the row's height.
-        if (_diffWrap) return label.FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(Math.Max(0, _diffCodeWidth + padX)));
+        // layout the build made for the row's height. A row kept over a width change is given the
+        // new basis (RebaseCodeLabels).
+        if (_diffWrap) return label.FlexGrow(1).FlexShrink(1).FlexBasis(CodeBasis(_diffCodeWidth, padX));
         return _diffPan.Cell(label.MaxLines(1).OverflowMode(TextOverflow.Clip).FlexGrow(1));
+    }
+
+    /// <summary>A wrapped code label's flex basis: the code width plus the label's padding.</summary>
+    private static Dimension CodeBasis(float codeWidth, float padX) => Dimension.Px(Math.Max(0, codeWidth + padX));
+
+    /// <summary>
+    /// Gives the wrapped code labels of the rows on screen, made at <paramref name="was"/>, the basis
+    /// <paramref name="now"/> a row made now gets (<see cref="DiffCodeCell"/>), so a kept row lays out
+    /// as a new one does.
+    /// </summary>
+    /// <remarks>
+    /// A kept row with its old basis is laid out at it and then grows or shrinks into the column, and
+    /// that is not the same: a shrinking item stops at its content's min-content width, so a line of
+    /// one unbreakable token stayed as wide as the old column in a narrowed one; and the label was
+    /// measured at the old width first, a text layout the build's heights had not just made, which a
+    /// split diff of long tokens laid out again on every step (plan 17 round 15: 465 → 779 KB a step).
+    /// A few elements a row; nothing is made (only the selectable labels, the code, have their flex style read).
+    /// </remarks>
+    private static void RebaseCodeLabels(Element e, Dimension was, Dimension now)
+    {
+        if (e is TextElement { Selectable: true } && e.Flex.FlexBasis == was)
+        {
+            e.Flex.FlexBasis = now;
+            e.MarkLayoutDirty();
+            return;
+        }
+        var children = e.Children;
+        for (int i = 0; i < children.Count; i++) RebaseCodeLabels(children[i], was, now);
     }
     // Review is the review's height version, so a card opening or a composer appearing
     // measures the rows again; -1 when no review is on.
@@ -543,9 +574,23 @@ public partial class JunctionApp
         if (_diffHeightShape != shape)
         {
             if (perRow) RebuildDiffHeights(rows, codeWidth); else _diffHeights = [];
+            // Wrapped and with no review, a width alone changes how tall the rows are and, but
+            // for its code labels' basis, nothing they show: a code label wraps into whatever
+            // column it is laid out in. The rows on screen are kept, their labels take the new
+            // basis, and the list gives them their new heights (plan 17 round 15: a resize step or
+            // a file list drag made every row on screen again, 279 → 153 KB a 4 px step).
+            bool widthOnly = _diffWrap && review is null && _diffHeightShape with { Width = shape.Item3 } == shape;
+            if (widthOnly && _diffBodyRef.Current is VirtualListElement<DiffRow> kept)
+            {
+                float pad = _diffSplit ? SplitCodePadX : UnifiedCodePadX;
+                var was = CodeBasis(_diffHeightShape.Width, pad);
+                var now = CodeBasis(codeWidth, pad);
+                var onScreen = kept.Children;
+                for (int i = 0; i < onScreen.Count; i++) RebaseCodeLabels(onScreen[i], was, now);
+            }
             // Not on the first build: there is nothing realized yet to throw away, and doing
             // it mid-build disturbs the rows the very first frame lays out.
-            if (_diffHeightShape.Rows >= 0 && _diffBodyRef.Current is VirtualListElement<DiffRow> mounted)
+            else if (_diffHeightShape.Rows >= 0 && _diffBodyRef.Current is VirtualListElement<DiffRow> mounted)
                 mounted.InvalidateRows();
             _diffHeightShape = shape;
         }
@@ -806,12 +851,13 @@ public partial class JunctionApp
     /// <see cref="LeadWrappedDiffWidth"/> for a move of a file list's splitter beside a wrapped
     /// diff: the list gains what the file list (<paramref name="list"/>, laid out at its old width)
     /// loses. The drag builds the view for the rows' heights, and that build read the width of the
-    /// frame before, so each step built and drew twice, the second time the chrome too.
+    /// frame before, so each step built and drew twice, the second time the chrome too. A review's
+    /// cards are measured at the width as wrapped lines are, so the same while reviewing.
     /// </summary>
     private void LeadWrappedDiffSplit(PaneSplitter split, Element? list)
     {
         _diffWrapLead = float.NaN;
-        if (!_diffWrap || list is not { IsHosted: true, Layout.Width: > 0 } || !DiffLaidOutAsSeen()) return;
+        if (!(_diffWrap || ReviewRowsActive) || list is not { IsHosted: true, Layout.Width: > 0 } || !DiffLaidOutAsSeen()) return;
         _diffWrapLead = Math.Max(0, _diffLaidOutWidth + list.Layout.Width - split.Size);
     }
 
@@ -1567,6 +1613,11 @@ public partial class JunctionApp
 
     private enum ExternalDiffMode { Commit, Staged, Unstaged }
 
+    /// <summary>A Ctrl+D that waits for the open file's patch in the Commit tab: the commit's
+    /// file-at-a-time source and the file. Taken by the next file patch that lands, which runs
+    /// it again only when that is this file and it is still the open one.</summary>
+    private (object? Source, string? Path) _editorDiffOnLanding;
+
     // Ctrl+D in the Commit / Changes views: open the selected file's diff in VS Code
     // (`code --wait --diff <left> <right>`). Reuses ExternalDiffLauncher's PATH/.cmd
     // resolution and its temp-file plumbing; --wait keeps the launched process alive
@@ -1575,10 +1626,28 @@ public partial class JunctionApp
     {
         if (ActiveRepo is not { } repo) return;
 
+        // The Commit tab acts on the open file's own diff, not on the one the pane keeps on
+        // screen while the open file's patch is on its way (CommitPane): asked then, the
+        // refusal below read the kept file while the launch opened the selected one. Until
+        // that patch lands it is not known whether the file is binary, so the key waits for
+        // it (AskFilePatch's landing comes back here).
+        GitFileDiff? target;
+        if (View == JunctionView.Commit && _selectedFilePath is { } open)
+        {
+            var detail = _commitDetail.Value;
+            target = CommitDiffFor(detail, open);   // asks for the patch if nothing has yet
+            if (target is null && FilePatchPending(detail, open))
+            {
+                _editorDiffOnLanding = (detail.Patches, open);
+                return;
+            }
+        }
+        else target = CurrentDiffTarget().Diff;
+
         // Both sides would be fetched as text, so a binary file reaches VS Code as two
         // temp files of mojibake. The header button is disabled for these; this is the
         // same refusal for the keyboard, which does not go through the button.
-        if (CurrentDiffTarget().Diff is { IsBinary: true })
+        if (target is { IsBinary: true })
         {
             Flash("Binary file — there are no two texts for VS Code to compare");
             return;

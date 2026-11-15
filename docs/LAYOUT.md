@@ -701,6 +701,23 @@ builds the view that measures at it, not the chrome around it, and one that leav
 alone builds nothing (Junction's wrapped diff until plan 17 round 14, `LeadWrappedDiffWidth`:
 two builds and two frames a step, the chrome in one, down to one view build and one frame).
 
+**A width that no row reads keeps the rows.** A wrapped line reads no width but the column it
+is laid out in, so a width change moves how tall such rows are and nothing they show. Keep the
+rows on screen (no `InvalidateRows`) and give the list the new heights: a new `RowHeights`
+delegate from a build, or `InvalidateHeights` when the arrays the delegate reads were measured
+again. The list forces each kept row to its new height. When nothing else a build makes reads
+the width either, measure the heights in the `Window.Resized` handler at the led width and build
+nothing: a height-only step then measures nothing at all. Vesper Commander's wrapped reader and
+compare view built the whole window and made every row on screen again on each step until plan
+17 round 15 (`FitWrappedRowsInPlace`): 281 → 24 KB a 4 px step of the reader over a
+1,000-line file, 62 → 2 KB a height-only step, with byte-identical frames. Keep the check after
+the frame: a wrong lead still builds once, and that build keeps the rows too. A row that carries
+the width it was made at must be given the new one, or a kept row lays out unlike a new one:
+Junction's wrapped code labels have the code width as their flex basis, and with the old basis a
+shrinking label stops at its min-content width, so a line of one unbreakable token stayed as wide
+as the old column (`RebaseCodeLabels`, plan 17 round 15: 279 → 153 KB a 4 px step of a Commit
+view).
+
 ---
 
 **A rounded box clips round.** `Overflow.Hidden` on a box with a corner radius cuts its

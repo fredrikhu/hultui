@@ -103,8 +103,12 @@ public class PartTests
 
             app.Refresh();   // the page that lands comes through the loader's signal alone
             int beforeLanding = app.PartBuilds, builds = app.Builds;
-            session.PumpUntil(() => app.Builds > builds + 1, TimeSpan.FromSeconds(5));
+            session.PumpUntil(() => app.Builds > builds, TimeSpan.FromSeconds(5));
+            session.PumpFrames(3);
             Assert.True(app.PartBuilds - beforeLanding >= 2, $"{app.PartBuilds - beforeLanding} part builds");
+            // The page's loads land in one pass, and the pass's posted work is one batch: one build
+            // for all of them (two, five part builds, until plan 17 round 15).
+            Assert.Equal(builds + 1, app.Builds);
         });
     }
 

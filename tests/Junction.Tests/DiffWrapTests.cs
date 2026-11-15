@@ -467,6 +467,63 @@ public class DiffWrapTests
     /// <summary>The row a label belongs to: the ancestor that is a direct child of the list.
     /// Walking a fixed number of parents does not work — wrapped, the label sits straight in
     /// the row; unwrapped, a panning cell sits between them.</summary>
+    /// <summary>
+    /// A width change of a wrapped diff keeps the rows on screen: a wrapped code label reads no
+    /// width but the column it is laid out in, and the list gives each kept row its new height.
+    /// The kept rows draw what rows made again at that width draw. Until plan 17 round 15 every
+    /// step made every row on screen again (18 rows, ~280 KB a 4 px step of a Commit view).
+    /// </summary>
+    [Fact]
+    public void AWidthChange_KeepsTheWrappedRowsOnScreen_AndTheyDrawAsRowsMadeAgain()
+    {
+        DiffScrollTests.Hosted((session, app) =>
+        {
+            Press(session, app, KeyCode.W);
+            DiffScrollTests.Quiet(session, app);
+            Assert.True(MostLines(session, app) > 1, "the fixture did not wrap at the starting width");
+
+            foreach (int width in new[] { 1396, 1392, 1300, 1180, 1260, 1400 })
+            {
+                var before = RowsByText(app);
+                session.Window.SetClientSize(width, 900);
+                DiffScrollTests.Quiet(session, app);
+                int compared = 0, again = 0;
+                foreach (var (key, row) in RowsByText(app))
+                {
+                    if (!before.TryGetValue(key, out var was)) continue;
+                    compared++;
+                    if (!ReferenceEquals(was, row)) again++;
+                }
+                Assert.True(compared >= 3, $"at {width} px only {compared} rows were on screen before and after");
+                Assert.True(again == 0, $"at {width} px {again} of {compared} rows on screen were made again");
+
+                var kept = Pixels(session);
+                Body(app).GetType().GetMethod("InvalidateRows")!.Invoke(Body(app), null);
+                DiffScrollTests.Quiet(session, app);
+                Assert.True(kept.AsSpan().SequenceEqual(Pixels(session)), $"at {width} px the kept rows draw other pixels than rows made again");
+            }
+        });
+    }
+
+    /// <summary>The diff's rows on screen by what they show (numbers and code), which no two rows share.</summary>
+    private static Dictionary<string, Element> RowsByText(JunctionApp app)
+    {
+        var rows = new Dictionary<string, Element>();
+        foreach (var row in Body(app).Children)
+        {
+            var texts = LayoutProbe.Descendants<TextElement>(row);
+            if (texts.Count > 0) rows[string.Join("\u0001", texts.Select(t => t.Content))] = row;
+        }
+        return rows;
+    }
+
+    private static byte[] Pixels(HeadlessSession session)
+    {
+        using var image = session.Window.CapturePixels();
+        using var pixmap = image.PeekPixels();
+        return pixmap.GetPixelSpan().ToArray();
+    }
+
     private static Element? RowOf(Element label, Element list)
     {
         for (var e = label; e is not null; e = e.Parent)

@@ -16,6 +16,7 @@ public partial class JunctionApp
 {
     private Element BuildCommitView()
     {
+        _commitTabOpened = true;   // from here on History warms the colours too (PrefetchHighlight)
         if (!HasActiveRepo)
             return BuildStubView("Commit", "Open a repository first.");
 
@@ -104,7 +105,7 @@ public partial class JunctionApp
         var key = RangeDetailKey(r);
         SelectionMovedTo(key);
         _commitDetail.Load(key, () => LoadOrRetry(path, () => LoadRangeDetail(r)),
-            onLoaded: PickInitialFile);
+            onLoaded: detail => PickInitialFile(detail, key));
     }
 
     // Runs off the UI thread.
@@ -224,7 +225,7 @@ public partial class JunctionApp
         var key = CommitDetailKey(h);
         SelectionMovedTo(key);
         _commitDetail.Load(key, () => LoadOrRetry(path, () => LoadDetail(path, h, open)),
-            onLoaded: PickInitialFile);
+            onLoaded: detail => PickInitialFile(detail, key));
     }
 
     // The detail last asked for. The Commit view asks on every build.
@@ -358,7 +359,10 @@ public partial class JunctionApp
 
     private int _fileReadAheads;
 
-    /// <summary>The last diff the pane drew with its own patch, and the detail it belongs to.</summary>
+    /// <summary>The last diff the pane drew with its own patch, and the detail it belongs to. Dropped when a
+    /// new detail lands (<see cref="PickInitialFile"/>): the owner is the detail's whole <c>DiffByPath</c>, and
+    /// kept until the Commit tab's next build it held a plan merge's parsed diffs in History, 6–12 MB, for as
+    /// long as the tab stayed closed.</summary>
     private (object? Owner, string? Path, GitFileDiff? Diff) _commitPaneShown;
 
     /// <summary>
@@ -432,12 +436,16 @@ public partial class JunctionApp
             {
                 foreach (var d in diffs) byPath.TryAdd(d.Path, d);
                 if (!byPath.ContainsKey(path)) source.NoPatch.Add(path);
+                // A Ctrl+D that waited for this file's patch; any landing ends the wait.
+                bool editor = ReferenceEquals(_editorDiffOnLanding.Source, source) && _editorDiffOnLanding.Path == path;
+                _editorDiffOnLanding = default;
                 if (!ReferenceEquals(_commitDetail.Value.Patches, source)) return;
                 // The pane was keeping the previous diff for this one: draw it. A file read ahead
                 // draws nothing; the next one ahead is asked for instead.
                 if (path == _selectedFilePath)
                 {
                     if (_diffFull) Rerender(); else RerenderView();
+                    if (editor && View == JunctionView.Commit) OpenSelectedDiffExternally();
                 }
                 else ReadAhead(_commitDetail.Value);
             });
@@ -479,8 +487,12 @@ public partial class JunctionApp
         return null;
     }
 
-    private void PickInitialFile(CommitDetail detail)
+    /// <param name="key">The detail key the load was asked with.</param>
+    private void PickInitialFile(CommitDetail detail, string key)
     {
+        // A new detail: the diff the pane kept for the last one is never shown again (CommitPane keeps only its
+        // own detail's), and through its owner it held all of that detail's diffs read so far.
+        if (!ReferenceEquals(_commitPaneShown.Owner, detail.DiffByPath)) _commitPaneShown = default;
         if (detail.Files.Count == 0) { _selectedFilePath = null; _commitCursorPath = null; return; }
         if (_selectedFilePath == null || detail.Files.All(f => f.Path != _selectedFilePath))
         {
@@ -491,8 +503,20 @@ public partial class JunctionApp
             // row is gone.
             _commitCursorPath = _selectedFilePath;
         }
+        // A detail History's rest asked for that lands after the selection moved on: the colours would be for a
+        // commit the reader has left. The move dropped the prefetch of the commit before; this one never starts.
+        if (key != _detailAskedFor) return;
         PrefetchHighlight(detail);
     }
+
+    /// <summary>
+    /// Whether the Commit tab has been shown in this session. Until it has, a detail that lands while another view
+    /// is on screen starts no tokenize (<see cref="PrefetchHighlight"/>): reading History a key every 400 ms, the
+    /// colours of a tab that may never be opened were 3.7–4.3 MB of a key's 4.1–4.7 MB on all threads, and 1.5 of
+    /// its 5.5 git runs (plan 17 round 15, NativeAOT). The first switch to the tab then colours the diff itself, once a
+    /// session: a C# file of 900 lines drew plain for ~90 ms.
+    /// </summary>
+    private bool _commitTabOpened;
 
     /// <summary>
     /// Starts tokenizing the file the diff will open on, as soon as the commit's detail
@@ -510,9 +534,13 @@ public partial class JunctionApp
     /// <para>Only the opening file. A commit of sixteen files would otherwise tokenize
     /// sixteen of them to show one, and moving between files inside the Commit view is a
     /// different (and much shorter) wait.</para>
+    ///
+    /// <para>And from another view only once the Commit tab has been opened in this session
+    /// (<see cref="_commitTabOpened"/>): someone who only reads the log never pays for it.</para>
     /// </summary>
     private void PrefetchHighlight(CommitDetail detail)
     {
+        if (View != JunctionView.Commit && !_commitTabOpened) return;
         if (_selectedFilePath is not { Length: > 0 } path) return;
         if (detail.Commit?.Hash is not { } hash) return;
 

@@ -83,6 +83,16 @@ public static class GitProcess
     /// repository. One difference is deliberate: a path that does not exist used to throw from
     /// <see cref="Process.Start(ProcessStartInfo)"/> and now comes back as an ordinary failed
     /// <see cref="GitResult"/>, which is what every caller already handles.</para>
+    ///
+    /// <para>On Windows git starts with no console at all (<see cref="ProcessStartInfo.StartDetached"/>, the
+    /// <c>DETACHED_PROCESS</c> flag). git.exe is a console program and this app has no console, so
+    /// <see cref="ProcessStartInfo.CreateNoWindow"/> alone gave every command a hidden console of its own: a
+    /// conhost.exe started beside it, two processes a command (22 for 11). Measured from a GUI process on
+    /// <c>rev-parse HEAD</c>, alternated, 800 runs a side: 22.1–22.4 → 14.3–14.4 ms a command (median), min
+    /// 21.6 → 13.9. Its pipes, exit code and stopping it are unchanged; standard input it is not given reads
+    /// as empty. Git needs no console with its output redirected, and starts its own children (ssh, hooks,
+    /// helpers) without one when it has none. On Unix a detached start is a new session, so it is left
+    /// alone there.</para>
     /// </summary>
     private static ProcessStartInfo StartInfo(string workingDirectory, string[] args)
     {
@@ -92,6 +102,7 @@ public static class GitProcess
             WorkingDirectory = NeutralDirectory,
             UseShellExecute = false,
             CreateNoWindow = true,
+            StartDetached = OperatingSystem.IsWindows(),
         };
 
         if (!string.IsNullOrEmpty(workingDirectory))
@@ -102,8 +113,19 @@ public static class GitProcess
         foreach (var arg in args)
             psi.ArgumentList.Add(arg);
 
+        if (!s_counted.IsEmpty && s_counted.TryGetValue(workingDirectory, out var counted))
+            Interlocked.Increment(ref counted.Value);
         return psi;
     }
+
+    // The repositories whose git commands a test counts (CountRuns), by the path as callers pass it.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, System.Runtime.CompilerServices.StrongBox<int>>
+        s_counted = new(StringComparer.Ordinal);
+
+    /// <summary>For tests: from this call on, how many git commands start against
+    /// <paramref name="repository"/>, every one of which comes through here.</summary>
+    internal static System.Runtime.CompilerServices.StrongBox<int> CountRuns(string repository) =>
+        s_counted.GetOrAdd(repository, _ => new System.Runtime.CompilerServices.StrongBox<int>());
 
     /// <summary>How long one async git invocation may run before it is killed. Git has no
     /// network timeout of its own, so a command against a remote that has gone away — a
@@ -263,8 +285,8 @@ public static class GitProcess
     ///
     /// <para>For output that can be far longer than what the caller shows, a commit's patch above all:
     /// reading and decoding all of it, and the strings made from it, were most of what loading it cost.
-    /// What was read goes into a pooled buffer, so a stopped command leaves nothing behind but the part
-    /// kept, and a whole one only its string.</para>
+    /// What was read goes into a pooled buffer (<see cref="ReadBuffers"/>), so a stopped command leaves
+    /// nothing behind but the part kept, and a whole one only its string.</para>
     /// </summary>
     public static (GitResult Result, bool Whole) RunUpTo(string workingDirectory, int maxChars,
         Func<ReadOnlySpan<char>, int> keep, params string[] args)
@@ -278,7 +300,7 @@ public static class GitProcess
         using var process = Process.Start(psi)!;
         // Read alongside: a git that fills the error pipe while the output is read would wait forever.
         var stderr = process.StandardError.ReadToEndAsync();
-        var pool = System.Buffers.ArrayPool<char>.Shared;
+        var pool = ReadBuffers;
         var buffer = pool.Rent(Math.Min(maxChars, 16 * 1024));
         try
         {
@@ -312,6 +334,19 @@ public static class GitProcess
         }
         finally { pool.Return(buffer); }
     }
+
+    /// <summary>
+    /// The buffers <see cref="RunUpTo"/> reads into, doubling from 16K characters to the 262,144 a commit's
+    /// patch is read whole below: a pool of their own, two of each size for the whole process.
+    ///
+    /// <para>Not <see cref="System.Buffers.ArrayPool{T}.Shared"/>. It keeps the last array of each size a
+    /// thread returned in that thread's own slots, and gives them up only when the thread retires or after two
+    /// gen-2 collections at least 30 s apart — and this app has almost none. The detail loads run on whichever
+    /// pool thread is free, so every thread that had read a long patch kept one of each, about 1 MB, half of it
+    /// on the large object heap.</para>
+    /// </summary>
+    private static readonly System.Buffers.ArrayPool<char> ReadBuffers =
+        System.Buffers.ArrayPool<char>.Create(maxArrayLength: 262_144, maxArraysPerBucket: 2);
 
     /// <summary>
     /// Runs git and returns stdout as raw bytes. Needed for blob content (images and

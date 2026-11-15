@@ -179,10 +179,13 @@ public class HoverFollowsScrollTests
         Assert.Equal(Red, boxes[2].BackgroundColor);
     }
 
-    /// <summary>Boxes that show no hover and hear no press: the release draws nothing of its own, so
-    /// it asks for the frame that follows the scroll.</summary>
+    /// <summary>Boxes that show no hover and hear no press: with nothing marked, the release follows
+    /// the scroll at once, and since nothing on screen is drawn from that hover it asks for no
+    /// frame. It asked for one every time: a click on a request in Meridian's map, which scrolls the
+    /// row into view under the held button, drew its release as the same pixels 9 times of 10
+    /// (plan 17 round 15).</summary>
     [Fact]
-    public void AReleaseAfterAHeldScroll_AsksForTheFrameThatFollows()
+    public void AReleaseAfterAHeldScroll_FollowsAtOnce_AndDrawsNothing_WhenNothingDrawsTheHover()
     {
         var (view, boxes) = StyledBoxes(styled: false);
         using var session = Mount(view);
@@ -195,9 +198,39 @@ public class HoverFollowsScrollTests
         Assert.True(boxes[1].IsHovered);
 
         session.Window.MouseUp(200, 75);
-        Assert.True(session.PumpFrame());
-        Assert.True(boxes[2].IsHovered);
+        Assert.True(boxes[2].IsHovered);   // followed by the release itself
         Assert.False(boxes[1].IsHovered);
+        Assert.False(session.PumpFrame(), "the release drew a frame");
+        using var shown = Shown(session);
+        using var fresh = session.Window.CapturePixels();
+        using var forced = SKBitmap.FromImage(fresh);
+        Assert.Equal(forced.Bytes, shown.Bytes);   // what a frame would draw is on screen
+    }
+
+    /// <summary>A list's tint under the row the pointer is on is drawn from the hover with nothing
+    /// marked, so a release that moves it to the row that scrolled under the pointer still asks for
+    /// the frame that draws it.</summary>
+    [Fact]
+    public void AReleaseAfterAHeldScroll_StillDrawsTheTintUnderTheNewRow()
+    {
+        var list = TintedList();
+        using var session = Mount(list);
+        session.Window.MoveMouse(200, 36);   // the second row
+        session.PumpFrames(2);
+        session.Window.MouseDown(200, 36);
+        session.PumpFrames(2);
+        session.Window.Wheel(200, 36, 0, -1);
+        session.PumpFrames(2);
+        var held = list.Children.Single(row => row.IsHovered);   // the press keeps its row
+        Assert.False(held.WindowBorderBox.Contains(new Point(200, 36)));
+
+        session.Window.MouseUp(200, 36);
+        Assert.True(session.PumpFrame(), "the release drew no frame for the tint");
+        Assert.True(RowAt(list, 200, 36).IsHovered);
+        Assert.False(held.IsHovered);
+        using (var frame = Shown(session))
+            Assert.Equal(Rgb(Tint), Rgb(frame.GetPixel(380, 36)));
+        Assert.False(session.PumpFrame());
     }
 
     [Fact]

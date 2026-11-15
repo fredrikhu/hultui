@@ -39,6 +39,22 @@ public partial class JunctionApp
     {
         public bool Holds(DiffShownLines other) => Holds(Old, other.Old) && Holds(New, other.New);
 
+        /// <summary>These lines and <paramref name="margin"/> more at both ends of every range, on both
+        /// sides; ranges that meet become one.</summary>
+        public DiffShownLines Widened(int margin) => new(Widen(Old, margin), Widen(New, margin));
+
+        private static LineRange[] Widen(LineRange[] ranges, int margin)
+        {
+            var wide = new List<LineRange>(ranges.Length);
+            foreach (var r in ranges)
+            {
+                var w = new LineRange(Math.Max(1, r.First - margin), r.Last + margin);
+                if (wide.Count > 0 && wide[^1].Last >= w.First - 1) wide[^1] = wide[^1] with { Last = w.Last };
+                else wide.Add(w);
+            }
+            return wide.ToArray();
+        }
+
         private static bool Holds(LineRange[] have, LineRange[] want)
         {
             int at = 0;
@@ -91,6 +107,14 @@ public partial class JunctionApp
     /// </summary>
     internal TimeSpan HighlightRest { get; set; } = TimeSpan.FromMilliseconds(120);
 
+    /// <summary>For tests: what a tokenize waits for, after its rest and before it reads the file;
+    /// null waits for nothing. A test that has to see a diff drawn plain before its colours land
+    /// holds them with it. Left to the clock, they land within the frames the test pumps where git
+    /// starts in a few milliseconds or the frames are slow: on Fedora 17–30 ms after the plain rows,
+    /// in the first or second of three frames, and on Windows in a process that runs nothing
+    /// before it (plan 17 round 15). The app's own cancel ends the wait.</summary>
+    internal Task? HighlightHold { get; set; }
+
     private readonly Dictionary<string, FileHighlight> _highlights = new(StringComparer.Ordinal);
 
     // The worker's one tokenize, its cancel, and the ask that takes over when it ends.
@@ -112,7 +136,11 @@ public partial class JunctionApp
     /// <summary>Tokenizes that got past their rest and read the file, for tests.</summary>
     internal int HighlightsRead => _highlightsRead;
 
-    private int _highlightsRead;
+    /// <summary>Tokenizes whose result is on its way to the UI thread, for tests: what lands next
+    /// frame lands after it.</summary>
+    internal int HighlightsPosted => Volatile.Read(ref _highlightsPosted);
+
+    private int _highlightsRead, _highlightsPosted;
 
     private bool HighlightRunningLive =>
         _highlightRunning is not null && _highlightCancel is { IsCancellationRequested: false };
@@ -164,9 +192,22 @@ public partial class JunctionApp
         return null;
     }
 
+    /// <summary>
+    /// How many lines past each end of the diff's ranges the colours a save asks for before its rows
+    /// land reach (<see cref="ReloadChangesView"/>). That ask is made for the diff on screen, and the
+    /// rows that land are the diff after the save: a save that adds lines inside a hunk, or a line
+    /// that joins one, shows lines the ask did not cover, and the file was tokenized a second time
+    /// and the view built twice (plan 17 round 15). Eight covers a line added or removed anywhere a
+    /// hunk's three lines of context reach (it grows by seven at most) and a block of up to eight
+    /// lines pasted inside one; the walk runs from the file's first line either way.
+    /// </summary>
+    internal const int SaveAskMargin = 8;
+
     /// <param name="rest">A prefetch from the log: wait for the selection to stay.</param>
+    /// <param name="margin">Lines to colour past both ends of every range the diff shows
+    /// (<see cref="SaveAskMargin"/>).</param>
     private FileHighlight? HighlightFor(GitFileDiff diff, ExternalDiffMode mode, string? commitHash,
-        string? baseHash = null, bool onScreen = false, bool rest = false)
+        string? baseHash = null, bool onScreen = false, bool rest = false, int margin = 0)
     {
         if (ActiveRepo is not { } repo) return null;
         var path = diff.Path;
@@ -183,6 +224,7 @@ public partial class JunctionApp
         if (onScreen) _highlightShown = key;
         if (!ReferenceEquals(_highlightLinesOf.Diff, diff)) _highlightLinesOf = (diff, DiffShownLines.Of(diff));
         var shown = _highlightLinesOf.Shown!;
+        if (margin > 0) shown = shown.Widened(margin);
 
         _highlights.TryGetValue(key, out var hit);
         if (hit is not null && hit.Covers(shown)) return hit;
@@ -229,7 +271,7 @@ public partial class JunctionApp
         var cancel = new CancellationTokenSource();
         _highlightRunning = ask;
         _highlightCancel = cancel;
-        var (clock, rest) = (_app.Time == TimeProvider.System ? TimeProvider.System : NoBudget, HighlightRest);
+        var (clock, rest, hold) = (_app.Time == TimeProvider.System ? TimeProvider.System : NoBudget, HighlightRest, HighlightHold);
         var token = cancel.Token;
 
         Task.Run(async () =>
@@ -239,6 +281,7 @@ public partial class JunctionApp
             try
             {
                 if (ask.Rest) await Task.Delay(rest, token);
+                if (hold is not null) await hold.WaitAsync(token);
                 Interlocked.Increment(ref _highlightsRead);
                 (result, lines) = Tokenize(ask, clock, token);
             }
@@ -252,6 +295,7 @@ public partial class JunctionApp
             }
 
             Application.InvokeOnMainThread(() => HighlightLanded(ask, result, lines));
+            Interlocked.Increment(ref _highlightsPosted);
         });
     }
 

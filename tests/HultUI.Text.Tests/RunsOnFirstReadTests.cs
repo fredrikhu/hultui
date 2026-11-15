@@ -30,10 +30,12 @@ public class RunsOnFirstReadTests(ITestOutputHelper output)
     private static string Paragraph(int words, int seed = 0) =>
         string.Join(' ', Enumerable.Range(0, words).Select(i => Words[(i * 7 + seed) % Words.Length]));
 
-    private static TextPipeline Pipeline(bool composeWhenRead = true, IFontCollection? fonts = null) =>
+    // keepsWrapRanges false: every new width breaks the text again, as what a break makes is measured.
+    private static TextPipeline Pipeline(bool composeWhenRead = true, IFontCollection? fonts = null, bool keepsWrapRanges = true) =>
         new(fonts ?? new WidthChangeEquivalenceTests.TwoFonts(negativeDescent: false), new WidthChangeEquivalenceTests.ContextShaper())
         {
             ComposeRunsWhenRead = composeWhenRead,
+            KeepsWrapRanges = keepsWrapRanges,
         };
 
     private static TextSpan[] Bold(string text) =>
@@ -430,8 +432,8 @@ public class RunsOnFirstReadTests(ITestOutputHelper output)
         }
         foreach (var spans in new[] { null, TestSpans.Variants(Paragraph(120)).First() })
         {
-            long reference = Allocated(Pipeline(composeWhenRead: false), spans);
-            long lazy = Allocated(Pipeline(), spans);
+            long reference = Allocated(Pipeline(composeWhenRead: false, keepsWrapRanges: false), spans);
+            long lazy = Allocated(Pipeline(keepsWrapRanges: false), spans);
             output.WriteLine($"40 widths of a 120-word paragraph, spans {spans?.Length ?? 0}: {reference:N0} B with runs made, {lazy:N0} B with runs made when read");
             Assert.True(lazy < reference * 0.6, $"{lazy:N0} B against {reference:N0} B with the runs made");
         }

@@ -334,13 +334,46 @@ public class HoverAfterRebuildTests
         session.PumpFrame();
         Assert.Equal((0, 0), (log.Leave("a.leaf"), log.Enter("b.leaf")));
 
-        session.Window.MouseUp(50, 20);
-        session.PumpFrame();   // the release asks for this frame; its end settles hover
+        session.Window.MouseUp(50, 20);   // nothing is marked: the release settles hover itself
+        Assert.Equal((1, 1), (log.Leave("a"), log.Leave("a.leaf")));
+        Assert.Equal((1, 1), (log.Enter("b"), log.Enter("b.leaf")));
+        Assert.True(session.PumpFrame());   // the enter handlers ran: they get a frame
         session.PumpFrame();
 
         Assert.Equal((1, 1), (log.Leave("a"), log.Leave("a.leaf")));
         Assert.Equal((1, 1), (log.Enter("b"), log.Enter("b.leaf")));
         Assert.Equal((1, 0), (log.Enter("host"), log.Leave("host")));
+    }
+
+    /// <summary>A build under a held press that nothing draws the hover of: with nothing marked, the
+    /// release settles hover at once and asks for no frame. It asked for one every time: a right
+    /// click in Vesper Commander, whose mark rebuilt the rows under the held button, drew its release
+    /// as the same pixels 6 times of 6 (plan 17 round 15).</summary>
+    [Fact]
+    public void AReleaseAfterABuildUnderAHeldPress_SettlesAtOnce_AndDrawsNothing()
+    {
+        using var session = HeadlessSession.Create(400, 300);
+        var host = Box.New().Children(Box.New().Width(200f).Height(100f));
+        session.Window.SetRoot(Flex.Column().AlignItems(AlignItems.FlexStart).Children(host));
+        session.PumpFrame();
+        session.Window.MoveMouse(50, 20);
+        session.PumpFrames(2);
+        session.Window.MouseDown(50, 20);
+        session.PumpFrames(2);
+
+        var next = Box.New().Width(200f).Height(100f);
+        host.ReplaceChildren(next);
+        Assert.True(session.PumpFrame());   // the build's, under the held press
+        Assert.False(next.IsHovered);
+
+        session.Window.MouseUp(50, 20);
+        Assert.True(next.IsHovered);   // settled by the release itself
+        Assert.False(session.PumpFrame(), "the release drew a frame");
+        using var onScreen = ((HultUI.Rendering.Skia.SkiaRasterRenderSurface)session.Window.Window.PlatformWindow.Surface).Snapshot();
+        using var shown = SKBitmap.FromImage(onScreen);
+        using var fresh = session.Window.CapturePixels();
+        using var forced = SKBitmap.FromImage(fresh);
+        Assert.Equal(forced.Bytes, shown.Bytes);
     }
 
     [Fact]

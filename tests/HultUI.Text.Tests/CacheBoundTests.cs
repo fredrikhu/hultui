@@ -39,12 +39,13 @@ public class CacheBoundTests
         foreach (var line in Document())
         {
             pipeline.Layout(line, Style, float.PositiveInfinity, 1);   // measured whole: shape and word caches
-            pipeline.Layout(line, Style, 640f, null);                  // wrapped: the layout cache
+            pipeline.Layout(line, Style, 640f, null);                  // wrapped: the layout cache and the wrap ranges
         }
 
         Check(pipeline.ShapeCacheUse, TextPipeline.ShapeCacheBytes, 3_000, "shape");
         Check(pipeline.WordCacheUse, TextPipeline.WordCacheBytes, TextPipeline.WordCacheEntries, "word");
         Check(pipeline.LayoutCacheUse, TextPipeline.LayoutCacheBytes, 2_048, "layout");
+        Check(pipeline.WrapRangeUse, TextPipeline.WrapRangeBytes, 3_000, "wrap range");
 
         // Within the bound, near it, and the bound is what stopped it: by the entry counts alone
         // (every line laid out, or the 32,768 and 2,048 the word and layout caches may hold)

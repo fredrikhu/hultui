@@ -55,6 +55,11 @@ sealed class Op
     /// <summary>What <see cref="Figure"/> counts, e.g. "rebuilds/frame".</summary>
     public string? FigureUnit { get; init; }
 
+    /// <summary>More of what the loop did, in words, read after each timed step; the last step's is
+    /// printed beside the figure and kept in the capture ("12 frames, longest 21 ms"). For a row
+    /// whose point needs more than one count.</summary>
+    public Func<string>? Detail { get; init; }
+
     /// <summary>Virtual time each of those frames advances; default one 60 Hz frame. Longer for a tooltip's delay.</summary>
     public TimeSpan? FrameDelta { get; init; }
 
@@ -96,6 +101,7 @@ sealed class Samples
     public readonly List<int> Gcs = [];
     public readonly List<double> Figures = [];
     public string? FigureUnit;
+    public string? Detail;
     public long AllocatedBytes;
     public int Count;
     public int Elements;
@@ -106,7 +112,7 @@ sealed record Result(
     string Name, string Description, int Elements, int N,
     double MinMs, double MedianMs, double BuildMs, double StyleMs, double LayoutMs,
     double RenderMs, double OtherMs, double AllocKB, int UnrenderedSteps,
-    double? Figure = null, string? FigureUnit = null);
+    double? Figure = null, string? FigureUnit = null, string? Detail = null);
 
 sealed record Options
 {
@@ -256,6 +262,7 @@ static class Runner
             into.Figures.Add(op.Figure());
             into.FigureUnit = op.FigureUnit;
         }
+        if (op.Detail is not null) into.Detail = op.Detail();
         into.Count++;
         if (Verbose)
             Console.WriteLine($"    {ctx.Window.Window.Title,-36} step {step,2}  total {total,8:0.000}  build {build,7:0.000}  style {style,6:0.00}  layout {layout,7:0.00}  render {render,7:0.00}  gc {GC.CollectionCount(0) - gc0}");
@@ -280,6 +287,6 @@ static class Runner
             x.Total.Count == 0 ? 0 : x.Total.Min(), Median(x.Total),
             Median(x.Build), Median(x.Style), Median(x.Layout), Median(x.Render), Median(x.Other),
             x.Count == 0 ? 0 : x.AllocatedBytes / 1024.0 / x.Count, x.UnrenderedSteps,
-            x.Figures.Count == 0 ? null : x.Figures.Average(), x.FigureUnit);
+            x.Figures.Count == 0 ? null : x.Figures.Average(), x.FigureUnit, x.Detail);
     }
 }

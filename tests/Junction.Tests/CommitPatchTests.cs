@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Reflection;
+using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Headless;
@@ -142,6 +143,38 @@ public class CommitPatchTests
     }
 
     /// <summary>
+    /// Once another commit's detail lands, the one the Commit tab showed can be collected. The pane kept the last
+    /// diff it drew together with its detail's whole <c>DiffByPath</c>, and held it until the tab's next build: back
+    /// in History after a walk through a plan merge's files, its parsed diffs (6–12 MB) stayed for as long as the
+    /// tab stayed closed.
+    /// </summary>
+    [Fact]
+    public void AnotherCommitsDetail_LetsTheShownOneGo()
+    {
+        Hosted(64, (session, app) =>
+        {
+            OpenCommit(session, app);
+            session.PumpFrames(5);
+            var shown = Weakly(Diffs(app));
+
+            session.Window.PressKey(KeyCode.Digit2);   // History
+            session.PumpFrame();
+            string parent = GitProcess.Run((string)Field(app, "_activeRepoPath")!, "rev-parse", "HEAD~1").Stdout.Trim();
+            typeof(JunctionApp).GetMethod("SetCommitSelection", All)!.Invoke(app, [parent]);
+            typeof(JunctionApp).GetMethod("Rerender", All, Type.EmptyTypes)!.Invoke(app, null);
+            session.PumpUntil(() => Property(Detail(app), "Commit") is GitCommit c && c.Hash == parent, TimeSpan.FromSeconds(30));
+            session.PumpFrames(3);
+
+            GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+            Assert.False(shown.IsAlive, "the Commit tab's last detail is still held");
+        });
+    }
+
+    /// <summary>A weak reference made in a frame of its own, so no local keeps the object alive.</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static WeakReference Weakly(object o) => new(o);
+
+    /// <summary>
     /// A walk through the files with the arrow keys: the file beside the open one is read ahead, so each key
     /// draws the new file's diff on its own frame — no "Loading…", no earlier diff — and nothing is read on
     /// a key. Going back reads nothing either.
@@ -234,7 +267,84 @@ public class CommitPatchTests
         });
     }
 
+    /// <summary>
+    /// Ctrl+D while the open file's patch is on its way decides on that file, not on the diff the pane keeps on
+    /// screen meanwhile: a binary file opened from a text one is refused once its patch lands, never launched.
+    /// (A click builds at once and asks for the patch; headless, the patch is read when the next frame starts,
+    /// so a key straight after the click always meets it on its way, however fast git is.)
+    /// </summary>
+    [Fact]
+    public void CtrlD_OnAFileStillLoading_RefusesItWhenItIsBinary()
+    {
+        Hosted(64, (session, app) =>
+        {
+            OpenCommit(session, app);
+            session.PumpFrames(5);
+            ClickRow(session, "e.bin");   // its build asks for e.bin's patch
+            Assert.Equal("a.txt", PaneLabel(session));   // the text file is kept on screen
+
+            session.Window.PressKey(KeyCode.D, KeyModifiers.Ctrl);
+            Assert.False(Diffs(app).Contains("e.bin"), "the patch landed before the key");
+            Assert.False(EditorStarted(session), "the editor was started before the file was known");
+            Assert.False(Announces(session, Refused), "refused before the file was known");
+
+            session.PumpUntil(() => PaneLabel(session) == "e.bin", TimeSpan.FromSeconds(20));
+            session.PumpFrames(3);
+            Assert.True(Announces(session, Refused), "the binary file was not refused");
+            Assert.False(EditorStarted(session), "the editor was started for a binary file");
+        });
+    }
+
+    /// <summary>
+    /// The other way: a text file opened from a binary one is opened in the editor once its patch lands; the
+    /// binary diff on screen meanwhile does not refuse it.
+    /// </summary>
+    [Fact]
+    public void CtrlD_OnAFileStillLoading_OpensItWhenTheKeptOneIsBinary()
+    {
+        Hosted(64, (session, app) =>
+        {
+            OpenCommit(session, app);
+            Click(app, "e.bin");
+            session.PumpUntil(() => PaneLabel(session) == "e.bin", TimeSpan.FromSeconds(20));
+            session.PumpUntil(() => Diffs(app).Contains("d.txt") && Diffs(app).Contains("f[1].txt"), TimeSpan.FromSeconds(20));
+            session.PumpFrames(3);
+            ClickRow(session, "c.cs");   // not read yet, and not beside e.bin
+            Assert.Equal("e.bin", PaneLabel(session));   // the binary file is kept on screen
+
+            session.Window.PressKey(KeyCode.D, KeyModifiers.Ctrl);
+            Assert.False(Diffs(app).Contains("c.cs"), "the patch landed before the key");
+            Assert.False(Announces(session, Refused), "refused for the binary file on screen");
+
+            session.PumpUntil(() => PaneLabel(session) == "c.cs", TimeSpan.FromSeconds(20));
+            session.PumpUntil(() => EditorStarted(session), TimeSpan.FromSeconds(20));
+            Assert.False(Announces(session, Refused), "the text file was refused");
+        });
+    }
+
     // ── Harness ──────────────────────────────────────────────────────────
+
+    // Ctrl+D's editor here, and what the app says when it refuses a file and when it starts the editor (or fails to).
+    private const string NoEditor = "junction-test-no-such-editor";
+    private const string Refused = "there are no two texts";
+
+    /// <summary>Whether Ctrl+D started the editor: the launch's own toast, or the failure to start it that
+    /// replaces it.</summary>
+    private static bool EditorStarted(HeadlessSession session) =>
+        Announces(session, "Opening diff in the editor") || Announces(session, NoEditor);
+
+    /// <summary>A click on a file row of the Commit tab's list: its handler builds at once, so a file not read
+    /// yet is asked for and still on its way when this returns.</summary>
+    private static void ClickRow(HeadlessSession session, string path) =>
+        session.Window.Click(Descendants(Root(session)).First(e => e.Key == path));
+
+    /// <summary>Whether the window says <paramref name="text"/> anywhere (a toast included).</summary>
+    private static bool Announces(HeadlessSession session, string text)
+    {
+        static IEnumerable<AccessibilityNode> Walk(AccessibilityNode n) => n.Children.SelectMany(Walk).Prepend(n);
+        return Walk(session.Window.AccessibilityTree).Any(n =>
+            n.Name?.Contains(text, StringComparison.Ordinal) == true || n.Value?.Contains(text, StringComparison.Ordinal) == true);
+    }
 
     private static string Describe(GitFileDiff d) =>
         string.Join('\n', new[]
@@ -337,6 +447,8 @@ public class CommitPatchTests
                 ActiveRepoPath = repo.Path,
                 Workspaces = [new WorkspaceData { Id = "w1", Name = "Tests", RepoPaths = [repo.Path] }],
                 ActiveWorkspaceId = "w1",
+                // Ctrl+D's editor: a program that is not there, so a launch fails to start rather than open one.
+                ExternalTools = new ExternalToolOptions { Editor = EditorPreset.Custom, EditorCommand = NoEditor },
             });
             if (wholePatchChars is { } chars) app.WholePatchChars = chars;
             session.Application.SetRoot(app.Mount());

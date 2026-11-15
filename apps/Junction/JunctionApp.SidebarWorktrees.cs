@@ -120,7 +120,7 @@ public partial class JunctionApp
         if (wt.Prunable) row.AddChild(Ui.TagOutline("gone", Nocturne.DelCount, 8.5f).FlexShrink(0));
 
         row.OnClick(_ => SelectRepo(wt.Path));
-        row.On<PointerDownEvent>(e => { if (e.Button == 2 && !active) SelectRepo(wt.Path); });
+        row.OnPassive<PointerDownEvent>(e => { if (e.Button == 2 && !active) SelectRepo(wt.Path); });
         row.ContextMenu(() => WorktreeMenuItems(wt, active));
         if (!active) row.HoverBg(Nocturne.Neutral900, Color.Transparent);
         return row;

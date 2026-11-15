@@ -66,17 +66,27 @@ public class DiffRowKeepTests
 
     /// <summary>The first build asks for the colours and draws plain; the tokenize landing is a
     /// new highlight, and the rows on screen are made again with it. The rows of the list are not:
-    /// they hold no colour.</summary>
+    /// they hold no colour.
+    ///
+    /// <para>The colours are held until the plain rows are on screen. Left to land when they
+    /// would, they came within the harness's frames wherever git starts in a few milliseconds
+    /// (Fedora: 17–30 ms after the plain rows) or the frames are slow (Windows, the test alone in
+    /// its process), and the rows the test then counted were already the coloured ones.</para></summary>
     [Fact]
     public void TheHighlightLanding_MakesTheRowsOnScreenAgainInColour()
     {
+        // Asynchronously: the tokenize goes on on the pool, not inside SetResult on this thread.
+        var colours = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Hosted((session, app) =>
         {
+            Assert.False(Coloured(app), "the rows were coloured before the colours were let land");
+            Assert.True(app.DiffRowsMade > 0, "no row was drawn plain");
             int flattens = app.DiffFlattens, made = app.DiffRowsMade;
+            colours.SetResult();
             session.PumpUntil(() => Coloured(app), TimeSpan.FromSeconds(20));
             Assert.Equal(flattens, app.DiffFlattens);
             Assert.True(app.DiffRowsMade > made, "the rows were not made again");
-        }, waitForColours: false);
+        }, holdColours: colours.Task);
     }
 
     /// <summary>The word diff's tint is the scheme's, baked into the flattened spans.</summary>
@@ -223,9 +233,9 @@ public class DiffRowKeepTests
     /// <summary>Unwrapped and with no review every row is one line high at any width, so a width
     /// change keeps the rows on screen: a window resize, and the split between the file list and
     /// the diff dragged (plan 17 round 10: a drag move made every row on screen again, 159.7 KB).
-    /// Wrapped, the rows are measured at the width, and a change makes them again.</summary>
+    /// Wrapped, the rows are measured at the width and kept too.</summary>
     [Fact]
-    public void AWidthChange_KeepsTheRows_UnlessTheyWrap()
+    public void AWidthChange_KeepsTheRows_WrappedOrNot()
     {
         Hosted((session, app) =>
         {
@@ -255,15 +265,18 @@ public class DiffRowKeepTests
             Assert.True(app.DiffRowsMade == made, $"{app.DiffRowsMade - made} rows made over a split drag");
             Assert.Equal(rows, Rows(app));
 
-            // Wrapped: measured at the width, made again when it moves.
+            // Wrapped: measured at the width, and kept too: a wrapped row reads no width but its
+            // column's, and takes its new height from the list (plan 17 round 15; it was made again).
             var body = Get<Ref<Element>>(app, "_diffBodyRef").Current!;
             body.Focus();
             session.Window.PressKey(KeyCode.W);
             session.PumpFrames(3);
             Assert.True(Get<bool>(app, "_diffWrap"));
             int wrapped = app.DiffRowsMade;
+            var wrappedRows = Rows(app);
             Resize(session, app, 1200);
-            Assert.True(app.DiffRowsMade - wrapped >= Rows(app).Count, $"{app.DiffRowsMade - wrapped} rows made of {Rows(app).Count} after a wrapped width change");
+            Assert.True(app.DiffRowsMade == wrapped, $"{app.DiffRowsMade - wrapped} rows made of {Rows(app).Count} after a wrapped width change");
+            Assert.Equal(wrappedRows, Rows(app));
         });
     }
 
@@ -368,9 +381,9 @@ public class DiffRowKeepTests
 
     /// <summary>Changes (or, with <paramref name="commitView"/>, the Commit tab on the commit
     /// that makes the change), on a C# file with a line holding a tab and seven more changed
-    /// word-wise, and one re-indented further down; its diff on screen and (by default)
-    /// coloured.</summary>
-    private static void Hosted(Action<HeadlessSession, JunctionApp> body, bool waitForColours = true, bool commitView = false)
+    /// word-wise, and one re-indented further down; its diff on screen and coloured, or, with
+    /// <paramref name="holdColours"/>, drawn plain, its colours waiting for that task.</summary>
+    private static void Hosted(Action<HeadlessSession, JunctionApp> body, Task? holdColours = null, bool commitView = false)
     {
         using var repo = TempRepo.CreateWithInitialCommit();
         repo.Write("src/Notes.cs", Notes(i => $"    int value{i} = {i}; // alpha beta gamma {i}", "\tint tabbed = 1;"));
@@ -395,6 +408,7 @@ public class DiffRowKeepTests
                 Workspaces = [new WorkspaceData { Id = "w1", Name = "Tests", RepoPaths = [repo.Path] }],
                 ActiveWorkspaceId = "w1",
             });
+            app.HighlightHold = holdColours;
             session.Application.SetRoot(app.Mount());
             session.PumpFrames(3);
 
@@ -407,7 +421,7 @@ public class DiffRowKeepTests
             else
                 session.Window.PressKey(KeyCode.Digit4);   // Changes
             session.PumpUntil(() => ListOrNull(app!) is { } l && l.Children.Count > 1, TimeSpan.FromSeconds(30));
-            if (waitForColours) session.PumpUntil(() => Coloured(app!), TimeSpan.FromSeconds(20));
+            if (holdColours is null) session.PumpUntil(() => Coloured(app!), TimeSpan.FromSeconds(20));
             session.PumpFrames(3);
 
             body(session, app);

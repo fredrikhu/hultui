@@ -52,6 +52,51 @@ public sealed class GpuFrameSinkGLTests
             $"picture pixel was ({px[0]},{px[1]},{px[2]}), expected (0,128,255)");
     }
 
+    /// <summary>
+    /// A player taken off screen and disposed leaves nothing of itself in the window. The render
+    /// context keeps a wrapper over each GPU source's texture, keyed by the source; until the GL
+    /// surface let it go when the source did (<c>ReleaseFrameTarget</c>), the window kept every
+    /// disposed player's sink, and through it its renderer and the frame buffers its pixel ring had
+    /// written: one player a cycle, for the window's life (plan 17 round 15).
+    /// </summary>
+    [UiFact]
+    public void ADisposedPlayer_IsNotKeptByTheWindow()
+    {
+        using var guard = ForegroundGuard.Begin();
+        using var app = new Application(new SdlWindowingPlatform(), "gpu-sink-gone", 320, 200);
+
+        var renderer = PlayThenDispose(app);
+        // The frame after the dispose is where the window lets the sink's wrapper go.
+        Assert.True(app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true));
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+
+        Assert.False(renderer.TryGetTarget(out _),
+            "the window still holds the disposed player's sink, and through it its renderer");
+    }
+
+    // Its own method, so no local of the test's frame keeps the player alive.
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static WeakReference<ClearingRenderer> PlayThenDispose(Application app)
+    {
+        var renderer = new ClearingRenderer();
+        var player = new MediaPlayer(new FakeMediaBackend { GpuRenderer = renderer });
+        app.SetRoot(Box.New().Background(Color.White).Width(320f).Height(200f).Children(
+            Video.New(player).Width(320f).Height(200f)));
+        player.Open(MediaSource.FromFile("clip.mp4"));
+        Assert.True(app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true));
+        Assert.True(app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true));
+        Assert.Equal(GpuSinkMode.Gpu, player.SinkMode);
+        Assert.True(renderer.Renders >= 2, $"rendered {renderer.Renders} times");
+
+        // As an app leaves playback: the picture leaves the tree, then the player goes.
+        app.SetRoot(Box.New().Background(Color.White).Width(320f).Height(200f));
+        Assert.True(app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true));
+        player.Dispose();
+        return new WeakReference<ClearingRenderer>(renderer);
+    }
+
     /// <summary>A renderer that clears the sink's framebuffer to one colour.</summary>
     private sealed class ClearingRenderer : IGpuFrameRenderer
     {

@@ -374,9 +374,21 @@ public class GitRepository
 
     // ── Status (working tree) ──
 
-    public List<GitFileChange> GetStatus()
+    private static readonly string[] StatusArgs = ["status", "--porcelain=v1", "-uall"];
+
+    public List<GitFileChange> GetStatus() => ParseStatus(RunStatus());
+
+    /// <summary>
+    /// <c>git status --porcelain=v1 -uall</c> as git answered it, for a caller that hands one
+    /// status to several readers: <see cref="ParseStatus"/> (what <see cref="GetStatus"/> returns),
+    /// <see cref="GetUnstagedChanges(Func{GitResult})"/> and <see cref="GetConflictedFiles(GitResult)"/>.
+    /// With <c>-uall</c> git walks the whole working tree for it.
+    /// </summary>
+    public GitResult RunStatus() => GitProcess.Run(Path, StatusArgs);
+
+    /// <summary>The files <paramref name="result"/> names, or none when git refused the status.</summary>
+    public static List<GitFileChange> ParseStatus(GitResult result)
     {
-        var result = GitProcess.Run(Path, "status", "--porcelain=v1", "-uall");
         if (!result.Success) return [];
 
         var changes = new List<GitFileChange>();
@@ -714,22 +726,17 @@ public class GitRepository
     }
 
     /// <summary>Staged files (index vs HEAD) with per-file added/deleted counts.</summary>
-    public List<GitFileChange> GetStagedChanges() => GetChangeList(cached: true, workingTree: false);
+    public List<GitFileChange> GetStagedChanges() => QueryFileChanges(["diff", "--cached", "--raw", "--numstat", "-M"]);
 
     /// <summary>Unstaged files (working tree vs index) with counts, plus untracked files.</summary>
-    public List<GitFileChange> GetUnstagedChanges() => GetChangeList(cached: false, workingTree: true);
+    public List<GitFileChange> GetUnstagedChanges() => GetUnstagedChanges(RunStatus);
 
-    private List<GitFileChange> GetChangeList(bool cached, bool workingTree)
+    /// <summary><see cref="GetUnstagedChanges()"/> folding in the status <paramref name="status"/>
+    /// gives (see <see cref="RunStatus"/>), asked for after the diff as that one asks.</summary>
+    public List<GitFileChange> GetUnstagedChanges(Func<GitResult> status)
     {
-        string[] statusArgs = cached
-            ? ["diff", "--cached", "--name-status", "-M"]
-            : ["diff", "--name-status", "-M"];
-        string[] numArgs = cached
-            ? ["diff", "--cached", "--numstat", "-M"]
-            : ["diff", "--numstat", "-M"];
-
-        var list = QueryFileChanges(statusArgs, numArgs);
-        if (workingTree) AddStatusOnlyChanges(list);
+        var list = QueryFileChanges(["diff", "--raw", "--numstat", "-M"]);
+        AddStatusOnlyChanges(list, status());
         return list;
     }
 
@@ -751,10 +758,11 @@ public class GitRepository
     /// as ordinary changes with no line counts: staging one is <c>git add</c>, which
     /// rewrites the cached size and is exactly the cure.</para>
     /// </summary>
-    private void AddStatusOnlyChanges(List<GitFileChange> list)
+    private static void AddStatusOnlyChanges(List<GitFileChange> list, GitResult status)
     {
+        if (!status.Success) throw new GitCommandException(StatusArgs, status);
         var seen = list.Select(f => f.Path).ToHashSet(StringComparer.Ordinal);
-        foreach (var line in Query("status", "--porcelain=v1", "-uall").Lines)
+        foreach (var line in status.Lines)
         {
             if (line.Length < 4) continue;
             var xy = line[..2];
@@ -789,8 +797,35 @@ public class GitRepository
     /// </summary>
     private List<GitFileChange> QueryFileChanges(string[] statusArgs, string[] numstatArgs)
     {
+        var numstat = Query(numstatArgs).Lines;
+        return FileChanges(Query(statusArgs).Lines, numstat);
+    }
+
+    /// <summary>
+    /// <see cref="QueryFileChanges(string[], string[])"/> from one command that asks for
+    /// <c>--raw</c> and <c>--numstat</c> together. A raw line is <c>:&lt;modes&gt; &lt;ids&gt;
+    /// &lt;letter&gt;</c> and, from its tab on, what <c>--name-status</c> prints for the same file of the
+    /// same diff; the numstat lines follow the raw ones. A save over Changes ran the two as four
+    /// commands, each a process and a pass over the index (plan 17 round 15).
+    /// </summary>
+    private List<GitFileChange> QueryFileChanges(string[] rawAndNumstatArgs)
+    {
+        var status = new List<string>();
+        var numstat = new List<string>();
+        foreach (var line in Query(rawAndNumstatArgs).Lines)
+        {
+            if (line.Length == 0 || line[0] != ':') { numstat.Add(line); continue; }
+            int tab = line.IndexOf('\t');
+            if (tab < 0) continue;
+            status.Add(line[(line.LastIndexOf(' ', tab) + 1)..]);
+        }
+        return FileChanges(status, numstat);
+    }
+
+    private static List<GitFileChange> FileChanges(IEnumerable<string> statusLines, IEnumerable<string> numstatLines)
+    {
         var counts = new Dictionary<string, (int Add, int Del)>(StringComparer.Ordinal);
-        foreach (var line in Query(numstatArgs).Lines)
+        foreach (var line in numstatLines)
         {
             var parts = line.Split('\t');
             if (parts.Length < 3) continue;
@@ -800,7 +835,7 @@ public class GitRepository
         }
 
         var list = new List<GitFileChange>();
-        foreach (var line in Query(statusArgs).Lines)
+        foreach (var line in statusLines)
         {
             var parts = line.Split('\t');
             if (parts.Length < 2) continue;
@@ -1372,10 +1407,11 @@ public class GitRepository
     /// <summary>
     /// Returns the list of currently conflicted file paths.
     /// </summary>
-    public List<GitFileChange> GetConflictedFiles()
-    {
-        return GetStatus().Where(f => f.Kind == FileChangeKind.Conflicted).ToList();
-    }
+    public List<GitFileChange> GetConflictedFiles() => GetConflictedFiles(RunStatus());
+
+    /// <summary>The conflicted files <paramref name="status"/> names (see <see cref="RunStatus"/>).</summary>
+    public static List<GitFileChange> GetConflictedFiles(GitResult status) =>
+        ParseStatus(status).Where(f => f.Kind == FileChangeKind.Conflicted).ToList();
 
     /// <summary>
     /// Resolves a conflicted file by choosing "ours" (the current branch's version).

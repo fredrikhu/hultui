@@ -167,6 +167,8 @@ public partial class JunctionApp
         if (!_compactChrome)
             b.AddChild(Text.New(label).FontSize(11.5f).FontWeight(FontWeight.Medium).TextColor(fg)
                 .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
+        else
+            b.AccessibleName(label);   // icon-only: named as the labelled one reads (a tooltip is no name)
         // Active and inactive differ in fill and border, so the flip has to replace the
         // element rather than patch over the other state's background.
         b.Key = "refview:" + label + (active ? "#a" : "");
@@ -222,7 +224,7 @@ public partial class JunctionApp
         row.AddChild(Box.New().FlexGrow(1));
 
         row.OnClick(_ => { select(index); ToggleFolder(kind, node); });
-        row.On<PointerDownEvent>(e => { if (e.Button == 2) select(index); });
+        row.OnPassive<PointerDownEvent>(e => { if (e.Button == 2) select(index); });
         row.ContextMenu(() => RefFolderMenuItems(kind, node));
         return row;
     }

@@ -78,6 +78,24 @@ public class HostPumpTests
         Assert.Null(host.App.HostNextFrameIn(Interval));
     }
 
+    /// <summary>A frame runs posted work for at most half a display interval: what it left is due
+    /// at once, and the next frame runs it.</summary>
+    [Fact]
+    public void PostsAFrameLeftForLackOfTime_AreDueAtOnce()
+    {
+        using var host = new Host();
+        int ran = 0;
+        for (int i = 0; i < 3; i++)
+            Application.InvokeOnMainThread(() => { ran++; host.Session.AdvanceTime(TimeSpan.FromMilliseconds(5)); });
+
+        host.App.HostRunFrame(Interval);
+        Assert.Equal(2, ran);
+        Assert.Equal(TimeSpan.Zero, host.App.HostNextFrameIn(Interval));
+        host.App.HostRunFrame(Interval);
+        Assert.Equal(3, ran);
+        Assert.Null(host.App.HostNextFrameIn(Interval));
+    }
+
     /// <summary>While the host waits between ticks, a change on the UI thread (input a WinForms
     /// control raised, a handler writing a signal) and a post from it wake the host, once.</summary>
     [Fact]

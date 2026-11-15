@@ -17,6 +17,20 @@ public partial class RichTextEditorElement
     // offset: true after End or a click past a line's end, so the caret stays where it was put.
     private bool _upstream;
 
+    // A numbered item's label ("1.", "2.", …), made once for each of the numbers lists use: made
+    // each frame, it was the one steady-state allocation of an editor frame, 0.78 KB a caret frame
+    // over 25 items in Junction's composer (plan 17 round 15). Shared by every editor, and drawn on
+    // the UI thread only.
+    private static readonly string?[] s_numberLabels = new string?[1000];
+
+    private static string NumberLabel(int number) =>
+        (uint)number < (uint)s_numberLabels.Length
+            ? s_numberLabels[number] ??= MakeNumberLabel(number)
+            : MakeNumberLabel(number);
+
+    private static string MakeNumberLabel(int number) =>
+        number.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".";
+
     /// <summary>The box's — the document is clipped to it — while the scrollbar fits inside it.</summary>
     public override Rect? PaintBounds(IRenderContext ctx) =>
         _bar.PaintsInside(Layout.AbsoluteContentBox, vertical: true) ? base.PaintBounds(ctx) : null;
@@ -229,7 +243,7 @@ public partial class RichTextEditorElement
 
             case BlockKind.NumberedItem:
             {
-                string label = bl.Number.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".";
+                string label = NumberLabel(bl.Number);
                 var style = bl.Style with { TextAlign = TextAlign.Start, Decoration = TextDecoration.None };
                 float w = ctx.MeasureText(label, style).Width;
                 // Right-aligned against the text, as a word processor sets them, so 9. and 10. line up.

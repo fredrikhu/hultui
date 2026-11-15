@@ -61,7 +61,8 @@ public class ParagraphAllocationTests
     [InlineData(false)]
     public void AWrappedLine_AllocatesWhatItKeeps_AndNoListToItemizeIn(bool runsWhenRead)
     {
-        var pipeline = new TextPipeline(new Fonts(), new Shaper()) { ComposeRunsWhenRead = runsWhenRead };
+        // Not kept for a range of widths: each new width below breaks the text again.
+        var pipeline = new TextPipeline(new Fonts(), new Shaper()) { ComposeRunsWhenRead = runsWhenRead, KeepsWrapRanges = false };
         string ten = Lines(10), forty = Lines(40);
         float width = 60f;
         // Laid out once, so their shaping and break segments are kept; then each round at a width
@@ -143,8 +144,9 @@ public class ParagraphAllocationTests
         // Text that wraps into its lines with nothing cut off, at widths not laid out at before:
         // Ellipsis tests the last line and leaves the layout as it is, as Clip does. The test
         // handed the line builder as a lambda made a closure and a delegate on every layout with
-        // Ellipsis: 136 B a layout more than Clip on the plain path, 152 styled, 160 BiDi.
-        var pipeline = new TextPipeline(new Fonts(), new Shaper());
+        // Ellipsis: 136 B a layout more than Clip on the plain path, 152 styled, 160 BiDi. (Clip
+        // is not kept for a range of widths here, as Ellipsis is not: both break at each width.)
+        var pipeline = new TextPipeline(new Fonts(), new Shaper()) { KeepsWrapRanges = false };
         string text = path == "BiDi" ? Lines(9) + " שלום" : Lines(10);
         TextSpan[]? spans = styled ? [new TextSpan(9, 8, new(0, 0, 0, 255), Weight: FontWeight.Bold)] : null;
         float width = 60f;

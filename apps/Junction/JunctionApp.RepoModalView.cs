@@ -390,7 +390,7 @@ public partial class JunctionApp
         layer.Position.Top = Dimension.Px(0);
         layer.Position.Left = Dimension.Px(0);
         layer.On<ClickEvent>(e => { e.StopPropagation = true; _popover = null; MarkDirty(); });
-        layer.On<PointerDownEvent>(e => { if (e.Button == 2) { _popover = null; MarkDirty(); } });
+        layer.OnPassive<PointerDownEvent>(e => { if (e.Button == 2) { _popover = null; MarkDirty(); } });
 
         var menu = Flex.Column(gap: 0)
             .Width(PopoverWidth).Padding(new Thickness(5))

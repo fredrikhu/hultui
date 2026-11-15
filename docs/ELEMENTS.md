@@ -75,6 +75,13 @@ These propagate to child elements unless overridden.
   drawing, return a `FontMetrics`: the ascent, descent and line gap, `LineHeight`, the
   `CharacterWidth` (the advance of `0`, which in a monospace face is the cell width), whether the
   face is fixed-pitch, the face actually used, and where an underline and a strikeout go.
+- **Wrapped heights at each width of a resize.** `TextMeasure.MeasureWrapped(text, style, width)` is
+  cheap to ask again at a new width while the text keeps its lines: a wrapped layout is kept for
+  every width that breaks it into the same lines, so a list that measures every row's height at
+  each step of a resize lays out only the rows whose lines change (Vesper Commander's reader over a
+  602,000-character file: 2.2 MB to 44 KB a 1 px step). That holds for plain text clipped; text with
+  bold, italic or resized spans, text that can need bidirectional layout (right-to-left scripts,
+  emoji, combining marks) and `TextOverflow.Ellipsis` are laid out again at each width.
 - **Glyph coverage.** `HasGlyph(style, codePoint)` says whether the face itself has a glyph, not a
   fallback font. A character grid draws a missing one on its own, since a fallback glyph's advance
   need not be the cell's.
@@ -124,7 +131,12 @@ and its `.OnHover` look in the next frame; the part of the chain that survived h
 and what it is no longer over gets its leave. A tooltip owned by what went closes, and the new
 element's opens after the usual delay. Nothing happens while a press holds the pointer (a
 capture, a drag, a text selection, a slider, an autoscroll): hover stays where it is until the
-release, as it does on a move, and the frame after the release settles it. Nothing happens
+release, as it does on a move, and the release settles it — at once when nothing in the window is
+marked (the window then shows the tree as it is laid out), or else at the end of the frame the
+release draws. Settled at once, the enter and leave handlers run at the release rather than after
+a frame, and the release draws a frame only when something shows the new hover, as below: a
+right click in Vesper Commander, whose mark rebuilt the rows under the held button, drew its
+release as the same pixels 6 times of 6 until plan 17's round 15. Nothing happens
 when the pointer is outside the window or has never been in it, or when the build kept the
 hovered element. The settle draws a frame of its own only when something shows the new
 hover, as a pointer move does (see "Which inputs draw a frame" below): a hover or pressed
@@ -145,8 +157,13 @@ scroll's own frame, with no frame of its own. A list first makes the rows its of
 a long jump lands on a real row. A tooltip showing for what scrolled away closes, as on a move off
 it; the new element's opens after the usual delay. An enter or leave handler that marks style or
 layout is styled and laid out in that same frame. Nothing follows while a press holds the pointer
-(a drag, a selection, the scrollbar's thumb, an autoscroll keeps its target); the release draws a
-frame, and that frame follows. Nothing follows when the pointer is outside the window. Touch
+(a drag, a selection, the scrollbar's thumb, an autoscroll keeps its target); the release follows,
+at once when nothing in the window is marked, or else in the frame the release draws. Followed at
+once, it draws a frame only when something shows the new hover (a hover style, a list's tint, an
+enter or leave handler, the inspector), as the settle above does. It drew one every time until
+plan 17's round 15: a click on a request in Meridian's map, which scrolls the row into view
+under the held button, drew its release as the same pixels 9 times of 10, and each click two
+frames. Nothing follows when the pointer is outside the window. Touch
 arrives as mouse events and is followed the same way. A pan made with a negative margin
 (`HorizontalPan`) or a layout that moves content without scrolling is not a scroll and is not
 followed. It costs one hit test in a frame that scrolled (12–33 elements visited in Junction,
@@ -199,6 +216,31 @@ right-button hold) and each file row's (a right-drag marking rows), drew a full 
 every move over the panes as ordinary handlers: 60 idle moves along a row drew 60 frames.
 Passive and listening only during their gesture, the same moves draw 1 (where the hover left
 the file's name), and a move allocates 40 bytes instead of 104.
+So does a handler that acts on one button or one key only and marks what it does then: an
+ordinary one draws a frame for every event it hears and ignores. Junction's rows hear
+`PointerDownEvent` only to collapse the selection to the row on a right press, and mark it
+(`row.OnPassive<PointerDownEvent>(e => { if (e.Button == 2 && ...) { ...; MarkDirty(); } })`).
+As ordinary handlers, every left press on a row drew the window again, the same pixels, before
+the click's frame: 10 History row clicks drew 20 frames in a real window, 10 since plan 17's
+round 15.
+**A root key handler** — an app's handler for its global keys, on its root — hears every key,
+Shift, Ctrl and Alt on their own and their auto-repeats included. As an ordinary handler it
+draws a frame for each, and those show nothing new: a shortcut such as Ctrl+S drew two frames,
+one of them the same pixels, a capital letter one more, and a Shift or Ctrl held for a range or
+a multi-select about 30 a second after the repeat delay. Register it passively and ask for the
+frame an ordinary handler gets for every other key, as all five apps do since plan 17's
+round 15:
+
+```csharp
+Mount().OnPassive<KeyDownEvent>(e =>
+{
+    HandleKeyDown(e);
+    if (!KeyChord.IsModifierKey(e.Key)) Mount().MarkPaintDirty();
+});
+```
+
+A handler that shows something for a modifier on its own (a hint while Alt is held) marks that
+itself. The chords still act and draw: the key that comes with the modifier is not a modifier.
 A callback a control calls
 (`OnChanged`, `LinkActivated`, a toast's action) is not a handler: it shares the frame the
 control's own change asks for, so one that changes something on screen while the control

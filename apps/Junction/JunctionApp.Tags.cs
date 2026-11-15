@@ -319,7 +319,7 @@ public partial class JunctionApp
         row.AddChild(TagActions(t));
 
         row.OnClick(_ => SelectTag(index));
-        row.On<PointerDownEvent>(e => { if (e.Button == 2) SelectTag(index); });
+        row.OnPassive<PointerDownEvent>(e => { if (e.Button == 2) SelectTag(index); });
         row.ContextMenu(() => TagMenuItems(t));
         return row;
     }

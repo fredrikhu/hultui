@@ -49,6 +49,33 @@ public class ReelTests : IDisposable
         return (session, app, backend);
     }
 
+    // ── Keys ─────────────────────────────────────────────────────────────
+
+    /// <summary>The root's key handler asks for no frame for a modifier key on its own, nor for its
+    /// auto-repeats: each drew a frame of the same pixels, a held Shift about 30 a second (plan 17
+    /// round 15). Any other key still gets the frame an ordinary handler's key gets.</summary>
+    [Fact]
+    public void ABareModifierDrawsNoFrame_AndAnyOtherKeyStillDoes()
+    {
+        var (session, _, _) = Host();
+        using var _s = session;
+        for (int i = 0; i < 100 && session.PumpFrame(); i++) { }
+        Assert.False(session.PumpFrame(), "the window did not settle");
+
+        foreach (var (key, mods) in new[] { (KeyCode.ShiftLeft, KeyModifiers.Shift), (KeyCode.CtrlLeft, KeyModifiers.Ctrl) })
+        {
+            session.Window.KeyDown(key, mods);
+            Assert.False(session.PumpFrame(), $"{key} drew a frame");
+            session.Window.KeyDown(key, mods, repeat: true);
+            Assert.False(session.PumpFrame(), $"{key}'s repeat drew a frame");
+            session.Window.KeyUp(key);
+            Assert.False(session.PumpFrame());
+        }
+
+        session.Window.PressKey(KeyCode.X);
+        Assert.True(session.PumpFrame(), "a key the root heard drew no frame");
+    }
+
     // ── The folder as a running order ────────────────────────────────────
 
     [Fact]

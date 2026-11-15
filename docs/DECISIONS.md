@@ -183,6 +183,7 @@ firing on those would be noise, and warning noise is the failure these rules exi
 | **Text put into a rich text block is joined to it in one pass** (2026-10-27) | Typing or a one-block paste sliced the block at the caret and joined it around the new text: two slices and two appends, four strings and four span builders a key, each copied out and the slices' grown by doubling, 6.4 times the bytes of the block's spans. The text is now one `string.Concat` of the head, the new text and the tail, and the spans one pass (`RichSpans.Insert`) that adds the same spans in the same order, merged as `Add` merges them, into an array made at their number by a counting pass first. The block comes back the same, text, spans and identity (itself when nothing is put in at its end, a copy otherwise), as 20,000 random inserts against the old slices and joins show. Typing in a paragraph of 600 spans 514.8 → 327.9 KB a key (−36 %), JIT and NativeAOT; time flat. Tests: `RichInsertTests` |
 | **Find hands a TextArea its matches as a layer of highlights** (2026-10-27, API addition approved by the user the same day) | Meridian's response and Junction's Files view tinted their find matches by merging them into the TextArea's syntax spans: a copy of every span of the document, the matches added, the list sorted, on every find key and every Enter — Junction on every repaint of the pane while a search had matches — and the area indexed the new list again. Over a 2,000-line JSON response that was 1,529 KB a key, in arrays big enough for the large-object heap: a gen-2 collection every key (98,004 lines: 14.5 MB, the app's own note). `TextAreaElement.Highlights` (`IReadOnlyList<TextHighlight>`, a range and a background, 12 bytes where a span is 40) is a layer of its own: the apps hand it their matches and the area the same spans as before, and the area merges the two for each row it draws, each found from its own index of running ends, a highlight as a background-only span after a span that starts where it does. A find key now costs a highlight a match and an index of them; another list draws the area again and lays nothing out, the same list again costs nothing. A highlight never changes the text's colour, which needed one change to the renderer: a span of transparent colour no longer paints the text it covers in the element's colour where spans overlap (a match that started with a token, as an unstable sort put it, or ran into the next one painted those characters in the editor's colour); lists that do not overlap — every label's and field's — draw as before. Readers are not told about highlights (they were not about the merged tints either). Junction works its line starts out once per file, with the text (they were not made again per build, as the survey thought: a memo on the file's lines held; but a selection in a file no search had matched in yet was read against the starts of the file searched before), and keeps its tints between repaints. Headless walks, a key and its two frames, idle-gated, before and after alternated twice, JIT / NativeAOT, minimum ms: Meridian, find typing over a 2,000-line JSON response 1,529 → 132 KB (−91 %), 3.01 → 2.25 / 3.09 → 1.87 ms; Enter 1,458 → 65 KB (−96 %), 2.91 → 1.66 / 3.20 → 1.76; over a 19,000-line one find 14,009 → 730 KB (−95 %), 11.6 → 3.0 / 14.1 → 3.4 ms, Enter 13,414 → 172 KB (−99 %), 14.0 → 1.7 / 16.4 → 1.8; gen-2 collections per 240 keys 24–78 → 0. Junction's Files view, a 6,000-line C# file with 59,000 spans: find 7,089 → 145 KB (−98 %), 7.3 → 2.7 / 8.4 → 2.9 ms; Enter 7,023 → 80 KB, 8.4 → 3.7 / 9.6 → 3.8; a repaint with find open 7,140 → 186 KB, 6.7 → 1.8 / 7.6 → 2.0. With a reader's bridge the same. A key still lays out once, as before: the find bar's row (its count); the body lays nothing out, works out no line starts, shapes nothing and indexes no span. Perf suite rows added: `text/find typing in highlighted JSON in a TextArea` and `text/find Enter in highlighted JSON in a TextArea` 0.725 → 0.460 ms JIT, 0.791 → 0.489 NativeAOT, 333 → 54 KB a key; Enter 0.657 → 0.391 and 0.708 → 0.397 ms, 305 → 26 KB; no row slower in both runs. Pixels: the suite's frames A/B identical; the apps' find scenes identical but where a match starts with a token or runs into one, now in the token's colour. `TextAreaHighlightLineTests` (each row's list the merged list's slice, over random overlapping spans and highlights; a new list reads no span but the row's, the same list is not indexed again; allocation-free), `TextAreaHighlightTests` (pixels equal to the merged tints for seven kinds of match, a selection, light and dark; a find step lays nothing out, works out no line starts, shapes nothing), `SkiaTextSpanRenderTests` (a transparent span over coloured ones leaves their colour; beside them draws as no span), and the apps' find tests on the layer |
 | **A line makes its runs the first time they are read** (2026-11-02) | Most lines laid out are never drawn: of the 450 a step of a resize drag over 150 paragraphs breaks, 36 are; of the 984 a step over 1,000 truncated labels, 38. Each still got its run strings, run objects and the list of them when it was laid out. A line on the plain or the styled path now keeps its width, metrics and extent, measured and not shaped (`MeasureRuns` adds up what shaping would, to the bit; a styled line walks its pieces once to measure and once to shape, the same walk), and makes its runs the first time `TextLine.Runs` is read, from a `LineSource` the lines of a layout share: the text and, styled, a copy of its metric spans, the list handed in may be filled again. The style, the Han context and the UI culture the faces were chosen in are one `LineStyle` for all the lines of a style: a style is ~60 bytes, a third of what a line saves. The line stays 56 bytes: one field holds the runs, the source, or the remembered line a copy shares them with. An ellipsized line is measured from its characters on the stack and joins its prefix to the mark only when read. The caches weigh a line as if its runs were made (a weight cannot grow later), and a remembered line counts once for the text it keeps alive. Read on the UI thread, as `ShapedRun.Glyphs`. Declined: a line on the BiDi path makes its runs at once (a right-to-left run is measured by shaping it), and so does the first layout of a styled paragraph with more than 32 spans: typing in a paragraph of 600 spans lays a new string out each key, mostly on screen, and the copy and second walk took it from 2.33 to 2.59 ms a key; at its later widths the entry's copy is used. Allocated per step, JIT and NativeAOT alike: `text/wrap` 221 → 67 KB (−70 %), `text/multi-font ellipsis` 1,337 → 414 (−69 %), `text/ellipsis` 398 → 172 (−57 %), `text/styled wrap` 155 → 81 (−48 %), `layout/shrink 300 overfull rows` −38 %, `text/spans bold` −35 %, `text/styled ellipsis` −34 %, `richtext/resize` 899 → 699 (−22 %), `richtext/open` 4,331 → 3,480 (−20 %), cards −5 %; time 0 slower, 0 faster at 10 % (multi-font ellipsis −5 % JIT / −7 % NativeAOT, `richtext/open` −6 % NativeAOT). Held: the 5,000-block document open 10.5 → 8.1 MB, after it closes 4.0 → 3.4. A line drawn for the first time itemizes and looks its words up again, so a step that scrolls laid-out lines into view allocates more (`richtext/wheel` 6.3 → 8.0 KB, a table's 0.1 → 1.1), and a whole session in which every line is drawn (open, wheel through, resize, wheel back) costs 1–3 % more time and up to 1 % more bytes (a list of labels +1.3 % / +0.8 %, styled paragraphs +2.6 % / −25 %, a rich text document +1.2 % / −10 %); one that leaves lines undrawn costs a quarter to a half fewer bytes. `ComposeRunsWhenRead = false` (internal) is the reference. `RunsOnFirstReadTests` (Text and Skia), `ParagraphAllocationTests`, `CacheBoundTests`; the 48,000-layout dump and two of 240,000 the same to the bit, read at once and after 300 more layouts |
+| **A wrapped layout is kept for the widths that break it into the same lines** (2026-11-15) | A resize drag lays every wrapped paragraph of a view out again at each width it passes, and nearly every paragraph keeps its lines from one width to the next. Vesper Commander's wrapped reader asks every row's height again at each step (`TextMeasure.MeasureWrapped`): over this repository's 602,000-character ledger archive that was 1,683 layouts, a million characters itemized and 2.2 MB a 1 px step, as the 8 MB shape cache could not hold the archive's shapings and made them all again each step. The layout cache is keyed by the exact width, so a width a pixel away found nothing. A wrapped plain layout is now kept with the widths at which the break pass takes every decision it took. Each test of a measured width against the box (a line's segments with the next one, a segment alone, a prefix of a word cut by character, the last line before its table) notes the widest that fitted and the narrowest that did not (`Over`, `Within`); at any width in between every test comes out the same over the same widths, so the lines are the same to the bit. The range ends below the text's own width, from which it is one line: segments measured apart can add up to more than the text shaped whole. The layout is kept by text and style, not width (one range a paragraph, the latest), and asked before the shape cache, so a kept paragraph is not shaped again. Size.Width is not the bound: it leaves out a line's trailing space and the last line's cut by character, and differed from a fresh layout in 1–179 rows a 1 px step of the real documents. Only plain text clipped: truncation reads the width again, and the styled and BiDi paths have break passes of their own (not done). The key keeps its hash, so a miss hashes a long paragraph once more and not four times, and `LruCache.Put` gives a replaced entry's node to the new one (a miss replaces an entry: +30 KB a full-width resize before). Bounded like the layout cache, by entries (4,096) and estimated bytes (16 MB: the archive's wraps count 5.8 MB at 1,440 px and 10.4 MB at 724 px; what a paragraph not drawn really keeps is far less, its lines measured and not shaped). Vesper's reader, NativeAOT, headless, alternated twice and idle-gated, 1 frame a step, UI-thread KB and time a 1 px step: the archive 2,181 → 44 KB, 21.9 / 20.8 → 3.6 / 3.6 ms; README.zh-CN 133 → 31 KB, 5.4 / 5.2 → 3.0 / 3.0 ms; README.ja 126 → 58 KB, 4.4 / 4.3 → 2.8 / 2.8 ms; TODO.md 19.6 → 13.8 KB, 2.19 / 2.09 → 2.02 / 1.93 ms; a 4 px step 2,187 → 111 KB (archive), 138 → 69 (zh). A real window on the 4K at 150 %, 1 physical px a step: the archive 2,179 → 35 KB, 21.5 / 21.1 → 2.9 / 2.6 ms; zh 131 → 24 KB, 5.4 / 5.5 → 2.6 / 2.5 ms. Rows kept on a 1 px step (Vesper's face): 88–95 % of the wrapped rows (the archive 362 of 363 on most steps, ~140 re-broken on one that crosses a character cell). A width no paragraph was kept for costs the same (the archive's resize to 1,200 px 23.1 / 22.9 → 23.4 / 23.0 ms, 2,396 → 2,391 KB); opening a document puts its wraps once (+22 KB the archive, +87 KB zh). Junction's Files view and Meridian's response body (TextArea) the same to the KB. Held after a full collection with the reader open: the archive 16.9 → 16.5 MB, zh 13.5 → 13.7. Equivalence over the real documents (archive, TODO.md, zh, ja, ko, th, the 154,000-character README; five styles, three modes, 47 widths of a drag in whole, fractional and 4 px steps): 5,038,170 layouts, 0 differ; 36,144 kept ranges probed at their ends, 108,432 widths inside answered and equal, 72,288 just past laid out again and equal. `KeepsWrapRanges = false` (internal) is the reference. `WrapRangeTests` (Text and Skia), `CacheBoundTests`; dumps 48k 7A18AF8DE8E05271 and 240k F09E9038726E4BD6 (late and reference), the CJK wrap corpus 0 of 1,344,616 widths differ |
 
 ---
 
@@ -933,7 +934,7 @@ to 1000 px 11.4 → 10.6 ms (808 → 555 KB, 1,433 → 1,141 HarfBuzz calls), to
 drag at 960 1,928 → 1,353 KB; Japanese to 1000 px 12.1 → 11.2 ms; the 154,000-character file within
 ±1 %. What is left at a new width is still the row-start words above and short words cut at need.
 
-### A full word cache takes every word: a scan-resistant admission measured and declined (round 14)
+### A full word cache takes every word: a scan-resistant admission measured and declined (rounds 14 and 15)
 
 A TextArea wraps every row of a document again at each width of a drag, so its prefix tables
 walk the document's words in the same order every frame. Least recently used out first, a walk
@@ -959,6 +960,35 @@ worse (2,572 calls → 5,380, 5,480 and 17,085): a word refused is shaped again 
 next probe in the same frame. No rule can do much better: the walk is about 2.5 times the cache,
 and a cache that keeps any fixed share of it finds at most that share. The user approved the larger
 bounds (question 56); the word cache now holds 32,768 entries and 16 MB.
+
+Round 15's review read the larger bounds as a cost a step: Junction's Files view on README.zh-CN.md,
+a 1,440 px window at 150 %, dragged 1 physical px a step (0.667 logical px), 41.4 → 51.7 KB a step
+against round 13. Plan 17's round 15, step 1 found the word cache growing once. Its slots double
+only when every slot holds an entry, and the old bound of 8,192 entries never let them pass 8,192.
+On that drag the Chinese README's words first pass 8,192, so one step of the 40 makes the 16,384-slot
+arrays: 960 KB in that one step. Without that step the drag costs 29.1 KB a step, against round 13's
+42.4. The next 40 widths cost 25.9 against 39.8, with no growth and no garbage collection where
+round 13's text had one. Japanese first passes 8,192 one drag later, which is why the review saw it
+11 % lower. Both READMEs in one file grow once more, to 32,768 slots (1,920 KB). Headless at whole
+layout widths, 1 logical px a step, the growth shows too (59.6 → 64.5 KB a step); the review's walk
+at whole widths missed it because there the growth came before the measured steps. A table of slots that grows
+without copying (pages of entries) would add a step to every lookup to save about 1 MB once per
+process; not built.
+
+Real window, NativeAOT, the 4K at 150 % (dpi 144, 120 Hz, GL), client 1,418 → 1,378 px (945.3 →
+918.7 logical) and then on to 1,338 px. Round 13's text is round 14's three changes switched off in
+the same probe build. UI KB a step agreed within 0.1 KB between the two launches of each side;
+UI-thread CPU a step is the minimum of 2, idle-gated, with the sides alternated. Headless at the same widths
+gave the same bytes to within 0.6 KB a step.
+
+| Drag | Round 13's text | Now | Now, without the growth step |
+|---|---|---|---|
+| Chinese, first 40 steps | 42.4 KB, 10.24 ms | 53.1 KB, 9.75 ms | 29.1 KB |
+| Chinese, next 40 | 39.8 KB, 10.30 ms | 25.9 KB, 9.92 ms | |
+| Japanese, first 40 | 54.2 KB, 9.74 ms | 48.5 KB, 9.88 ms | |
+| Japanese, next 40 | 60.2 KB, 10.22 ms | 75.3 KB, 9.96 ms | 51.3 KB |
+| Both in one file, first 40 | 5,374 KB, 39.4 ms | 69.4 KB, 17.1 ms | |
+| Both in one file, next 40 | 5,533 KB, 40.2 ms | 117.4 KB, 17.8 ms | 69.4 KB |
 
 ### A Vulkan window's video loads the GL driver in its first frame: a preload measured and declined (round 14)
 
@@ -996,6 +1026,100 @@ player 25 ms either way, Aperture 50.3 → 50.9 ms). Declined: a first video fra
 once a process, against an idle and memory cost on every session that plays nothing. The
 off-thread load itself held on WGL: SDL's probe pumps nothing on the calling thread (a message
 posted to the worker's queue before `SDL_GL_LoadLibrary` was still queued after it).
+
+### A Vulkan window keeps its video interop's GL context after the last video: a release measured and declined (round 15)
+
+The video interop's hidden GL context and its one-pixel window (`SdlVulkanHost.EnableInterop`) live
+until the window closes. Plan 17's round 15, step 8 (media-interop-context-release) let them go,
+with the barrier ring, once the last source had given its image back (right after the device wait
+that frees that image), and made them again on the next video's first frame. Built as an internal
+method behind a switch and measured in a NativeAOT probe host built as Reel's `Main` builds it: Reel
+on Vulkan, a 320×180 clip, an Aperture-shaped dispose (the player and the scrubber stills disposed,
+8 s rest, two cycles a launch), real windows on the 1440p at 100 % (200 Hz, HDR on, SDR white 240
+nits; the 4K was not attached), idle-gated, the switch alternated in two holds; 3 launches kept and
+4 released (a cold first launch after the publish left out). Before any clip: private bytes
+97.5–99.9 MB, working set 98.4–98.9 MB.
+
+| | Kept (today) | Released |
+|---|---|---|
+| After the first dispose: private bytes | 155.9–158.2 MB | 147.6–149.7 MB |
+| the same: working set | 147.3–149.6 MB | 147.2–148.3 MB |
+| the same: GPU memory, local / non-local (DXGI, this process) | 44.7 / 29.2 MB | 38.4 / 29.2 MB |
+| the same: "other" private allocations (resident) | 62.9–65.8 (32.7) MB | 53.5–56.7 (32.0) MB |
+| The next video: Open → "vulkan interop ready" | — (kept) | 29.2–30.0 ms |
+| the same: Open → its first frame drawn (the image lent) | 70.2–77.5 ms | 96.3–106.9 ms |
+| the same: Open → first window frame | 62.6–65.9 ms | 85.6–95.8 ms |
+| the same: Open → mpv's position past 0 | 103–107 ms | 125–135 ms |
+
+The release took 1.4–1.7 ms, and the next video drew the same picture (the paused frame's middle,
+read from the window's own surface: mean 171/171/171 in 8 colours either way; the empty player
+16/17/21). But the context itself holds about 9 MB of commit, 6 MB of GPU memory and under 1 MB of
+resident memory. The survey's "about 40 MB private and 17 MB resident" was everything the first video
+leaves behind, of which the context is a small part: libmpv's and CUDA's process-wide state (five
+modules, `nvcuda64` among them, stay loaded: 94 → 99) and NVIDIA's driver, whose `nvoglv64` is also
+the Vulkan driver and is loaded before any video.
+
+Over ten cycles (one launch each way, the same dispose and rest) the release also stops a growth of
+about 1 MB a video. Each mpv render context made and freed in the long-lived context leaves ~0.9 MB
+committed and resident in the NVIDIA driver's own 1 GB reservation (see the next entry); made in a
+fresh context each time, that reservation stays level from the fourth video on:
+
+| | Kept (today) | Released |
+|---|---|---|
+| After the 10th dispose: private bytes / working set | 172.7 / 161.0 MB | 158.5 / 153.9 MB |
+| Growth a video, videos 2–10 (least squares): private / working set | +1.23 / +1.10 MB | +0.88 / +0.39 MB (heap noise; steps 5–10 within ±0.7) |
+| The driver's reservation, committed / resident, after videos 1 and 10 | 38.3 / 29.6 → 45.8 / 37.5 MB | 38.3 / 29.7 → 41.2 / 31.1 MB |
+| GPU memory, local | 44.7 → 45.5 MB | 38.4 → 38.4 MB |
+| Videos 2–10: Open → first window frame / mpv's position past 0 | 58.7–82.6 / 98–124 ms | 89.0–103.7 / 128–144 ms |
+
+Declined. After a dispose shaped like the survey's, it frees under 1 MB of working set (0.4 %); the
+growth it stops is about 1 MB a film, 7 MB (4.4 %) after ten, for a first frame about 30 ms later
+on every video after the first. Nor is it small to make safe: a next episode is opened in the same
+turn as the last one is disposed (Aperture's `OpenStream`), so the new player has made its mpv render
+context in the hidden context before the old image is destroyed; the release would need every GPU
+source to register with the host before its first GL call, not only when it is lent an image, or it
+destroys a context a live renderer is in. Between autoplayed episodes it would then never release.
+
+### A player's open and dispose leaves about 1 MB in NVIDIA's GL driver: measured, not ours (round 15)
+
+Plan 17's round 15, step 8 (media-player-cycle-growth) measured ten open, play, pause and dispose
+cycles of Reel's player in the same probe host and windows as the entry above: private bytes,
+working set, the process heaps (HeapWalk), the managed heap and the threads 8 s after each
+dispose, with a region dump after two forced collections. It grows by about a megabyte a cycle,
+and does not level off:
+
+| Ten cycles, growth a cycle (least squares, cycles 2–10) | Private bytes | Working set |
+|---|---|---|
+| Vulkan (two launches) | +1.07, +1.23 MB | +1.02, +1.10 MB |
+| Vulkan, dumps only after cycles 1 and 10 (no forced collections between) | +1.36 MB | +1.16 MB |
+| GL (two launches, 10 and 8 cycles) | +1.70, +1.97 MB | +1.36, +1.39 MB |
+| Vulkan, `gpu-hwdec-interop=no` | +0.88 MB | +0.91 MB |
+
+The managed heap stays at 2.8 MB, the threads fall (27 → 21, the pool trimming), GPU memory
+(DXGI, this process) moves under 0.1 MB a cycle, and the process heaps swing ±3 MB with no trend.
+All of the growth is in one 1 GB reservation that sits right after the GC's: committed 38.3 → 45.8
+MB and resident 29.6 → 37.5 over cycles 1–10 on Vulkan, 55.9 → 70.4 / 37.7 → 48.5 on GL. It is not
+the runtime's: with `DOTNET_GCRegionRange` at 4 GB the GC's range shrinks to 4 GB and this one stays
+1 GB, and before any video it already holds 31.9 MB on Vulkan and 54.8 MB on GL, which follows the
+graphics API, not the managed heap. The controls place it in the NVIDIA driver's handling of mpv's
+GL renderer:
+
+- the same dumps and rests with no player: level (31.9 → 32.0 MB);
+- the framework's own GPU path with no libmpv (a fake backend whose renderer clears the image it is
+  lent, a shared image and its GL objects made and destroyed every cycle): level (37.1 → 37.2 MB);
+- mpv drawing with its software renderer (`HULTUI_VULKAN_INTEROP=0`): level (31.9 → 32.1 MB);
+- mpv's GL render context made in a fresh hidden context each time (the release above): level
+  from the fourth video (41.2 MB).
+
+So each mpv render context made and freed in a GL context that outlives it leaves about 0.9 MB
+(Vulkan's hidden context) to 1.5 MB (the GL window's) in the driver: libmpv's or NVIDIA's, not
+HultUI's, and not fixed here. The one thing of ours the cycles turned up is fixed: the GL
+renderer kept a wrapper over each GPU source's texture, keyed by the source, and never let it go,
+so every disposed player's sink stayed reachable with its renderer and its frame buffers. Now the
+GL surface lets the wrapper go when the source does (`ReleaseFrameTarget`): the managed heap's
+growth a cycle went from +0.22 MB to 0 with a backend that writes a 320×180 frame into the sink's
+pixel ring, and from +0.02 MB to 0 with mpv, Open's timings unchanged (videos 2–8, Open → first
+window frame 51.6–63.9 ms before, 48.2–76.8 ms after).
 
 ### A ref's lock file alone is a working-tree event, not dropped (round 13)
 

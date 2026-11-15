@@ -58,6 +58,45 @@ public class GitProcessTests
         Assert.False(res.Success);
     }
 
+    /// <summary>
+    /// A long read leaves nothing in <see cref="System.Buffers.ArrayPool{T}.Shared"/>: its buffers come from a pool
+    /// of their own. The shared pool keeps the last array of each size a thread returned in that thread's own
+    /// slots, so every pool thread that read a long patch kept one of each, about 1 MB, until it retired or two
+    /// gen-2 collections ≥30 s apart — and Junction has almost none. Read on a thread of its own, the read grows
+    /// its buffer through every size (16K to 256K characters) and is stopped at the limit; renting each size
+    /// from the shared pool on that thread afterwards must not hand back one holding what git wrote (an added
+    /// line, "+" and the marker: the file's own text, which other code may have pooled, has no "+").
+    /// </summary>
+    [Fact]
+    public void ALongRead_LeavesNoBufferInTheSharedPool()
+    {
+        using var repo = TempRepo.CreateWithInitialCommit();
+        var marker = Guid.NewGuid().ToString("N");
+        repo.Write("long.txt", string.Concat(Enumerable.Range(0, 8000).Select(i => $"{marker} {i}\n")));
+        repo.Git("add", "-A");
+        repo.Git("commit", "-q", "-m", "a long file");
+        var added = "\n+" + marker;
+
+        var found = new List<int>();
+        (GitResult Result, bool Whole) read = default;
+        var thread = new Thread(() =>
+        {
+            read = GitProcess.RunUpTo(repo.Path, 262_144, _ => 0, "show", "HEAD");
+            for (int size = 16 * 1024; size <= 262_144; size *= 2)
+            {
+                var array = System.Buffers.ArrayPool<char>.Shared.Rent(size);
+                if (array.AsSpan().IndexOf(added.AsSpan()) >= 0) found.Add(size);
+                System.Buffers.ArrayPool<char>.Shared.Return(array);
+            }
+        });
+        thread.Start();
+        thread.Join();
+
+        Assert.False(read.Whole);   // the patch runs past the limit: every size was rented
+        Assert.Equal(-1, read.Result.ExitCode);
+        Assert.True(found.Count == 0, $"the shared pool kept this thread's {string.Join(", ", found)}-character buffers");
+    }
+
     /// <summary>Stdin still reaches git — the patch-application path, which builds its
     /// arguments the same way.</summary>
     [Fact]
@@ -69,5 +108,79 @@ public class GitProcessTests
         Assert.True(hash.Success, hash.Stderr);
         Assert.Equal("some content\n",
             GitProcess.Run(repo.Path, "cat-file", "-p", hash.Stdout.Trim()).Stdout);
+    }
+
+    /// <summary>
+    /// On Windows git starts with no console (DETACHED_PROCESS). git.exe is a console program and Junction has no
+    /// console, so a start with only CreateNoWindow gave every command a hidden console of its own: a conhost.exe
+    /// child beside git, two processes a command and ~8 ms a run. Caught while git runs a shell alias (a
+    /// child of its own, so it is surely running): no conhost.exe among the children of this process's git.
+    /// </summary>
+    [Fact]
+    public void OnWindows_GitRunsWithNoConsoleOfItsOwn()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var repo = TempRepo.CreateWithInitialCommit();
+
+        var run = GitProcess.RunAsync(repo.Path, "-c", "alias.junctionwait=!sleep 2", "junctionwait");
+        int self = Environment.ProcessId;
+        List<string> beside = [];
+        bool seenRunning = false;
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (!seenRunning && !run.IsCompleted && DateTime.UtcNow < deadline)
+        {
+            var all = ProcessTree.Snapshot();
+            var gits = all.Where(p => p.Parent == self && p.Name.Equals("git.exe", StringComparison.OrdinalIgnoreCase))
+                .Select(p => p.Pid).ToHashSet();
+            var children = all.Where(p => gits.Contains(p.Parent)).ToList();
+            beside = children.Where(p => p.Name.Equals("conhost.exe", StringComparison.OrdinalIgnoreCase)).Select(p => p.Name).ToList();
+            seenRunning = children.Any(p => !p.Name.Equals("conhost.exe", StringComparison.OrdinalIgnoreCase));
+            if (!seenRunning) Thread.Sleep(20);
+        }
+
+        var result = run.GetAwaiter().GetResult();
+        Assert.True(result.Success, result.Stderr);
+        Assert.True(seenRunning, "git's alias was never seen running");
+        Assert.Empty(beside);
+    }
+
+    /// <summary>Every process on the machine with its parent (a Toolhelp snapshot).</summary>
+    private static class ProcessTree
+    {
+        public static List<(int Pid, int Parent, string Name)> Snapshot()
+        {
+            var list = new List<(int, int, string)>();
+            var snap = CreateToolhelp32Snapshot(2 /* TH32CS_SNAPPROCESS */, 0);
+            try
+            {
+                var e = new Entry { Size = (uint)System.Runtime.InteropServices.Marshal.SizeOf<Entry>() };
+                if (Process32FirstW(snap, ref e))
+                    do list.Add(((int)e.ProcessId, (int)e.ParentProcessId, e.ExeFile)); while (Process32NextW(snap, ref e));
+            }
+            finally { CloseHandle(snap); }
+            return list;
+        }
+
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential,
+            CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private struct Entry
+        {
+            public uint Size, Usage, ProcessId;
+            public nint DefaultHeapId;
+            public uint ModuleId, Threads, ParentProcessId;
+            public int PriorityBase;
+            public uint Flags;
+            [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.ByValTStr, SizeConst = 260)]
+            public string ExeFile;
+        }
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        private static extern nint CreateToolhelp32Snapshot(uint flags, uint pid);
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern bool Process32FirstW(nint snap, ref Entry e);
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern bool Process32NextW(nint snap, ref Entry e);
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        private static extern bool CloseHandle(nint h);
     }
 }

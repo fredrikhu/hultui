@@ -60,6 +60,10 @@ public class RunBlobsByTextTests
         var pending = new List<ShapedRun>();
         for (float width = 420f; width >= 300f; width -= 4f)
         {
+            // Laid out at a far width first (one not laid out before), so this one is laid out again:
+            // the wrap kept for the range of widths the last one is in would otherwise answer a width
+            // that keeps its lines.
+            ctx.LayoutParagraph(Paragraph, Style, 150f + width / 1000f);
             var paragraph = ctx.LayoutParagraph(Paragraph, Style, width);
             runs.AddRange(Runs(paragraph));
             pending.AddRange(Runs(paragraph).Where(run => !run.GlyphsComposed));
