@@ -14,10 +14,12 @@ file after every step and commits it with the step's work. Full survey reports a
   them), `archive_r15.py`, `merge_r15.py`, all in session 8e8ba33b's scratchpad
   `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\8e8ba33b-db33-43fa-885a-cb6b82b7253f\scratchpad\`.
   For round 16's start: move round 14's Landed rows, round 15's build order and its answered questions 62, 63 and 65 to
-  the archive (question 64 stays open), as `archive_r15.py` did. Open for the user, not blocking: the live screen-reader
-  check, now with builds ready (`sr-variants\` in that scratchpad: today / items200 / gate, launchers and `CHECKLIST.md`;
-  patches in `sr-variants\patches\`), which decides questions 50 and 64 and the menu check; another F16 held-drag run
-  (Waiting) only with a new approval. Outside plan 17: CI's Linux job runs no Junction, Meridian, Aperture or Reel tests.
+  the archive (question 64 stays open), as `archive_r15.py` did. Open for the user, not blocking: another F16 held-drag
+  run (Waiting) only with a new approval. The live screen-reader check RAN 2026-11-15 and decided nothing (log): no
+  build's keyboard moves in lists or menus reach either reader, so questions 50 and 64 wait for that fix and a second
+  check (builds, `CHECKLIST.md` and the notes `NOTES-narrator.md` / `NOTES-nvda.md` in `sr-variants\` in that
+  scratchpad; patches in `sr-variants\patches\`). Outside plan 17: CI's Linux job runs no Junction, Meridian, Aperture or
+  Reel tests; the keyboard-move bug (a11y-keyboard-moves-silent, log 2026-11-15).
   To resume in a fresh context, run in this worktree: `/loop Run the next step of
   the performance team: follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
   Read both once per session (afterwards only the ledger's Phase and the part the step needs), do the step the ledger's
@@ -292,7 +294,7 @@ Re-ranked by the next survey.
 - **vesper-start-focus-event** (7, lead) — at start Vesper raises a focus-changed event for a window that never had the
   foreground (round 13: 5 of 5 launches), and in 2 of 5 refuses a leaf patch and builds a second tree (~53 KB), start
   only. Cause not isolated; not perf.
-- **a11y-gate-on-client** (7; question 50: not yet) — build the tree and raise events only after a UIA client asks for
+- **a11y-gate-on-client** (7; question 50: not yet; the 2026-11-15 live check could not decide it, log) — build the tree and raise events only after a UIA client asks for
   the window's root. Round 13 (r13-7): 0 root asks in 22 launches; the bridge costs Junction +40 % UI bytes at start and
   +29 % a commit-walk key, Vesper +29 % a drag. New risk evidence: a desktop-wide listener receives our bounds,
   structure, name and focus events (13 provider calls each) without ever asking for the root; a gate would cut it off.
@@ -907,7 +909,9 @@ Round 15 questions. Recommendations in brackets.
     the bridge 59 % of the frame's UI bytes. (a) a11y-items-on-demand-sooner: lists over ~200 items are served on
     demand, which removes all of it (a list crossing 200 builds the whole tree once; AT-SPI needs the Orca check). (b)
     a11y-item-renames-unfetched: items no UIA client fetched raise no Name change (UIA only, smaller; the renaming walk
-    stays). [(a), checked with the readers; (b) if (a) is declined.]
+    stays). [(a), checked with the readers; (b) if (a) is declined.] Live check 2026-11-15: today and items200 sound
+    the same to both readers, as neither reads any row a keyboard move reaches (log); decide after
+    a11y-keyboard-moves-silent is fixed and the readers check again.
 65. **junction-history-highlight-prefetch** (r15-4; step 10): each History rest tokenizes the opening file's two
     versions for the Commit tab, which may never be opened: a first walk of 120 Downs at 250 ms costs 3.13 MB a key on
     all threads against 0.90 with the colours cached (−71 %), app GCs 23/6/1 → 6/2/0 (UI-thread bytes the same).
@@ -1212,3 +1216,14 @@ From 2026-11-13 (round 14's survey); earlier entries are in the archive ([to 202
   first attempt in 23 min (test, test-linux, docs, meridian-keyring on macOS and Ubuntu); "Push on main" green. The
   screen-reader variant builds are ready for the user (`sr-variants\` in session 8e8ba33b's scratchpad, never committed).
   Round → 16, Phase survey, in a fresh context.
+- 2026-11-15: the user's live screen-reader check (Narrator, then NVDA; today / items200 / gate builds of Vesper,
+  Junction and the Fluent sample; notes in `sr-variants\NOTES-*.md`) decided neither question 50 nor 64. In every build
+  neither reader reads a keyboard move in a list or a menu: Vesper's files, Junction's History, the Fluent menu bar,
+  Junction's context menu and its submenu. Both read the window's name; NVDA reads what the mouse points at; a click
+  that moves the focus is read. From the code: a keyboard move in a list or menu moves the selection, not the focus; the
+  bridge raises only SelectionItem.IsSelected property changes (`WindowsAccessibilityBridge.RaiseServedSelection`), an
+  item served on demand answers no HasKeyboardFocus (`UiaVirtualItem.cs:80–84`), and the root's `GetFocus` names the
+  list (`UiaFragmentRoot.cs:124`), so a reader gets no focus event to speak. Also: NVDA reads a clicked Fluent nav item
+  "not selected" (the state as of before the rebuild). The gate logged each open "root asked, tree built at once":
+  4 for Fluent, 2 each for Vesper and Junction. **a11y-keyboard-moves-silent** is not perf and is outside plan 17; the
+  readers check questions 50 and 64 again after it is fixed. AT-SPI/Orca is unchecked.
