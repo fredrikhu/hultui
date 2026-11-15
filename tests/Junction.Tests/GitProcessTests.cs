@@ -109,4 +109,78 @@ public class GitProcessTests
         Assert.Equal("some content\n",
             GitProcess.Run(repo.Path, "cat-file", "-p", hash.Stdout.Trim()).Stdout);
     }
+
+    /// <summary>
+    /// On Windows git starts with no console (DETACHED_PROCESS). git.exe is a console program and Junction has no
+    /// console, so a start with only CreateNoWindow gave every command a hidden console of its own: a conhost.exe
+    /// child beside git, two processes a command and ~8 ms a run. Caught while git runs a shell alias (a
+    /// child of its own, so it is surely running): no conhost.exe among the children of this process's git.
+    /// </summary>
+    [Fact]
+    public void OnWindows_GitRunsWithNoConsoleOfItsOwn()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var repo = TempRepo.CreateWithInitialCommit();
+
+        var run = GitProcess.RunAsync(repo.Path, "-c", "alias.junctionwait=!sleep 2", "junctionwait");
+        int self = Environment.ProcessId;
+        List<string> beside = [];
+        bool seenRunning = false;
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (!seenRunning && !run.IsCompleted && DateTime.UtcNow < deadline)
+        {
+            var all = ProcessTree.Snapshot();
+            var gits = all.Where(p => p.Parent == self && p.Name.Equals("git.exe", StringComparison.OrdinalIgnoreCase))
+                .Select(p => p.Pid).ToHashSet();
+            var children = all.Where(p => gits.Contains(p.Parent)).ToList();
+            beside = children.Where(p => p.Name.Equals("conhost.exe", StringComparison.OrdinalIgnoreCase)).Select(p => p.Name).ToList();
+            seenRunning = children.Any(p => !p.Name.Equals("conhost.exe", StringComparison.OrdinalIgnoreCase));
+            if (!seenRunning) Thread.Sleep(20);
+        }
+
+        var result = run.GetAwaiter().GetResult();
+        Assert.True(result.Success, result.Stderr);
+        Assert.True(seenRunning, "git's alias was never seen running");
+        Assert.Empty(beside);
+    }
+
+    /// <summary>Every process on the machine with its parent (a Toolhelp snapshot).</summary>
+    private static class ProcessTree
+    {
+        public static List<(int Pid, int Parent, string Name)> Snapshot()
+        {
+            var list = new List<(int, int, string)>();
+            var snap = CreateToolhelp32Snapshot(2 /* TH32CS_SNAPPROCESS */, 0);
+            try
+            {
+                var e = new Entry { Size = (uint)System.Runtime.InteropServices.Marshal.SizeOf<Entry>() };
+                if (Process32FirstW(snap, ref e))
+                    do list.Add(((int)e.ProcessId, (int)e.ParentProcessId, e.ExeFile)); while (Process32NextW(snap, ref e));
+            }
+            finally { CloseHandle(snap); }
+            return list;
+        }
+
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential,
+            CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private struct Entry
+        {
+            public uint Size, Usage, ProcessId;
+            public nint DefaultHeapId;
+            public uint ModuleId, Threads, ParentProcessId;
+            public int PriorityBase;
+            public uint Flags;
+            [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.ByValTStr, SizeConst = 260)]
+            public string ExeFile;
+        }
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        private static extern nint CreateToolhelp32Snapshot(uint flags, uint pid);
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern bool Process32FirstW(nint snap, ref Entry e);
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern bool Process32NextW(nint snap, ref Entry e);
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        private static extern bool CloseHandle(nint h);
+    }
 }

@@ -83,6 +83,16 @@ public static class GitProcess
     /// repository. One difference is deliberate: a path that does not exist used to throw from
     /// <see cref="Process.Start(ProcessStartInfo)"/> and now comes back as an ordinary failed
     /// <see cref="GitResult"/>, which is what every caller already handles.</para>
+    ///
+    /// <para>On Windows git starts with no console at all (<see cref="ProcessStartInfo.StartDetached"/>, the
+    /// <c>DETACHED_PROCESS</c> flag). git.exe is a console program and this app has no console, so
+    /// <see cref="ProcessStartInfo.CreateNoWindow"/> alone gave every command a hidden console of its own: a
+    /// conhost.exe started beside it, two processes a command (22 for 11). Measured from a GUI process on
+    /// <c>rev-parse HEAD</c>, alternated, 800 runs a side: 22.1–22.4 → 14.3–14.4 ms a command (median), min
+    /// 21.6 → 13.9. Its pipes, exit code and stopping it are unchanged; standard input it is not given reads
+    /// as empty. Git needs no console with its output redirected, and starts its own children (ssh, hooks,
+    /// helpers) without one when it has none. On Unix a detached start is a new session, so it is left
+    /// alone there.</para>
     /// </summary>
     private static ProcessStartInfo StartInfo(string workingDirectory, string[] args)
     {
@@ -92,6 +102,7 @@ public static class GitProcess
             WorkingDirectory = NeutralDirectory,
             UseShellExecute = false,
             CreateNoWindow = true,
+            StartDetached = OperatingSystem.IsWindows(),
         };
 
         if (!string.IsNullOrEmpty(workingDirectory))
