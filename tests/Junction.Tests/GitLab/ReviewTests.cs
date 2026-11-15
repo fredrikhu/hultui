@@ -205,6 +205,16 @@ public class ReviewTests
             session.PumpFrames(2);
             AssertCardFitsItsRow(session);
             float tall = LayoutProbe.Painted(ById(session, "review-thread")!).Height;
+            // The review fetched the request's head into the repository, and its watcher tells that
+            // a debounce (300 ms) after the last file event: the repository reloads and the window
+            // builds again as its loads land. On Fedora, whose git starts in a few milliseconds, that
+            // landed inside the first splitter step below, every time: three builds and three frames
+            // where the step makes one. What is counted here is the resize's and the drag's own work,
+            // so the watchers are let go first (disposed, still listed, so a build does not start them
+            // again), as ChromePartTests does.
+            foreach (var w in ((System.Collections.IDictionary)typeof(JunctionApp)
+                         .GetField("_watchers", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!).Values)
+                ((IDisposable)w!).Dispose();
             // Until the review's loads have all landed: a build of their own inside a step is not the step's.
             DiffScrollTests.Quiet(session, app);
 
