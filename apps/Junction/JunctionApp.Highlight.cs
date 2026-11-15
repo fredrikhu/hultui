@@ -107,6 +107,14 @@ public partial class JunctionApp
     /// </summary>
     internal TimeSpan HighlightRest { get; set; } = TimeSpan.FromMilliseconds(120);
 
+    /// <summary>For tests: what a tokenize waits for, after its rest and before it reads the file;
+    /// null waits for nothing. A test that has to see a diff drawn plain before its colours land
+    /// holds them with it. Left to the clock, they land within the frames the test pumps where git
+    /// starts in a few milliseconds or the frames are slow: on Fedora 17–30 ms after the plain rows,
+    /// in the first or second of three frames, and on Windows in a process that runs nothing
+    /// before it (plan 17 round 15). The app's own cancel ends the wait.</summary>
+    internal Task? HighlightHold { get; set; }
+
     private readonly Dictionary<string, FileHighlight> _highlights = new(StringComparer.Ordinal);
 
     // The worker's one tokenize, its cancel, and the ask that takes over when it ends.
@@ -263,7 +271,7 @@ public partial class JunctionApp
         var cancel = new CancellationTokenSource();
         _highlightRunning = ask;
         _highlightCancel = cancel;
-        var (clock, rest) = (_app.Time == TimeProvider.System ? TimeProvider.System : NoBudget, HighlightRest);
+        var (clock, rest, hold) = (_app.Time == TimeProvider.System ? TimeProvider.System : NoBudget, HighlightRest, HighlightHold);
         var token = cancel.Token;
 
         Task.Run(async () =>
@@ -273,6 +281,7 @@ public partial class JunctionApp
             try
             {
                 if (ask.Rest) await Task.Delay(rest, token);
+                if (hold is not null) await hold.WaitAsync(token);
                 Interlocked.Increment(ref _highlightsRead);
                 (result, lines) = Tokenize(ask, clock, token);
             }
