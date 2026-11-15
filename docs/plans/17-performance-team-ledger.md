@@ -4,37 +4,29 @@ State of [the performance team](17-performance-team.md). The orchestrator update
 file after every step and commits it with the step's work. Full survey reports are in
 [`17-reports/`](17-reports/).
 
-- **Round:** 15
-- **Phase:** release — round 15's full suite passed at 6cf0f79b (Windows 30 projects, Fedora the slnf plus Junction,
-  Meridian, Aperture and Reel, docfx 0 warnings); merged into main 75f2288a and pushed (2026-11-15; origin/main 5aa1d25b
-  unmoved, tree identical to the branch; the primary checkout fast-forwarded behind the guard); waiting for CI on
-  75f2288a. Build record: (step 1 done: 6c7a6cab, docs only; step 2 landed b258f4fb..ff6922f0; step 3
-  fdd795bd..bc2426aa; a Fedora test race fixed 17e13e63; step 4 a9321aac..38629c1e; step 5 dae30194..49c7b384; step 6
-  29f1ddc0..2d5d96ee; step 7 52852f6e, 83034345; step 8 eb68bbca..da63c3d0; step 9 9fcc1397; ReviewTests races fixed
-  1d852da7, a32c8b9f, 37b9e96b; step 10 c6a19b06, 870a6fc7). The build order is done: the full suite runs
-  (`fullsuite-r15.sh` and `fedora-r15.sh` in this session's scratchpad: Windows `HultUI.slnx`, Fedora the slnf plus
-  Junction, Meridian, Aperture and Reel each in a private D-Bus session, docfx), then Phase release. The round's full suite must run Junction, Meridian, Aperture
-  and Reel tests on Fedora on their own (each in a private D-Bus session with an unlocked keyring):
-  `HultUI.CrossPlatform.slnf`, wsl-test.sh's default and CI's test-linux, has none of them. The survey is merged (reports 9906f275..587f1767, `17-reports/r15-*`,
-  2026-11-14/15, ~80 min, 71 → 80 % weekly). The weekly limit resets 2026-11-15 03:00 UTC; the 5-hour window read 73 %
-  at the merge, so step 1 starts after it resets (01:10 UTC). Build briefs `brief-r15b<N>.md`, agent ids `r15-agents.txt`,
-  probes `r15-<area>\` and `r15b<N>\`, the survey brief `brief-r15-survey.md`, `archive_r15.py` and `merge_r15.py`, all in
-  this session's scratchpad `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\8e8ba33b-db33-43fa-885a-cb6b82b7253f\scratchpad\`.
-  Questions 63 and 65 answered (a) and (b) on 2026-11-15; 64 waits for the live reader check. Build
-  briefs measure the real-app case in a guarded real window (the lock `Global\HultUI-r15-desktop` and the survey's
-  harnesses) as well as by step-ab; a step that changes when a navigation or a load applies runs its app's tests on
-  Fedora too (round 14). Round 14's files (briefs `brief-r14*.md`, `fullsuite-r14.sh`, the model for the full suite,
-  probes `r14-<area>\` and `r14b<N>\`) are in session 41943a9b's scratchpad (Probe code below).
+- **Round:** 16
+- **Phase:** survey — round 16, to start in a fresh context. Round 15 RELEASED 2026-11-15: main 75f2288a (merge, tree
+  identical to the tested branch; origin/main 5aa1d25b had not moved), CI run 43749648717 green on the first attempt
+  (test, test-linux, docs, both meridian-keyring jobs) and "Push on main" green. No app releases this round (only when
+  the user asks). Round 15's files: briefs `brief-r15*.md`, agent ids `r15-agents.txt`, probes `r15-<area>\` and
+  `r15b<N>\`, `fullsuite-r15.sh` with `fedora-r15.sh` (the model for round 16's full suite: Fedora must run Junction,
+  Meridian, Aperture and Reel on their own, each in a private D-Bus session, as `HultUI.CrossPlatform.slnf` has none of
+  them), `archive_r15.py`, `merge_r15.py`, all in session 8e8ba33b's scratchpad
+  `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\8e8ba33b-db33-43fa-885a-cb6b82b7253f\scratchpad\`.
+  For round 16's start: move round 14's Landed rows, round 15's build order and its answered questions 62, 63 and 65 to
+  the archive (question 64 stays open), as `archive_r15.py` did. Open for the user, not blocking: the live screen-reader
+  check, now with builds ready (`sr-variants\` in that scratchpad: today / items200 / gate, launchers and `CHECKLIST.md`;
+  patches in `sr-variants\patches\`), which decides questions 50 and 64 and the menu check; another F16 held-drag run
+  (Waiting) only with a new approval. Outside plan 17: CI's Linux job runs no Junction, Meridian, Aperture or Reel tests.
   To resume in a fresh context, run in this worktree: `/loop Run the next step of
   the performance team: follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
   Read both once per session (afterwards only the ledger's Phase and the part the step needs), do the step the ledger's
   Phase calls for, record it in the ledger, and commit.` Before resuming, `git fetch` and merge main if it moved; build
-  steps use `scripts/perf/step-ab.ps1`. Open for the user, not blocking: the live screen-reader check of menus (with
-  question 50's bridge gate and question 64); another F16 held-drag run (Waiting) only with a new approval. Older rounds
-  are in [the archive](17-performance-team-ledger-archive.md) (search it, don't read it whole). History note: rewritten
-  2026-10-25 (every commit after 3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history).
+  steps use `scripts/perf/step-ab.ps1`. Older rounds are in [the archive](17-performance-team-ledger-archive.md) (search
+  it, don't read it whole). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a pre-push
+  hook refuses pushes built on the old history).
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`)
-- **Review commits since:** round 16's survey reviews round 15's build, 587f1767..(round 15's release) (the last survey report to the round 15 release). Earlier: round 15's survey reviewed round 14's build, 06d4db59..5b2985be (the last survey report to the round 14 release; the one merge is round 14's own into main). Earlier: round 14's survey reviewed round 13's build, 8f01b6fd..e432c224 (the last survey report to the round 13 release; its two merges are round 13's own into main). Round 13's survey reviewed round 12's build, 5f1744ca..afc1ed40 (the last survey report to the round 12 release; the one merge is round 12's own into main). Round 12's survey reviewed round 11's build, 5731ee58..b0dd1954 (the last survey report to the
+- **Review commits since:** round 16's survey reviews round 15's build, 587f1767..75f2288a (the last survey report to the round 15 release; the one merge is round 15's own into main). Earlier: round 15's survey reviewed round 14's build, 06d4db59..5b2985be (the last survey report to the round 14 release; the one merge is round 14's own into main). Earlier: round 14's survey reviewed round 13's build, 8f01b6fd..e432c224 (the last survey report to the round 13 release; its two merges are round 13's own into main). Round 13's survey reviewed round 12's build, 5f1744ca..afc1ed40 (the last survey report to the round 12 release; the one merge is round 12's own into main). Round 12's survey reviewed round 11's build, 5731ee58..b0dd1954 (the last survey report to the
   round 11 release; it includes the .NET 11 upgrade's step 0 only as already reviewed). Earlier: round 11's survey reviewed round 10's build and the .NET 11 upgrade, f4d6050d..868e2ffc
   (the last survey report to the upgrade's captures; round 10's merge into main cc55bdcc is in the range). Earlier: round 10's survey reviewed round 9's build, 4919ac40..facced69 (the last survey report
   to the round 9 release; 82 commits, 81 not merges; no merge from main this round). Round 9's survey reviewed
@@ -1215,3 +1207,8 @@ From 2026-11-13 (round 14's survey); earlier entries are in the archive ([to 202
   whose Fedora run covers the four apps; docfx 0 warnings. origin/main 5aa1d25b unmoved (in the branch). Phase release.
   Meanwhile the user asked for the screen-reader variant builds (today / items200 / gate) for questions 50 and 64: an
   expert 7 agent builds them in its own worktree, never committed, into `sr-variants\` in this session's scratchpad.
+- 2026-11-15: round 15 RELEASED. Merged into main 75f2288a and pushed (origin/main 5aa1d25b unmoved, tree identical to
+  the tested branch; the primary checkout fast-forwarded behind the guard). CI run 43749648717 on 75f2288a green on the
+  first attempt in 23 min (test, test-linux, docs, meridian-keyring on macOS and Ubuntu); "Push on main" green. The
+  screen-reader variant builds are ready for the user (`sr-variants\` in session 8e8ba33b's scratchpad, never committed).
+  Round → 16, Phase survey, in a fresh context.
