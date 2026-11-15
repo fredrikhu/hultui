@@ -1027,6 +1027,59 @@ once a process, against an idle and memory cost on every session that plays noth
 off-thread load itself held on WGL: SDL's probe pumps nothing on the calling thread (a message
 posted to the worker's queue before `SDL_GL_LoadLibrary` was still queued after it).
 
+### A Vulkan window keeps its video interop's GL context after the last video: a release measured and declined (round 15)
+
+The video interop's hidden GL context and its one-pixel window (`SdlVulkanHost.EnableInterop`) live
+until the window closes. Plan 17's round 15, step 8 (media-interop-context-release) let them go,
+with the barrier ring, once the last source had given its image back (right after the device wait
+that frees that image), and made them again on the next video's first frame. Built as an internal
+method behind a switch and measured in a NativeAOT probe host built as Reel's `Main` builds it: Reel
+on Vulkan, a 320×180 clip, an Aperture-shaped dispose (the player and the scrubber stills disposed,
+8 s rest, two cycles a launch), real windows on the 1440p at 100 % (200 Hz, HDR on, SDR white 240
+nits; the 4K was not attached), idle-gated, the switch alternated in two holds; 3 launches kept and
+4 released (a cold first launch after the publish left out). Before any clip: private bytes
+97.5–99.9 MB, working set 98.4–98.9 MB.
+
+| | Kept (today) | Released |
+|---|---|---|
+| After the first dispose: private bytes | 155.9–158.2 MB | 147.6–149.7 MB |
+| the same: working set | 147.3–149.6 MB | 147.2–148.3 MB |
+| the same: GPU memory, local / non-local (DXGI, this process) | 44.7 / 29.2 MB | 38.4 / 29.2 MB |
+| the same: "other" private allocations (resident) | 62.9–65.8 (32.7) MB | 53.5–56.7 (32.0) MB |
+| The next video: Open → "vulkan interop ready" | — (kept) | 29.2–30.0 ms |
+| the same: Open → its first frame drawn (the image lent) | 70.2–77.5 ms | 96.3–106.9 ms |
+| the same: Open → first window frame | 62.6–65.9 ms | 85.6–95.8 ms |
+| the same: Open → mpv's position past 0 | 103–107 ms | 125–135 ms |
+
+The release took 1.4–1.7 ms, and the next video drew the same picture (the paused frame's middle,
+read from the window's own surface: mean 171/171/171 in 8 colours either way; the empty player
+16/17/21). But the context itself holds about 9 MB of commit, 6 MB of GPU memory and under 1 MB of
+resident memory. The survey's "about 40 MB private and 17 MB resident" was everything the first video
+leaves behind, of which the context is a small part: libmpv's and CUDA's process-wide state (five
+modules, `nvcuda64` among them, stay loaded: 94 → 99) and NVIDIA's driver, whose `nvoglv64` is also
+the Vulkan driver and is loaded before any video.
+
+Over ten cycles (one launch each way, the same dispose and rest) the release also stops a growth of
+about 1 MB a video. Each mpv render context made and freed in the long-lived context leaves ~0.9 MB
+committed and resident in the NVIDIA driver's own 1 GB reservation (see the next entry); made in a
+fresh context each time, that reservation stays level from the fourth video on:
+
+| | Kept (today) | Released |
+|---|---|---|
+| After the 10th dispose: private bytes / working set | 172.7 / 161.0 MB | 158.5 / 153.9 MB |
+| Growth a video, videos 2–10 (least squares): private / working set | +1.23 / +1.10 MB | +0.88 / +0.39 MB (heap noise; steps 5–10 within ±0.7) |
+| The driver's reservation, committed / resident, after videos 1 and 10 | 38.3 / 29.6 → 45.8 / 37.5 MB | 38.3 / 29.7 → 41.2 / 31.1 MB |
+| GPU memory, local | 44.7 → 45.5 MB | 38.4 → 38.4 MB |
+| Videos 2–10: Open → first window frame / mpv's position past 0 | 58.7–82.6 / 98–124 ms | 89.0–103.7 / 128–144 ms |
+
+Declined. After a dispose shaped like the survey's, it frees under 1 MB of working set (0.4 %); the
+growth it stops is about 1 MB a film, 7 MB (4.4 %) after ten, for a first frame about 30 ms later
+on every video after the first. Nor is it small to make safe: a next episode is opened in the same
+turn as the last one is disposed (Aperture's `OpenStream`), so the new player has made its mpv render
+context in the hidden context before the old image is destroyed; the release would need every GPU
+source to register with the host before its first GL call, not only when it is lent an image, or it
+destroys a context a live renderer is in. Between autoplayed episodes it would then never release.
+
 ### A ref's lock file alone is a working-tree event, not dropped (round 13)
 
 Plan 17's round 13, step 1 stopped Junction's repository watcher from reading a ref transaction
