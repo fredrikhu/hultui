@@ -1567,6 +1567,11 @@ public partial class JunctionApp
 
     private enum ExternalDiffMode { Commit, Staged, Unstaged }
 
+    /// <summary>A Ctrl+D that waits for the open file's patch in the Commit tab: the commit's
+    /// file-at-a-time source and the file. Taken by the next file patch that lands, which runs
+    /// it again only when that is this file and it is still the open one.</summary>
+    private (object? Source, string? Path) _editorDiffOnLanding;
+
     // Ctrl+D in the Commit / Changes views: open the selected file's diff in VS Code
     // (`code --wait --diff <left> <right>`). Reuses ExternalDiffLauncher's PATH/.cmd
     // resolution and its temp-file plumbing; --wait keeps the launched process alive
@@ -1575,10 +1580,28 @@ public partial class JunctionApp
     {
         if (ActiveRepo is not { } repo) return;
 
+        // The Commit tab acts on the open file's own diff, not on the one the pane keeps on
+        // screen while the open file's patch is on its way (CommitPane): asked then, the
+        // refusal below read the kept file while the launch opened the selected one. Until
+        // that patch lands it is not known whether the file is binary, so the key waits for
+        // it (AskFilePatch's landing comes back here).
+        GitFileDiff? target;
+        if (View == JunctionView.Commit && _selectedFilePath is { } open)
+        {
+            var detail = _commitDetail.Value;
+            target = CommitDiffFor(detail, open);   // asks for the patch if nothing has yet
+            if (target is null && FilePatchPending(detail, open))
+            {
+                _editorDiffOnLanding = (detail.Patches, open);
+                return;
+            }
+        }
+        else target = CurrentDiffTarget().Diff;
+
         // Both sides would be fetched as text, so a binary file reaches VS Code as two
         // temp files of mojibake. The header button is disabled for these; this is the
         // same refusal for the keyboard, which does not go through the button.
-        if (CurrentDiffTarget().Diff is { IsBinary: true })
+        if (target is { IsBinary: true })
         {
             Flash("Binary file — there are no two texts for VS Code to compare");
             return;

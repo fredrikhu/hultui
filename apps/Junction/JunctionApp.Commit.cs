@@ -435,12 +435,16 @@ public partial class JunctionApp
             {
                 foreach (var d in diffs) byPath.TryAdd(d.Path, d);
                 if (!byPath.ContainsKey(path)) source.NoPatch.Add(path);
+                // A Ctrl+D that waited for this file's patch; any landing ends the wait.
+                bool editor = ReferenceEquals(_editorDiffOnLanding.Source, source) && _editorDiffOnLanding.Path == path;
+                _editorDiffOnLanding = default;
                 if (!ReferenceEquals(_commitDetail.Value.Patches, source)) return;
                 // The pane was keeping the previous diff for this one: draw it. A file read ahead
                 // draws nothing; the next one ahead is asked for instead.
                 if (path == _selectedFilePath)
                 {
                     if (_diffFull) Rerender(); else RerenderView();
+                    if (editor && View == JunctionView.Commit) OpenSelectedDiffExternally();
                 }
                 else ReadAhead(_commitDetail.Value);
             });
