@@ -188,6 +188,35 @@ public class PaneMoveTests
         return data.ToArray();
     }
 
+    /// <summary>A right click's release draws nothing. The mark's rebuild under the held button made
+    /// the hovered row again, and the window used to ask for a frame to settle the hover in once the
+    /// button was up: 6 release frames of 6 were the press frame's pixels. With nothing marked it
+    /// settles the hover at the release now, and nothing on screen is drawn from it (plan 17
+    /// round 15).</summary>
+    [Fact]
+    public void ARightClicksRelease_DrawsNoFrame()
+    {
+        using var t = FiveFiles();
+        var (x, y) = NameAt(t, "c.txt");
+        t.Session.Window.MoveMouse(x, y);
+        t.Session.PumpFrames(2);
+        try
+        {
+            t.Session.Window.MouseDown(x, y, MouseButton.Right);
+            CancelHold(t);
+            Assert.True(t.Session.PumpFrame(), "the right press drew no mark");
+            t.Session.PumpFrames(2);
+            var marked = Pixels(t);
+
+            t.Session.Window.MouseUp(x, y, MouseButton.Right);
+            Assert.False(t.Session.PumpFrame(), "the release drew a frame");
+            Assert.False(t.Field<bool>("_rmarkActive"), "the release left the right-drag mark going");
+            Assert.Equal(new[] { "c.txt" }, t.MarkNames('L'));
+            Assert.Equal(marked, Pixels(t));
+        }
+        finally { CancelHold(t); }
+    }
+
     /// <summary>A hold left armed opens the shell's menu from its timer; never leave one behind.</summary>
     private static void CancelHold(DiffViewTests.Fixture t) => t.Invoke("CancelContextHold");
 }

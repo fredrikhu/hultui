@@ -124,7 +124,12 @@ and its `.OnHover` look in the next frame; the part of the chain that survived h
 and what it is no longer over gets its leave. A tooltip owned by what went closes, and the new
 element's opens after the usual delay. Nothing happens while a press holds the pointer (a
 capture, a drag, a text selection, a slider, an autoscroll): hover stays where it is until the
-release, as it does on a move, and the frame after the release settles it. Nothing happens
+release, as it does on a move, and the release settles it — at once when nothing in the window is
+marked (the window then shows the tree as it is laid out), or else at the end of the frame the
+release draws. Settled at once, the enter and leave handlers run at the release rather than after
+a frame, and the release draws a frame only when something shows the new hover, as below: a
+right click in Vesper Commander, whose mark rebuilt the rows under the held button, drew its
+release as the same pixels 6 times of 6 until plan 17's round 15. Nothing happens
 when the pointer is outside the window or has never been in it, or when the build kept the
 hovered element. The settle draws a frame of its own only when something shows the new
 hover, as a pointer move does (see "Which inputs draw a frame" below): a hover or pressed
@@ -145,8 +150,13 @@ scroll's own frame, with no frame of its own. A list first makes the rows its of
 a long jump lands on a real row. A tooltip showing for what scrolled away closes, as on a move off
 it; the new element's opens after the usual delay. An enter or leave handler that marks style or
 layout is styled and laid out in that same frame. Nothing follows while a press holds the pointer
-(a drag, a selection, the scrollbar's thumb, an autoscroll keeps its target); the release draws a
-frame, and that frame follows. Nothing follows when the pointer is outside the window. Touch
+(a drag, a selection, the scrollbar's thumb, an autoscroll keeps its target); the release follows,
+at once when nothing in the window is marked, or else in the frame the release draws. Followed at
+once, it draws a frame only when something shows the new hover (a hover style, a list's tint, an
+enter or leave handler, the inspector), as the settle above does. It drew one every time until
+plan 17's round 15: a click on a request in Meridian's map, which scrolls the row into view
+under the held button, drew its release as the same pixels 9 times of 10, and each click two
+frames. Nothing follows when the pointer is outside the window. Touch
 arrives as mouse events and is followed the same way. A pan made with a negative margin
 (`HorizontalPan`) or a layout that moves content without scrolling is not a scroll and is not
 followed. It costs one hit test in a frame that scrolled (12–33 elements visited in Junction,

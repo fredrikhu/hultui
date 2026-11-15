@@ -3034,20 +3034,52 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         }
 
         // The hovered element may have gone (a build while a press held the pointer that this input
-        // let go of, an overlay this input closed): the end of a frame settles hover
-        // (SettleHover), so there has to be one.
+        // let go of, an overlay this input closed). With nothing marked the window shows the tree as
+        // it is laid out, so hover is settled now (SettleHover), and that asks for a frame only for
+        // what it draws: a list's tint, an app's enter or leave handler, the inspector. Otherwise the
+        // end of the frame this input has marked settles it, against the tree that frame draws. The
+        // release asked for a frame every time: a right click in Vesper Commander, whose mark rebuilt
+        // the rows under the held button, drew its release as the same pixels 6 times of 6 (plan 17
+        // round 15).
         if (_hoverMayBeStale && !PointerHeld)
         {
-            if (_lastHoveredElement is { } hovered && !IsShownInWindow(hovered)) _root.MarkPaintDirty();
+            if (_lastHoveredElement is { } hovered && !IsShownInWindow(hovered))
+            {
+                if (ShowsTreeAsLaidOut()) SettleHover();
+                else _root.MarkPaintDirty();
+            }
             else _hoverMayBeStale = false;
         }
 
         // Content scrolled under the pointer while a press held it (a drag, a selection's edge scroll, the
-        // autoscroll): the first frame drawn after the release follows it with the hover
-        // (FollowScrollWithHover), so the release has to have one.
+        // autoscroll, a press that scrolled what it selected into view): hover follows it at the release
+        // (FollowScrollWithHover). With nothing marked, now, asking for a frame only when that changes
+        // something drawn (the tint, a handler, the inspector, as SettleHover); otherwise in the frame
+        // this input has marked, before it draws. It asked for a frame every time: a click on a request
+        // in Meridian's map, which scrolls the row into view under the held button, drew its release
+        // as the same pixels 9 times of 10 (plan 17 round 15).
         if (evt is InputEvent.MouseButtonInput { IsDown: false } && !PointerHeld && _lastHoveredElement is not null
             && _contentMovesFollowed != ScrollViewElement.ContentMoves)
-            _root.MarkPaintDirty();
+        {
+            if (!ShowsTreeAsLaidOut()) _root.MarkPaintDirty();
+            else
+            {
+                int drawn = _pointerState.DrawnHoverChanges;
+                if (FollowScrollWithHover() || _pointerState.DrawnHoverChanges != drawn || _devTools.IsEnabled)
+                    _root.MarkPaintDirty();
+            }
+        }
+    }
+
+    /// <summary>Whether nothing is marked in the main tree or any open overlay: the window shows the
+    /// trees as they are styled and laid out, so hover can be hit-tested against them at once, as a
+    /// move is, rather than at the end of a frame.</summary>
+    private bool ShowsTreeAsLaidOut()
+    {
+        if (_root is null || _root.DirtyFlags != DirtyFlags.None) return false;
+        for (int i = 0; i < _overlays.Count; i++)
+            if (_overlays[i].Content.DirtyFlags != DirtyFlags.None) return false;
+        return true;
     }
 
     // ── Cross-label (group) text selection ──
@@ -3383,8 +3415,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// what went closes; one for the new element opens after the usual delay.
     ///
     /// <para>Not while a press holds the pointer (a capture, a drag, a selection, a slider, an
-    /// autoscroll): hover stays as it is until the release, as on a move, and the frame after the
-    /// release settles it. Nothing when nothing is hovered (the pointer is outside the window or has
+    /// autoscroll): hover stays as it is until the release, as on a move, and the release settles it,
+    /// at once when nothing is marked, or else at the end of the frame it marked (HandleInputEvent's
+    /// tail). Nothing when nothing is hovered (the pointer is outside the window or has
     /// never been in it), or when the hovered element is still shown, as after most builds: then this
     /// is one walk up from the hovered element, and only in a frame that changed some tree's children.</para>
     /// </summary>
@@ -3418,11 +3451,13 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// scrolled away gets its leave, the row now under the pointer its enter, its hover look, a list's
     /// tint under it, the cursor it asks for, and a tooltip after the usual delay; a tooltip showing for
     /// what scrolled away closes, as on a move off it. Until plan 17's round 14 hover stayed on the row
-    /// that scrolled away until the pointer moved (Junction's History after 4 of 4 wheel series).
+    /// that scrolled away until the pointer moved (Junction's History after 4 of 4 wheel series). Also
+    /// called from a release with nothing marked (below).
     ///
     /// <para>The lists under the pointer make the rows their offsets now show first, as drawing would
     /// next (<see cref="HitTestRealizing"/>). Nothing while a press holds the pointer (a drag keeps
-    /// its target; the release asks for a frame, and that frame follows), and nothing but a read when the
+    /// its target): the release follows, at once when nothing is marked and the window shows the
+    /// trees as laid out, or else in the frame it marked (HandleInputEvent's tail). Nothing but a read when the
     /// pointer is outside the window or has never been in it. Touch arrives as SDL's mouse events and
     /// is followed as the mouse is.</para>
     /// </summary>
