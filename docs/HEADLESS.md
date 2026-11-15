@@ -39,7 +39,12 @@ public void ClickingIncrementsCounter()
 Nothing happens between pumps. `PumpFrame()` runs one iteration of the same loop `Application.Run` uses:
 
 1. advance virtual time (default: one 60 Hz frame),
-2. drain main-thread work — `Application.InvokeOnMainThread` and `await` continuations,
+2. drain main-thread work — `Application.InvokeOnMainThread` and `await` continuations, in
+   the order posted. A pass of the real loop runs posted work for at most half a display
+   interval on the platform's clock and leaves the rest for the next pass
+   ([THREADING.md](THREADING.md)); the session's clock does not move inside a pass, so a pump
+   runs everything posted, unless the work itself moves the clock (`AdvanceTime`), which is how a
+   test reaches the budget,
 3. tick animations by the virtual delta,
 4. render every open window that needs a frame,
 5. clean up closed windows.

@@ -503,8 +503,9 @@ public sealed class Application : IDisposable
     internal static readonly TimeSpan LiveRequestsQuietAfter = TimeSpan.FromMilliseconds(100);
 
     /// <summary>How many posts waited in the main-thread queue when a live frame last drew, none of
-    /// which can have run since; 0 once the queue drains. A count above it is a post made since.
-    /// UI thread.</summary>
+    /// which can have run since; once a pass of the loop drains, the count it left (0 when it
+    /// emptied the queue, more when its budget ran out first). A count above it is a post made
+    /// since. UI thread.</summary>
     private int _liveFrameQueued;
 
     /// <summary>
@@ -1128,14 +1129,44 @@ public sealed class Application : IDisposable
         }
     }
 
-    /// <summary>Runs actions posted from background threads and await continuations.</summary>
+    /// <summary>
+    /// Runs actions posted from background threads and await continuations, in the order they
+    /// were posted, until the queue is empty or the pass has spent its budget
+    /// (<see cref="DrainBudget"/>): at least one, then none once the budget is spent, the rest left
+    /// for the next pass. The loop ran every action, those posted while it drained included, so
+    /// work posted faster than the UI thread ran it held the thread here: no input was handled and
+    /// no frame drawn until the stream stopped (a framework user's list, rebuilt on each of a
+    /// loader's posts, drew one frame of 10.6 s for a burst of 500). An action that throws leaves
+    /// the rest queued, as before.
+    /// </summary>
     private void DrainMainThreadQueue()
     {
-        while (_mainThreadQueue.TryDequeue(out var action))
-            action();
-        // Nothing waits now: the next post is a new one to a live frame (RenderLiveResizeFrame).
-        _liveFrameQueued = 0;
+        if (!_mainThreadQueue.TryDequeue(out var action))
+        {
+            // Nothing waits now: the next post is a new one to a live frame (RenderLiveResizeFrame).
+            _liveFrameQueued = 0;
+            return;
+        }
+        var clock = _platform.TimeProvider;
+        long start = clock.GetTimestamp();
+        long budget = DrainBudget(clock);
+        try
+        {
+            do action();
+            while (clock.GetTimestamp() - start < budget && _mainThreadQueue.TryDequeue(out action));
+        }
+        finally
+        {
+            // What waits now waited when this pass ended; a post since is a new one to a live frame.
+            _liveFrameQueued = _mainThreadQueue.IsEmpty ? 0 : _mainThreadQueue.Count;
+        }
     }
+
+    /// <summary>How long a pass of the loop may run posted work for, on <paramref name="clock"/>: half
+    /// the display's interval (8.3 ms at 60 Hz), so a pass that spends it still leaves the frame its
+    /// time. Under a headless session the clock moves only between passes, so a pass there runs
+    /// everything posted, as it always has, unless the work itself moves the clock.</summary>
+    private long DrainBudget(TimeProvider clock) => (long)(clock.TimestampFrequency / DisplayHz() / 2);
 
     /// <summary>
     /// Renders every open window that needs a frame (or all open windows when
