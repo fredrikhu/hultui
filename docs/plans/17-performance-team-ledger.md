@@ -6,9 +6,9 @@ file after every step and commits it with the step's work. Full survey reports a
 
 - **Round:** 15
 - **Phase:** build — round 15, step 4 next (step 1 done: 6c7a6cab, docs only; step 2 landed b258f4fb..ff6922f0; step 3
-  fdd795bd..bc2426aa). Before step 4: bisect the Fedora failure of Junction's
-  `DiffRowKeepTests.TheHighlightLanding_MakesTheRowsOnScreenAgainInColour` (fails at 909e630e; round 14's Fedora run at
-  6ea0db3b passed; step 2 ran only Headless on Fedora). The survey is merged (reports 9906f275..587f1767, `17-reports/r15-*`,
+  fdd795bd..bc2426aa; a Fedora test race fixed 17e13e63). The round's full suite must run Junction, Meridian, Aperture
+  and Reel tests on Fedora on their own (each in a private D-Bus session with an unlocked keyring):
+  `HultUI.CrossPlatform.slnf`, wsl-test.sh's default and CI's test-linux, has none of them. The survey is merged (reports 9906f275..587f1767, `17-reports/r15-*`,
   2026-11-14/15, ~80 min, 71 → 80 % weekly). The weekly limit resets 2026-11-15 03:00 UTC; the 5-hour window read 73 %
   at the merge, so step 1 starts after it resets (01:10 UTC). Build briefs `brief-r15b<N>.md`, agent ids `r15-agents.txt`,
   probes `r15-<area>\` and `r15b<N>\`, the survey brief `brief-r15-survey.md`, `archive_r15.py` and `merge_r15.py`, all in
@@ -1123,3 +1123,14 @@ From 2026-11-13 (round 14's survey); earlier entries are in the archive ([to 202
   failed once (2 callbacks), 15/15 on reruns; ReviewTests on 2 cores ran 2.7–19.0 min (watch at the full suite). A
   Junction test fails on Fedora since before step 3 (`DiffRowKeepTests.TheHighlightLanding_MakesTheRowsOnScreenAgainInColour`,
   failing at 909e630e): bisect before step 4.
+- 2026-11-15: the Fedora failure is a race in the test, not a regression (17e13e63): `DiffRowKeepTests.Hosted` counted
+  rows 3 frames after the list showed, and on Fedora git starts in a few ms, so the colours had already landed (31 plain
+  rows, the tokenize 17–30 ms later); it also fails on Windows when run alone (4 of 4). Fix: an internal
+  `JunctionApp.HighlightHold` (a `Task?`, null by default) the tokenize worker waits on after its rest; the test holds
+  the colours, sees plain rows, releases them and sees them made again (a reverse edit fails 6 of 6 on both OSes). It
+  failed at 6ea0db3b too: round 14 never ran Junction on Fedora — `HultUI.CrossPlatform.slnf` (wsl-test.sh's default
+  and CI's test-linux) has no Junction, Meridian, Aperture or Reel tests. Fedora at 17e13e63: the slnf 22/22 projects;
+  each app alone in a private D-Bus session with an unlocked keyring: Junction 1,147, Meridian 680 (+4 skipped),
+  Aperture 364 (+21), Reel 52. Windows Junction 1,147, Headless 1,617. For the guidelines: a change to an app runs that
+  app's tests on Fedora explicitly. (Its commit message also guesses that round 14 passed because 22 projects ran at
+  once; the filter is the real reason.) Next: step 4.
