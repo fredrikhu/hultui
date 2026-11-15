@@ -201,17 +201,8 @@ public class ReviewTests
             session.PumpFrames(2);
             AssertCardFitsItsRow(session);
             float tall = LayoutProbe.Painted(ById(session, "review-thread")!).Height;
-            // The review fetched the request's head into the repository, and its watcher tells that
-            // a debounce (300 ms) after the last file event: the repository reloads and the window
-            // builds again as its loads land. On Fedora, whose git starts in a few milliseconds, that
-            // landed inside the first splitter step below, every time: three builds and three frames
-            // where the step makes one. What is counted here is the resize's and the drag's own work,
-            // so the watchers are let go first (disposed, still listed, so a build does not start them
-            // again), as ChromePartTests does.
-            foreach (var w in ((System.Collections.IDictionary)typeof(JunctionApp)
-                         .GetField("_watchers", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!).Values)
-                ((IDisposable)w!).Dispose();
             // Until the review's loads have all landed: a build of their own inside a step is not the step's.
+            // (The repository's watcher, which would reload it after the review's fetch, is let go in Hosted.)
             DiffScrollTests.Quiet(session, app);
 
             foreach (int width in new[] { 1600, 1520, 1500, 1460, 1900, 1440 })
@@ -989,6 +980,18 @@ public class ReviewTests
             // re-keys the summary and not the log.
             session.PumpUntil(() => TreeHas(session, "orders") && ById(session, "gitlab-mark") is not null,
                 TimeSpan.FromSeconds(15));
+            // A review fetches the request's head into the repository (refs/remotes/origin/merge-requests/
+            // 412), and the repository's watcher tells that a debounce (300 ms) after the last file event:
+            // the repository reloads, and the window builds again as five loads land. Left alone, that
+            // lands inside whatever a test counts then: on Fedora, whose git starts in a few
+            // milliseconds, in AResizeMeasuresTheCardsAgain's first splitter step every time, three builds
+            // and three frames where the step makes one (1d852da7, that test's own fix until this one). No
+            // test here is about the repository changing on disk, so the watchers are let go before any
+            // body runs (disposed, still listed, so a build does not start them again), as
+            // ChromePartTests does; what the fetch brings, the review reads itself.
+            foreach (var w in ((System.Collections.IDictionary)typeof(JunctionApp)
+                         .GetField("_watchers", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!).Values)
+                ((IDisposable)w!).Dispose();
             body(repo, origin, session, app);
         }
         finally { app?.Dispose(); }
