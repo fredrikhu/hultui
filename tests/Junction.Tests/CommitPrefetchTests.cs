@@ -20,6 +20,10 @@ namespace Junction.Tests;
 /// <para>The assertions below are about <i>when</i> the work starts, not how fast it is,
 /// which is the only part of that a test can hold: the tokenize has to be under way (or
 /// finished) while History is still the visible view.</para>
+///
+/// <para>The colours only once the Commit tab has been opened in the session: before that,
+/// tokenizing for a tab nobody had opened was 70 % of what reading History cost (plan 17
+/// round 15), and the first switch colours the diff itself.</para>
 /// </summary>
 [Collection("JunctionDiff")]
 public class CommitPrefetchTests
@@ -54,11 +58,82 @@ public class CommitPrefetchTests
         Hosted((session, app) =>
         {
             OpenHistory(session, app);
+            OpenTheCommitTabOnce(session, app);
+            int warmed = Highlights(app).Count;
 
-            session.PumpUntil(() => Highlights(app).Count > 0 || Pending(app) > 0,
+            session.Window.PressKey(KeyCode.Down);   // "add the sources", open on src/Program.cs too
+
+            session.PumpUntil(() => Highlights(app).Count > warmed || Pending(app) > 0,
                 TimeSpan.FromSeconds(20));
-
             Assert.Equal(JunctionView.History, View(app));
+        });
+    }
+
+    /// <summary>
+    /// Until the Commit tab has been opened in the session, History's rests load each commit's
+    /// files and diffs and tokenize nothing: a reader of the log alone paid for the colours of a
+    /// tab they never opened, 70 % of the walk's bytes on all threads (plan 17 round 15, 120 keys
+    /// 250 ms apart: 3.13 MB a key against 0.90 with the colours cached). The first switch colours
+    /// the diff itself, and from then on History warms the colours as before.
+    /// </summary>
+    [Fact]
+    public void ReadingHistory_BeforeTheCommitTabWasOpened_TokenizesNothing()
+    {
+        Hosted((session, app) =>
+        {
+            OpenHistory(session, app);
+            foreach (var key in new[] { KeyCode.Down, KeyCode.Up })
+            {
+                session.Window.PressKey(key);
+                var stop = (string)Field(app, "_selectedCommitHash")!;
+                session.PumpUntil(() => DetailHash(app) == stop, TimeSpan.FromSeconds(20));
+                Assert.Equal(0, Pending(app));   // a prefetch would be resting now
+            }
+            session.PumpFrames(3);
+            Assert.Equal(0, app.HighlightsRead);
+            Assert.Empty(Highlights(app));
+
+            session.Window.PressKey(KeyCode.Digit3);
+            session.PumpUntil(() => Highlights(app).Count == 1 && Pending(app) == 0, TimeSpan.FromSeconds(20));
+
+            session.Window.PressKey(KeyCode.Digit2);
+            session.PumpFrames(2);
+            session.Window.PressKey(KeyCode.Down);
+            var next = (string)Field(app, "_selectedCommitHash")!;
+            session.PumpUntil(() => DetailHash(app) == next, TimeSpan.FromSeconds(20));
+            Assert.Equal(1, Pending(app));
+            session.PumpUntil(() => Highlights(app).Count == 2 && Pending(app) == 0, TimeSpan.FromSeconds(20));
+            Assert.Equal(JunctionView.History, View(app));
+        });
+    }
+
+    /// <summary>
+    /// A detail History's rest asked for that lands after the selection moved on is for a commit
+    /// the reader has left: it starts no tokenize.
+    /// </summary>
+    [Fact]
+    public void ADetailThatLandsAfterTheSelectionMovedOn_StartsNoTokenize()
+    {
+        Hosted((session, app) =>
+        {
+            OpenHistory(session, app);
+            OpenTheCommitTabOnce(session, app);
+            var loader = Field(app, "_commitDetail")!;
+            bool Loading() => (bool)loader.GetType().GetProperty("IsLoading")!.GetValue(loader)!;
+            app.DetailRest = TimeSpan.FromMilliseconds(50);
+
+            session.Window.PressKey(KeyCode.Down);   // "add the sources": its rest runs out, its detail is asked for
+            var left = (string)Field(app, "_selectedCommitHash")!;
+            session.PumpUntil(Loading, TimeSpan.FromSeconds(20));   // the producer runs on the next frame
+            app.DetailRest = TimeSpan.FromSeconds(60);
+            session.Window.PressKey(KeyCode.Down);   // and the reader moves on before it lands
+            int read = app.HighlightsRead;
+
+            session.PumpUntil(() => DetailHash(app) == left, TimeSpan.FromSeconds(20));
+            Assert.NotEqual(left, (string)Field(app, "_selectedCommitHash")!);
+            Assert.Equal(0, Pending(app));
+            session.PumpFrames(3);
+            Assert.Equal(read, app.HighlightsRead);
         });
     }
 
@@ -84,7 +159,10 @@ public class CommitPrefetchTests
         Hosted((session, app) =>
         {
             OpenHistory(session, app);
-            session.PumpUntil(() => Highlights(app).Count > 0, TimeSpan.FromSeconds(20));
+            OpenTheCommitTabOnce(session, app);
+            int before = Highlights(app).Count;
+            session.Window.PressKey(KeyCode.Down);
+            session.PumpUntil(() => Highlights(app).Count > before && Pending(app) == 0, TimeSpan.FromSeconds(20));
             int warmed = Highlights(app).Count;
 
             session.Window.PressKey(KeyCode.Digit3);
@@ -106,6 +184,10 @@ public class CommitPrefetchTests
         Hosted((session, app) =>
         {
             OpenHistory(session, app);
+            OpenTheCommitTabOnce(session, app);
+            Highlights(app).Clear();
+
+            session.Window.PressKey(KeyCode.Down);   // "add the sources": three files
             session.PumpUntil(() => Highlights(app).Count > 0, TimeSpan.FromSeconds(20));
 
             Assert.Equal(1, Highlights(app).Count + Pending(app));
@@ -177,6 +259,16 @@ public class CommitPrefetchTests
         session.Window.PressKey(KeyCode.Digit2);
         session.PumpUntil(() => Field(app, "_selectedCommitHash") != null, TimeSpan.FromSeconds(30));
         session.PumpUntil(() => DetailFiles(app) > 0, TimeSpan.FromSeconds(30));
+    }
+
+    /// <summary>The Commit tab opened once, its colours landed, and History again: from here on
+    /// History's rests warm the colours too.</summary>
+    private static void OpenTheCommitTabOnce(HeadlessSession session, JunctionApp app)
+    {
+        session.Window.PressKey(KeyCode.Digit3);
+        session.PumpUntil(() => Highlights(app).Count > 0 && Pending(app) == 0, TimeSpan.FromSeconds(20));
+        session.Window.PressKey(KeyCode.Digit2);
+        session.PumpFrames(2);
     }
 
     private static void Hosted(Action<HeadlessSession, JunctionApp> body)

@@ -11,8 +11,9 @@ namespace Junction.Tests;
 /// A syntax highlight that lands rebuilds the window only when the diff on screen is waiting
 /// for it.
 ///
-/// <para>Selecting a commit in History prefetches the colours of the file its diff will open on
-/// (<see cref="CommitPrefetchTests"/>), so they land while the log is still on screen — and the
+/// <para>Selecting a commit in History prefetches the colours of the file its diff will open on, once
+/// the Commit tab has been opened in the session (<see cref="CommitPrefetchTests"/>), so they land
+/// while the log is still on screen — and the
 /// landing used to rebuild the whole window, which shows no diff there. A reader moving through
 /// the log paid two whole-window builds a key instead of one (Junction, Down every 500 ms: 2.00
 /// builds and ~470 KB a key). These pin both sides: no build for a result nothing on screen
@@ -149,7 +150,8 @@ public class HighlightRebuildTests
     }
 
     /// <summary>History open on the newest of three commits, its detail loaded and its opening
-    /// file's colours landed: the state someone is in while reading the log.</summary>
+    /// file's colours landed, the Commit tab opened once on the way: the state someone is in while
+    /// reading the log.</summary>
     private static void Hosted(Action<HeadlessSession, JunctionApp> body)
     {
         using var repo = TempRepo.CreateWithInitialCommit();
@@ -177,7 +179,10 @@ public class HighlightRebuildTests
 
             session.Window.PressKey(KeyCode.Digit2);
             session.PumpUntil(() => Field(app, "_selectedCommitHash") != null, TimeSpan.FromSeconds(30));
+            // History warms the colours only once the Commit tab has been opened in the session.
+            session.Window.PressKey(KeyCode.Digit3);
             session.PumpUntil(() => Highlights(app).Count > 0 && Pending(app) == 0, TimeSpan.FromSeconds(30));
+            session.Window.PressKey(KeyCode.Digit2);
             session.PumpFrames(3);
             body(session, app);
         }

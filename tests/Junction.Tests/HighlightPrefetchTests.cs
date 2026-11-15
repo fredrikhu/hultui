@@ -166,9 +166,7 @@ public class HighlightPrefetchTests
     {
         Hosted((session, app) =>
         {
-            session.Window.PressKey(KeyCode.Digit2);
-            session.PumpUntil(() => Field(app, "_selectedCommitHash") != null, TimeSpan.FromSeconds(30));
-            session.PumpUntil(() => app.HighlightsPending == 0 && Highlights(app).Count > 0, TimeSpan.FromSeconds(30));
+            History(session, app);
             int read = app.HighlightsRead;
             app.HighlightRest = TimeSpan.FromSeconds(1);   // a key a frame, however busy the machine
 
@@ -193,9 +191,7 @@ public class HighlightPrefetchTests
     {
         Hosted((session, app) =>
         {
-            session.Window.PressKey(KeyCode.Digit2);
-            session.PumpUntil(() => Field(app, "_selectedCommitHash") != null, TimeSpan.FromSeconds(30));
-            session.PumpUntil(() => app.HighlightsPending == 0 && Highlights(app).Count > 0, TimeSpan.FromSeconds(30));
+            History(session, app);
             app.HighlightRest = TimeSpan.FromSeconds(5);
 
             session.Window.PressKey(KeyCode.Down);
@@ -269,9 +265,7 @@ public class HighlightPrefetchTests
     {
         Hosted((session, app) =>
         {
-            session.Window.PressKey(KeyCode.Digit2);
-            session.PumpUntil(() => Field(app, "_selectedCommitHash") != null, TimeSpan.FromSeconds(30));
-            session.PumpUntil(() => app.HighlightsPending == 0 && Highlights(app).Count > 0, TimeSpan.FromSeconds(30));
+            History(session, app);
             app.HighlightRest = TimeSpan.FromSeconds(30);
             int read = app.HighlightsRead;
 
@@ -429,6 +423,18 @@ public class HighlightPrefetchTests
     {
         typeof(JunctionApp).GetField("_selectedFilePath", All)!.SetValue(app, path);
         typeof(JunctionApp).GetField("_commitCursorPath", All)!.SetValue(app, path);
+    }
+
+    /// <summary>History on the newest commit, its colours landed. The Commit tab is opened once on
+    /// the way: History's rests warm the colours only once it has been in the session.</summary>
+    private static void History(HeadlessSession session, JunctionApp app)
+    {
+        session.Window.PressKey(KeyCode.Digit2);
+        session.PumpUntil(() => Field(app, "_selectedCommitHash") != null, TimeSpan.FromSeconds(30));
+        session.Window.PressKey(KeyCode.Digit3);
+        session.PumpUntil(() => Detail(app) > 0 && app.HighlightsPending == 0 && Highlights(app).Count > 0, TimeSpan.FromSeconds(30));
+        session.Window.PressKey(KeyCode.Digit2);
+        session.PumpFrames(2);
     }
 
     /// <summary>The Commit tab, open on <paramref name="path"/>, with nothing tokenized yet but
