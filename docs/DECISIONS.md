@@ -933,7 +933,7 @@ to 1000 px 11.4 → 10.6 ms (808 → 555 KB, 1,433 → 1,141 HarfBuzz calls), to
 drag at 960 1,928 → 1,353 KB; Japanese to 1000 px 12.1 → 11.2 ms; the 154,000-character file within
 ±1 %. What is left at a new width is still the row-start words above and short words cut at need.
 
-### A full word cache takes every word: a scan-resistant admission measured and declined (round 14)
+### A full word cache takes every word: a scan-resistant admission measured and declined (rounds 14 and 15)
 
 A TextArea wraps every row of a document again at each width of a drag, so its prefix tables
 walk the document's words in the same order every frame. Least recently used out first, a walk
@@ -959,6 +959,35 @@ worse (2,572 calls → 5,380, 5,480 and 17,085): a word refused is shaped again 
 next probe in the same frame. No rule can do much better: the walk is about 2.5 times the cache,
 and a cache that keeps any fixed share of it finds at most that share. The user approved the larger
 bounds (question 56); the word cache now holds 32,768 entries and 16 MB.
+
+Round 15's review read the larger bounds as a cost a step: Junction's Files view on README.zh-CN.md,
+a 1,440 px window at 150 %, dragged 1 physical px a step (0.667 logical px), 41.4 → 51.7 KB a step
+against round 13. Plan 17's round 15, step 1 found the word cache growing once. Its slots double
+only when every slot holds an entry, and the old bound of 8,192 entries never let them pass 8,192.
+On that drag the Chinese README's words first pass 8,192, so one step of the 40 makes the 16,384-slot
+arrays: 960 KB in that one step. Without that step the drag costs 29.1 KB a step, against round 13's
+42.4. The next 40 widths cost 25.9 against 39.8, with no growth and no garbage collection where
+round 13's text had one. Japanese first passes 8,192 one drag later, which is why the review saw it
+11 % lower. Both READMEs in one file grow once more, to 32,768 slots (1,920 KB). Headless at whole
+layout widths, 1 logical px a step, the growth shows too (59.6 → 64.5 KB a step); the review's walk
+at whole widths missed it because there the growth came before the measured steps. A table of slots that grows
+without copying (pages of entries) would add a step to every lookup to save about 1 MB once per
+process; not built.
+
+Real window, NativeAOT, the 4K at 150 % (dpi 144, 120 Hz, GL), client 1,418 → 1,378 px (945.3 →
+918.7 logical) and then on to 1,338 px. Round 13's text is round 14's three changes switched off in
+the same probe build. UI KB a step agreed within 0.1 KB between the two launches of each side;
+UI-thread CPU a step is the minimum of 2, idle-gated, with the sides alternated. Headless at the same widths
+gave the same bytes to within 0.6 KB a step.
+
+| Drag | Round 13's text | Now | Now, without the growth step |
+|---|---|---|---|
+| Chinese, first 40 steps | 42.4 KB, 10.24 ms | 53.1 KB, 9.75 ms | 29.1 KB |
+| Chinese, next 40 | 39.8 KB, 10.30 ms | 25.9 KB, 9.92 ms | |
+| Japanese, first 40 | 54.2 KB, 9.74 ms | 48.5 KB, 9.88 ms | |
+| Japanese, next 40 | 60.2 KB, 10.22 ms | 75.3 KB, 9.96 ms | 51.3 KB |
+| Both in one file, first 40 | 5,374 KB, 39.4 ms | 69.4 KB, 17.1 ms | |
+| Both in one file, next 40 | 5,533 KB, 40.2 ms | 117.4 KB, 17.8 ms | 69.4 KB |
 
 ### A Vulkan window's video loads the GL driver in its first frame: a preload measured and declined (round 14)
 
