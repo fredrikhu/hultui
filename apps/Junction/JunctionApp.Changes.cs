@@ -69,17 +69,43 @@ public partial class JunctionApp
     {
         // The ignore-whitespace flag is part of the key so toggling it reloads the diffs.
         bool ws = _settings.Git.IgnoreWhitespace;
-        _changesLoaders.For(path).Load($"{path}|{ChangesGen(path)}|w{ws}",
-            () => LoadOrRetry(path, () => LoadChanges(path, ws)),
-            onLoaded: data => { if (PathEquals(path, _activeRepoPath)) OnChangesLoaded(data); });
+        int gen = ChangesGen(path), refsGen = _refsGen.GetValueOrDefault(path);
+        var status = SharedStatusAt(path, gen);
+        // HEAD's message moves only with HEAD, which moves the refs generation: while that stands,
+        // a reload (an editor's save) keeps the one read last rather than run git log for it.
+        (int RefsGen, string? Message)? head = _changesHeadRead.TryGetValue(path, out var read) && read.RefsGen == refsGen ? read : null;
+        _changesLoaders.For(path).Load($"{path}|{gen}|w{ws}",
+            () => LoadOrRetry(path, () => LoadChanges(path, ws, status, head)),
+            onLoaded: data =>
+            {
+                _changesHeadRead[path] = (refsGen, data.HeadMessage);
+                if (PathEquals(path, _activeRepoPath)) OnChangesLoaded(data);
+            });
     }
 
-    // Runs off the UI thread.
-    private ChangesData LoadChanges(string path, bool ignoreWhitespace)
+    /// <summary>HEAD's message as each repository's working tree last landed with it, and the refs
+    /// generation it was read at (see <see cref="EnsureChangesLoaded"/>).</summary>
+    private readonly Dictionary<string, (int RefsGen, string? Message)> _changesHeadRead = new(PathComparer);
+
+    // Runs off the UI thread. <paramref name="shared"/>: the status the summary of this generation
+    // reads too. <paramref name="head"/>: HEAD's message, when one read at this refs generation is
+    // known.
+    private ChangesData LoadChanges(string path, bool ignoreWhitespace, SharedStatus? shared = null,
+        (int RefsGen, string? Message)? head = null)
     {
         var repo = RepoFor(path);
         var staged = repo.GetStagedChanges();
-        var unstaged = repo.GetUnstagedChanges();
+        // One status for the files only it lists and, mid-operation, the conflicts: read after
+        // the diff, as before, from the summary's run when there is one.
+        GitResult? statusRead = null;
+        GitResult Status()
+        {
+            if (statusRead is not null) return statusRead;
+            statusRead = shared?.Result ?? repo.RunStatus();
+            if (shared is not null) _sharedStatus.TryRemove(new KeyValuePair<string, SharedStatus>(path, shared));
+            return statusRead;
+        }
+        var unstaged = repo.GetUnstagedChanges(Status);
 
         // Conflict state. Unmerged files leak into `git diff` as plain "Modified",
         // so pull them from status (GetConflictedFiles) and remove them from the
@@ -89,7 +115,7 @@ public partial class JunctionApp
         // conflict looked like a working tree full of ordinary modifications until this
         // stopped asking specifically about merges.
         var state = repo.GetSequencerState();
-        IReadOnlyList<GitFileChange> conflicted = state != null ? repo.GetConflictedFiles() : [];
+        IReadOnlyList<GitFileChange> conflicted = state != null ? GitRepository.GetConflictedFiles(Status()) : [];
         ConflictSides? sequencer = null;
         if (state != null)
         {
@@ -125,7 +151,7 @@ public partial class JunctionApp
 
         var assumeUnchanged = repo.GetAssumeUnchangedFiles();
         return new ChangesData(staged, unstaged, stagedDiffs, unstagedDiffs, conflicted, sequencer,
-            assumeUnchanged, repo.GetLastCommitMessage());
+            assumeUnchanged, head is { } known ? known.Message : repo.GetLastCommitMessage());
     }
 
     private void PickInitialChange(ChangesData data)

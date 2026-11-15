@@ -631,8 +631,9 @@ public partial class JunctionApp : Component, IDisposable
         int refsGen = _refsGen.GetValueOrDefault(path);
         RepoSummary? refs = _summaryRefsRead.TryGetValue(path, out var read) && read.Gen == refsGen
             && ReferenceEquals(read.Branches, shown.Branches) ? shown : null;
+        var status = SharedStatusAt(path, gen);
         loader.Load($"{path}#{gen}",
-            () => LoadSummary(path, refs) is var loaded && loaded.SameAs(shown) ? shown : loaded,
+            () => LoadSummary(path, refs, status) is var loaded && loaded.SameAs(shown) ? shown : loaded,
             onLoaded: landed => _summaryRefsRead[path] = (refsGen, landed.Branches));
     }
 
@@ -681,6 +682,40 @@ public partial class JunctionApp : Component, IDisposable
         return _dataGen.GetValueOrDefault(path);
     }
 
+    /// <summary>
+    /// One <c>git status</c> a data generation, for the two loads that read it while the Changes
+    /// view shows the repository: the summary (the dirty count) and the Changes view's working tree.
+    /// Each ran its own, and with <c>-uall</c> git walks the whole working tree for one: a save over
+    /// Changes walked it twice (plan 17 round 15). Made when such a repository's generation moves
+    /// (<see cref="ShareStatus"/>), before either load is asked for; whichever runs first runs git,
+    /// the other has its answer, and the Changes load, the one it is made for, lets it go once it
+    /// has read it. A load asked for at another generation runs its own.
+    /// </summary>
+    private sealed class SharedStatus(GitRepository repo, int gen)
+    {
+        private readonly Lazy<GitResult> _result = new(repo.RunStatus);
+
+        public int Gen { get; } = gen;
+
+        /// <summary>The status, run on the first read; off the UI thread only.</summary>
+        public GitResult Result => _result.Value;
+    }
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, SharedStatus> _sharedStatus = new(PathComparer);
+
+    /// <summary>The data generation of <paramref name="path"/> moved: its two status readers share
+    /// one when the Changes view's loads key on it (see <see cref="SharedStatus"/>).</summary>
+    private void ShareStatus(string path)
+    {
+        if (_viewKeysChanges.Contains(path))
+            _sharedStatus[path] = new SharedStatus(RepoFor(path), _dataGen.GetValueOrDefault(path));
+        else
+            _sharedStatus.TryRemove(path, out _);
+    }
+
+    private SharedStatus? SharedStatusAt(string path, int gen) =>
+        _sharedStatus.TryGetValue(path, out var shared) && shared.Gen == gen ? shared : null;
+
     /// <summary>Invalidate a repo's cached data (views + summary) so it reloads
     /// on next display. Called by our own git actions and by the change watcher.</summary>
     private void BumpDataGen(string path)
@@ -695,6 +730,7 @@ public partial class JunctionApp : Component, IDisposable
     {
         _dataGen[path] = _dataGen.GetValueOrDefault(path) + 1;
         _refsGen[path] = _refsGen.GetValueOrDefault(path) + 1;
+        ShareStatus(path);
     }
 
     // ── Refused loads ────────────────────────────────────────────────────
@@ -846,6 +882,7 @@ public partial class JunctionApp : Component, IDisposable
     {
         if (string.IsNullOrEmpty(path)) return;
         _dataGen[path] = _dataGen.GetValueOrDefault(path) + 1;
+        ShareStatus(path);
         _loadRetries.Remove(path);
         Reload(path, refs: false);
     }
@@ -917,7 +954,8 @@ public partial class JunctionApp : Component, IDisposable
 
     // Runs off the UI thread — no UI / reactive access. With <paramref name="refs"/>, a summary
     // whose HEAD, refs and config have not moved since it was read: only the status is read again.
-    private RepoSummary LoadSummary(string path, RepoSummary? refs = null)
+    // With <paramref name="shared"/>, the status the Changes view's load of this generation reads.
+    private RepoSummary LoadSummary(string path, RepoSummary? refs = null, SharedStatus? shared = null)
     {
         var repo = RepoFor(path);
         // One status, read twice: the dirty count and — when git is half way through a
@@ -925,7 +963,7 @@ public partial class JunctionApp : Component, IDisposable
         // only inside an operation matches what the Changes view lists (LoadChanges). The
         // operation is four File.Exists calls, read every time: a cherry-pick or a revert
         // stopping writes no file the watcher reports as a ref moving.
-        var status = repo.GetStatus();
+        var status = GitRepository.ParseStatus(shared?.Result ?? repo.RunStatus());
         var op = repo.GetSequencerOp();
         var conflicts = op == SequencerOp.None
             ? 0

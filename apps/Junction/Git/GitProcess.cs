@@ -102,8 +102,19 @@ public static class GitProcess
         foreach (var arg in args)
             psi.ArgumentList.Add(arg);
 
+        if (!s_counted.IsEmpty && s_counted.TryGetValue(workingDirectory, out var counted))
+            Interlocked.Increment(ref counted.Value);
         return psi;
     }
+
+    // The repositories whose git commands a test counts (CountRuns), by the path as callers pass it.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, System.Runtime.CompilerServices.StrongBox<int>>
+        s_counted = new(StringComparer.Ordinal);
+
+    /// <summary>For tests: from this call on, how many git commands start against
+    /// <paramref name="repository"/>, every one of which comes through here.</summary>
+    internal static System.Runtime.CompilerServices.StrongBox<int> CountRuns(string repository) =>
+        s_counted.GetOrAdd(repository, _ => new System.Runtime.CompilerServices.StrongBox<int>());
 
     /// <summary>How long one async git invocation may run before it is killed. Git has no
     /// network timeout of its own, so a command against a remote that has gone away — a

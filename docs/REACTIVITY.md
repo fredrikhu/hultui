@@ -1771,6 +1771,24 @@ headless (NativeAOT) and 309–358 → 187–208 KB in a real window, where it d
 save in place tokenizes eight lines more (3–5 % more bytes on the tokenizer's thread) and is
 otherwise as it was.
 
+### Two loads of one generation can read one answer
+
+Loads keyed on the same generation that run the same command can share its run. Junction's summary
+(the sidebar's dirty count) and the Changes view's working tree each ran `git status -uall`, which
+walks the whole working tree, at every save over Changes. A save now makes one status for the new
+generation (`SharedStatus`) before either load is asked for; whichever runs first runs git, the
+other reads its answer, and the Changes load lets it go once read, so nothing is kept for a
+repository whose Changes view is not on screen. What an event cannot change keeps the value it
+had, as the refs do (`RefsGen`): HEAD's message, which the amend box offers, moves only with HEAD,
+so a save keeps the one read at the refs generation that still stands. And two outputs git can
+print together come from one command: `--raw` and `--numstat` together give each file's letter (what
+`--name-status` prints) and counts from one diff. Round 15: a save over Changes 11 → 7 git commands
+(the status 2 → 1, the four list diffs 4 → 2, `git log` 1 → 0), its rows on screen about 180 ms
+sooner (721–802 → 537–588 ms after the write headless, 699–831 → 519–590 ms in a real window, the
+watcher's 300 ms debounce included) and 4–6 % fewer bytes on all threads. Over 12 outside operations
+(a save, `git add`, `restore --staged`, a stash and its pop, commits, an amend, checkouts), each view
+reads what a load that shares nothing reads.
+
 ### The app's own change, heard again
 
 An app that watches what it also writes hears its own writes. Junction's actions (a checkout, a

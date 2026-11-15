@@ -133,6 +133,75 @@ public class GitRepositoryTests
         Assert.Equal("original.txt", change.OldPath);
     }
 
+    /// <summary>The staged and unstaged lists come from one <c>git diff --raw --numstat</c> each
+    /// (plan 17 round 15), and list what <c>--name-status</c> and <c>--numstat</c> run apart said:
+    /// every file, its letter, the name it had, its counts, in the order git gives them, for an
+    /// addition, a deletion, a rename with an edit, a binary file, a name with a space and one that
+    /// git quotes, a file staged and edited again, and the untracked and status-only files the
+    /// status adds.</summary>
+    [Fact]
+    public void TheChangeListsFromOneCommand_AreWhatNameStatusAndNumstatSaidApart()
+    {
+        using var t = TempRepo.CreateWithInitialCommit();
+        t.Write("kept.txt", "one\ntwo\nthree\n");
+        t.Write("gone.txt", "gone\n");
+        t.Write("both.txt", "a\nb\n");
+        t.Write("old name.txt", string.Join("\n", Enumerable.Range(0, 40).Select(i => $"line {i}")) + "\n");
+        t.Write("späce/ö.txt", "ö\n");
+        t.Git("add", "-A");
+        t.Git("commit", "-q", "-m", "files");
+
+        t.Write("kept.txt", "one\n2\nthree\nfour\n");
+        t.Git("rm", "-q", "gone.txt");
+        t.Git("mv", "old name.txt", "new name.txt");
+        t.Write("new name.txt", string.Join("\n", Enumerable.Range(0, 41).Select(i => $"line {i}")) + "\n");
+        t.WriteBytes("blob.bin", [0, 1, 2, 0, 255]);
+        t.Write("added.txt", "new\n");
+        t.Write("both.txt", "a\nB\n");
+        t.Git("add", "-A");
+        t.Write("both.txt", "a\nB\nc\n");
+        t.Write("späce/ö.txt", "ö ö\n");
+        File.Delete(Path.Combine(t.Path, "kept.txt"));
+        t.Write("untracked.txt", "u\n");
+
+        List<GitFileChange> Apart(params string[] diff)
+        {
+            var counts = new Dictionary<string, (int, int)>();
+            foreach (var line in t.Git([.. diff, "--numstat", "-M"]).Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var p = line.Split('\t');
+                var path = p[2].Contains(" => ") ? p[2][(p[2].IndexOf(" => ", StringComparison.Ordinal) + 4)..] : p[2];
+                counts[path] = (int.TryParse(p[0], out var x) ? x : 0, int.TryParse(p[1], out var y) ? y : 0);
+            }
+            var list = new List<GitFileChange>();
+            foreach (var line in t.Git([.. diff, "--name-status", "-M"]).Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var p = line.Split('\t');
+                var kind = p[0][0] switch
+                {
+                    'A' => FileChangeKind.Added, 'D' => FileChangeKind.Deleted, 'R' => FileChangeKind.Renamed,
+                    'C' => FileChangeKind.Copied, _ => FileChangeKind.Modified,
+                };
+                var (path, old) = p.Length >= 3 ? (p[2], p[1]) : (p[1], null);
+                var (add, del) = counts.GetValueOrDefault(path);
+                list.Add(new GitFileChange(path, old, kind, add, del));
+            }
+            return list;
+        }
+
+        var staged = t.Repo.GetStagedChanges();
+        Assert.Equal(Apart("diff", "--cached"), staged);
+        Assert.Contains(staged, c => c is { Kind: FileChangeKind.Renamed, Path: "new name.txt", OldPath: "old name.txt", Additions: 1 });
+        Assert.Contains(staged, c => c is { Path: "blob.bin", Kind: FileChangeKind.Added, Additions: 0 });
+
+        var unstaged = t.Repo.GetUnstagedChanges();
+        var apart = Apart("diff");
+        Assert.Equal(apart, unstaged.Take(apart.Count));
+        Assert.Equal([new GitFileChange("untracked.txt", null, FileChangeKind.Untracked, 0, 0)], unstaged.Skip(apart.Count));
+        Assert.Contains(unstaged, c => c is { Path: "kept.txt", Kind: FileChangeKind.Deleted, Deletions: 4 });
+        Assert.Contains(unstaged, c => c is { Path: "both.txt", Additions: 1 });
+    }
+
     [Fact]
     public void TheLogCarriesSubjectsAndParentLinks()
     {

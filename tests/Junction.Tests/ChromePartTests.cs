@@ -657,6 +657,62 @@ public class ChromePartTests
         });
     }
 
+    /// <summary>A save over Changes runs seven git commands, and every view reads what it did: the
+    /// working tree's lists and counts, the summary's dirty count, HEAD's message and the worktrees
+    /// are what loads that share nothing and run every command make of the same disk. It ran
+    /// eleven (plan 17 round 15): each list's letters and counts as two diffs, a status for the
+    /// summary and another for the working tree, and HEAD's message, which a save cannot change.</summary>
+    [Fact]
+    public void ASaveOverChanges_RunsSevenGitCommands_AndEveryViewReadsWhatAFreshLoadDoes()
+    {
+        Hosted(fx =>
+        {
+            string a = fx.A.Path;
+            fx.A.Write("src/one.txt", "one, edited\n");
+            fx.A.Write("three.txt", "three\nand more\n");
+            fx.A.Git("add", "three.txt");
+            fx.A.Write("new.txt", "untracked\n");
+            Switch(fx, KeyCode.Digit4);
+            fx.Session.PumpUntil(() => LoadedKey(fx.App, "_changesLoaders", a) is { } k && k.StartsWith($"{a}|{DataGen(fx.App, a)}|", StringComparison.Ordinal), Wait);
+            Settle(fx);
+            foreach (var w in ((System.Collections.IDictionary)typeof(JunctionApp)
+                         .GetField("_watchers", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(fx.App)!).Values)
+                ((IDisposable)w!).Dispose();
+            Settle(fx);
+            var runs = Junction.Git.GitProcess.CountRuns(a);
+
+            for (int save = 0; save < 2; save++)
+            {
+                fx.A.Write("src/one.txt", $"one, edited {save}\nand a line\n");
+                int before = runs.Value, gen = DataGen(fx.App, a);
+                HultUI.Application.InvokeOnMainThread(() => Invoke(fx.App, "OnWorkingTreeChange", a));
+                fx.Session.PumpUntil(() => DataGen(fx.App, a) > gen
+                    && LoadedKey(fx.App, "_changesLoaders", a) is { } k && k.StartsWith($"{a}|{DataGen(fx.App, a)}|", StringComparison.Ordinal)
+                    && LoadedKey(fx.App, "_summaryLoaders", a) == $"{a}#{DataGen(fx.App, a)}"
+                    && LoadedKey(fx.App, "_worktreeLoaders", a) == $"{a}|{DataGen(fx.App, a)}", Wait);
+                Settle(fx);
+                Assert.True(runs.Value - before == 7, $"save {save}: {runs.Value - before} git commands");
+
+                // What a load that shares nothing and reads everything makes of the same disk.
+                var shown = Get<object>(fx.App, "ChangesView");
+                var fresh = typeof(JunctionApp).GetMethod("LoadChanges", BindingFlags.NonPublic | BindingFlags.Instance)!
+                    .Invoke(fx.App, [a, false, null, null])!;
+                foreach (var list in new[] { "Staged", "Unstaged", "Conflicted", "AssumeUnchanged" })
+                    Assert.Equal(((System.Collections.IEnumerable)Get<object>(fresh, list)).Cast<object>(),
+                        ((System.Collections.IEnumerable)Get<object>(shown, list)).Cast<object>());
+                foreach (var diffs in new[] { "StagedDiffs", "UnstagedDiffs" })
+                    Assert.Equal(Get<System.Collections.IDictionary>(fresh, diffs).Keys.Cast<string>().Order(),
+                        Get<System.Collections.IDictionary>(shown, diffs).Keys.Cast<string>().Order());
+                Assert.Equal(Get<string?>(fresh, "HeadMessage"), Get<string?>(shown, "HeadMessage"));
+                Assert.Equal("three files", Get<string?>(shown, "HeadMessage"));
+                Assert.Contains(Get<IEnumerable<Junction.Git.GitFileChange>>(shown, "Unstaged"), f => f.Path == "src/one.txt" && f.Additions == 2 && f.Deletions == 1);
+                var summary = typeof(JunctionApp).GetMethod("SummaryFor", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(fx.App, [a])!;
+                Assert.Equal(3, Get<int>(summary, "Dirty"));
+                AssertChromeIsAFullBuild(fx, $"after save {save}");
+            }
+        });
+    }
+
     /// <summary>A save that adds lines inside the hunk on screen, or moves a hunk below the one it
     /// edits, still tokenizes the file once and builds the view once: the colours the handler asks
     /// for reach a few lines past the diff on screen, and so cover the rows that land. Asked for the
