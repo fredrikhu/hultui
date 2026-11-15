@@ -71,8 +71,10 @@ public interface IExternalGLSurface : IRenderSurface
     }
 
     /// <summary>
-    /// <paramref name="owner"/> will not draw again: its target, if it was lent one, can go.
-    /// Any thread.
+    /// <paramref name="owner"/> will not draw again: its target, if it was lent one, can go, and
+    /// so can anything the surface kept for it between frames. The GL surface keeps a wrapper over
+    /// each source's own texture, keyed by the source, and with it the source, until this is
+    /// called. Any thread.
     /// </summary>
     void ReleaseFrameTarget(object owner) { }
 }

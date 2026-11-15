@@ -1080,6 +1080,47 @@ context in the hidden context before the old image is destroyed; the release wou
 source to register with the host before its first GL call, not only when it is lent an image, or it
 destroys a context a live renderer is in. Between autoplayed episodes it would then never release.
 
+### A player's open and dispose leaves about 1 MB in NVIDIA's GL driver: measured, not ours (round 15)
+
+Plan 17's round 15, step 8 (media-player-cycle-growth) measured ten open, play, pause and dispose
+cycles of Reel's player in the same probe host and windows as the entry above: private bytes,
+working set, the process heaps (HeapWalk), the managed heap and the threads 8 s after each
+dispose, with a region dump after two forced collections. It grows by about a megabyte a cycle,
+and does not level off:
+
+| Ten cycles, growth a cycle (least squares, cycles 2–10) | Private bytes | Working set |
+|---|---|---|
+| Vulkan (two launches) | +1.07, +1.23 MB | +1.02, +1.10 MB |
+| Vulkan, dumps only after cycles 1 and 10 (no forced collections between) | +1.36 MB | +1.16 MB |
+| GL (two launches, 10 and 8 cycles) | +1.70, +1.97 MB | +1.36, +1.39 MB |
+| Vulkan, `gpu-hwdec-interop=no` | +0.88 MB | +0.91 MB |
+
+The managed heap stays at 2.8 MB, the threads fall (27 → 21, the pool trimming), GPU memory
+(DXGI, this process) moves under 0.1 MB a cycle, and the process heaps swing ±3 MB with no trend.
+All of the growth is in one 1 GB reservation that sits right after the GC's: committed 38.3 → 45.8
+MB and resident 29.6 → 37.5 over cycles 1–10 on Vulkan, 55.9 → 70.4 / 37.7 → 48.5 on GL. It is not
+the runtime's: with `DOTNET_GCRegionRange` at 4 GB the GC's range shrinks to 4 GB and this one stays
+1 GB, and before any video it already holds 31.9 MB on Vulkan and 54.8 MB on GL, which follows the
+graphics API, not the managed heap. The controls place it in the NVIDIA driver's handling of mpv's
+GL renderer:
+
+- the same dumps and rests with no player: level (31.9 → 32.0 MB);
+- the framework's own GPU path with no libmpv (a fake backend whose renderer clears the image it is
+  lent, a shared image and its GL objects made and destroyed every cycle): level (37.1 → 37.2 MB);
+- mpv drawing with its software renderer (`HULTUI_VULKAN_INTEROP=0`): level (31.9 → 32.1 MB);
+- mpv's GL render context made in a fresh hidden context each time (the release above): level
+  from the fourth video (41.2 MB).
+
+So each mpv render context made and freed in a GL context that outlives it leaves about 0.9 MB
+(Vulkan's hidden context) to 1.5 MB (the GL window's) in the driver: libmpv's or NVIDIA's, not
+HultUI's, and not fixed here. The one thing of ours the cycles turned up is fixed: the GL
+renderer kept a wrapper over each GPU source's texture, keyed by the source, and never let it go,
+so every disposed player's sink stayed reachable with its renderer and its frame buffers. Now the
+GL surface lets the wrapper go when the source does (`ReleaseFrameTarget`): the managed heap's
+growth a cycle went from +0.22 MB to 0 with a backend that writes a 320×180 frame into the sink's
+pixel ring, and from +0.02 MB to 0 with mpv, Open's timings unchanged (videos 2–8, Open → first
+window frame 51.6–63.9 ms before, 48.2–76.8 ms after).
+
 ### A ref's lock file alone is a working-tree event, not dropped (round 13)
 
 Plan 17's round 13, step 1 stopped Junction's repository watcher from reading a ref transaction

@@ -72,6 +72,16 @@ public sealed class SkiaGLRenderSurface : IRenderSurface, ISkiaExternalSurface, 
     /// </summary>
     SKImage? ISkiaExternalSurface.WrapFrame(in GpuFrame frame) => WrapTexture(frame);
 
+    /// <summary>
+    /// Lends nothing, but the render context keeps a wrapper over each source's texture, keyed by
+    /// the source: a source that goes for good lets that go too, or the window keeps the source,
+    /// and through it its renderer and its frame buffers, for as long as the window lives.
+    /// </summary>
+    void IExternalGLSurface.ReleaseFrameTarget(object owner)
+    {
+        if (owner is IGpuImageSource source) _renderContext.ReleaseGpuSource(source);
+    }
+
     internal SKImage? WrapTexture(in GpuFrame frame)
     {
         const uint GL_TEXTURE_2D = 0x0DE1;
