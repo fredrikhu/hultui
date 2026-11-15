@@ -366,6 +366,24 @@ public class FrameAllocationTests
         }
     }
 
+    /// <summary>A rich text editor's numbered items, repainted, allocate nothing. Each item's label
+    /// ("1.", "2.", …) was a new string every frame, about 31 B an item: 0.78 KB a caret frame in
+    /// Junction's composer over 25 items, the one steady-state allocation of an editor frame
+    /// (plan 17 round 15).</summary>
+    [Fact]
+    public void ASteadyRepaintOfNumberedItems_AllocatesNothing()
+    {
+        var blocks = new List<RichBlock>();
+        for (int i = 0; i < 30; i++)
+            blocks.Add(RichBlock.Of(BlockKind.NumberedItem, $"Item number {i}"));
+        var editor = RichTextEditor.New(new RichDocument(blocks)).FlexGrow(1);
+        using var session = Session(Flex.Column().FlexGrow(1).Children(editor));
+
+        double perFrame = PerFrame(session.Application, () => editor.MarkPaintDirty());
+
+        Assert.True(perFrame < 1, $"repainting numbered items allocated {perFrame:0.#} B per frame");
+    }
+
     /// <summary>Tab through a form of 300 fields, a frame after each: what is left is the key
     /// and focus events. It was ~28 KB per Tab (a tree walk with a boxed enumerator per
     /// container, a fresh list, and a sort of keys that were all equal); the bound is far above
