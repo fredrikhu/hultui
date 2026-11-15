@@ -3526,9 +3526,19 @@ public partial class CommanderApp : Component, IDisposable
         // build registers checks that against the frame's layout and corrects a wrong guess.
         // Without this call nothing rebuilds at all on a resize, so the settle is never
         // registered and never runs — it is only ever scheduled from a build.
+        //
+        // Most steps need no build, though: a wrapped row reads neither the window nor the
+        // width, so the rows on screen stay and the heights are handed to the list from here
+        // (FitWrappedRowsInPlace), which registers the settle itself. A build of the whole window
+        // per step made every row on screen again, ~290 KB a 4 px step of the reader over a
+        // 1,000-line file, and 64 KB a height-only step that changed nothing (plan 17 round 15).
+        // Behind a Brief or Thumbnails grid the resize builds as it did (see below).
+        bool gridView = ViewOf('L') is ViewMode.Brief or ViewMode.Thumbnails
+                     || ViewOf('R') is ViewMode.Brief or ViewMode.Thumbnails;
         if (scaleChanged || (_settings.DiffWrap && (_diffOpen || _viewerOpen)))
         {
             LeadWrappedBodyWidth();
+            if (!scaleChanged && !gridView && FitWrappedRowsInPlace()) return;
             MarkDirty();
             return;
         }
@@ -3546,8 +3556,6 @@ public partial class CommanderApp : Component, IDisposable
         // its leading segments with the pane's width. A Detail pane has nothing else a build
         // sizes from the window, so it builds only when its trail would change — before, it
         // never built on a resize, and the trail kept the old window's truncation until a key.
-        bool gridView = ViewOf('L') is ViewMode.Brief or ViewMode.Thumbnails
-                     || ViewOf('R') is ViewMode.Brief or ViewMode.Thumbnails;
         if (gridView && FullShellOpen) { MarkDirty(); return; }
         if (WindowFitChanged()) MarkDirty();
         else if (gridView) FitGridsInPlace();
@@ -3652,6 +3660,68 @@ public partial class CommanderApp : Component, IDisposable
         !float.IsNaN(_wrapLeadWidth) ? _wrapLeadWidth
         : body is { Layout.AbsoluteContentBox.Width: > 0 } ? body.Layout.AbsoluteContentBox.Width
         : _window.LayoutWidth;
+
+    /// <summary>
+    /// A resize of the wrapped reader or compare view with no build: the heights are measured at
+    /// the width the resize leads the body to (<see cref="LeadWrappedBodyWidth"/>) and handed to
+    /// the list, and the rows on screen are kept and take them in the frame the resize lays out.
+    /// A height alone measures nothing. The check after that frame
+    /// (<see cref="SettleWrappedRowWidths"/>) still corrects a wrong lead with a build.
+    /// </summary>
+    /// <remarks>
+    /// A wrapped row reads neither the window nor the width (<see cref="WrappedWidthOnly"/>), and
+    /// nothing else in these full-shell views is decided from the window's size in a build: the
+    /// unwrapped views never built on a resize. Grid views do it the same way for the window's
+    /// size (<see cref="FitGridsInPlace"/>). False when there is no lead (the body was laid out at
+    /// a width the check did not see) or no rows on screen; the resize then builds, as before.
+    /// </remarks>
+    private bool FitWrappedRowsInPlace()
+    {
+        if (float.IsNaN(_wrapLeadWidth)) return false;
+        if (!(_diffOpen ? FitDiffRowsInPlace() : FitViewerRowsInPlace())) return false;
+        _wrapLeadWidth = float.NaN;
+        SettleWrappedRowWidths();
+        return true;
+    }
+
+    private bool FitViewerRowsInPlace()
+    {
+        if (_viewerState != ViewerState.Ok || _viewerScrollRef.Current is not VirtualListElement<int> { IsHosted: true } list)
+            return false;
+        var shape = (ViewerWrap, _viewerPan.Offset, ViewerCodeWidth());
+        if (!WrappedWidthOnly(_viewerRowShape, shape, _viewerTops.Length == _viewerLines.Length + 1)) return false;
+        if (_viewerHeightsWidth != shape.Item3)
+        {
+            RebuildViewerHeights();
+            list.InvalidateHeights();
+        }
+        _viewerRowShape = shape;
+        return true;
+    }
+
+    private bool FitDiffRowsInPlace()
+    {
+        if (_diffState != DiffViewState.Ok || _diffScrollRef.Current is not VirtualListElement<DiffRow> { IsHosted: true } list)
+            return false;
+        var shape = (DiffWrap, _diffPan.Offset, DiffCodeWidth());
+        if (!WrappedWidthOnly(_diffRowShape, shape, _diffTops.Length == _diffRows.Count + 1)) return false;
+        if (_diffHeightsWidth != shape.Item3)
+        {
+            RebuildDiffHeights();
+            list.InvalidateHeights();
+        }
+        _diffRowShape = shape;
+        return true;
+    }
+
+    /// <summary>Whether the rows on screen of a wrapped view stay from one row shape to the next:
+    /// both wrapped, at the same pan, with heights for the lines on hand (<paramref name="heightsCurrent"/>).
+    /// Wrapped, a row's line wraps into whatever column it is laid out in, and the pan is used only
+    /// unwrapped, so a width alone changes how tall the rows are and nothing they show; the list's
+    /// kept rows take new heights by themselves.</summary>
+    private static bool WrappedWidthOnly((bool Wrap, float Pan, float Width) was, (bool Wrap, float Pan, float Width) now,
+        bool heightsCurrent) =>
+        heightsCurrent && was.Wrap && now.Wrap && was.Pan == now.Pan;
 
     public void Dispose()
     {

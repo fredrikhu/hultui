@@ -724,9 +724,11 @@ public partial class CommanderApp
 
         // What a row looks like depends on three things the list cannot see: the wrap mode,
         // how far the view is panned sideways, and the column width the text wraps into. A
-        // realized row is reused as-is across a patch, so when any of them moves the rows have
-        // to be thrown away and rebuilt — and the heights remeasured, since two of the three
-        // change how tall a row is.
+        // realized row is reused as-is across a patch, so when the wrap mode or the pan moves
+        // the rows have to be thrown away and rebuilt, and the heights remeasured when the wrap
+        // mode or the width does. Wrapped, a row reads neither the pan nor the width, so a width
+        // alone keeps the rows on screen and they take their new heights from the list, as the
+        // reader's do (BuildViewerBody).
         var shape = (DiffWrap, _diffPan.Offset, DiffCodeWidth());
         // And what else a row shows: the change F8 last jumped to (ringed), find's query,
         // options and match count (tinted), and the syntax colouring once it lands. The rows
@@ -741,10 +743,11 @@ public partial class CommanderApp
         _diffRowLook = look;
         if (_diffTops.Length != _diffRows.Count + 1 || _diffRowShape != shape)
         {
+            bool widthOnly = WrappedWidthOnly(_diffRowShape, shape, _diffTops.Length == _diffRows.Count + 1);
             if (_diffRowShape.Item1 != shape.Item1 || _diffHeightsWidth != shape.Item3
                 || _diffTops.Length != _diffRows.Count + 1)
                 RebuildDiffHeights();
-            remake = true;
+            if (!widthOnly) remake = true;
             _diffRowShape = shape;
         }
         var hit = CurrentHit(_diffFind.Search);

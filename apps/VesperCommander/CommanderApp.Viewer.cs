@@ -520,9 +520,12 @@ public partial class CommanderApp
 
         // What a row looks like depends on three things the list cannot see: the wrap mode,
         // how far the view is panned sideways, and the column width the text wraps into. A
-        // realized row is reused as-is across a patch, so when any of them moves the rows have
-        // to be thrown away and rebuilt — and the heights remeasured, since two of the three
-        // change how tall a row is.
+        // realized row is reused as-is across a patch, so when the wrap mode or the pan moves
+        // the rows have to be thrown away and rebuilt, and the heights remeasured when the wrap
+        // mode or the width does. Wrapped, a row reads neither the pan nor the width: its line
+        // wraps into whatever column it is laid out in. So a width alone changes only how tall
+        // the rows are, and the rows on screen are kept and take their new heights from the
+        // list (plan 17 round 15: a resize step made every row on screen again, ~37 rows).
         var shape = (ViewerWrap, _viewerPan.Offset, ViewerCodeWidth());
         // And what else a row shows: the syntax colouring once it lands, and find's query,
         // options and match count. The rows are on item rows, so a rebuild keeps every row on
@@ -537,10 +540,11 @@ public partial class CommanderApp
         _viewerRowLook = look;
         if (_viewerTops.Length != _viewerLines.Length + 1 || _viewerRowShape != shape)
         {
+            bool widthOnly = WrappedWidthOnly(_viewerRowShape, shape, _viewerTops.Length == _viewerLines.Length + 1);
             if (_viewerRowShape.Item1 != shape.Item1 || _viewerHeightsWidth != shape.Item3
                 || _viewerTops.Length != _viewerLines.Length + 1)
                 RebuildViewerHeights();
-            remake = true;
+            if (!widthOnly) remake = true;
             _viewerRowShape = shape;
         }
         var hit = CurrentHit(_viewerFind.Search);
