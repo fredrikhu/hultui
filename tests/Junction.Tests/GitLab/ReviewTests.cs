@@ -98,8 +98,7 @@ public class ReviewTests
             });
         Hosted((repo, _, session, app) =>
         {
-            app.StartReview(repo.Path, 412);
-            session.PumpUntil(() => ById(session, "review-thread") is not null, TimeSpan.FromSeconds(20));
+            OpenReview(session, app, repo.Path, () => ById(session, "review-thread") is not null);
             Assert.Null(Tag(session, "new"));
 
             app.RefreshHosted(repo.Path);
@@ -122,8 +121,7 @@ public class ReviewTests
     {
         Hosted((repo, _, session, app) =>
         {
-            app.StartReview(repo.Path, 412);
-            session.PumpUntil(() => ById(session, "review-thread") is not null, TimeSpan.FromSeconds(20));
+            OpenReview(session, app, repo.Path, () => ById(session, "review-thread") is not null);
             session.PumpFrames(2);
 
             // Collapsed first, then opened: both heights are measured, both must hold.
@@ -164,8 +162,7 @@ public class ReviewTests
             .Replace("\"Refunds should not count voided tenders.\"", System.Text.Json.JsonSerializer.Serialize(note))));
         Hosted((repo, _, session, app) =>
         {
-            app.StartReview(repo.Path, 412);
-            session.PumpUntil(() => ById(session, "review-thread") is not null, TimeSpan.FromSeconds(20));
+            OpenReview(session, app, repo.Path, () => ById(session, "review-thread") is not null);
             session.PumpFrames(2);
             AssertCardFitsItsRow(session);
 
@@ -197,8 +194,7 @@ public class ReviewTests
             .Replace("\"Refunds should not count voided tenders.\"", System.Text.Json.JsonSerializer.Serialize(note))));
         Hosted((repo, _, session, app) =>
         {
-            app.StartReview(repo.Path, 412);
-            session.PumpUntil(() => ById(session, "review-thread") is not null, TimeSpan.FromSeconds(20));
+            OpenReview(session, app, repo.Path, () => ById(session, "review-thread") is not null);
             session.PumpFrames(2);
             session.Window.Click(ById(session, "review-thread")!);
             session.PumpUntil(() => TreeHas(session, "Good catch, fixed in the next push."), TimeSpan.FromSeconds(10));
@@ -301,8 +297,7 @@ public class ReviewTests
             .Map($"GET {Api}/projects/7781/uploads/0a1b2c3d/shot.png", _ => FakeGitLabHandler.Bytes(FakeGitLabHandler.Png(800, 400)));
         Hosted((repo, _, session, app) =>
         {
-            app.StartReview(repo.Path, 412);
-            session.PumpUntil(() => ById(session, "review-thread") is not null, TimeSpan.FromSeconds(20));
+            OpenReview(session, app, repo.Path, () => ById(session, "review-thread") is not null);
             session.PumpFrames(2);
             session.Window.Click(ById(session, "review-thread")!);
             session.PumpUntil(() => ById(session, "md-image") is not null, TimeSpan.FromSeconds(10));
@@ -350,8 +345,7 @@ public class ReviewTests
         var handler = Routes();
         Hosted((repo, _, session, app) =>
         {
-            app.StartReview(repo.Path, 412);
-            session.PumpUntil(() => ById(session, "review-plus") is not null, TimeSpan.FromSeconds(20));
+            OpenReview(session, app, repo.Path, () => ById(session, "review-plus") is not null);
             session.PumpFrames(2);
 
             // Down lands on the first line (the hunk header is skipped); Shift+Down twice
@@ -416,8 +410,7 @@ public class ReviewTests
     {
         Hosted((repo, _, session, app) =>
         {
-            app.StartReview(repo.Path, 412);
-            session.PumpUntil(() => ById(session, "review-plus") is not null, TimeSpan.FromSeconds(20));
+            OpenReview(session, app, repo.Path, () => ById(session, "review-plus") is not null);
             session.PumpFrames(2);
 
             var plus = ById(session, "review-plus")!;
@@ -454,8 +447,7 @@ public class ReviewTests
     {
         Hosted((repo, _, session, app) =>
         {
-            app.StartReview(repo.Path, 412);
-            session.PumpUntil(() => ById(session, "review-plus") is not null, TimeSpan.FromSeconds(20));
+            OpenReview(session, app, repo.Path, () => ById(session, "review-plus") is not null);
             session.PumpFrames(2);
             // Lines 19–21 are context, 22–26 old deletions then new additions. From line 21
             // (new side) Shift+Down cannot cross into the deletions.
@@ -478,8 +470,7 @@ public class ReviewTests
         var handler = Routes(drafts);
         Hosted((repo, _, session, app) =>
         {
-            app.StartReview(repo.Path, 412);
-            session.PumpUntil(() => ById(session, "review-plus") is not null, TimeSpan.FromSeconds(20));
+            OpenReview(session, app, repo.Path, () => ById(session, "review-plus") is not null);
             session.PumpFrames(2);
             session.Window.PressKey(KeyCode.Down);
             session.Window.PressKey(KeyCode.C);
@@ -517,8 +508,7 @@ public class ReviewTests
         var handler = Routes();
         Hosted((repo, _, session, app) =>
         {
-            app.StartReview(repo.Path, 412, focusThread: Thread1);
-            session.PumpUntil(() => ById(session, "review-reply") is not null, TimeSpan.FromSeconds(20));
+            OpenReview(session, app, repo.Path, () => ById(session, "review-reply") is not null, focusThread: Thread1);
             session.PumpFrames(2);
 
             // The field opens an editor in the card, focused, and the card grows to fit it.
@@ -565,8 +555,7 @@ public class ReviewTests
     {
         Hosted((repo, _, session, app) =>
         {
-            app.StartReview(repo.Path, 412);
-            session.PumpUntil(() => ById(session, "review-plus") is not null, TimeSpan.FromSeconds(20));
+            OpenReview(session, app, repo.Path, () => ById(session, "review-plus") is not null);
             session.PumpFrames(4);
             session.Window.PressKey(KeyCode.Down);
             session.PumpFrames(2);
@@ -623,19 +612,12 @@ public class ReviewTests
     {
         Hosted((repo, _, session, app) =>
         {
-            app.StartReview(repo.Path, 412, focusThread: Thread1);
-            session.PumpUntil(() => ById(session, "review-plus") is not null && ById(session, "review-reply") is not null,
-                TimeSpan.FromSeconds(20));
+            OpenReview(session, app, repo.Path, () => ById(session, "review-plus") is not null && ById(session, "review-reply") is not null, focusThread: Thread1);
             session.PumpFrames(4);
-
-            // The diff's colours are tokenized off the UI thread, and the one landing for the file
-            // on screen builds the view. On a loaded runner it can land inside a measured key and
-            // read as that key's second build, so each measured stretch starts once none is left.
-            void SettleColours() => session.PumpUntil(() => app.HighlightsPending == 0, TimeSpan.FromSeconds(20));
 
             void TypeAndCheck(string text, string card)
             {
-                SettleColours();
+                SettleColours(session, app);
                 int quiet = 0;
                 foreach (var ch in text)
                 {
@@ -681,7 +663,7 @@ public class ReviewTests
             var boldButton = () => LayoutProbe.Descendants<ButtonElement>(ById(session, "review-composer")!, b => b.AutomationId == "richtext-bold").Single();
             Assert.NotEqual(true, boldButton().AccessibleToggled);
             var typedIn = Focused(session);
-            SettleColours();
+            SettleColours(session, app);
             int moved = 0;
             for (int i = 0; i < 2; i++)
             {
@@ -783,8 +765,7 @@ public class ReviewTests
             AccessibilityClients.Force = true;
             try
             {
-                app.StartReview(repo.Path, 412);
-                session.PumpUntil(() => ById(session, "review-plus") is not null, TimeSpan.FromSeconds(20));
+                OpenReview(session, app, repo.Path, () => ById(session, "review-plus") is not null);
                 session.PumpFrames(2);
                 session.Window.PressKey(KeyCode.Down);
                 session.PumpFrames(2);
@@ -857,8 +838,7 @@ public class ReviewTests
             AccessibilityClients.Force = true;
             try
             {
-                app.StartReview(repo.Path, 412);
-                session.PumpUntil(() => ById(session, "review-plus") is not null, TimeSpan.FromSeconds(20));
+                OpenReview(session, app, repo.Path, () => ById(session, "review-plus") is not null);
                 session.PumpFrames(2);
                 session.Window.PressKey(KeyCode.Down);
                 session.PumpFrames(2);
@@ -900,8 +880,7 @@ public class ReviewTests
             AccessibilityClients.Force = true;
             try
             {
-                app.StartReview(repo.Path, 412, focusThread: Thread1);
-                session.PumpUntil(() => ById(session, "review-reply") is not null, TimeSpan.FromSeconds(20));
+                OpenReview(session, app, repo.Path, () => ById(session, "review-reply") is not null, focusThread: Thread1);
                 session.PumpFrames(2);
                 session.Window.Click(ById(session, "review-reply")!);
                 session.PumpUntil(() => Focused(session) is RichTextEditorElement { AutomationId: "review-reply-text" }, TimeSpan.FromSeconds(10));
@@ -924,6 +903,32 @@ public class ReviewTests
     /// <summary>A local clone whose origin carries <c>refs/merge-requests/412/head</c>: the
     /// base commit writes forty lines of Orders.cs, the head rewrites lines 22–26, so the one
     /// hunk spans new lines 19–29 and the recorded thread on 23–25 has a line to sit on.</summary>
+    /// <summary>
+    /// Opens the review of request 412 and waits for <paramref name="ready"/>, then for what the opening
+    /// set off to land (<see cref="SettleColours"/>), so a test starts from a review at rest.
+    /// </summary>
+    private static void OpenReview(HeadlessSession session, JunctionApp app, string path, Func<bool> ready, string? focusThread = null)
+    {
+        app.StartReview(path, 412, focusThread: focusThread);
+        session.PumpUntil(ready, TimeSpan.FromSeconds(20));
+        SettleColours(session, app);
+    }
+
+    /// <summary>
+    /// Waits until the diff's colours have landed and the window has built nothing for a while. The
+    /// colours are tokenized off the UI thread, and their landing builds the view and makes the rows on
+    /// screen again, in colour. Left to the clock it lands a frame or two after the review shows, inside
+    /// whatever a test does next: a key that makes two rows made 18-22, a focus held in a row's control
+    /// was lost with the row, a typed character built twice (plan 17 round 15, 3 of 14 class runs on
+    /// Windows: ACaretMove..., TheKeyboardReachesTheCommentAgain; TypingAComment... before a5039b25's
+    /// fix of its own).
+    /// </summary>
+    private static void SettleColours(HeadlessSession session, JunctionApp app)
+    {
+        session.PumpUntil(() => app.HighlightsPending == 0, TimeSpan.FromSeconds(20));
+        DiffScrollTests.Quiet(session, app);
+    }
+
     private static void Hosted(Action<TempRepo, TempRepo, HeadlessSession, JunctionApp> body, FakeGitLabHandler? handler = null)
     {
         using var repo = TempRepo.CreateWithInitialCommit();
