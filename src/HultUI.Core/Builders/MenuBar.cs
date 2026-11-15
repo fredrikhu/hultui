@@ -278,7 +278,14 @@ public sealed class MenuBar : Component
 
     public override Element Build()
     {
-        var bar = new MenuBarElement();
+        var bar = new MenuBarElement
+        {
+            // The title the keyboard is on: what a reader is told has the focus while the bar holds it,
+            // walked with ← and →. An open menu holds the reader's focus (Window), and its title stays the
+            // bar's current one, so Escape back to the titles is told as on it, and the bar is no stop
+            // between the title and the menu.
+            CurrentTitle = _keyboard ? _highlight : -1,
+        };
         bar.Flex.Direction = FlexDirection.Row;
         bar.Flex.AlignItems = AlignItems.Center;
         bar.IsFocusable = true;
@@ -346,6 +353,22 @@ public sealed class MenuBarElement : BoxElement
     // the twin's titles too (MenuTitleElement compares against those).
     private protected override bool PatchMarksOwnLayout => true;
     private protected override bool PatchThemesTwin => true;
+
+    /// <summary>The title the keyboard is on while the bar has the keys, its menu open or not, or -1:
+    /// the bar's current item (<see cref="Accessibility.AccessibilityNode.CurrentItem"/>), which a
+    /// reader is told has the focus while the bar holds it.</summary>
+    internal int CurrentTitle { get; set; } = -1;
+
+    internal override void PatchFrom(Element source)
+    {
+        base.PatchFrom(source);
+        if (source is MenuBarElement bar && bar.CurrentTitle != CurrentTitle)
+        {
+            CurrentTitle = bar.CurrentTitle;
+            // A ← or → between titles changes no node but the bar's: patched with no tree built.
+            NotifyAccessibilityPropertyChanged(Accessibility.AccessibilityProperties.CurrentItem);
+        }
+    }
 
     protected internal override void ApplyTheme(Theme theme)
     {

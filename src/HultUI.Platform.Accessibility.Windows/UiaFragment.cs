@@ -44,7 +44,6 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
     private string? _description;
     private string? _value;
     private bool _isFocusable;
-    private bool _isFocused;
     private bool _isEnabled;
     private bool? _isToggled;
     private bool? _expanded;
@@ -89,14 +88,6 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         Generation = generation;
     }
 
-    /// <summary>Takes a focus move, which rebuilds no tree (UI thread). True when the state changed.</summary>
-    public bool SetFocused(bool focused)
-    {
-        if (_isFocused == focused) return false;
-        _isFocused = focused;
-        return true;
-    }
-
     private void Snapshot(AccessibilityNode node)
     {
         _name = node.Name;
@@ -105,7 +96,6 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         // document's is made only when asked, and its changes are told as text changes.
         _value = node.TextSource is null ? node.Value : null;
         _isFocusable = node.IsFocusable;
-        _isFocused = node.IsFocused;
         _isEnabled = node.IsEnabled;
         _isToggled = node.IsToggled;
         _expanded = node.Expanded;
@@ -242,8 +232,14 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
             UiaInterop.UIA_AutomationIdPropertyId when node.AutomationId is { } automationId => UiaVariant.FromBStr(automationId),
             UiaInterop.UIA_HelpTextPropertyId when _description is not null => UiaVariant.FromBStr(_description),
             UiaInterop.UIA_ControlTypePropertyId => UiaVariant.FromInt(MapControlType(node.Role)),
-            UiaInterop.UIA_IsKeyboardFocusablePropertyId => UiaVariant.FromBool(_isFocusable),
-            UiaInterop.UIA_HasKeyboardFocusPropertyId => UiaVariant.FromBool(_isFocused),
+            // A list's or a menu's item can have the reader's focus (its container's current item), as
+            // a WPF list box's item can; and so can whatever has it now (a menu bar's title).
+            UiaInterop.UIA_IsKeyboardFocusablePropertyId
+                => UiaVariant.FromBool(_isFocusable || VirtualItemId.IsItem(ElementId) || _bridge.HasReaderFocus(ElementId)),
+            // The reader's focus, as the bridge holds it: the node that holds the focus, or its current
+            // item while it has one, and then not the holder (AccessibilityFocus). A focus move rebuilds
+            // no tree, so a node's own state was the last rebuild's until the window marked it.
+            UiaInterop.UIA_HasKeyboardFocusPropertyId => UiaVariant.FromBool(_bridge.HasReaderFocus(ElementId)),
             UiaInterop.UIA_IsEnabledPropertyId => UiaVariant.FromBool(_isEnabled),
             UiaInterop.UIA_IsOffscreenPropertyId => UiaVariant.FromBool(Node.IsOffscreen),
             UiaInterop.UIA_IsPasswordPropertyId => UiaVariant.FromBool(_isPassword),

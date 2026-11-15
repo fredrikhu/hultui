@@ -387,6 +387,10 @@ public static class ElementExtensions
     /// <see cref="VirtualListElement{T}.SelectionOverlay"/>.</summary>
     public static VirtualListElement<T> SelectionOverlay<T>(this VirtualListElement<T> el, Element? overlay) { el.SelectionOverlay = overlay; return el; }
     public static VirtualListElement<T> CanSelectMultiple<T>(this VirtualListElement<T> el, bool value = true) { el.CanSelectMultiple = value; return el; }
+    /// <summary>A reader is told the focus is on the selected item while the nearest focusable element
+    /// above the list holds it (a pane that walks the list's cursor); see
+    /// <see cref="VirtualListElement{T}.TakesAncestorFocus"/>.</summary>
+    public static VirtualListElement<T> TakesAncestorFocus<T>(this VirtualListElement<T> el, bool value = true) { el.TakesAncestorFocus = value; return el; }
     public static VirtualListElement<T> OnSelectionChanged<T>(this VirtualListElement<T> el, Action<IReadOnlyList<int>> handler) { el.OnSelectionChanged = handler; return el; }
     /// <summary>Let the focused list scroll itself with Up/Down/Page/Home/End.
     /// Chorded keys (Shift/Ctrl/Alt/Super) still bubble to the app.</summary>

@@ -242,6 +242,15 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     private readonly List<(AccessibilityNode Node, AccessibleTextVersion Version)> _a11yTextVersions = [];
     private readonly List<(A11yPatchTarget Target, AccessibilityNode Node)> _a11yRemade = [];
     private readonly List<(AccessibilityNode Node, int Count, int[] Selected)> _a11yServed = [];
+    // The containers whose current item (AccessibilityNode.CurrentItem) a patch moves, with the one now;
+    // and whether any frame's patch or walk moved one in place, which the bridge is told at the phase's
+    // end (NotifyChangesApplied): no diff carries it.
+    private readonly List<(AccessibilityNode Node, int Current)> _a11yCurrents = [];
+    private bool _a11yCurrentMoved;
+    // The menu the bridge was told holds the reader's focus (UpdateA11yMenuFocus): an open context menu
+    // or menu bar's menu, which takes the keys while the focus stays on the element that had it. Null
+    // while the focused element holds it, as everywhere else.
+    private ContextMenuElement? _a11yMenuFocus;
     private readonly List<Element> _a11yChain = [];
     // Kept for the layout refresh made in place (TryRefreshA11yInPlace): what it finds to change, and
     // the open overlays whose parts follow the root's children in the tree.
@@ -882,7 +891,10 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         if (_accessibilityBridge.IsActive)
         {
             var (previous, focused) = MoveA11yFocus(element);
-            _accessibilityBridge.NotifyFocusChanged(focused, previous);
+            // While an open menu holds the reader's focus, the bridge hears where the element focus is
+            // when the menu closes (UpdateA11yMenuFocus): a command chosen from a menu bar's menu gives
+            // the focus back to what had it before the bar, and the bar in between is no stop to tell.
+            if (_a11yMenuFocus is null) _accessibilityBridge.NotifyFocusChanged(focused, previous);
         }
     }
 
@@ -953,8 +965,37 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         if (_a11yPendingFocusId is not { } id) return;
         _a11yPendingFocusId = null;
         if (_a11yFocusElement is not { } element || id != element.Id) return;
-        if (FindA11yNode(tree, element) is { IsFocused: true } node)
+        // While a menu holds the reader's focus, its closing tells the element's.
+        if (FindA11yNode(tree, element) is { IsFocused: true } node && _a11yMenuFocus is null)
             _accessibilityBridge.NotifyFocusChanged(node, previous: null);
+    }
+
+    /// <summary>
+    /// Tells the bridge which open menu holds the reader's focus, when that changed: a context menu or a
+    /// menu bar's menu takes the keys (↑ ↓ ← → Enter Escape, above) while the keyboard focus stays on the
+    /// element that had it, and a reader speaks focus moves only, so for a reader the menu holds the
+    /// focus, and its highlighted entry has it (<see cref="AccessibilityFocus"/>): Narrator and NVDA said
+    /// nothing as the arrows walked a menu. A submenu holds it once an entry of its own is highlighted (→,
+    /// or the pointer inside it): a flyout the pointer opened over its parent leaves the focus on the
+    /// parent. When the menus close the focused element holds it again, and the bridge is told so.
+    /// A menu's node is in the tree from the frame its part is put in (the one after it opened): until
+    /// then the bridge hears nothing of it. A reference compare a frame otherwise.
+    /// </summary>
+    private void UpdateA11yMenuFocus(AccessibilityNode tree)
+    {
+        var menu = _contextSubmenuElement is { HoveredIndex: >= 0 } sub ? sub : _contextMenuElement;
+        if (ReferenceEquals(menu, _a11yMenuFocus)) return;
+        if (menu is not null)
+        {
+            if (FindA11yNodeDown(tree, menu) is not { } node) return;
+            var was = _a11yMenuFocus is { } open ? FindA11yNodeDown(tree, open) : FindA11yNodeDown(tree, _a11yFocusElement);
+            _a11yMenuFocus = menu;
+            _accessibilityBridge.NotifyFocusChanged(node, was);
+            return;
+        }
+        // The menus closed: their parts left the tree with this frame.
+        _a11yMenuFocus = null;
+        _accessibilityBridge.NotifyFocusChanged(FindA11yNode(tree, _a11yFocusElement), previous: null);
     }
 
     /// <summary>
@@ -988,6 +1029,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         var versions = _a11yTextVersions;
         var remade = _a11yRemade;
         var served = _a11yServed;
+        var currents = _a11yCurrents;
         try
         {
             if (!AddPatchTargets(tree, _a11ySelectionMoved, A11yPatchKind.List)
@@ -1006,8 +1048,14 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 switch (target.Kind)
                 {
                     case A11yPatchKind.List:
-                        if (!AccessibilityTreeBuilder.ItemSelectionChanges(node, (IAccessibleItemSource)element, changes, served))
+                        if (!AccessibilityTreeBuilder.ItemSelectionChanges(node, (IAccessibleItemSource)element, changes, served, currents))
                             return false;
+                        break;
+                    case A11yPatchKind.Selected when element is MenuBarElement bar:
+                        // The title the keyboard is on (← →, no menu open): the bar's current item.
+                        if (!node.TracksCurrentItem) return false;
+                        if (AccessibilityTreeBuilder.CurrentItemOf(bar) is var title && title != node.CurrentItem)
+                            currents.Add((node, title));
                         break;
                     case A11yPatchKind.Text:
                         if (element.AccessibleTextSource is not IVersionedAccessibleTextSource source
@@ -1030,6 +1078,10 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             foreach (var (target, node) in remade)
                 target.Node.Parent!.ReplaceChild(_a11yPaths[target.PathStart + target.PathLength - 1], node);
             foreach (var (node, count, selected) in served) node.ReplaceServedItems(count, selected);
+            // No diff tells a current item: the bridge reads it again at the phase's end, and after
+            // the patch below.
+            foreach (var (node, current) in currents) node.ReplaceCurrentItem(current);
+            if (currents.Count > 0) _a11yCurrentMoved = true;
             if (changes.Count == 0) return true;   // moved back: nothing to tell
             // With an overlay come or gone, told first in the diff of its part (TryRebuildOverlays).
             var patch = deferred ? null : A11yPatchDiff();
@@ -1051,6 +1103,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             versions.Clear();
             remade.Clear();
             served.Clear();
+            currents.Clear();
             _a11yLentDiff?.Clear();
         }
     }
@@ -1414,6 +1467,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             }
             _a11yRefreshFailures = 0;
             refresh.Apply();
+            if (refresh.Currents.Count > 0) _a11yCurrentMoved = true;
             AccessibilityLayoutRefreshesInPlace++;
             if (refresh.Structural || come.Count > 0 || gone.Count > 0)
             {
@@ -2011,7 +2065,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // is new, where the walk finds what a build would make, and built where it does not. Either tells
         // what the patches below would, so they do not run then. A row a key made again in a composite
         // list built the whole window's tree, and so did a pane renamed after the folder it went into.
-        bool a11yRefreshed = false;
+        bool a11yRefreshed = false, a11yPatched = false;
         // An overlay a reader sees opened or closed: its part is put in or taken out on its own, by the
         // walk when the frame walks the elements (TryRefreshA11yInPlace), else with the open overlays'
         // parts below (TryRebuildOverlays), unless the frame builds the tree anyway.
@@ -2048,6 +2102,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             bool withRanges = _a11yRangeRefreshPending && (a11yRangeDue || _a11yLeafChanged.Count > 0);
             using (_tracer.Begin("Phase", "A11y"))
                 a11yRebuild = !TryPatchA11y(withRanges, deferred: a11yOverlays && a11yCameOrWent);
+            a11yPatched = !a11yRebuild;
             if (!a11yRebuild && withRanges)
             {
                 _a11yRangeRefreshPending = false;
@@ -2093,7 +2148,18 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             _a11yOverlayRefreshPending = false;
             _a11yRangeRefreshPending = false;
             _a11yRangeChanged.Clear();
+            _a11yMenuFocus = null;
         }
+        if (a11yActive && _previousA11yTree is { } told)
+        {
+            // Where the reader's focus is, once the frame's changes are told: an open menu's, or the
+            // focused element's again when it closed (a reference compare a frame otherwise); then the
+            // bridge reads the current items again, which no diff carries, once, after all of it.
+            UpdateA11yMenuFocus(told);
+            if (_a11yCurrentMoved || a11yRebuild || a11yRefreshed || a11yOverlays || a11yPatched)
+                _accessibilityBridge.NotifyChangesApplied(told);
+        }
+        _a11yCurrentMoved = false;
         if (_announcements.Count > 0)
         {
             // After the rebuild, so an element that announces as it appears has its node.
@@ -5114,6 +5180,13 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             else if (propertyName == AccessibilityProperties.IsSelected
                 && element is IAccessibleItemSource { PublishesItemNodes: false } && element.AccessibleSelected is null)
                 return;
+            // A menu bar's highlighted title moved (← →): its node's current item, which is the reader's
+            // focus while the bar holds the keyboard focus. Marked on the bar's node in place and told as
+            // a menu's entry's selected state is (TryPatchA11y), with no tree built.
+            else if (propertyName == AccessibilityProperties.CurrentItem && element is MenuBarElement)
+            {
+                if (!window._a11yOwnSelection.Contains(element)) window._a11yOwnSelection.Add(element);
+            }
             // A keystroke, a caret or a selection moved in text made on request (a rich text
             // editor's, a text area's), or what its version holds besides the text changed
             // (read-only, its layout): its new version goes on the applied tree's node and the

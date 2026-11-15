@@ -69,6 +69,14 @@ public static class AccessibilityProperties
     /// </summary>
     public const string NativeContent = "NativeContent";
 
+    /// <summary>
+    /// A menu bar's highlighted title moved (<see cref="AccessibilityNode.CurrentItem"/>). Told by the
+    /// element only: the window marks the bar's node in place and asks the bridge to read the focus
+    /// again (<see cref="IAccessibilityBridge.NotifyChangesApplied"/>). No diff carries it, and no
+    /// bridge is handed it as a change.
+    /// </summary>
+    internal const string CurrentItem = "CurrentItem";
+
     /// <summary>An <see cref="IAccessibleContentSource"/>'s content changed (seam W11).</summary>
     public const string Content = "Content";
 

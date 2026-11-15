@@ -27,6 +27,10 @@ public static partial class AccessibilityTreeBuilder
         internal readonly List<(AccessibilityNode Node, AccessibleTextVersion Version)> TextVersions = [];
         internal readonly List<(AccessibilityNode Node, int Count, int[] Selected)> Served = [];
 
+        /// <summary>The containers whose current item moved (<see cref="AccessibilityNode.CurrentItem"/>),
+        /// with the one now: no diff reports it, and the window asks the bridge to read it again.</summary>
+        internal readonly List<(AccessibilityNode Node, int Current)> Currents = [];
+
         /// <summary>The nodes whose selected state is the other one now (selected or not, before and
         /// after).</summary>
         internal readonly List<AccessibilityNode> SelectedFlips = [];
@@ -93,11 +97,13 @@ public static partial class AccessibilityTreeBuilder
                 parent.ReplaceChild(index, node);
             }
             foreach (var (node, count, selected) in Served) node.ReplaceServedItems(count, selected);
+            foreach (var (node, current) in Currents) node.ReplaceCurrentItem(current);
         }
 
         internal void Clear()
         {
             Changes.Clear();
+            Currents.Clear();
             Moves.Clear();
             OffscreenFlips.Clear();
             SelectedFlips.Clear();
@@ -231,8 +237,8 @@ public static partial class AccessibilityTreeBuilder
                 if (!isRoot) made.IsOffscreen = offscreen;
                 if (element is IAccessibleItemSource { PublishesItemNodes: true } items && element is not IAccessibleContentSource)
                 {
-                    made.ItemSource = items;
                     int count = items.ItemCount;
+                    MarkItemSource(made, element, items, count);
                     if (count > MaxEagerVirtualItems && OpenRow(element, items, focusManager).Element is null)
                         ServeOnDemand(made, items, count);
                 }
@@ -262,8 +268,10 @@ public static partial class AccessibilityTreeBuilder
             }
         }
 
-        // The same node: what moved of it is written in place.
+        // The same node: what moved of it is written in place, and the item a container's keyboard is on.
         PlaceInPlace(applied, unscrolled, offscreen, prevAbove, currAbove, refresh);
+        if (applied.TracksCurrentItem && CurrentItemOf(element) is var currentItem && currentItem != applied.CurrentItem)
+            refresh.Currents.Add((applied, currentItem));
         if (scrollView is not null)
         {
             var viewportBox = element.Layout.AbsoluteContentBox;
@@ -678,6 +686,10 @@ public static partial class AccessibilityTreeBuilder
     private static Sameness Compare(Element element, AccessibilityNode node, FocusManager? focusManager)
     {
         if (node.IsFocusable != element.IsFocusable) return Sameness.Untellable;
+        // Whose focus a list's current item stands for: no diff tells it, and a bridge reads it from
+        // the node.
+        if (node.ItemSource is { } source && node.FocusHolder != FocusHolderIdOf(element, source))
+            return Sameness.Untellable;
         var textSource = element.AccessibleTextSource;
         if (!ReferenceEquals(node.TextSource, textSource)) return Sameness.Untellable;
         var versioned = textSource as IVersionedAccessibleTextSource;

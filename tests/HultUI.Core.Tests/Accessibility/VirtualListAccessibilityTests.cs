@@ -249,7 +249,7 @@ public class VirtualListAccessibilityTests
         list.SelectedIndex = 2;
         var changes = new List<PropertyChange>();
 
-        Assert.True(AccessibilityTreeBuilder.ItemSelectionChanges(before, list, changes, []));
+        Assert.True(AccessibilityTreeBuilder.ItemSelectionChanges(before, list, changes, [], []));
 
         var diff = AccessibilityTreeDiffer.Diff(before, BuildLaidOut(list));
         Assert.Equal(
@@ -271,26 +271,26 @@ public class VirtualListAccessibilityTests
         var tree = BuildLaidOut(list);
         list.Items = Enumerable.Range(0, 11).Select(i => $"row {i}").ToArray();
         list.SelectedIndex = 10;
-        Assert.False(AccessibilityTreeBuilder.ItemSelectionChanges(tree, list, changes, []));
+        Assert.False(AccessibilityTreeBuilder.ItemSelectionChanges(tree, list, changes, [], []));
 
         // Rows that are their own controls publish no item nodes.
         var composite = MakeList(10);
         var compositeTree = BuildLaidOut(composite);
         composite.RowsAreComposite = true;
         composite.SelectedIndex = 1;
-        Assert.False(AccessibilityTreeBuilder.ItemSelectionChanges(compositeTree, composite, changes, []));
+        Assert.False(AccessibilityTreeBuilder.ItemSelectionChanges(compositeTree, composite, changes, [], []));
 
         // Grown past the items built eagerly.
         var grown = MakeList(10);
         var grownTree = BuildLaidOut(grown);
         grown.Items = Enumerable.Range(0, AccessibilityTreeBuilder.MaxEagerVirtualItems + 1).Select(i => $"row {i}").ToArray();
-        Assert.False(AccessibilityTreeBuilder.ItemSelectionChanges(grownTree, grown, changes, []));
+        Assert.False(AccessibilityTreeBuilder.ItemSelectionChanges(grownTree, grown, changes, [], []));
 
         // And back under it.
         var shrunk = MakeList(AccessibilityTreeBuilder.MaxEagerVirtualItems + 1);
         var shrunkTree = BuildLaidOut(shrunk);
         shrunk.Items = Enumerable.Range(0, 10).Select(i => $"row {i}").ToArray();
-        Assert.False(AccessibilityTreeBuilder.ItemSelectionChanges(shrunkTree, shrunk, changes, []));
+        Assert.False(AccessibilityTreeBuilder.ItemSelectionChanges(shrunkTree, shrunk, changes, [], []));
         Assert.Empty(changes);
     }
 
@@ -351,7 +351,7 @@ public class VirtualListAccessibilityTests
         var changes = new List<PropertyChange>();
         var served = new List<(AccessibilityNode Node, int Count, int[] Selected)>();
 
-        Assert.True(AccessibilityTreeBuilder.ItemSelectionChanges(before, list, changes, served));
+        Assert.True(AccessibilityTreeBuilder.ItemSelectionChanges(before, list, changes, served, []));
 
         var diff = AccessibilityTreeDiffer.Diff(before, BuildLaidOut(list));
         Assert.Equal([(list.Id, AccessibilityProperties.ItemSelection)], diff.PropertyChanged.Select(c => (c.Node.ElementId, c.PropertyName)));
@@ -372,7 +372,7 @@ public class VirtualListAccessibilityTests
         // Nothing moved: nothing to tell.
         changes.Clear();
         served.Clear();
-        Assert.True(AccessibilityTreeBuilder.ItemSelectionChanges(before, list, changes, served));
+        Assert.True(AccessibilityTreeBuilder.ItemSelectionChanges(before, list, changes, served, []));
         Assert.Empty(changes);
         Assert.Empty(served);
     }
@@ -389,7 +389,7 @@ public class VirtualListAccessibilityTests
         var changes = new List<PropertyChange>();
         var served = new List<(AccessibilityNode Node, int Count, int[] Selected)>();
 
-        Assert.True(AccessibilityTreeBuilder.ItemSelectionChanges(before, list, changes, served));
+        Assert.True(AccessibilityTreeBuilder.ItemSelectionChanges(before, list, changes, served, []));
         string[] told = [AccessibilityProperties.ItemCount, AccessibilityProperties.ItemSelection];
         Assert.Equal(told, changes.Select(c => c.PropertyName));
         Assert.Same(changes[0].Previous, changes[1].Previous);

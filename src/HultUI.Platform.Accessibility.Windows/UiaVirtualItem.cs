@@ -82,6 +82,9 @@ internal sealed class UiaVirtualItem(WindowsAccessibilityBridge bridge, ElementI
             UiaInterop.UIA_IsOffscreenPropertyId => UiaVariant.FromBool(bridge.GetVirtualItemOffscreen(listId, index)),
             // As an item node's wrapper answers it, from the state its events told.
             UiaInterop.UIA_SelectionItemIsSelectedPropertyId => UiaVariant.FromBool(bridge.GetServedItemSelected(listId, index)),
+            // The list's current item has the reader's focus while the list holds it, as an item node does.
+            UiaInterop.UIA_IsKeyboardFocusablePropertyId => UiaVariant.FromBool(true),
+            UiaInterop.UIA_HasKeyboardFocusPropertyId => UiaVariant.FromBool(bridge.HasReaderFocus(VirtualItemId.For(listId, index))),
             _ => UiaVariant.Empty,
         };
         return 0;

@@ -38,7 +38,25 @@ public interface IAccessibilityBridge
     /// both up to date, tells assistive technology as a diff would have, and then the focus
     /// change. By default, only the focus change.
     /// </summary>
+    /// <remarks>The node is the one that holds the focus for a reader: the focused element's, or, while
+    /// a context menu or a menu bar's menu is open and takes the keys, the menu's, though the element
+    /// keeps the keyboard focus. A bridge tells assistive technology the focus is on that node's
+    /// current item where it has one (<see cref="AccessibilityFocus"/>).</remarks>
     void NotifyFocusChanged(AccessibilityNode? focused, AccessibilityNode? previous) => NotifyFocusChanged(focused);
+
+    /// <summary>
+    /// The frame has handed the bridge what changed in the most recently applied tree,
+    /// <paramref name="root"/> (a build's diff, a patch, a refresh made in place, an open overlay's part),
+    /// and written in place what no diff carries: a container's current item
+    /// (<see cref="AccessibilityNode.CurrentItem"/>), which a key that moves a list's or a menu's
+    /// selection moves with it, and a menu bar's ← and → move alone. A bridge that tells the focus on a
+    /// container's current item (<see cref="AccessibilityFocus"/>) reads it again here, once a frame,
+    /// after the changes it was told: an item's selected state goes out before the focus moves to it,
+    /// and a frame that opens a menu from a title moves the focus once, to the menu. Called on the UI
+    /// thread, at the end of the frame's accessibility phase, only when it applied something. Does
+    /// nothing by default.
+    /// </summary>
+    void NotifyChangesApplied(AccessibilityNode root) { }
 
     /// <summary>
     /// Properties changed with no rebuild: the window has marked them in place on the most

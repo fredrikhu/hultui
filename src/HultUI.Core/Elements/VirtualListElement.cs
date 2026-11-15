@@ -113,6 +113,17 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     public bool RowsAreComposite { get; set; }
 
     /// <summary>
+    /// Whether the item at <see cref="SelectedIndex"/> is what a reader is told has the focus while the
+    /// nearest focusable element above the list holds it: for a pane that takes the keys and walks the
+    /// list's cursor without the list holding the focus (Vesper Commander's pane). A reader speaks focus
+    /// moves, not selection moves, so without it a walk of the cursor is heard from no reader. Off (the
+    /// default), only a focus on the list itself is read as on its item. Set it when the list is built;
+    /// the accessibility tree takes it with its next build or refresh. Rows that are composite
+    /// (<see cref="RowsAreComposite"/>) have no items to read.
+    /// </summary>
+    public bool TakesAncestorFocus { get; set; }
+
+    /// <summary>
     /// Optional handler run when assistive tech activates an item (its primary
     /// action, as a click would do). Lets a screen-reader user act on any item,
     /// including off-screen ones the list hasn't realized. Wire it to the same
@@ -124,10 +135,14 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// Index of the selected item (-1 for none), surfaced to assistive tech as the
     /// UIA selection. Set it to keep the a11y selection in sync with your own.
     /// In multi-select mode (see <see cref="CanSelectMultiple"/>) the selection is
-    /// tracked as a set instead — see <see cref="SelectedIndices"/>.
+    /// tracked as a set instead — see <see cref="SelectedIndices"/> — and this is the keyboard
+    /// cursor, on an item selected or not.
     /// </summary>
     /// <remarks>A change tells assistive technology, as a checkbox's toggle does: the item that
-    /// had the selection and the one that has it change their selected state.</remarks>
+    /// had the selection and the one that has it change their selected state. It is also the item the
+    /// keyboard is on (<see cref="Accessibility.IAccessibleItemSource.CurrentIndex"/>): while the list
+    /// holds the keyboard focus, or its focusable ancestor does and <see cref="TakesAncestorFocus"/> is
+    /// set, a reader is told the focus moved to it.</remarks>
     public int SelectedIndex
     {
         get => _selectedIndex;
@@ -353,6 +368,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         return (OffsetOf(index) + (IsStickyRow(index) ? ShiftOfStickyRow(index) : 0f), HeightOf(index));
     }
     int IAccessibleItemSource.SelectedIndex => SelectedIndex;
+    bool IAccessibleItemSource.TakesAncestorFocus => TakesAncestorFocus;
     bool IAccessibleItemSource.CanSelectMultiple => CanSelectMultiple;
 
     IReadOnlyList<int> IAccessibleItemSource.SelectedIndices =>
@@ -1547,6 +1563,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             OnItemActivate = vl.OnItemActivate;
             AccessibleLabel = vl.AccessibleLabel;
             RowsAreComposite = vl.RowsAreComposite;
+            TakesAncestorFocus = vl.TakesAncestorFocus;
             CanSelectMultiple = vl.CanSelectMultiple;
             OnSelectionChanged = vl.OnSelectionChanged;
             // Handlers aren't copied on patch, but this flag gates the mounted
