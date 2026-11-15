@@ -65,10 +65,19 @@ input was handled and no frame drawn until the stream stopped (a framework user'
 rebuilt on each change a loader posted, drew one frame of 10.6 s for a burst of 500).
 Now frames keep coming and input is handled while a stream lasts: a burst of 500 such
 posts, at 20 ms a rebuild, is 500 frames of 20 ms instead of one of 10 s (the PerfSuite's
-`loop/500 posts …` row). The budget does not make the UI thread faster: a stream that
-posts more work than the thread can run still grows the queue, and its last change lands
-as late as it did. A host's own loop (HultUI.WinForms) gets the same: work a frame left
-is run by its next tick, which is due at once when nothing needs drawing.
+`loop/500 posts …` row). The budget alone does not make the UI thread faster: a stream
+that posts more work than the thread can run grows the queue, and its last change lands as
+late as it would have. What lets such a stream catch up is that a pass's posted work runs
+in one reactive batch ([REACTIVITY.md](REACTIVITY.md#automatic-batching-of-event-handlers)):
+however many posts a pass runs, the signal writes in them cost one rebuild, so a pass empties
+what came in during the last one. A change every 5 ms for 2 s into a list whose build takes
+20 ms is a frame every 20 ms with one rebuild each, the last change drawn 20 ms after the
+stream ends; with the budget alone it was one rebuild a frame for 8 s, and before both, one
+frame of 8 s holding 400 rebuilds (the PerfSuite's `loop/a post every 5 ms …`). Work that rebuilds with
+`MarkDirty()` in each post still pays a build a post: coalesce those posts
+([REACTIVITY.md](REACTIVITY.md#a-background-callback-that-fires-once-per-item-posts-one-build-at-a-time)).
+A host's own loop (HultUI.WinForms) gets the same: work a frame left is run by its next
+tick, which is due at once when nothing needs drawing.
 
 The loop used to park 16 ms at a time: about 60 passes a second in every idle
 window (37–38 minimized), each looking again at whatever had been set aside for

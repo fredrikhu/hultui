@@ -139,13 +139,17 @@ box.On<ClickEvent>(_ =>
 
 This is safe because event handlers already read cached layout from the previous frame (layout runs once per frame, after the whole event burst), and the batch always flushes before the next frame. The one thing it changes: a handler no longer sees its *own* rebuild partway through — if you write a signal and then need the resulting element to exist (to focus or measure it), the rebuild hasn't happened yet.
 
+**Work posted to the UI thread is batched the same way**, one batch for each pass of the frame loop: what `Application.InvokeOnMainThread` and `Application.Post` queued, and every `await` continuation that resumes on the UI thread, runs inside a batch that flushes when the pass's posted work is done, before animations, layout and drawing, so the rebuild still lands in that frame. A hundred posts that each bump a signal a component reads rebuild it once; until plan 17's round 15 they rebuilt it a hundred times in that pass, and one post that wrote a signal 500 times, 500 times. What a posted action or a continuation writes is therefore not built yet when its next line runs, as in a handler: write, then let `OnAfterBuild` do what needs the new elements (the apps' focus and scroll requests all go through a flag it reads), or call `FlushNow()`. What the flush's rebuilds post in turn (an `OnAfterBuild` that posts a follow-up) still runs in the same pass while it has time.
+
+A posted action or a handler that runs a loop of its own — a modal dialog under a host whose timer runs whole frames, such as HultUI.WinForms — would otherwise hold its batch open across the dialog's frames, which would show nothing it wrote. A pass of the loop run inside an open batch sets it aside: what the batch held so far is flushed first, the pass's own batches flush as they close, and the outer batch is open again when the pass returns. Before round 15 a click handler that did this drew none of its writes until it returned.
+
 For that, prefer the existing pattern of deferring to `OnAfterBuild` (see the Component Model section). When you genuinely need the rebuild mid-handler, escape hatches are available:
 
 | API | Effect |
 |---|---|
 | `ReactiveRuntime.FlushNow()` | Runs pending effects immediately, even inside the batch. Write your signals, call it, then read the rebuilt element. |
 | `using (ReactiveRuntime.SuspendBatching())` | Within the scope, writes flush immediately (pre-auto-batch behaviour). |
-| `ReactiveRuntime.AutoBatch = false` | Global off switch — restores immediate per-write flushing everywhere. A last resort. |
+| `ReactiveRuntime.AutoBatch = false` | Global off switch — restores immediate per-write flushing everywhere, in event handlers and in posted work. A last resort. |
 
 ```csharp
 input.On<KeyDownEvent>(_ =>
@@ -161,11 +165,14 @@ input.On<KeyDownEvent>(_ =>
 The two ways of asking for a rebuild behave differently inside a handler, and it pays
 to know which one you are holding:
 
-| Call | Inside an event handler | Elsewhere on the UI thread |
+| Call | Inside an event handler, or posted work | Elsewhere on the UI thread |
 |---|---|---|
-| a `Signal<T>` write (or a `[Reactive]` setter) | queued; the rebuild runs once when the dispatch ends | runs the dependent effects immediately |
+| a `Signal<T>` write (or a `[Reactive]` setter, or an app's `Rerender()` that bumps a revision signal, as the apps' do) | queued; the rebuild runs once when the dispatch ends, or when the pass's posted work is done | runs the dependent effects immediately |
 | `Component.MarkDirty()` | rebuilds **and reconciles on the calling stack**, right now | the same |
 | `Application.InvokeOnMainThread(...)` | always queued for the next frame, even from the UI thread | the same |
+
+Only signal writes coalesce in a batch. `MarkDirty()` does not wait for one: ten posts that each
+call it are ten builds in one pass, batch or not.
 
 The synchronous one has consequences. A `MarkDirty()` inside a handler replaces
 elements *while the event is still bubbling*; the dispatcher pins the handler list of
@@ -313,7 +320,7 @@ real window. The same builds and bytes, and the settled frame is a full build's.
 ### A background callback that fires once per item posts one build at a time
 
 A cache or a worker that calls back once per item it finishes, on another thread, usually
-ends in `Application.InvokeOnMainThread(MarkDirty)`. The UI thread runs everything posted
+ends in `Application.InvokeOnMainThread(MarkDirty)`. The UI thread runs what was posted
 since the last frame in one go, and `MarkDirty()` rebuilds on the calling stack, so N items
 that land between two frames are N builds in that frame, each making the whole view again for
 one more picture. Aperture's `PosterCache` and Vesper's `ThumbnailCache` call back once per
@@ -359,6 +366,16 @@ after 15–30 ms; JIT, then NativeAOT):
 The same pictures are drawn at the end, and the settled frame has the same pixels. With
 pictures served more slowly (60–120 ms) fewer land together: Home 41 → 26 builds (−29 %), the
 grid 46 → 25 (−26 %).
+
+**With a signal write the flag is optional.** Since plan 17's round 15 the posted work a pass
+of the loop runs is one batch (see [Automatic batching](#automatic-batching-of-event-handlers)),
+so a callback that ends in a signal write a `Build()` reads — a `[Reactive]` setter, an app's
+`Rerender()` — coalesces on its own: N landings between two frames are one build in that frame.
+The flag still saves N posts and N closures, and it is still needed where the callback ends in
+`MarkDirty()`, which rebuilds on the calling stack, batch or not. A pass also runs posted work
+for at most half a display interval ([THREADING.md](THREADING.md)), so a worker that posts
+faster than the UI thread runs it no longer holds back input and frames; batched, it catches
+up, since a pass's writes cost one build however many posts it ran.
 
 ### A value that changes ten times a second
 

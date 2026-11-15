@@ -16,14 +16,34 @@ public static class ReactiveRuntime
     private const int MaxIterations = 1000;
 
     /// <summary>
-    /// When true (the default), the framework wraps each event dispatch in a
-    /// batch so multiple signal writes in a handler coalesce into a single
-    /// rebuild. Set to false to restore immediate, per-write flushing globally
-    /// — a safety valve for code that relies on a rebuild being visible partway
-    /// through a handler. Prefer <see cref="FlushNow"/> or
+    /// When true (the default), the framework wraps each event dispatch, and the
+    /// work posted to the UI thread that a pass of the frame loop runs
+    /// (<c>Application.InvokeOnMainThread</c>, <c>Application.Post</c>, an
+    /// <c>await</c>'s continuation), in a batch so multiple signal writes coalesce
+    /// into a single rebuild. Set to false to restore immediate, per-write flushing
+    /// globally — a safety valve for code that relies on a rebuild being visible
+    /// partway through a handler or a posted action. Prefer <see cref="FlushNow"/> or
     /// <see cref="SuspendBatching"/> for narrow, local opt-outs.
     /// </summary>
     public static bool AutoBatch { get; set; } = true;
+
+    /// <summary>
+    /// Sets aside the batches open on this thread, for a pass of the frame loop run inside them: a
+    /// posted action or an event handler that runs a loop of its own (a modal dialog under a host
+    /// whose timer runs whole frames). The pass's own batches then flush as they close, and its
+    /// frames show what they write. Returns the depth to hand <see cref="RestoreBatches"/> when the
+    /// pass is over; 0 when none was open. The caller flushes what the open batches held
+    /// (<see cref="FlushNow"/>) once it has the depth back, so a throwing build cannot lose it.
+    /// </summary>
+    internal static int SetAsideBatches()
+    {
+        int depth = _batchDepth;
+        _batchDepth = 0;
+        return depth;
+    }
+
+    /// <summary>Opens again the batches <see cref="SetAsideBatches"/> set aside.</summary>
+    internal static void RestoreBatches(int depth) => _batchDepth += depth;
 
     /// <summary>
     /// Runs the given action inside a batch. Signal changes within the batch

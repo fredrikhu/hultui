@@ -1,11 +1,15 @@
 using HultUI.Core.Builders;
+using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Core.Rendering;
 using Xunit;
 
 namespace HultUI.Headless.Tests;
+
+using Text = HultUI.Core.Builders.Text;
 
 /// <summary>
 /// Work posted to the UI thread (<c>Application.InvokeOnMainThread</c>, <c>Application.Post</c>, an
@@ -189,5 +193,192 @@ public class PostedWorkTests
             LiveFrameRequests.SetPoster(null);
             session.PumpFrames(3);   // runs the posts
         }
+    }
+
+    // ── One batch a pass ──
+
+    /// <summary>A component whose Build reads <see cref="Rev"/>, counting its builds; with
+    /// <see cref="PostAfterBuild"/>, its OnAfterBuild posts that once, as a reveal's follow-up does.</summary>
+    private sealed class Bumped : Component
+    {
+        public Signal<int> Rev { get; } = new(0);
+        public int Builds { get; private set; }
+        public int ThrowAt { get; set; } = -1;
+        public Action? PostAfterBuild { get; set; }
+
+        public override Element Build()
+        {
+            Builds++;
+            int rev = Rev.Value;
+            if (rev == ThrowAt) throw new InvalidOperationException("build");
+            return Text.New($"Revision {rev}");
+        }
+
+        protected internal override void OnAfterBuild()
+        {
+            if (PostAfterBuild is not { } post) return;
+            PostAfterBuild = null;
+            Application.InvokeOnMainThread(post);
+        }
+    }
+
+    private static (HeadlessSession Session, Bumped List) Mounted()
+    {
+        var list = new Bumped();
+        return (Session(Flex.Column().Children(new ComponentHost(list))), list);
+    }
+
+    /// <summary>The report's repro: 100 posts that each bump a signal a component reads, then a
+    /// frame. One rebuild; it was 100, one for each write.</summary>
+    [Fact]
+    public void HundredPostsThatEachBumpASignal_RebuildOnce_InTheSameFrame()
+    {
+        var (session, list) = Mounted();
+        using var _ = session;
+        int before = list.Builds;
+        for (int i = 0; i < 100; i++)
+            Application.InvokeOnMainThread(() => list.Rev.Value++);
+
+        session.PumpFrame();
+
+        Assert.Equal(before + 1, list.Builds);
+        Assert.NotNull(session.Window.FindByText("Revision 100"));
+    }
+
+    [Fact]
+    public void AnAwaitsContinuation_IsBatchedToo()
+    {
+        var (session, list) = Mounted();
+        using var _ = session;
+        int before = list.Builds;
+        async Task BumpTwice()
+        {
+            await Task.Yield();   // resumes through the session's context: a post
+            list.Rev.Value++;
+            list.Rev.Value++;
+        }
+        var task = BumpTwice();
+
+        session.PumpFrame();
+
+        Assert.True(task.IsCompletedSuccessfully);
+        Assert.Equal(before + 1, list.Builds);
+        Assert.NotNull(session.Window.FindByText("Revision 2"));
+    }
+
+    [Fact]
+    public void WithAutoBatchOff_EveryWriteRebuildsAtOnce()
+    {
+        var (session, list) = Mounted();
+        using var _ = session;
+        int before = list.Builds;
+        ReactiveRuntime.AutoBatch = false;
+        try
+        {
+            for (int i = 0; i < 100; i++)
+                Application.InvokeOnMainThread(() => list.Rev.Value++);
+            session.PumpFrame();
+        }
+        finally
+        {
+            ReactiveRuntime.AutoBatch = true;
+        }
+
+        Assert.Equal(before + 100, list.Builds);
+    }
+
+    /// <summary>What the batch's rebuild posts (an OnAfterBuild's follow-up) still runs before
+    /// the frame, as it did when the write rebuilt inside the post.</summary>
+    [Fact]
+    public void WhatTheBatchesRebuildPosts_RunsInTheSamePass()
+    {
+        var (session, list) = Mounted();
+        using var _ = session;
+        bool followedUp = false;
+        list.PostAfterBuild = () => followedUp = true;
+        Application.InvokeOnMainThread(() => list.Rev.Value = 1);
+
+        session.PumpFrame();
+
+        Assert.True(followedUp);
+    }
+
+    /// <summary>
+    /// A posted action that runs a loop of its own (a modal dialog under a host whose timer runs
+    /// whole frames, HultUI.WinForms): the pass's batch is set aside for the inner pass, so its
+    /// frame rebuilds with what the action wrote and draws it.
+    /// </summary>
+    [Fact]
+    public void ANestedPassInsidePostedWork_ShowsItsWrites()
+    {
+        var (session, list) = Mounted();
+        using var _ = session;
+        int built = -1;
+        bool drew = false, shown = false;
+        Application.InvokeOnMainThread(() =>
+        {
+            int before = list.Builds;
+            list.Rev.Value = 1;
+            drew = session.Application.RunFrame(TimeSpan.FromMilliseconds(16));
+            built = list.Builds - before;
+            shown = session.Window.FindByText("Revision 1") is not null;
+            list.Rev.Value = 2;   // after the inner pass: batched again, with the outer pass
+        });
+
+        session.PumpFrame();
+
+        Assert.Equal(1, built);
+        Assert.True(drew);
+        Assert.True(shown);
+        Assert.NotNull(session.Window.FindByText("Revision 2"));
+    }
+
+    /// <summary>The same for an event handler, whose dispatch is a batch: the frames of a loop it
+    /// runs showed nothing it wrote until it returned.</summary>
+    [Fact]
+    public void AClickHandlerThatRunsANestedLoop_ShowsItsWritesThere()
+    {
+        var list = new Bumped();
+        var button = Box.New().Width(Dimension.Px(80)).Height(Dimension.Px(30)).Background(Color.White);
+        using var session = Session(Flex.Column().Children(button, new ComponentHost(list)));
+        int built = -1;
+        bool shown = false;
+        button.On<ClickEvent>(_ =>
+        {
+            int before = list.Builds;
+            list.Rev.Value = 1;
+            session.Application.RunFrame(TimeSpan.FromMilliseconds(16));
+            built = list.Builds - before;
+            shown = session.Window.FindByText("Revision 1") is not null;
+        });
+
+        session.Window.Click(button);
+
+        Assert.Equal(1, built);
+        Assert.True(shown);
+    }
+
+    /// <summary>A build that throws in the flush that ends a pass propagates, as it did from the
+    /// post whose write ran it; after an action threw, it does not take that exception's place.</summary>
+    [Fact]
+    public void ABuildThatThrowsInThePassesFlush_PropagatesButDoesNotHideAnActionsException()
+    {
+        var (session, list) = Mounted();
+        using var _ = session;
+        list.ThrowAt = 1;
+        Application.InvokeOnMainThread(() => list.Rev.Value = 1);
+        Assert.Equal("build", Assert.Throws<InvalidOperationException>(() => session.PumpFrame()).Message);
+
+        list.ThrowAt = 2;
+        bool ran = false;
+        Application.InvokeOnMainThread(() => list.Rev.Value = 2);
+        Application.InvokeOnMainThread(() => throw new InvalidOperationException("posted"));
+        Application.InvokeOnMainThread(() => ran = true);
+        Assert.Equal("posted", Assert.Throws<InvalidOperationException>(() => session.PumpFrame()).Message);
+        Assert.False(ran);
+
+        list.ThrowAt = -1;
+        session.PumpFrame();
+        Assert.True(ran);
     }
 }

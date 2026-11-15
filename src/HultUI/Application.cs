@@ -6,6 +6,7 @@ using HultUI.Core.Components;
 using HultUI.Core.DevTools;
 using HultUI.Core.Elements;
 using HultUI.Core.Platform;
+using HultUI.Core.Reactivity;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using HultUI.Core.Threading;
@@ -674,13 +675,27 @@ public sealed class Application : IDisposable
         bool boundFirstStep = false)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!FrameLog.On) return RunPass(delta, forceRender, allowRender, tick, boundFirstStep);
+        // A pass inside an open batch: a posted action (whose pass batches it) or an event handler
+        // that runs a loop of its own, a modal dialog under a host whose timer runs whole frames
+        // (HultUI.WinForms). The batch would hold every write until the dialog closed, and the
+        // dialog's frames would show none of them, the pass's own included: it is set aside for the
+        // pass, what it held so far flushed first.
+        int outer = ReactiveRuntime.SetAsideBatches();
+        try
+        {
+            if (outer > 0) ReactiveRuntime.FlushNow();
+            if (!FrameLog.On) return RunPass(delta, forceRender, allowRender, tick, boundFirstStep);
 
-        FrameLog.PassStart(this, _platform.TimeProvider);
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        bool rendered = RunPass(delta, forceRender, allowRender, tick, boundFirstStep);
-        FrameLog.PassEnd(rendered, tick, GC.GetAllocatedBytesForCurrentThread() - before);
-        return rendered;
+            FrameLog.PassStart(this, _platform.TimeProvider);
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            bool rendered = RunPass(delta, forceRender, allowRender, tick, boundFirstStep);
+            FrameLog.PassEnd(rendered, tick, GC.GetAllocatedBytesForCurrentThread() - before);
+            return rendered;
+        }
+        finally
+        {
+            ReactiveRuntime.RestoreBatches(outer);
+        }
     }
 
     private bool RunPass(TimeSpan delta, bool forceRender, bool allowRender, bool tick, bool boundFirstStep)
@@ -1138,6 +1153,14 @@ public sealed class Application : IDisposable
     /// no frame drawn until the stream stopped (a framework user's list, rebuilt on each of a
     /// loader's posts, drew one frame of 10.6 s for a burst of 500). An action that throws leaves
     /// the rest queued, as before.
+    ///
+    /// <para>The actions run in one reactive batch (while <see cref="ReactiveRuntime.AutoBatch"/>
+    /// is on, as an event's handlers do), flushed when the pass's work is done, before animations,
+    /// layout and drawing: what they write rebuilds once, in the same frame. A post was a rebuild
+    /// for every signal write in it, 100 posts that each bump a signal a component reads 100
+    /// rebuilds in one pass. <c>MarkDirty</c> still rebuilds at once, batch or not. What the flush's
+    /// rebuilds post (an <c>OnAfterBuild</c>'s follow-up) runs in the same pass while it has time,
+    /// as it did when every write rebuilt at once.</para>
     /// </summary>
     private void DrainMainThreadQueue()
     {
@@ -1150,16 +1173,46 @@ public sealed class Application : IDisposable
         var clock = _platform.TimeProvider;
         long start = clock.GetTimestamp();
         long budget = DrainBudget(clock);
+        bool batch = ReactiveRuntime.AutoBatch;
         try
         {
-            do action();
-            while (clock.GetTimestamp() - start < budget && _mainThreadQueue.TryDequeue(out action));
+            do
+            {
+                if (batch) ReactiveRuntime.BeginBatch();
+                bool ran = false;
+                try
+                {
+                    do action();
+                    while (clock.GetTimestamp() - start < budget && _mainThreadQueue.TryDequeue(out action));
+                    ran = true;
+                }
+                finally
+                {
+                    if (batch) EndPassBatch(ran);
+                }
+            }
+            while (batch && clock.GetTimestamp() - start < budget && _mainThreadQueue.TryDequeue(out action));
         }
         finally
         {
             // What waits now waited when this pass ended; a post since is a new one to a live frame.
             _liveFrameQueued = _mainThreadQueue.IsEmpty ? 0 : _mainThreadQueue.Count;
         }
+    }
+
+    /// <summary>Closes a pass's batch, which flushes it. After an action threw, the flush still runs
+    /// (what the actions before it wrote is applied), but a build in it that throws as well is not
+    /// let take the action's exception's place: that one is on its way out, and it is the one the
+    /// pass ended on.</summary>
+    private static void EndPassBatch(bool ran)
+    {
+        if (ran)
+        {
+            ReactiveRuntime.EndBatch();
+            return;
+        }
+        try { ReactiveRuntime.EndBatch(); }
+        catch (Exception) { /* the action's exception propagates instead */ }
     }
 
     /// <summary>How long a pass of the loop may run posted work for, on <paramref name="clock"/>: half
