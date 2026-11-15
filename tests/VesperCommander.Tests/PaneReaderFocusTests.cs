@@ -122,4 +122,42 @@ public class PaneReaderFocusTests
 
     private static IEnumerable<AccessibilityNode> Selected(AccessibilityNode node) =>
         node.Children.SelectMany(Selected).Prepend(node).Where(n => n.IsSelected == true);
+
+    /// <summary>In Detail the pane holds the focus and the keys walk its list's cursor: a reader speaks
+    /// focus moves only, and Narrator and NVDA said nothing of the walk (2026-11-15). The list takes the
+    /// pane's focus (its node's FocusHolder), so the cursor's row is the reader's
+    /// focus (its <see cref="AccessibilityNode.CurrentItem"/>) and moves with each key, with no tree.</summary>
+    [Fact]
+    public void InDetail_TheListTakesThePanesFocus_AndItsCurrentItemFollowsTheCursor()
+    {
+        using var t = Open();
+        var bridge = t.Session.Window.InstallAccessibilityBridge();
+        t.Session.PumpFrames(3);
+        var left = t.Field<HultUI.Core.Reactivity.Ref<HultUI.Core.Elements.BoxElement>>("_paneRefL").Current!;
+        Assert.Same(left, t.Session.Window.Window.FocusedElement);
+        t.PutCursorOn('L', "f1.txt");
+        t.Session.PumpFrames(3);
+        AccessibilityNode List() => Find(bridge.CurrentTree!, left.Id)!.Children.Single(c => c.Role == AccessibilityRole.List);
+        Assert.Equal(left.Id, typeof(AccessibilityNode).GetProperty("FocusHolder",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(List()));
+        Assert.Equal("f1.txt", List().Children[List().CurrentItem].Name?.Split(',')[0]);
+        int trees = t.Session.Window.AccessibilityTreesBuilt;
+
+        t.Press(KeyCode.Down);
+        t.Session.PumpFrames(2);
+        Assert.Equal("f2.txt", List().Children[List().CurrentItem].Name?.Split(',')[0]);
+        Assert.True(List().Children[List().CurrentItem].IsSelected);
+        t.Press(KeyCode.End);
+        t.Session.PumpFrames(2);
+        Assert.Equal(List().Children.Count - 1, List().CurrentItem);
+        Assert.Equal(trees, t.Session.Window.AccessibilityTreesBuilt);
+    }
+
+    private static AccessibilityNode? Find(AccessibilityNode node, HultUI.Core.Elements.ElementId id)
+    {
+        if (node.ElementId == id) return node;
+        foreach (var child in node.Children)
+            if (Find(child, id) is { } found) return found;
+        return null;
+    }
 }

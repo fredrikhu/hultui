@@ -838,6 +838,9 @@ public partial class CommanderApp
             // item alone, so the list keeps each row's label while the item is unchanged, and a
             // mark makes the label of the row it changed again.
             .AccessibleItemLabel(FileLabelOfItem)
+            // The pane holds the focus and the keys walk the cursor: a reader is told the cursor's row
+            // has the focus, as it moves. It spoke focus moves only, and heard nothing of a walk.
+            .TakesAncestorFocus()
             .WithRef(VList(side))
             .FlexGrow(1);
     }

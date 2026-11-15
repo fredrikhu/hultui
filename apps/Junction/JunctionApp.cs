@@ -1222,6 +1222,12 @@ public partial class JunctionApp : Component, IDisposable
             _modalNameRef.Current?.Focus();
         }
 
+        // History's list holds the focus while nothing else does: a reader is told its caret's commit
+        // has it as the keys walk it (BuildCommitList).
+        if (View == JunctionView.History && _window.FocusedElement is null
+            && _commitListRef.Current is { } history && _window.IsInTree(history))
+            history.Focus();
+
         _diffFind.Service();
         _filesFind.Service();
 
