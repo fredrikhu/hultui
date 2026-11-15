@@ -299,6 +299,17 @@ What is read after the frame shows a frame later, in a frame of its own; where t
 before the layout (a column taking the window's slack moves by the window's change), give it in
 the `Resized` handler too and keep the read as the check (LAYOUT.md, "Nesting scroll views").
 
+A key's reveal is such a move. `ScrollRangeIntoView` called in `OnAfterBuild` scrolls by the
+viewport the list had the frame before, which a key does not change, and holds the request for
+the layout when the list has none yet. Junction's Commit tab and Changes revealed the caret only
+after the frame, so a key past the list's edge drew its frame with the row outside the list and a
+second frame to bring it in; they now reveal in `OnAfterBuild` too and keep the call after the
+frame as the check, which finds nothing to do when the first was right (History and the Files
+tree already did). Plan 17 round 15, keys past the edge: Changes with 61 files 2.0–2.75 → 1.0–2.0
+frames a key headless (NativeAOT), and in a real window 39 → 30 frames for 10 keys 400 ms apart and
+42–45 → 23 for 20 held; the Commit tab 2.9–3.0 → 1.9–2.0 headless, 40 → 30 and 43–51 → 25–32 in a
+real window. The same builds and bytes, and the settled frame is a full build's.
+
 ### A background callback that fires once per item posts one build at a time
 
 A cache or a worker that calls back once per item it finishes, on another thread, usually

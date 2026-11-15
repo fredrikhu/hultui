@@ -1200,14 +1200,20 @@ public partial class JunctionApp : Component, IDisposable
             else if (View == JunctionView.Commit)
             {
                 // A virtual list of rows: the cursor's row may not be an element yet, so its
-                // band comes from the row heights. After the frame, as before, so the list has
-                // its new items and viewport.
+                // band comes from the row heights. Now, before the layout, so this frame draws the
+                // row in view: the list keeps its viewport from the frame before, which a key does
+                // not change. Done only after the frame, as it was, every key that moved the cursor
+                // past the list's edge drew its frame with the row outside the list and then a
+                // second frame to scroll it in. After the frame again as the check, for a list that
+                // got new items or a new size in this build; it finds nothing to do otherwise.
+                ScrollCommitCursorIntoView();
                 _window.RequestPostFrameCallback(ScrollCommitCursorIntoView);
             }
             else if (View == JunctionView.Changes)
             {
-                // The same list of tagged rows: its band comes from the row heights, after the
-                // frame, so the list has its new items and viewport.
+                // The same list of tagged rows, the same two calls: its band comes from the row
+                // heights, now so this frame shows it, and after the frame as the check.
+                ScrollChangeCaretIntoView();
                 _window.RequestPostFrameCallback(ScrollChangeCaretIntoView);
             }
         }
