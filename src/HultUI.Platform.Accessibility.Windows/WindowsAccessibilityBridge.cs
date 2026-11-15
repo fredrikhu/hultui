@@ -620,6 +620,13 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
         // against it, and it must reflect deep changes even when the root node's
         // own properties didn't change.
         bool adoptedFocus = false;
+        // A tree from nothing (a client attached again; the window dropped its tree meanwhile): the
+        // focus is the one it marks, as the client finds it, not the one this bridge last held.
+        if (diff.Added.Count > 0 && diff.Added[0].Parent is null && diff.Removed.Count == 0)
+        {
+            Volatile.Write(ref _focusedIdRaw, 0L);
+            Volatile.Write(ref _targetIdRaw, 0L);
+        }
         lock (_applyLock)
         {
             Volatile.Write(ref _rootNode, root);
