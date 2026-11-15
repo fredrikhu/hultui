@@ -804,6 +804,8 @@ public partial class JunctionApp
         if (!_compactChrome)
             b.AddChild(Text.New($"Only {title}").FontSize(11f).FontWeight(FontWeight.Medium)
                 .TextColor(fg).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
+        else
+            b.AccessibleName($"Only {title}");   // icon-only: named as the labelled one reads (a tooltip is no name)
         // Lit and unlit differ in fill and border, so the flip has to replace the element
         // rather than patch over the other state's background; the branch is in the key
         // because checking another one out changes what this button means.

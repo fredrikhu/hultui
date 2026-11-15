@@ -158,10 +158,19 @@ public partial class JunctionApp
             .Tooltip($"Search & commands ({Shortcuts.Keys("palette")})");
         search.AddChild(Ui.Icon(Icons.MagnifyingGlass, 13f, Nocturne.On(0.55)));
         // Narrow windows collapse the search box to just its icon.
+        const string searchLabel = "Search & commands";
+        var paletteKey = Shortcuts.Map["palette"].Keys[0].ToString();
         if (!_compactChrome)
         {
-            search.AddChild(Text.New("Search & commands").FontSize(12f).TextColor(Nocturne.On(0.55)));
-            search.AddChild(Kbd(Shortcuts.Map["palette"].Keys[0].ToString()));
+            search.AddChild(Text.New(searchLabel).FontSize(12f).TextColor(Nocturne.On(0.55)));
+            search.AddChild(Kbd(paletteKey));
+        }
+        else
+        {
+            // The icon leaves no text to name the box from, and a tooltip is no name: it says what
+            // the wide box's texts read, so a reader hears the same button on both sides of the
+            // breakpoint and a resize across it renames nothing.
+            search.AccessibleName($"{searchLabel} {paletteKey}");
         }
         search.OnClick(_ => TogglePalette());
         search.HoverBg(Nocturne.Alpha(Nocturne.Accent, 0.08), Nocturne.Bg);
@@ -262,16 +271,14 @@ public partial class JunctionApp
         fetch.Key = "fetch" + (_remoteOp == RemoteOp.Fetch ? "#busy" : "");
         actions.AddChild(fetch);
 
-        var pull = ActionButton("Pull", Icons.ArrowDown, DoPull, primary: false, compact, RemoteOp.Pull);
+        var pull = ActionButton("Pull", Icons.ArrowDown, DoPull, primary: false, compact, RemoteOp.Pull,
+            sum.Behind, Nocturne.Accent300);
         pull.Key = "pull" + (_remoteOp == RemoteOp.Pull ? "#busy" : "");
-        if (sum.Behind > 0 && _remoteOp != RemoteOp.Pull)
-            pull.AddChild(Text.New(sum.Behind.ToString()).FontSize(13f).TextColor(Nocturne.Accent300));
         actions.AddChild(pull);
 
-        var push = ActionButton("Push", Icons.ArrowUp, DoPush, primary: true, compact, RemoteOp.Push);
+        var push = ActionButton("Push", Icons.ArrowUp, DoPush, primary: true, compact, RemoteOp.Push,
+            sum.Ahead, Nocturne.Accent);
         push.Key = "push" + (_remoteOp == RemoteOp.Push ? "#busy" : "");
-        if (sum.Ahead > 0 && _remoteOp != RemoteOp.Push)
-            push.AddChild(Text.New(sum.Ahead.ToString()).FontSize(13f).TextColor(Nocturne.Accent));
         actions.AddChild(push);
 
         var stash = StashButton();
@@ -287,16 +294,21 @@ public partial class JunctionApp
     }
 
     // A toolbar git action. Full width shows an icon + label; compact drops the
-    // label to an icon-only button (with the label as its tooltip) but keeps room
-    // for a trailing ahead/behind count the caller may append.
+    // label to an icon-only button (with the label as its tooltip) but keeps the
+    // trailing ahead/behind count, when there is one.
     //
     // While its own command is running the icon is handed in already in motion (see
     // RemoteOpIcon) and the label goes present-tense, so the button itself reports the
-    // work rather than leaving it to a toast that has already faded.
+    // work rather than leaving it to a toast that has already faded. The count goes
+    // meanwhile: the command is what will change it.
     private BoxElement ActionButton(string label, string glyph, Action onClick, bool primary, bool compact,
-        RemoteOp op = RemoteOp.None)
+        RemoteOp op = RemoteOp.None, int count = 0, Color countInk = default)
     {
         bool busy = op != RemoteOp.None && _remoteOp == op;
+        var shownLabel = busy ? RemoteOpLabel(op) : label;
+        var counted = count > 0 && !busy
+            ? Text.New(count.ToString()).FontSize(13f).TextColor(countInk)
+            : null;
         // One remote command at a time, so while any of them is in flight every entry point
         // refuses (see RemoteOpRunning) — including the two buttons that are not the one
         // running. They have to *look* refused as well: they kept their pointer and their
@@ -316,9 +328,10 @@ public partial class JunctionApp
             // is an ordinary element, so a transform on it moves the mark alone and
             // leaves the label sitting still beside it.
             var full = primary
-                ? Ui.PrimaryButton(busy ? RemoteOpLabel(op) : label, null, onClick)
-                : Ui.SecondaryButton(busy ? RemoteOpLabel(op) : label, null, onClick);
+                ? Ui.PrimaryButton(shownLabel, null, onClick)
+                : Ui.SecondaryButton(shownLabel, null, onClick);
             full.InsertChild(0, RemoteOpIcon(glyph, 14f, fg, op));
+            if (counted != null) full.AddChild(counted);
             full.Tooltip(tooltip);
             if (blocked) full.Enabled(false);
             return full;
@@ -339,6 +352,10 @@ public partial class JunctionApp
             .BorderColor(edge).BorderWidth(1f)
             .Tooltip(tooltip);
         b.AddChild(RemoteOpIcon(glyph, 15f, ink, op));
+        if (counted != null) b.AddChild(counted);
+        // Named as the labelled button's texts read it ("Pull 2", "Fetching…"): a tooltip is
+        // no name, and the count alone would be all a reader heard.
+        b.AccessibleName(counted != null ? $"{shownLabel} {count}" : shownLabel);
         if (blocked)
             return b;
 
@@ -378,6 +395,12 @@ public partial class JunctionApp
                 Box.New().Padding(new Thickness(1, 4, 1, 4)).CornerRadius(3f)
                     .BorderColor(Nocturne.Divider).BorderWidth(1f)
                     .Children(Ui.Mono(num, 9f, Nocturne.On(active ? 0.8 : 0.5))));
+        }
+        else
+        {
+            // Named as the labelled tab's texts read it, badge and all ("Changes 4 3"): a
+            // tooltip is no name, so a reader heard the badge alone or nothing.
+            tab.AccessibleName(badge > 0 ? $"{label} {num} {badge}" : $"{label} {num}");
         }
 
         if (badge > 0)

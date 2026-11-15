@@ -815,6 +815,11 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   the live button (a `Ref` write) it was never told — a caching AT-SPI client kept it enabled (seen
   live in WSL) — and through its owner's rebuild only when the layout refresh its patch brought came
   due. No other control has an enabled state.
+- **A button named from its texts** has no name without them, and a tooltip is no name: an
+  icon-only button names itself (`AccessibleName`). One that drops its label in a narrow window
+  names itself as the labelled one reads, its count included, or a reader hears a button named ''
+  there and every resize across the breakpoint renames it (Junction's compact chrome: eleven Name
+  raises a crossing in the Commit view until plan 17 round 15 step 9).
 - **Acting through a pattern** (2026-10-22) — every pattern below that changes something
   queues the change for the UI thread (`AccessibilityActionRouter`) and makes it through the
   element's own handler, as the pointer, a key or a paste would: the same events, the same

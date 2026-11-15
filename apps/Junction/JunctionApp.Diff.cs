@@ -260,6 +260,8 @@ public partial class JunctionApp
         b.AddChild(Ui.Icon(glyph, 12f, fg));
         if (!_compactChrome)
             b.AddChild(Text.New(label).FontSize(11.5f).FontWeight(FontWeight.Medium).TextColor(fg));
+        else
+            b.AccessibleName(label);   // icon-only: named as the labelled one reads (a tooltip is no name)
         b.OnClick(e => { e.StopPropagation = true; onClick(); });
         return b;
     }
