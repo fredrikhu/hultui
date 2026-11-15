@@ -6,7 +6,9 @@ file after every step and commits it with the step's work. Full survey reports a
 
 - **Round:** 15
 - **Phase:** release — round 15's full suite passed at 6cf0f79b (Windows 30 projects, Fedora the slnf plus Junction,
-  Meridian, Aperture and Reel, docfx 0 warnings); merge into main, push, wait for CI. Build record: (step 1 done: 6c7a6cab, docs only; step 2 landed b258f4fb..ff6922f0; step 3
+  Meridian, Aperture and Reel, docfx 0 warnings); merged into main 75f2288a and pushed (2026-11-15; origin/main 5aa1d25b
+  unmoved, tree identical to the branch; the primary checkout fast-forwarded behind the guard); waiting for CI on
+  75f2288a. Build record: (step 1 done: 6c7a6cab, docs only; step 2 landed b258f4fb..ff6922f0; step 3
   fdd795bd..bc2426aa; a Fedora test race fixed 17e13e63; step 4 a9321aac..38629c1e; step 5 dae30194..49c7b384; step 6
   29f1ddc0..2d5d96ee; step 7 52852f6e, 83034345; step 8 eb68bbca..da63c3d0; step 9 9fcc1397; ReviewTests races fixed
   1d852da7, a32c8b9f, 37b9e96b; step 10 c6a19b06, 870a6fc7). The build order is done: the full suite runs
