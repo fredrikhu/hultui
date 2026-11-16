@@ -63,6 +63,9 @@ public sealed class ReaderFocusTests(ITestOutputHelper output)
                     + "UI Automation may not deliver one without it");
             Assert.Contains(heard, h => h.Name == "file 0" && h.HasFocus);
             Assert.Contains(heard, h => h.Name == "file 3" && h.HasFocus);
+            // One focus event a move, on the item: none on the list itself, none twice.
+            Assert.Equal(["file 0", "file 3"], heard.Where(h => h.Name.StartsWith("file", StringComparison.OrdinalIgnoreCase)
+                || h.Name == "Files").Select(h => h.Name));
         }
         finally { automation.UnregisterAllEvents(); }
     }

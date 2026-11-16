@@ -264,11 +264,33 @@ The rule now, as a WPF list box's item has the keyboard focus:
   (`IUIAutomation.AddFocusChangedEventHandler`, FlaUI) in the test process: a focused list's
   selection move reaches it as the item, by name, with HasKeyboardFocus true, from a window that is
   never the foreground.
-- **Left:** a click that both focuses an element and changes its selected state (the Fluent
-  sample's navigation items) still tells the focus before the rebuild marks the selection, so NVDA
-  reads "not selected"; a dropdown's open list keeps the focus on the dropdown; Vesper's Brief and
-  Thumbnails views and its Synchronize rows mark their cursor with `AccessibleSelected` on elements
-  the pane holds, which no rule above makes the target.
+- **After the first listening round (2026-11-16, Narrator and NVDA on the `fixed` build):**
+  - *One focus event a move.* The bridges take the holder when the window tells it
+    (`TellA11yFocus`) and tell assistive technology at the end of the next accessibility phase,
+    after its changes: F10 and Alt with a letter focused the bar, then its title a frame later, and
+    the bar's event was read last ("Menu bar menu bar"); a click that focuses and selects is now told
+    with its selection.
+  - *A menu's entries are no SelectionItems* (Narrator said "selected" on each), as a Win32 or a
+    WinUI menu's are not; a menu has no Selection pattern; on AT-SPI they are neither selectable nor
+    selected. Lists keep theirs.
+  - *The holder is no focus stop while its item has the focus:* it answers IsKeyboardFocusable false
+    then (a menu bar's titles and a list's items true), as Vesper's file list and a context menu, which
+    the readers walked item by item, are no focus stops; Narrator said "History list" and "Menu bar"
+    again on every move in the two that were. The events, the ancestors and the runtime ids were the
+    same in both (`TheFocussAncestors_AreTheSameProviders…`); this is the difference left, and the next
+    listening round decides it. NVDA saying the window again on a Tab between Vesper's panes is the
+    window's title changing with the active pane.
+  - *A window that comes to the front* tells the reader's focus again
+    (`IAccessibilityBridge.NotifyWindowActivated`, from `Window.RaiseActivated`), once per activation.
+  - *Positions:* item nodes, served items, menu entries (separators excluded) and menu bar titles
+    answer PositionInSet and SizeOfSet; any other list item, menu item, tree item, tab or radio button
+    its place among its parent's children with its role (the Fluent sample's five navigation items,
+    which UI Automation counted as 6, 5 or 7).
+  - *A new listing* relabels a list's items in place (an item's id is its place): a frame that takes the
+    focus off an item tells no rename of it, so entering a folder in Vesper reads the new cursor only.
+- **Left:** a dropdown's open list keeps the focus on the dropdown; Vesper's Brief and Thumbnails
+  views and its Synchronize rows mark their cursor with `AccessibleSelected` on elements the pane
+  holds, which no rule above makes the target.
 
 A move of a list's selection rebuilds no tree either (2026-10-11). The frame marks
 `IsSelected` on the item nodes it changed, in the applied tree, and hands the bridge
