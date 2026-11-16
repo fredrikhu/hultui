@@ -269,6 +269,16 @@ current item moves with the selection, patched in place with no tree built; the 
 focus event once a frame, after the items' selected states. The full rule is in
 `docs/ACCESSIBILITY-PLAN.md` ("The reader's focus is a list's or a menu's current item").
 
+**A pointer press that moves the focus is told at its release.** The press focuses; the app acts on
+the click. So the reader hears the move at the end of the frame the release is handled in, after
+the click's changes ("Personalization, selected", not "not selected"), and until then UI Automation
+answers the element the focus left. A drag, a key, the window coming to the front again or a second
+without the release tell it sooner. Keyboard and programmatic moves are told in their own frame.
+A selection made on the press or on the click is read with the move either way.
+
+**A `MenuBar` gives the keyboard back** to what had it before F10 or Alt, and to nothing when nothing
+had it: it keeps no focus of its own, so a reader is never told the bar.
+
 ---
 
 ## Testing focus

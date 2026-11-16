@@ -268,8 +268,8 @@ The rule now, as a WPF list box's item has the keyboard focus:
   - *One focus event a move.* The bridges take the holder when the window tells it
     (`TellA11yFocus`) and tell assistive technology at the end of the next accessibility phase,
     after its changes: F10 and Alt with a letter focused the bar, then its title a frame later, and
-    the bar's event was read last ("Menu bar menu bar"); a click that focuses and selects is now told
-    with its selection.
+    the bar's event was read last ("Menu bar menu bar"). (A click that focuses and selects was not told
+    with its selection by this: the press focuses, the release selects; see the second round.)
   - *A menu's entries are no SelectionItems* (Narrator said "selected" on each), as a Win32 or a
     WinUI menu's are not; a menu has no Selection pattern; on AT-SPI they are neither selectable nor
     selected. Lists keep theirs.
@@ -288,6 +288,38 @@ The rule now, as a WPF list box's item has the keyboard focus:
     which UI Automation counted as 6, 5 or 7).
   - *A new listing* relabels a list's items in place (an item's id is its place): a frame that takes the
     focus off an item tells no rename of it, so entering a folder in Vesper reads the new cursor only.
+- **After the second listening round (2026-11-16, on 21ec8bb6):**
+  - *A press holds the move until the release.* A click on the Fluent sample's "Personalization" read
+    "Personalization, not selected, 2 of 5" (NVDA) and nothing on the release that selected it: the
+    focus moves on the press, the app selects on the click, and neither reader speaks a SelectionItem
+    IsSelected change. A focus move made by a pointer press is now told at the end of the frame its
+    release is handled in, after the click's changes (`Window.BeginA11yPressHold` /
+    `EndA11yPressHold`, in `TellA11yFocus`): one focus event, on the item, selected. Explorer selects
+    on the press, which is why it reads "selected" there. Until the release the bridge has heard
+    nothing, so UIA's GetFocus and HasKeyboardFocus answer the element the focus left (the applied tree
+    marks the move at once, as for any move). The hold covers every tell of the press, an open menu
+    closed by it included (the menu's closing tells the element then), and the latest one is told. It
+    ends at the release whichever path takes it (a captured press, a text drag), at a drag's start, at
+    a key, at another press that moves the focus, when the window comes to the front again (a release that went
+    elsewhere), when no client listens any more, and after `Window.A11yPressHoldMaxMs` (1 s, asked for
+    as an idle deadline) at the latest. Keyboard and programmatic moves are told as before. AT-SPI
+    follows from the window: `state-changed:focused` at the release, after `state-changed:selected`.
+    Cost: a reference compare and the listening query on a press that moves the focus, a field compare
+    per tell; nothing allocated.
+  - *A menu bar gives the keyboard back to nothing when nothing had it.* F10, Right, Right, Escape read
+    "Menu bar menu bar" on Escape: with nothing focused before F10 (a click on the page clears the
+    focus) the bar kept the focus, its node with no current title the reader's target. It clears the
+    focus then (`MenuBar.Deactivate`): no focus event, HasKeyboardFocus false on the title, GetFocus
+    answers the window, as before F10; with an element focused before, the element is told again, as
+    it was (the Fluent sample's Home item, focused by a click: checked through the bridge and a real
+    client).
+  - *Vesper's Enter into a folder* tells one focus event, on the new folder's parent row, read "Parent
+    folder", 1 of N, selected, whether the rows land in the same frame or a few later
+    (`EnterFolderReaderFocusTests`); a folder that misses the 50 ms a navigation waits moves the pane
+    over its waiting block and tells the pane, then the row when its rows land.
+  - *App tests hear the real bridge:* `HultUI.Headless.HeadlessUiaReader` installs the Windows bridge on
+    a hidden window of its own for a headless session, keeps every event it raises, and answers
+    GetFocus, Name, IsSelected, HasKeyboardFocus and the place of an item as a client would.
 - **Left:** a dropdown's open list keeps the focus on the dropdown; Vesper's Brief and Thumbnails
   views and its Synchronize rows mark their cursor with `AccessibleSelected` on elements the pane
   holds, which no rule above makes the target.
