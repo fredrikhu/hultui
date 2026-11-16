@@ -907,6 +907,11 @@ The refinements once listed here are built: the UIA `Scroll` pattern, `ItemConta
 Elements expose these to UIA today (property/pattern → how to opt in):
 
 - **AutomationId** — `AutomationId("id")` (stable test selectors).
+- **IsEnabled** — `AccessibleEnabled(false)` marks an element unavailable (a button an app
+  builds from a box, drawn disabled; 2026-11-16): UIA IsEnabled, AT-SPI enabled and sensitive,
+  and the action router refuses a reader's invoke, toggle, select, expand and set-value on it.
+  As `aria-disabled` it changes nothing else (focus, pointer, keys stay); a `ButtonElement`'s own
+  `IsEnabled` still disables it either way.
 - **Name / HelpText / ControlType / IsEnabled / bounds** — from role + name. `Role`,
   `AccessibleName`, `AccessibleDescription`, `AccessibleExpanded`, `AutomationId`, `Name` (the
   name's fallback) and a check box's, radio button's or switch's `Label` tell the window when they

@@ -39,7 +39,7 @@ app.Run();
 static Element CloseButton(Window window) =>
     Box.New().Padding(new Thickness(4, 12, 4, 12))
         .CornerRadius(4f).Cursor(CursorType.Pointer)
-        .OnClick(_ => window.Close())
+        .OnClick(_ => window.RequestClose())
         .Children(Text.New("\u00D7").FontSize(14f));
 ```
 
@@ -84,9 +84,15 @@ Flex.Row().WindowDrag().Children(
     // These buttons work normally despite being inside a drag region:
     Box.New().OnClick(_ => window.Minimize()).Children(Text.New("\u2212")),
     Box.New().OnClick(_ => window.ToggleMaximize()).Children(Text.New("\u25FB")),
-    Box.New().OnClick(_ => window.Close()).Children(Text.New("\u00D7"))
+    Box.New().OnClick(_ => window.RequestClose()).Children(Text.New("\u00D7"))
 )
 ```
+
+The close button calls `RequestClose()`, not `Close()`: it raises `Window.CloseRequested`
+first, as Alt+F4, the task bar's close and the window menu's do, so an app that asks
+"Close? There is unsaved work" asks it on every way out. A handler calls `request.Cancel()`
+to keep the window open, and `window.Close()` once the user has answered. A quit (Cmd+Q, a
+signal, the session ending) asks nothing: every window closes, and `Closed` is raised.
 
 ---
 
@@ -131,7 +137,8 @@ window.Minimize();         // minimize to taskbar
 window.Maximize();         // maximize to fill screen
 window.Restore();          // restore from maximized/minimized
 window.ToggleMaximize();   // maximize if normal, restore if maximized
-window.Close();            // close the window
+window.RequestClose();     // close as the title bar's close does: asks CloseRequested first
+window.Close();            // close at once, asking nothing
 
 bool max = window.IsMaximized;  // query current state
 ```

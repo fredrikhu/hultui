@@ -54,6 +54,13 @@ public sealed partial class HeadlessWindow
     }
 
     /// <summary>
+    /// Stands in for the system asking the window to close: Alt+F4, the title bar's or the task
+    /// bar's close. Delivered by the next pump, as a real platform's request is, and then asked as
+    /// one (<see cref="HultUI.Window.CloseRequested"/>): the window closes unless the app cancels.
+    /// </summary>
+    public void AskToClose() => _platform.CloseAsked = true;
+
+    /// <summary>
     /// The display refresh rate the window reports, in Hz. 0, the default, is unknown, which the
     /// loop takes as 60 Hz. Set it to run <see cref="HeadlessSession.RunLoop"/> as on a faster
     /// display; a pump draws whenever it is asked, whatever this says.

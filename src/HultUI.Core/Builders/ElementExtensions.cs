@@ -274,6 +274,9 @@ public static class ElementExtensions
     public static T AccessibleExpanded<T>(this T el, bool expanded) where T : Element { el.AccessibleExpanded = expanded; return el; }
     /// <summary>Selected or not, for one of a set — a tab; see <see cref="Element.AccessibleSelected"/>.</summary>
     public static T AccessibleSelected<T>(this T el, bool selected) where T : Element { el.AccessibleSelected = selected; return el; }
+    /// <summary>Enabled or not, as assistive technology reads it — a custom button drawn disabled;
+    /// see <see cref="Element.AccessibleEnabled"/>. It changes only what a reader reads and can do.</summary>
+    public static T AccessibleEnabled<T>(this T el, bool enabled) where T : Element { el.AccessibleEnabled = enabled; return el; }
 
     // ──── Events ────
     public static T OnClick<T>(this T el, Action<ClickEvent> handler) where T : Element { el.On(handler); return el; }

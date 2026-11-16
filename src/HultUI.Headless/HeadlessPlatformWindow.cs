@@ -391,6 +391,10 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
         if (WindowsLike) _movedAt = (Outer.X, Outer.Y);
     }
 
+    /// <summary>The system asked the window to close (<see cref="HeadlessWindow.AskToClose"/>), for
+    /// the next pump to hand on, as a real platform's close request.</summary>
+    internal bool CloseAsked { get; set; }
+
     /// <summary>The pump: delivers the posted commands in order, then raises <see cref="Moved"/>
     /// when the window is somewhere else than the pump last told of.</summary>
     internal void DeliverPosted()

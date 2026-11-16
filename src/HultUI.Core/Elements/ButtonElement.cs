@@ -257,7 +257,7 @@ public class ButtonElement : BoxElement
 
     internal override float RenderOpacity => _enabled ? base.RenderOpacity : base.RenderOpacity * _disabledOpacity;
 
-    internal override bool IsEnabledForAccessibility => _enabled;
+    internal override bool IsEnabledForAccessibility => _enabled && base.IsEnabledForAccessibility;
 
     private static Color Darken(Color c, float factor) => new(
         (byte)(c.R * factor),

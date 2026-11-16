@@ -79,6 +79,12 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
 
     public Element? FindElement(ElementId id) => _window.FindElement(id);
 
+    /// <summary>The element a reader's action goes to, or null when it is gone or not enabled
+    /// (<see cref="Element.AccessibleEnabled"/>, a disabled button): a reader read it as
+    /// unavailable, and a box the app marked so still ran its click handler when invoked.</summary>
+    private Element? EnabledElement(ElementId id) =>
+        FindElement(id) is { IsEnabledForAccessibility: true } element ? element : null;
+
     // ──── IAccessibilityActionHost — the actions the platform bridges route to.
 
     /// <summary>A described node's action goes to its source (seam W11). True if it was one.</summary>
@@ -100,7 +106,7 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
                 source.ActivateItem(index);
             return;
         }
-        if (FindElement(id) is { } element)
+        if (EnabledElement(id) is { } element)
             EventDispatcher.DispatchDirect(new ClickEvent { Position = default }, element);
     });
 
@@ -118,7 +124,7 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
         // A checkbox, a switch or a toggling button (Element.AccessibleToggled) is toggled by
         // being pressed: the click runs its own handler and anything the app hung on the click.
         // A switch had no route here and its Toggle did nothing.
-        var target = FindElement(id);
+        var target = EnabledElement(id);
         if (target is CheckboxElement or ToggleSwitchElement or { AccessibleToggled: not null })
             EventDispatcher.DispatchDirect(new ClickEvent { Position = default }, target);
     });
@@ -133,7 +139,7 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
                 source.ActivateItem(index);
             return;
         }
-        switch (FindElement(id))
+        switch (EnabledElement(id))
         {
             // A radio is selected by its click, which also clears the rest of its group: set
             // directly, the group was left with two checked.
@@ -161,7 +167,7 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
             if (FindElement(listId) is IAccessibleItemSource source) source.SetItemExpanded(index, expand);
             return;
         }
-        switch (FindElement(id))
+        switch (EnabledElement(id))
         {
             case DropdownElement dropdown:
                 dropdown.SetOpenFromAssistiveTool(expand);
@@ -211,14 +217,14 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
     /// through the element, which clamps it and tells its own change; nothing for a read-only one.</summary>
     public void SetRangeValue(ElementId id, double value) => Enqueue(() =>
     {
-        if (FindElement(id) is IRangeValueElement range && !range.IsReadOnly)
+        if (EnabledElement(id) is IRangeValueElement range && !range.IsReadOnly)
             range.SetAccessibleValue(value);
     });
 
     public void SetValue(ElementId id, string value) => Enqueue(() =>
     {
         if (ToContent(id, AccessibleContentAction.SetValue, value)) return;
-        switch (FindElement(id))
+        switch (EnabledElement(id))
         {
             // As a paste over the whole value: undoable, refused where a paste is.
             case TextInputElement input: input.SetValueFromAssistiveTool(value); break;

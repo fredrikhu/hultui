@@ -487,10 +487,33 @@ public abstract class Element
     internal virtual float RenderOpacity => _opacity;
 
     /// <summary>
-    /// Whether assistive technology should offer this element as enabled. A control with a
-    /// disabled state overrides it; everything else is enabled.
+    /// Whether assistive technology should offer this element as enabled: false when the app
+    /// marked it unavailable (<see cref="AccessibleEnabled"/>), and a control with a disabled state
+    /// of its own (a button) adds that.
     /// </summary>
-    internal virtual bool IsEnabledForAccessibility => true;
+    internal virtual bool IsEnabledForAccessibility => _accessibleEnabled;
+
+    /// <summary>
+    /// False marks an element unavailable to assistive technology: a button the app builds from a
+    /// box, drawn disabled. It is read as UIA's IsEnabled and AT-SPI's enabled and sensitive
+    /// states, and a reader can no longer invoke, toggle, select, expand or set the value of it.
+    /// True (the default) leaves it to the control; a <see cref="ButtonElement"/> is disabled
+    /// while its own <see cref="ButtonElement.IsEnabled"/> is false either way.
+    /// <para>As <c>aria-disabled</c>, it changes nothing else: the element keeps the focus, the
+    /// pointer and the keys, so an app that marks it also stops its own handlers acting. A
+    /// <see cref="ButtonElement"/> does both, and takes the element out of Tab order.</para>
+    /// </summary>
+    public bool AccessibleEnabled
+    {
+        get => _accessibleEnabled;
+        set
+        {
+            if (_accessibleEnabled == value) return;
+            _accessibleEnabled = value;
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.IsEnabled);
+        }
+    }
+    private bool _accessibleEnabled = true;
 
     /// <summary>
     /// A 2D transform (rotate/scale/translate) applied to this element and its
@@ -1759,6 +1782,7 @@ public abstract class Element
         AccessibleExpanded = source.AccessibleExpanded;
         AccessibleSelected = source.AccessibleSelected;
         AccessibleToggled = source.AccessibleToggled;
+        AccessibleEnabled = source.AccessibleEnabled;
         // App event handlers ARE copied: the incoming build is the source of truth,
         // so a retained element always runs the latest build's handlers (matching how
         // callback props like ButtonElement.Clicked already behave). Element-OWNED

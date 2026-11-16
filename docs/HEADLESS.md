@@ -90,6 +90,9 @@ A run past `limit` (default 60 s of virtual time) throws `TimeoutException`. Two
 settings shape it: `window.RefreshRate = 120` paces it as on a 120 Hz display (0, the
 default, is taken as 60), and `window.Minimized = true` stands in for the OS minimizing the
 window, which then draws nothing (its animations still run) until it is set back.
+`window.AskToClose()` stands in for the system asking the window to close (Alt+F4, the title
+bar's close): the next pump hands it on, and `Window.CloseRequested` is asked as on a real
+platform.
 
 ## Virtual Time
 
