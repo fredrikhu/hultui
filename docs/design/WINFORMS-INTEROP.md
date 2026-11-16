@@ -359,6 +359,10 @@ the interval after the last. It ticked every 8 ms whatever happened: an idle for
 now none after start-up; a 1 s toast every 3 s 64.0 → 8.1 passes a second; a post
 from a worker to its frame, median 16.2 → 0.6 ms (it waited for the next tick).
 
+**Closing belongs to the form.** A control's `Window` is never asked to close by the system:
+the form is, so `Window.CloseRequested` is not raised under this host. An app that asks
+"Close? There is unsaved work" handles `Form.FormClosing` and sets `e.Cancel`.
+
 **`HultUIControl`** is the mount point. It creates its GL context in
 `OnHandleCreated`, tears it down in `OnHandleDestroyed`, calls
 `wglSwapIntervalEXT(0)` once current, resizes the surface from `OnResize`, and

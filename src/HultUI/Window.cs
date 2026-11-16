@@ -4209,13 +4209,43 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             ClearAllFlags(children[i]);
     }
 
+    /// <summary>Closes the window at once: <see cref="CloseRequested"/> is not asked, as an app
+    /// that calls this has decided. <see cref="Closed"/> is raised.</summary>
     public void Close()
     {
         PlatformWindow.Close();
         Closed?.Invoke();
     }
 
-    internal void NotifyClosed() => Close();
+    /// <summary>
+    /// Raised when the window is asked to close, before it does: Alt+F4, the title bar's or the
+    /// taskbar's close, the window menu's, another program's WM_CLOSE, or
+    /// <see cref="RequestClose"/>. Call <see cref="WindowCloseRequest.Cancel"/> to keep it open, to
+    /// ask "Close? There is unsaved work", and call <see cref="Close"/> once the user has answered.
+    /// <para>On the UI thread, after the platform's events are taken, as <see cref="Activated"/>
+    /// is: a handler may open a dialog. Not raised by <see cref="Close"/>, nor when the
+    /// application quits (Cmd+Q, a signal, the session ending), which no window can stop: each
+    /// window still open then closes, with <see cref="Closed"/>.</para>
+    /// </summary>
+    public event Action<WindowCloseRequest>? CloseRequested;
+
+    /// <summary>
+    /// Asks the window to close as the system's close does: <see cref="CloseRequested"/> runs, and
+    /// the window closes unless a handler cancels. A custom title bar's close button calls this
+    /// rather than <see cref="Close"/>, so the app's question is asked there too. Asked again from
+    /// inside a handler, it does nothing.
+    /// </summary>
+    public void RequestClose()
+    {
+        if (!IsOpen || _closeRequesting) return;
+        var request = new WindowCloseRequest();
+        _closeRequesting = true;
+        try { CloseRequested?.Invoke(request); }
+        finally { _closeRequesting = false; }
+        // A handler may have closed the window itself.
+        if (!request.IsCancelled && IsOpen) Close();
+    }
+    private bool _closeRequesting;
 
     // ──── Overlay system (IOverlayHost) ────
 

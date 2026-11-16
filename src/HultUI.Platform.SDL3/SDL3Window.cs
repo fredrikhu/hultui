@@ -2304,6 +2304,13 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // both focuses the window and hits the control, as users expect.
         SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
 
+        // A request to close the last window is only that: no quit with it. By default SDL sends
+        // SDL_EVENT_QUIT along with the last window's close request, in the same poll, so an app
+        // that kept the window open (Window.CloseRequested, unsaved work) was quit anyway. The
+        // application ends when its last window has closed (Application.IsRunning). A quit SDL
+        // sends for anything else (Cmd+Q, SIGTERM, the session ending) still comes.
+        SDL_SetHint(SDL_HINT_QUIT_ON_LAST_WINDOW_CLOSE, "0");
+
         // Windows only: no 1 ms timer resolution for the life of the process, which SDL asks for
         // by default; the frame loop's waits ask for it while frames are paced (SdlTimerResolution).
         SdlTimerResolution.AtRest();
