@@ -690,7 +690,7 @@ public class A11yCurrentItemFocusTests
         public readonly MenuBar Bar;
         public readonly TextInputElement Document;
 
-        public MenuBarFixture()
+        public MenuBarFixture(bool focusDocument = true)
         {
             Bar = new MenuBar(
             [
@@ -704,7 +704,7 @@ public class A11yCurrentItemFocusTests
             root.On<KeyUpEvent>(e => Bar.HandleKeyUp(e));
             Rig.Session.Window.SetRoot(root);
             Settle(Rig.Session);
-            Document.Focus();
+            if (focusDocument) Document.Focus();
             Rig.Session.PumpFrames(2);
         }
 
@@ -811,6 +811,43 @@ public class A11yCurrentItemFocusTests
         Assert.True(rig.HasFocus(f.Document));
         Assert.False(rig.HasFocus(f.Title(2)));
         Assert.False(rig.HasFocus(f.BarNode().ElementId));
+    }
+
+    /// <summary>
+    /// On the Fluent sample (2026-11-16) F10, Right, Right and Escape read the titles, then "Menu bar menu
+    /// bar": with nothing focused before F10 (a click on the page clears the focus) the bar had nothing to
+    /// give the keyboard back to and kept it, with no title current, so its own node was the reader's
+    /// focus and Escape told it. The keyboard goes back to nothing now, as it was, and a reader is told no
+    /// bar: the title lets go of the focus, and nothing has it (GetFocus answers the window). F10 works
+    /// again from there.
+    /// </summary>
+    [WindowsFact]
+    public void AMenuBar_F10_RightRight_Escape_WithNothingFocused_GivesTheKeysBackToNothing_AndTellsNoBar()
+    {
+        using var f = new MenuBarFixture(focusDocument: false);
+        var rig = f.Rig;
+        Assert.Null(rig.Session.Window.Window.FocusedElement);
+
+        f.Press(KeyCode.F10);
+        Assert.Equal([f.Title(0)], rig.FocusEvents());
+        f.Press(KeyCode.Right);
+        f.Press(KeyCode.Right);
+        Assert.Equal([f.Title(2)], rig.FocusEvents());
+
+        f.Press(KeyCode.Escape);
+        Assert.Null(rig.Session.Window.Window.FocusedElement);
+        Assert.Empty(rig.FocusEvents());
+        Assert.Contains(Prop(HasKeyboardFocus, f.Title(2)), rig.Raised);
+        Assert.False(rig.HasFocus(f.Title(2)));
+        Assert.False(rig.HasFocus(f.BarNode().ElementId));
+        Assert.Null(rig.GetFocus());
+        Assert.Equal(-1, f.Bar.HighlightIndex);
+
+        f.Press(KeyCode.F10);
+        Assert.Equal([f.Title(0)], rig.FocusEvents());
+        f.Press(KeyCode.F10);
+        Assert.Null(rig.Session.Window.Window.FocusedElement);
+        Assert.Empty(rig.FocusEvents());
     }
 
     /// <summary>
