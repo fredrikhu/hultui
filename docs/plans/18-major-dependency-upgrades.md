@@ -41,6 +41,34 @@ failures, so there may be more):
 - **Pixels.** Four `OpacityLayerTests`, four `RichTextGoldenTests` (Showcase dark and light,
   tables and pictures, a selection across blocks) and `SaveFrameTests`.
 
+**What to expect for performance.** Checked on 2026-11-17 against the release notes and
+bindings, not measured. Expect modest gains in shaping text that isn't cached yet, larger on
+Linux, no free win in steady frame time, and an allocation regression to fix first.
+
+- **HarfBuzz: real but narrow gains.** Speedups documented since our versions:
+  - 10.3.0: faster OpenType kerning and ligatures (Roboto benchmark 10.3 → 9.4 ms), at about
+    1 KB more cache per font face.
+  - 11.0.x: the OpenType shaper no longer allocates.
+  - 11.3.0: glyph advances up to 24 % faster.
+  - Later releases: "various shaping speedups", without numbers.
+
+  Shaped words are cached, so these show only on a cache miss: first layout, rows scrolled into
+  view for the first time, and typing. Frames that only repaint shaped text won't change.
+- **Linux moves further than Windows.** No HarfBuzzSharp.NativeAssets.Linux 8.x was ever
+  published, so today Linux runs the 7.3.0 native library under the 8.3.1 managed binding
+  (SkiaSharp.HarfBuzz 3.119 brings HarfBuzzSharp 8.3.1.3). Windows runs 8.3.1 throughout. The
+  upgrade is 7.3 → 14.4 on Linux and 8.3.1 → 14.4 on Windows, so measure the two separately.
+- **SkiaSharp: no documented frame-time win.** The 4.148 to 4.155 release notes list API,
+  lifecycle, variable-font and security changes, none for speed. `GRContextOptions` has the same
+  six properties in 3.119.4 and 4.155, so there is still no persistent program cache for
+  start-up GPU work. Skia's internals moved 36 milestones, so the m119-tuned decisions in step 7
+  could get better or worse.
+- **A known cost first.** #2's run failed `FrameAllocationTests` and `PolygonTests`: 4.x
+  allocates on every frame where 3.119 allocates nothing (step 5).
+- **The real upside is Graphite.** 4.155 binds Skia's Graphite backend for Vulkan, Dawn and
+  Metal (`SKGraphiteContext` and related types). Using it means a new render backend for HultUI,
+  as the Vulkan work was, so it gets its own plan after this one, to be decided by measurement.
+
 **Steps:**
 
 1. **Bump all four packages together** (SkiaSharp, SkiaSharp.HarfBuzz,
@@ -51,8 +79,8 @@ failures, so there may be more):
    the file was byte-identical. If a signature changed, change the function pointer types in
    `NativeTextBlob.cs`. Then move the pin in `NativeTextBlob.cs`, `NativeTextBlobTests.cs` and
    docs/DECISIONS.md.
-3. **Recheck HarfBuzz.** `SkiaTextShaper` shapes with HarfBuzzSharp directly (e21e376), so 7.3 →
-   14 is a direct API change for us. `ShaperEquivalenceTests` must stay green against
+3. **Recheck HarfBuzz.** `SkiaTextShaper` shapes with HarfBuzzSharp directly (e21e376), so the
+   managed binding's 8.3.1 → 14 is a direct API change for us. `ShaperEquivalenceTests` must stay green against
    SkiaSharp.HarfBuzz's shaper.
 4. **Bold text.** Find out what changed in a bold run's advance (font embolden, metrics, or
    shaping) before changing any expected width. These tests guard real layout: wrapping, carets,
@@ -63,11 +91,13 @@ failures, so there may be more):
    with `HULTUI_UPDATE_GOLDENS`. Windows and Linux must still produce identical PNG bytes.
 7. **Perf.** Several decisions were measured against Skia m119: the run-blob maps, the whole-pixel
    baseline for the GPU text-blob cache (docs/DECISIONS.md, 2026-11-02), and the opacity layer
-   bounds. Run an idle-gated perf-suite A/B and re-measure any decision that names m119.
+   bounds. Run an idle-gated perf-suite A/B and re-measure any decision that names m119. Include
+   text that isn't cached yet (first layout, scrolling into new rows, typing) on both OSes,
+   because that is where HarfBuzz's changes show.
 8. **Real windows.** Run GL and Vulkan, HDR video on an HDR display, live resize, and Native AOT
-   publishes of each app. Check whether 4.x removes the 3.119 limits that docs/design/HDR-LOG.md
-   and `SdlVulkanHost.cs` describe: no persistent program cache, a fence on acquire, and
-   `GRContextOptions` with few options. If it does, record each one as its own follow-up.
+   publishes of each app. Of the 3.119 limits that docs/design/HDR-LOG.md and `SdlVulkanHost.cs`
+   describe, `GRContextOptions` is unchanged in 4.155, so the missing program cache stays. Check
+   whether the fence on acquire can go, and record anything that can as its own follow-up.
 
 **Done when** the full suite is green on both operating systems, every golden change has been
 reviewed and explained, the perf A/B shows no regression, and the real-window check has passed.
