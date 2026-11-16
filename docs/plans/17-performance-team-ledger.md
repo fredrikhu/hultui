@@ -14,12 +14,13 @@ file after every step and commits it with the step's work. Full survey reports a
   them), `archive_r15.py`, `merge_r15.py`, all in session 8e8ba33b's scratchpad
   `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\8e8ba33b-db33-43fa-885a-cb6b82b7253f\scratchpad\`.
   For round 16's start: move round 14's Landed rows, round 15's build order and its answered questions 62, 63 and 65 to
-  the archive (question 64 stays open), as `archive_r15.py` did. Open for the user, not blocking: another F16 held-drag
-  run (Waiting) only with a new approval. The live screen-reader check RAN 2026-11-15 and decided nothing (log): no
-  build's keyboard moves in lists or menus reach either reader, so questions 50 and 64 wait for that fix and a second
-  check (builds, `CHECKLIST.md` and the notes `NOTES-narrator.md` / `NOTES-nvda.md` in `sr-variants\` in that
-  scratchpad; patches in `sr-variants\patches\`). Outside plan 17: CI's Linux job runs no Junction, Meridian, Aperture or
-  Reel tests; the keyboard-move bug (a11y-keyboard-moves-silent, log 2026-11-15).
+  the archive, as `archive_r15.py` did; questions 50 and 64 are answered too (2026-11-16) and go once round 16's build
+  order names their items. **Round 16 builds a11y-gate-on-client (question 50: build) and a11y-items-on-demand-sooner
+  (question 64: (a), Windows only)**; the prototypes are `sr-variants\patches\gate.patch` and `items200.patch`. **The
+  screen-reader fix (a11y-keyboard-moves-silent, 9b7513d1..9550ecec, outside plan 17) is on this branch, not on main**:
+  it goes to main with round 16's release, and round 16's survey treats it as already reviewed. Open for the user, not
+  blocking: another F16 held-drag run (Waiting) only with a new approval. Outside plan 17: CI's Linux job runs no
+  Junction, Meridian, Aperture or Reel tests; AT-SPI/Orca is unchecked for the screen-reader fix.
   To resume in a fresh context, run in this worktree: `/loop Run the next step of
   the performance team: follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
   Read both once per session (afterwards only the ledger's Phase and the part the step needs), do the step the ledger's
@@ -294,7 +295,7 @@ Re-ranked by the next survey.
 - **vesper-start-focus-event** (7, lead) — at start Vesper raises a focus-changed event for a window that never had the
   foreground (round 13: 5 of 5 launches), and in 2 of 5 refuses a leaf patch and builds a second tree (~53 KB), start
   only. Cause not isolated; not perf.
-- **a11y-gate-on-client** (7; question 50: not yet; the 2026-11-15 live check could not decide it, log) — build the tree and raise events only after a UIA client asks for
+- **a11y-gate-on-client** (7; question 50: **BUILD**, 2026-11-16, after the second live check passed in both orders, log; round 16) — build the tree and raise events only after a UIA client asks for
   the window's root. Round 13 (r13-7): 0 root asks in 22 launches; the bridge costs Junction +40 % UI bytes at start and
   +29 % a commit-walk key, Vesper +29 % a drag. New risk evidence: a desktop-wide listener receives our bounds,
   structure, name and focus events (13 provider calls each) without ever asking for the root; a gate would cut it off.
@@ -312,7 +313,8 @@ Re-ranked by the next survey.
   Round 14 (r14-5): after step 1 (a) row-start segments are 88 of 951 calls (zh) and 118 of 681 (ja) at 1200;
   short words (under 8 characters) cut at need are the largest share (461 of 951); giving 2–7 character words their cuts
   in the tables halves a new width's calls but costs opening +248 KB (zh) / +121 KB (ja): a trade.
-- **a11y-items-on-demand-sooner** (7; with question 50's live check; r14-7 Candidate 2) — serve a virtual list's items on
+- **a11y-items-on-demand-sooner** (7; question 64: **(a), Windows only**, 2026-11-16, after the second live check passed,
+  log; Linux stays at 2,000 until an Orca check; round 16; r14-7 Candidate 2) — serve a virtual list's items on
   demand above ~200 items, not 2,000 (`MaxEagerVirtualItems`, AccessibilityTreeBuilder.cs:18). AOT prototype, real
   windows with the desktop listener: Junction start 2,239.5 → 1,867.2 KB UI (−16.6 %; a11y 426 → 54 KB), Vesper's
   viewer open 1,742.5 → 1,099.2 (−37 %), a History search's 3 keys 2,840 → 718 provider calls, whole-tree builds for an
@@ -868,8 +870,9 @@ No question is open from rounds 1–14. Their answered questions are in the arch
 [round 10, with round 9's 26 and the earlier 10](17-performance-team-ledger-archive.md#needs-the-user-round-10),
 [round 9](17-performance-team-ledger-archive.md#needs-the-user-round-9), [round 8](17-performance-team-ledger-archive.md#needs-the-user-round-8),
 [round 7](17-performance-team-ledger-archive.md#needs-the-user-round-7), [round 6](17-performance-team-ledger-archive.md#needs-the-user-round-6)). Search it by candidate id
-before asking anything an earlier round asked. Recommendations in brackets. Question 50 (a11y-gate-on-client)
-and 51 (after-layout-callback) were answered "not yet" and "only if another app needs it"; both are Waiting.
+before asking anything an earlier round asked. Recommendations in brackets. Question 50 (a11y-gate-on-client) was
+answered "not yet", then **build** (2026-11-16, after the second live check); 51 (after-layout-callback) "only if
+another app needs it" (Waiting).
 Round 14's a11y-items-on-demand-sooner and apps-junction-ref-move-a11y wait with question 50 (Waiting); question
 57 (text-open-measures-every-line, full) was answered "not now" (Waiting).
 
@@ -911,7 +914,8 @@ Round 15 questions. Recommendations in brackets.
     a11y-item-renames-unfetched: items no UIA client fetched raise no Name change (UIA only, smaller; the renaming walk
     stays). [(a), checked with the readers; (b) if (a) is declined.] Live check 2026-11-15: today and items200 sound
     the same to both readers, as neither reads any row a keyboard move reaches (log); decide after
-    a11y-keyboard-moves-silent is fixed and the readers check again.
+    a11y-keyboard-moves-silent is fixed and the readers check again. → **(a), Windows only** (2026-11-16, after the
+    second live check: items200 on the fix reads the same as without it in both readers; Linux keeps 2,000 until Orca).
 65. **junction-history-highlight-prefetch** (r15-4; step 10): each History rest tokenizes the opening file's two
     versions for the Commit tab, which may never be opened: a first walk of 120 Downs at 250 ms costs 3.13 MB a key on
     all threads against 0.90 with the colours cached (−71 %), app GCs 23/6/1 → 6/2/0 (UI-thread bytes the same).
@@ -1227,3 +1231,14 @@ From 2026-11-13 (round 14's survey); earlier entries are in the archive ([to 202
   "not selected" (the state as of before the rebuild). The gate logged each open "root asked, tree built at once":
   4 for Fluent, 2 each for Vesper and Junction. **a11y-keyboard-moves-silent** is not perf and is outside plan 17; the
   readers check questions 50 and 64 again after it is fixed. AT-SPI/Orca is unchecked.
+- 2026-11-16: **a11y-keyboard-moves-silent fixed on the branch** (9b7513d1..9550ecec, not on main; outside plan 17).
+  A reader's focus is now a list's or a menu's current item (AccessibilityNode.CurrentItem, AccessibilityFocus.TargetOf),
+  told as one focus event per move at the end of the frame (IAccessibilityBridge.NotifyChangesApplied). Also: n of N on
+  items and menu bar titles, menu entries are no SelectionItems, activation re-tells the focus, a pointer press's move
+  is told at its release, F10 then Escape with nothing focused clears the focus, and the Fluent nav items and Junction's
+  MR rows say whether they are selected. Tests include a real UIA client (HultUI.UiTests ReaderFocusTests) and
+  HeadlessUiaReader for app tests. Five listening runs (Narrator, then NVDA; `sr-variants\fixed*`, notes
+  `NOTES-fixed*.md`): the last on `fixed4` had every step right in both readers. The second variant check on the fix
+  (`items200-fixed`, `gate-fixed`) read the same as `fixed4` in both readers; for the gate, both reader-first and
+  app-first for Vesper, Junction and Fluent, 13 launches, each logged "root asked, tree built at once". **Answers:
+  question 50 → build; question 64 → (a), Windows only.** Both go to round 16's build.
