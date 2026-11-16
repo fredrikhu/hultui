@@ -18,12 +18,12 @@
          GHSA-7j59-v9qr-6fq9, so every Kiota package is pinned forward to 1.22.2 — same
          major, binary-compatible with the generated code. -->
     <PackageReference Include="Jellyfin.Sdk" Version="2025.10.21" />
-    <PackageReference Include="Microsoft.Kiota.Abstractions" Version="1.22.2" />
-    <PackageReference Include="Microsoft.Kiota.Http.HttpClientLibrary" Version="1.22.2" />
-    <PackageReference Include="Microsoft.Kiota.Serialization.Form" Version="1.22.2" />
-    <PackageReference Include="Microsoft.Kiota.Serialization.Json" Version="1.22.2" />
-    <PackageReference Include="Microsoft.Kiota.Serialization.Multipart" Version="1.22.2" />
-    <PackageReference Include="Microsoft.Kiota.Serialization.Text" Version="1.22.2" />
+    <PackageReference Include="Microsoft.Kiota.Abstractions" Version="2.1.6" />
+    <PackageReference Include="Microsoft.Kiota.Http.HttpClientLibrary" Version="2.1.6" />
+    <PackageReference Include="Microsoft.Kiota.Serialization.Form" Version="2.1.6" />
+    <PackageReference Include="Microsoft.Kiota.Serialization.Json" Version="2.1.6" />
+    <PackageReference Include="Microsoft.Kiota.Serialization.Multipart" Version="2.1.6" />
+    <PackageReference Include="Microsoft.Kiota.Serialization.Text" Version="2.1.6" />
   </ItemGroup>
 
   <ItemGroup>
