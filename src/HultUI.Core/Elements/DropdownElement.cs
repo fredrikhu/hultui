@@ -82,8 +82,10 @@ public class DropdownElement : Element
             int clamped = Math.Max(-1, Math.Min(value, _items.Count - 1));
             if (_selectedIndex == clamped) return;
             _selectedIndex = clamped;
-            AccessibleName = SelectedItem ?? Placeholder;
             MarkPaintDirty();
+            // The node is made again: the choice is its value, and its name too when the app gave
+            // none (AccessibilityTreeBuilder.ResolveName). Writing the choice into AccessibleName
+            // replaced the name an app gave, "Group of computer X" read as "b".
             NotifyAccessibilityPropertyChanged(AccessibilityProperties.Value);
         }
     }
@@ -127,7 +129,6 @@ public class DropdownElement : Element
     {
         var dd = new DropdownElement { Items = items };
         dd.SelectedIndex = selectedIndex;
-        dd.AccessibleName = dd.SelectedItem ?? dd.Placeholder;
         return (DropdownElement)dd.WithOrigin(file, line);
     }
 

@@ -260,6 +260,11 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     /// <summary>Optional per-range text colors (syntax highlighting and similar), in
     /// whole-buffer UTF-16 offsets. Purely a paint concern — never affects wrapping or
     /// measurement. Each visible line slices the spans it overlaps.
+    /// <para>A span's <see cref="TextSpan.Color"/>, <see cref="TextSpan.Background"/> and
+    /// <see cref="TextSpan.Decoration"/> are drawn. Its weight, slant, size and family are not:
+    /// they change how wide the characters are, and the area places its caret, selection and
+    /// lines in its one style. For bold or italic runs, use a RichTextEditor (read-only, it is a
+    /// viewer) or a TextElement with spans.</para>
     /// <para>Sorted by start. They may overlap, as a search tint's background over a syntax
     /// colour does. The list is indexed the first time it is drawn — where each line's spans
     /// begin — and kept by reference: to change the spans, hand a new list rather than
@@ -2280,7 +2285,9 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
             if (hasSpan && (!hasHighlight || span.Start <= highlight.Start))
             {
                 int start = Math.Max(span.Start, lineStart);
-                result.Add(new TextSpan(start - lineStart, Math.Min(span.End, lineEnd) - start, span.Color, span.Background));
+                // Colour, background and decoration: what paints and measures nothing (see Spans).
+                result.Add(new TextSpan(start - lineStart, Math.Min(span.End, lineEnd) - start, span.Color,
+                    span.Background, span.Decoration));
                 hasSpan = NextOnLine(spans, ref si, spanCount, lineStart, lineEnd, out span);
             }
             else

@@ -2,6 +2,7 @@ using System.Collections;
 using HultUI.Core.Elements;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
+using HultUI.Core.Styling;
 using HultUI.Testing;
 using Xunit;
 
@@ -167,6 +168,21 @@ public class TextAreaHighlightLineTests
         var line = area.SpansForLine(25_000, 25_049);
         Assert.Equal([new TextSpan(0, 3, default, Tint)], line);
         Assert.InRange(highlights.Reads, 1, 3);
+    }
+
+    /// <summary>A span's decoration is drawn, as its colour is: it measures nothing. Its weight and
+    /// slant are not, since the area lays its lines out in its one style. The line's spans were made
+    /// before spans had a decoration, and dropped it.</summary>
+    [Fact]
+    public void ASpansDecoration_IsDrawn_ButNotItsWeightOrSlant()
+    {
+        var area = TextAreaElement.New("");
+        area.Spans = [new TextSpan(2, 4, Ink, Decoration: TextDecoration.Underline,
+            Weight: FontWeight.Bold, Slant: FontSlant.Italic)];
+
+        var line = area.SpansForLine(0, 10);
+
+        Assert.Equal([new TextSpan(2, 4, Ink, default, TextDecoration.Underline)], line);
     }
 
     [Fact]

@@ -472,6 +472,45 @@ public class TextPipelineTests
         Assert.Equal(60, layout.Lines[0].Width, 0.1f);
     }
 
+    /// <summary>
+    /// A width that came back through the layout engine's sums a float error short of the line's
+    /// own holds the line whole, clipped or wrapped. With a letter spacing of 0.4 the width is no
+    /// binary fraction, and "SAME DAY" lost its last character to the clip ("SAME DA"), or "DAY"
+    /// to a second line.
+    /// </summary>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(null)]
+    public void AWidthAFloatErrorShortOfTheLinesOwn_StillHoldsItWhole(int? maxLines)
+    {
+        var pipeline = CreatePipeline(charWidth: 6.5f);
+        var style = DefaultStyle with { FontSize = 11f, LetterSpacing = 0.4f };
+        float own = pipeline.Layout("SAME DAY", style, float.PositiveInfinity, null).Size.Width;
+
+        // What a 12 px padding added and taken off again gives back for it, and a few ulps below.
+        float back = (own + 12f) - 12f;
+        foreach (float width in new[] { back, MathF.BitDecrement(own), own - 0.001f })
+        {
+            var layout = pipeline.Layout("SAME DAY", style, width, maxLines);
+            Assert.Single(layout.Lines);
+            Assert.Equal(8, layout.Lines[0].Length);
+        }
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(null)]
+    public void AWidthReallyShortOfTheLinesOwn_StillClipsOrWraps(int? maxLines)
+    {
+        var pipeline = CreatePipeline(charWidth: 6.5f);
+        var style = DefaultStyle with { FontSize = 11f, LetterSpacing = 0.4f };
+        float own = pipeline.Layout("SAME DAY", style, float.PositiveInfinity, null).Size.Width;
+
+        var layout = pipeline.Layout("SAME DAY", style, own - 0.05f, maxLines);
+
+        Assert.True(layout.Lines.Count > 1 || layout.Lines[0].Length < 8);
+    }
+
     [Fact]
     public void LetterSpacing_ProducesDistinctLayoutFromDefault()
     {

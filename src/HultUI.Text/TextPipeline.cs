@@ -46,6 +46,15 @@ public sealed class TextPipeline
     private Dictionary<ResolvedInheritedStyle, TextPrefixMeasurer>? _prefixMeasurers;
     private const int PrefixMeasurerCacheMaxSize = 64;
 
+    // How far a width may fall short of one line's own and still hold it whole: float error, not
+    // overflow. A label sized to its text gets its width back through the layout engine's sums (its
+    // padding added, then taken off), and when that lands a bit below what the text measured, the
+    // line lost its last character to the clip, or its last word to a wrap: "SAME DAY" drew as
+    // "SAME DA". Widths that are not binary fractions lose that bit (a letter spacing of 0.4, a font
+    // size of 13.333); HarfBuzz's advances alone are exact. A line this much too wide overhangs its
+    // box by nothing that draws. Not on the styled or BiDi paths, whose fits are their own.
+    internal const float OneLineFitTolerance = 1f / 256f;
+
     // ── How much the caches above may hold ──
     //
     // An application keeps one pipeline for its whole life, so what these caches hold stays
@@ -490,7 +499,8 @@ public sealed class TextPipeline
         // Single line that fits: the whole layout is width-independent, so the
         // shaped result is returned directly for any width that accommodates it.
         // Nothing is truncated, so the overflow mode is irrelevant here.
-        if (!shaped.HasNewline && shaped.TotalWidth <= maxWidth)
+        // Fits by OneLineFitTolerance: see there.
+        if (!shaped.HasNewline && shaped.TotalWidth <= maxWidth + OneLineFitTolerance)
         {
             sameFromWidth = shaped.TotalWidth;
             return shaped.SingleLine!;

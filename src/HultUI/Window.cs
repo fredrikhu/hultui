@@ -2052,6 +2052,12 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // style/layout so its effect is visible this frame.
         TreeDiffer.DrainDeferred();
 
+        // A tooltip whose owner has left the window since the last frame (removed by posted work,
+        // a key handler, a rebuild drained above, or its overlay closing) is not drawn over what
+        // replaced it: showing, or coming due this pass. SettleHover would close it only after
+        // this frame's present, and a lock screen that replaced the content would show the name.
+        if (_tooltipOwner is { } tipOwner && !IsShownInWindow(tipOwner)) HideTooltip();
+
         // Whether this frame has anything to draw. A frame only accessibility asked for (a
         // coalesced refresh coming due between keys of a walk, a client attaching) runs the
         // accessibility phase and stops there, as a minimized window's does: drawing it painted
@@ -4717,8 +4723,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     {
         _tooltipDelayTween = null;
 
-        // Owner may have been removed from tree during the delay
-        if (owner.OverlayHost is null) return;
+        // Owner may have left the window during the delay: removed itself, or under an ancestor
+        // that was (which keeps the owner's OverlayHost), or in an overlay that has closed.
+        if (owner.OverlayHost is null || !IsShownInWindow(owner)) return;
 
         var theme = Application.Theme;
         var tt = theme.Tooltip;
@@ -5173,7 +5180,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         FailFrameSaves();
         if (_tracer.IsRecording && !string.IsNullOrEmpty(_envTracePath))
             _tracer.StopRecording(_envTracePath);
-        PlatformWindow.InputReceived -= HandleInputEvent;
+        // The handler the constructor subscribed: the logging one while a frame log is on.
+        PlatformWindow.InputReceived -= FrameLog.On ? HandleInputEventLogged : HandleInputEvent;
         (_accessibilityBridge as IDisposable)?.Dispose();
         PlatformWindow.Dispose();
     }

@@ -4,6 +4,7 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Primitives;
 using Xunit;
+using static HultUI.Headless.HeadlessExpect;
 
 namespace HultUI.Headless.Tests;
 
@@ -208,6 +209,54 @@ public class DropdownTests
         session.PumpFrame();
 
         Assert.NotNull(session.Window.FindByRole(AccessibilityRole.ComboBox, "Alpha"));
+    }
+
+    /// <summary>
+    /// A name the app gave says what the dropdown is for, and stays when the choice changes,
+    /// by code or by the user; the choice is the node's value. The control wrote its choice into
+    /// its accessible name, so a reader heard "Beta" and nothing of what it was a choice of.
+    /// </summary>
+    [Fact]
+    public void ANameTheAppGave_StaysThroughAChoice_AndTheChoiceIsTheValue()
+    {
+        using var session = HeadlessSession.Create();
+        var dropdown = Dropdown.New(Options, 0).AccessibleName("Group of computer X");
+        session.Window.SetRoot(Box.New().Padding(new Thickness(40)).Children(dropdown));
+        session.PumpFrame();
+
+        var node = session.Window.FindByRole(AccessibilityRole.ComboBox, "Group of computer X");
+        Assert.Equal("Alpha", node?.Value);
+
+        dropdown.SelectedIndex = 1;
+        session.PumpFrame();
+        node = session.Window.FindByRole(AccessibilityRole.ComboBox, "Group of computer X");
+        Assert.Equal("Beta", node?.Value);
+
+        dropdown.Focus();
+        session.Window.PressKey(KeyCode.Enter);
+        session.Window.PressKey(KeyCode.End);
+        session.Window.PressKey(KeyCode.Enter);
+        session.PumpFrame();
+        node = session.Window.FindByRole(AccessibilityRole.ComboBox, "Group of computer X");
+        Assert.Equal("Gamma", node?.Value);
+        Expect(session.GetByRole(AccessibilityRole.ComboBox, "Group of computer X")).ToHaveValue("Gamma");
+    }
+
+    /// <summary>One the app did not name reads as its choice, with no value to say it twice.</summary>
+    [Fact]
+    public void WithNoNameFromTheApp_TheChoiceIsTheName_AndFollowsIt()
+    {
+        using var session = HeadlessSession.Create();
+        var dropdown = Mount(session, selected: -1);
+
+        var node = session.Window.FindByRole(AccessibilityRole.ComboBox);
+        Assert.Equal((dropdown.Placeholder, null), (node?.Name, node?.Value));
+
+        dropdown.SelectedIndex = 2;
+        session.PumpFrame();
+        node = session.Window.FindByRole(AccessibilityRole.ComboBox);
+        Assert.Equal(("Gamma", null), (node?.Name, node?.Value));
+        Assert.Null(dropdown.AccessibleName);
     }
 
     [Fact]
