@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
+using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Primitives;
@@ -848,6 +849,228 @@ public class A11yCurrentItemFocusTests
         f.Press(KeyCode.F10);
         Assert.Null(rig.Session.Window.Window.FocusedElement);
         Assert.Empty(rig.FocusEvents());
+    }
+
+    // ── A press that moves the focus ──
+
+    /// <summary>The Fluent sample's navigation: items that hold the focus, one selected, the selection
+    /// moved by a click, which rebuilds the list (as the sample's page switch does).</summary>
+    private sealed class NavList : Component
+    {
+        public int Current;
+        public int Clicks;
+        public readonly string[] Names = ["Home", "Personalization", "Gallery", "Rich text", "About"];
+
+        public override Element Build() => Flex.Column(gap: 4).Children(
+        [
+            .. Names.Select((name, i) =>
+            {
+                var item = Flex.Row().Height(30)
+                    .AccessibleRole(AccessibilityRole.ListItem).AccessibleName(name).AccessibleSelected(i == Current)
+                    .OnClick(_ => { Clicks++; Current = i; MarkDirty(); })
+                    .Children(TextB.New(name));
+                item.IsFocusable = true;
+                return (Element)item;
+            }),
+            Button.New("Elsewhere"),
+        ]);
+    }
+
+    private static (UiaRig Rig, NavList Nav) NavRig()
+    {
+        var rig = new UiaRig();
+        var nav = new NavList();
+        rig.Session.Window.SetRoot(nav.Mount());
+        Settle(rig.Session);
+        NavItem(rig, 0).Focus();
+        rig.Session.PumpFrame();
+        rig.Raised.Clear();
+        return (rig, nav);
+    }
+
+    private static Element NavItem(UiaRig rig, int index) =>
+        rig.Session.Window.FindByRole(AccessibilityRole.ListItem, new NavList().Names[index])!.Element;
+
+    private static Point Middle(Element element)
+    {
+        var box = element.Layout.AbsoluteBorderBox;
+        return new Point(box.X + box.Width / 2, box.Y + box.Height / 2);
+    }
+
+    /// <summary>
+    /// A click on the Fluent sample's "Personalization" read "Personalization, not selected, 2 of 5" in
+    /// NVDA and nothing more (2026-11-16): the press moved the focus and its frame told it, and the click
+    /// selected the item on the release, a property change neither reader speaks. The move is told at the
+    /// end of the release's frame now, after the click's selected state: one focus event, on the item,
+    /// which answers selected. Until the release the reader's focus stays where it was.
+    /// </summary>
+    [WindowsFact]
+    public void APressThatMovesTheFocus_IsToldAtTheRelease_AfterWhatTheClickSelected()
+    {
+        var (rig, nav) = NavRig();
+        using var _ = rig;
+        var home = NavItem(rig, 0);
+        var personalization = NavItem(rig, 1);
+        var at = Middle(personalization);
+
+        rig.Session.Window.MouseDown(at.X, at.Y);
+        rig.Session.PumpFrame();
+        Assert.Same(personalization, rig.Session.Window.Window.FocusedElement);
+        Assert.Empty(rig.FocusEvents());
+        Assert.DoesNotContain(rig.Raised, e => e.Id == HasKeyboardFocus);
+        // The reader's focus has not moved: GetFocus and HasKeyboardFocus agree on the item it left.
+        Assert.Equal(home.Id, rig.GetFocus());
+        Assert.True(rig.HasFocus(home));
+        Assert.False(rig.HasFocus(personalization));
+
+        rig.Session.PumpFrames(3);
+        Assert.Empty(rig.FocusEvents());
+
+        rig.Session.Window.MouseUp(at.X, at.Y);
+        rig.Session.PumpFrame();
+        Assert.Equal(1, nav.Clicks);
+        Assert.Same(personalization, NavItem(rig, 1));   // the rebuild patched the item it focused
+        Assert.Equal([personalization.Id], rig.FocusEvents());
+        int selected = rig.Raised.IndexOf(Prop(IsSelected, personalization.Id));
+        Assert.InRange(selected, 0, rig.Raised.IndexOf(Focus(personalization.Id)));
+        Assert.Contains(Prop(IsSelected, home.Id), rig.Raised);
+        Assert.True(rig.Answer(personalization.Id, IsSelected));
+        Assert.Equal(personalization.Id, rig.GetFocus());
+        Assert.True(rig.HasFocus(personalization));
+        Assert.False(rig.HasFocus(home));
+
+        rig.Raised.Clear();
+        rig.Session.PumpFrames(3);
+        Assert.Empty(rig.FocusEvents());
+
+        // A click in one frame, press and release together, is told once in it.
+        var gallery = NavItem(rig, 2);
+        rig.Session.Window.Click(Middle(gallery).X, Middle(gallery).Y);
+        rig.Session.PumpFrame();
+        Assert.Equal([gallery.Id], rig.FocusEvents());
+        Assert.True(rig.Answer(gallery.Id, IsSelected));
+    }
+
+    /// <summary>The keyboard's moves are told in their own frame, as before: Tab from an item.</summary>
+    [WindowsFact]
+    public void AKeyboardMove_IsToldInItsFrame_AsBefore()
+    {
+        var (rig, _) = NavRig();
+        using var _r = rig;
+        rig.Session.Window.PressKey(KeyCode.Tab);
+        rig.Session.PumpFrame();
+        Assert.Equal([NavItem(rig, 1).Id], rig.FocusEvents());
+    }
+
+    /// <summary>
+    /// A press whose release does not come still has its move told: when the press becomes a drag (no
+    /// click comes of it, and a drag out of the window takes the release), when a key is pressed, when the
+    /// window comes to the front again (the release went to another window), and once
+    /// <see cref="HultUI.Window.A11yPressHoldMaxMs"/> has gone by. Each once; the release that comes late
+    /// tells nothing more.
+    /// </summary>
+    [WindowsTheory]
+    [InlineData("drag")]
+    [InlineData("key")]
+    [InlineData("activation")]
+    [InlineData("time")]
+    public void APressWhoseReleaseDoesNotCome_StillHasItsMoveTold_Once(string how)
+    {
+        var (rig, nav) = NavRig();
+        using var _ = rig;
+        var item = NavItem(rig, 3);
+        item.Draggable = how == "drag";
+        var at = Middle(item);
+        rig.Session.Window.MouseDown(at.X, at.Y);
+        rig.Session.PumpFrame();
+        Assert.Same(item, rig.Session.Window.Window.FocusedElement);
+        Assert.Empty(rig.FocusEvents());
+
+        switch (how)
+        {
+            case "drag":
+                rig.Session.Window.MoveMouse(at.X + 40, at.Y + 60);
+                rig.Session.PumpFrame();
+                break;
+            case "key":
+                rig.Session.Window.KeyDown(KeyCode.F13);
+                rig.Session.PumpFrame();
+                break;
+            case "activation":
+                rig.Session.Window.Window.RaiseActivated();
+                rig.Session.PumpFrame();
+                break;
+            case "time":
+                rig.Session.PumpFrame(TimeSpan.FromMilliseconds(HultUI.Window.A11yPressHoldMaxMs / 2));
+                Assert.Empty(rig.FocusEvents());
+                rig.Session.AdvanceTime(TimeSpan.FromMilliseconds(HultUI.Window.A11yPressHoldMaxMs / 2 + 1));
+                rig.Session.PumpFrame();
+                break;
+        }
+        Assert.Equal([item.Id], rig.FocusEvents());
+        Assert.Equal(item.Id, rig.GetFocus());
+
+        rig.Raised.Clear();
+        rig.Session.Window.MouseUp(at.X + (how == "drag" ? 40 : 0), at.Y + (how == "drag" ? 60 : 0));
+        rig.Session.PumpFrames(2);
+        Assert.Empty(rig.FocusEvents());
+        Assert.Equal(item.Id, rig.GetFocus());
+    }
+
+    /// <summary>An open context menu holds the reader's focus; a press on an item outside closes it and
+    /// moves the focus: told once, at the release, on the item the click selected — not on what had the
+    /// focus under the menu, nor at the press.</summary>
+    [WindowsFact]
+    public void APressOutsideAnOpenMenu_IsToldAtTheRelease_OnTheItemItFocused()
+    {
+        var (rig, nav) = NavRig();
+        using var _ = rig;
+        rig.Session.Window.Window.OpenMenu([Entry("Copy"), Entry("Paste")], new Point(300, 40), new MenuRequest { HighlightFirst = true });
+        rig.Session.PumpFrames(2);
+        var menu = rig.Menu();
+        Assert.Equal(Item(menu, 0), rig.GetFocus());
+        rig.Raised.Clear();
+
+        var about = NavItem(rig, 4);
+        var at = Middle(about);
+        rig.Session.Window.MouseDown(at.X, at.Y);
+        rig.Session.PumpFrames(2);
+        Assert.Empty(rig.FocusEvents());
+        rig.Session.Window.MouseUp(at.X, at.Y);
+        rig.Session.PumpFrame();
+        Assert.Equal(4, nav.Current);
+        Assert.Equal([about.Id], rig.FocusEvents());
+        Assert.True(rig.Answer(about.Id, IsSelected));
+    }
+
+    /// <summary>The same hold on Linux: state-changed:focused goes to the clicked item at the release,
+    /// after its state-changed:selected.</summary>
+    [Fact]
+    public void ATSPI_APressThatMovesTheFocus_IsToldAtTheRelease_AfterWhatTheClickSelected()
+    {
+        using var rig = new AtSpiRig();
+        var nav = new NavList();
+        rig.Session.Window.SetRoot(nav.Mount());
+        Settle(rig.Session);
+        var home = rig.Session.Window.FindByRole(AccessibilityRole.ListItem, "Home")!.Element;
+        var personalization = rig.Session.Window.FindByRole(AccessibilityRole.ListItem, "Personalization")!.Element;
+        home.Focus();
+        rig.Session.PumpFrame();
+        rig.Signals.Lines.Clear();
+
+        var at = Middle(personalization);
+        rig.Session.Window.MouseDown(at.X, at.Y);
+        rig.Session.PumpFrames(2);
+        Assert.Empty(rig.Signals.States());
+        rig.Session.Window.MouseUp(at.X, at.Y);
+        rig.Session.PumpFrame();
+        Assert.Equal(
+        [
+            Selected(home.Id, false), Selected(personalization.Id, true),
+            Focused(home.Id, false), Focused(personalization.Id, true),
+        ], rig.Signals.States());
+        Assert.True(rig.Object(personalization.Id).Focused);
+        Assert.False(rig.Object(home.Id).Focused);
     }
 
     /// <summary>

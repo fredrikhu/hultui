@@ -254,6 +254,18 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     // or menu bar's menu, which takes the keys while the focus stays on the element that had it. Null
     // while the focused element holds it, as everywhere else.
     private ContextMenuElement? _a11yMenuFocus;
+    // A pointer press that moved the focus holds what the bridge is told of the reader's focus until
+    // the press ends (EndA11yPressHold): the button, or -1; whether a tell waits, with what it tells (the
+    // latest node, and the node the bridge last heard of, from the first held tell); and when the hold
+    // gives the move up to a release that never came (A11yPressHoldMaxMs).
+    private int _a11yPressHold = -1;
+    private bool _a11yHeldTell;
+    private AccessibilityNode? _a11yHeldFocused, _a11yHeldPrevious;
+    private long _a11yPressHoldUntilMs;
+    /// <summary>How long a press holds the reader's focus move at most (<see cref="BeginA11yPressHold"/>):
+    /// a click is 80–150 ms, a slow one 300; past this a release that never arrives (a native drag that
+    /// took it, a window that lost it) has the move told without it.</summary>
+    internal const int A11yPressHoldMaxMs = 1000;
     private readonly List<Element> _a11yChain = [];
     // Kept for the layout refresh made in place (TryRefreshA11yInPlace): what it finds to change, and
     // the open overlays whose parts follow the root's children in the tree.
@@ -661,6 +673,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // the accessibility phase this asks for, after whatever the activation changes.
         if (_accessibilityBridge.IsActive)
         {
+            // A press whose release went to another window holds the move no longer.
+            EndA11yPressHold();
             _accessibilityBridge.NotifyWindowActivated();
             _a11yFocusTold = true;
         }
@@ -986,11 +1000,56 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
     /// <summary>Tells the bridge the node that holds the reader's focus now, and asks for the
     /// accessibility phase in which it tells assistive technology, once that frame's changes are
-    /// told (<see cref="IAccessibilityBridge.NotifyChangesApplied"/>): one focus event a move.</summary>
+    /// told (<see cref="IAccessibilityBridge.NotifyChangesApplied"/>): one focus event a move. While a
+    /// press holds the move (<see cref="BeginA11yPressHold"/>) it is kept for the press's end instead:
+    /// the latest node, and the node the bridge last heard of.</summary>
     private void TellA11yFocus(AccessibilityNode? focused, AccessibilityNode? previous)
     {
+        if (_a11yPressHold >= 0)
+        {
+            if (!_a11yHeldTell) _a11yHeldPrevious = previous;
+            _a11yHeldTell = true;
+            _a11yHeldFocused = focused;
+            return;
+        }
         _accessibilityBridge.NotifyFocusChanged(focused, previous);
         _a11yFocusTold = true;
+    }
+
+    /// <summary>
+    /// A pointer press is about to move the focus: what a reader is told of the move waits for the press
+    /// to end (<see cref="EndA11yPressHold"/>), and is told at the end of the frame the release is handled
+    /// in, after the click's changes. The focus moves on the press and an app acts on the click: a
+    /// navigation item selected by its click was read "not selected" from the press's frame, and its
+    /// selected state, told on the release, read by neither Narrator nor NVDA (2026-11-16). Explorer
+    /// selects on the press, so its reader reads the item selected; here the move is told with what the
+    /// click made of it. Until then UI Automation's GetFocus and HasKeyboardFocus answer the element the
+    /// focus left, as the bridge has heard nothing (the applied tree marks the move at once, as for any
+    /// move). Only when a reader listens and the focus moves; a field and a time a press.
+    /// </summary>
+    private void BeginA11yPressHold(int button)
+    {
+        // Another press while one holds (its release lost): that one's move is told first.
+        EndA11yPressHold();
+        _a11yPressHold = button;
+        _a11yPressHoldUntilMs = A11yClockMs + A11yPressHoldMaxMs;
+    }
+
+    /// <summary>
+    /// The press that held the reader's focus move ended: its release was handled (and the click it
+    /// made), it became a drag, a key was pressed, the window came to the front again, or
+    /// <see cref="A11yPressHoldMaxMs"/> went by. The move is told now, once, as the press's tells left it:
+    /// a press that focused an item, then a click handler that focused another, tells the other.
+    /// </summary>
+    private void EndA11yPressHold()
+    {
+        if (_a11yPressHold < 0) return;
+        _a11yPressHold = -1;
+        if (!_a11yHeldTell) return;
+        var (focused, previous) = (_a11yHeldFocused, _a11yHeldPrevious);
+        _a11yHeldTell = false;
+        _a11yHeldFocused = _a11yHeldPrevious = null;
+        TellA11yFocus(focused, previous);
     }
 
     /// <summary>
@@ -1776,6 +1835,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         || _a11yOwnSelection.Count > 0
         // A focus move told the bridge: the phase that tells assistive technology of it.
         || _a11yFocusTold
+        // A press held a move longer than a click (A11yPressHoldMaxMs): the phase that tells it.
+        || (_a11yHeldTell && A11yClockMs >= _a11yPressHoldUntilMs)
         || _a11yWalkDue
         // An overlay a reader sees opened or closed: its part comes or goes.
         || _a11yOverlaysCameOrWent
@@ -1802,8 +1863,12 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         long frequency = clock.TimestampFrequency;
         // Only while a client listens: otherwise the frame that clears them never comes, and
         // the loop would wake for nothing.
-        if ((_a11yLayoutRefreshPending || _a11yOverlayRefreshPending || _a11yRangeRefreshPending) && _accessibilityBridge.IsActive)
+        if ((_a11yLayoutRefreshPending || _a11yOverlayRefreshPending || _a11yRangeRefreshPending || _a11yHeldTell)
+            && _accessibilityBridge.IsActive)
         {
+            // A move a press holds is told when the hold runs out, if the release has not come by then.
+            if (_a11yHeldTell)
+                Application.Earliest(ref at, ref deadline, _a11yPressHoldUntilMs * frequency / 1000, IdleDeadline.A11yLayout);
             if (_a11yLayoutRefreshPending)
                 Application.Earliest(ref at, ref deadline, A11yLayoutDueMs(_lastA11yRebuildMs) * frequency / 1000,
                     IdleDeadline.A11yLayout);
@@ -2174,9 +2239,14 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             _a11yRangeRefreshPending = false;
             _a11yRangeChanged.Clear();
             _a11yMenuFocus = null;
+            _a11yPressHold = -1;
+            _a11yHeldTell = false;
+            _a11yHeldFocused = _a11yHeldPrevious = null;
         }
         if (a11yActive && _previousA11yTree is { } told)
         {
+            // A press held the reader's focus move longer than a click: told without its release.
+            if (_a11yPressHold >= 0 && nowMs >= _a11yPressHoldUntilMs) EndA11yPressHold();
             // Where the reader's focus is, once the frame's changes are told: an open menu's, or the
             // focused element's again when it closed (a reference compare a frame otherwise); then the
             // bridge reads the current items again, which no diff carries, once, after all of it.
@@ -2431,10 +2501,14 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// <summary>A modifier on its own is not keyboard use, nor a chord with Ctrl, Alt or Super:
     /// Ctrl+C after a click is the mouse user's shortcut, not navigation.</summary>
     private static bool IsKeyboardUse(InputEvent.KeyInput key) =>
-        key.KeyCode is not (KeyCode.ShiftLeft or KeyCode.ShiftRight or KeyCode.CtrlLeft or KeyCode.CtrlRight
-            or KeyCode.AltLeft or KeyCode.AltRight or KeyCode.SuperLeft or KeyCode.SuperRight
-            or KeyCode.CapsLock or KeyCode.NumLock or KeyCode.ScrollLock)
+        !IsModifierKey(key.KeyCode)
         && (key.Modifiers & (KeyModifiers.Ctrl | KeyModifiers.Alt | KeyModifiers.Super)) == 0;
+
+    /// <summary>A modifier or a lock key: nothing on its own.</summary>
+    private static bool IsModifierKey(KeyCode code) =>
+        code is KeyCode.ShiftLeft or KeyCode.ShiftRight or KeyCode.CtrlLeft or KeyCode.CtrlRight
+            or KeyCode.AltLeft or KeyCode.AltRight or KeyCode.SuperLeft or KeyCode.SuperRight
+            or KeyCode.CapsLock or KeyCode.NumLock or KeyCode.ScrollLock;
 
     private static KeyDownEvent NewKeyDown(InputEvent.KeyInput key) => new()
     {
@@ -2730,6 +2804,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     var focusTarget = FindFocusableAncestor(target);
                     if (!isOverlayHit || focusTarget is not null)
                     {
+                        // What a reader hears of the move waits for the click (BeginA11yPressHold).
+                        if (!ReferenceEquals(focusTarget, _focusManager.FocusedElement) && _accessibilityBridge.IsActive)
+                            BeginA11yPressHold(button.Button);
                         _focusManager.SetFocus(focusTarget, FocusReason.Pointer);
 
                         // Provide clipboard to text inputs when focused
@@ -2883,6 +2960,10 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 // a handler moves it — an arrow through a tab strip, not only Tab.
                 if (key.IsDown && IsKeyboardUse(key))
                     _focusFromKeyboard = true;
+                // A key while a press holds the reader's focus move: the move is told first, so the
+                // key's own focus move, if it makes one, is told as any key's is.
+                if (key.IsDown && _a11yPressHold >= 0 && !IsModifierKey(key.KeyCode))
+                    EndA11yPressHold();
 
                 // F12 cycles DevTools: enabled → enabled + continuous redraw → disabled
                 if (key.IsDown && key.KeyCode == KeyCode.F12 && Application.DevToolsHotkeysEnabled)
@@ -3090,6 +3171,13 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 break;
             }
         }
+
+        // The press that holds the reader's focus move let go, its release and its click handled (by
+        // whichever path above took them): the move is told now, at the end of this input's frame, after
+        // what the click changed.
+        if (_a11yPressHold >= 0 && evt is InputEvent.MouseButtonInput { IsDown: false } released
+            && released.Button == _a11yPressHold)
+            EndA11yPressHold();
 
         // The input safety net. An app handler may change what is drawn without marking
         // anything dirty (the imperative-mutation convention; HULTUI002 catches the common
@@ -3775,6 +3863,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
     private void StartInternalDrag(Point pos, KeyModifiers modifiers)
     {
+        // The press is a drag now: no click comes of it to wait for, and a drag out of the window
+        // takes its release (the modal loop below).
+        EndA11yPressHold();
         _dragSource = _potentialDragSource!;
         _potentialDragSource = null;
         _isDragging = true;

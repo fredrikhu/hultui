@@ -70,6 +70,153 @@ public sealed class ReaderFocusTests(ITestOutputHelper output)
         finally { automation.UnregisterAllEvents(); }
     }
 
+    /// <summary>The Fluent sample's navigation, as a client sees it: items that hold the focus, one
+    /// selected, the selection moved by a click (which rebuilds the list), under a menu bar.</summary>
+    private sealed class Nav : HultUI.Core.Components.Component
+    {
+        public readonly string[] Names = ["Home", "Personalization", "Gallery"];
+        public int Current;
+        public readonly MenuBar Bar = new(
+        [
+            new("&File", [new ContextMenuItem { Label = "Open" }]),
+            new("&View", [new ContextMenuItem { Label = "Zoom" }]),
+            new("&Help", [new ContextMenuItem { Label = "About" }]),
+        ]);
+
+        public override Element Build() => Flex.Column().FlexGrow(1).Children(
+        [
+            Bar.Mount(),
+            .. Names.Select((name, i) =>
+            {
+                var item = Flex.Row().Height(30)
+                    .AccessibleRole(HultUI.Core.Accessibility.AccessibilityRole.ListItem).AccessibleName(name)
+                    .AccessibleSelected(i == Current)
+                    .OnClick(_ => { Current = i; MarkDirty(); })
+                    .Children(Text.New(name));
+                item.IsFocusable = true;
+                return (Element)item;
+            }),
+        ]);
+    }
+
+    /// <summary>
+    /// Narrator and NVDA read a navigation item's click from its press, "not selected", and never its
+    /// selection, on the release (2026-11-16); and after F10, Right, Right and Escape they read the menu
+    /// bar where the focus had been. A real client hears the click once, at the release, on the item,
+    /// selected; and Escape on the item again, never on the bar. Press and release go onto SDL's queue
+    /// for this window (never the system's input), a frame apart as a hand makes them.
+    /// </summary>
+    [UiFact]
+    public unsafe void AClickOnASelectableItem_ReachesAClient_AtTheRelease_Selected_AndEscapeFromTheBarGoesBackToIt()
+    {
+        using var guard = ForegroundGuard.Begin();
+        using var app = new Application(new SdlWindowingPlatform(), "reader focus", 500, 300);
+        var nav = new Nav();
+        var root = nav.Mount();
+        root.On<HultUI.Core.Events.KeyDownEvent>(e => { if (nav.Bar.HandleKey(e)) e.StopPropagation = true; });
+        app.SetRoot(root);
+        app.RunFrame(TimeSpan.FromMilliseconds(16));
+
+        using var automation = new UIA3Automation();
+        var heard = new ConcurrentQueue<string>();
+        automation.RegisterFocusChangedEvent(element =>
+        {
+            try
+            {
+                var selected = element.Patterns.SelectionItem.PatternOrDefault?.IsSelected.ValueOrDefault;
+                heard.Enqueue($"{element.Name}{(selected is { } s ? s ? ", selected" : ", not selected" : "")}"
+                    + (element.Properties.HasKeyboardFocus.ValueOrDefault ? "" : " (no keyboard focus)"));
+            }
+            catch (Exception ex) { heard.Enqueue($"<{ex.GetType().Name}>"); }
+        });
+        string[] ours = ["Home", "Personalization", "Gallery", "File", "View", "Help", "Menu bar"];
+        List<string> Heard()
+        {
+            var list = new List<string>();
+            while (heard.TryDequeue(out var h))
+                if (ours.Any(o => h.StartsWith(o, StringComparison.Ordinal))) list.Add(h);
+            return list;
+        }
+        var window = WindowId();
+        void Push(SDL.SDL_Event e)
+        {
+            Assert.True(SDL.SDL3.SDL_PushEvent(&e));
+            Pump(app, TimeSpan.FromMilliseconds(120));
+        }
+        void Key(SDL.SDL_Scancode code)
+        {
+            foreach (bool down in new[] { true, false })
+            {
+                var e = new SDL.SDL_Event();
+                e.key.type = down ? SDL.SDL_EventType.SDL_EVENT_KEY_DOWN : SDL.SDL_EventType.SDL_EVENT_KEY_UP;
+                e.key.windowID = window;
+                e.key.scancode = code;
+                e.key.key = SDL.SDL3.SDL_GetKeyFromScancode(code, SDL.SDL_Keymod.SDL_KMOD_NONE, true);
+                e.key.down = down;
+                Push(e);
+            }
+        }
+        try
+        {
+            Pump(app, TimeSpan.FromMilliseconds(300));
+            var items = ((Element)root).Children[0].Children;
+            items[1].Focus();   // Home
+            Pump(app, TimeSpan.FromMilliseconds(500));
+            Heard();
+
+            // The press: the focus moves, a client hears nothing yet.
+            var box = items[2].Layout.AbsoluteBorderBox;   // Personalization
+            // SDL's coordinates to the window's layout units (SDL3Window.InputScale), undone.
+            float scale = ((SDL3Window)typeof(Window).GetProperty("PlatformWindow",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(app.PrimaryWindow)!).InputScale;
+            var press = new SDL.SDL_Event();
+            press.button.type = SDL.SDL_EventType.SDL_EVENT_MOUSE_BUTTON_DOWN;
+            press.button.windowID = window;
+            press.button.button = 1;   // SDL_BUTTON_LEFT
+            press.button.down = true;
+            press.button.clicks = 1;
+            press.button.x = (box.X + box.Width / 2) / scale;
+            press.button.y = (box.Y + box.Height / 2) / scale;
+            Push(press);
+            Pump(app, TimeSpan.FromMilliseconds(300));
+            Assert.Same(items[2], app.PrimaryWindow.FocusedElement);
+            Assert.Empty(Heard());
+
+            var release = press;
+            release.button.type = SDL.SDL_EventType.SDL_EVENT_MOUSE_BUTTON_UP;
+            release.button.down = false;
+            Push(release);
+            Pump(app, TimeSpan.FromSeconds(3), () => !heard.IsEmpty);
+            Pump(app, TimeSpan.FromMilliseconds(300));
+            Assert.Equal(1, nav.Current);
+            var click = Heard();
+            output.WriteLine("click: " + string.Join(" | ", click));
+            Assert.Equal(["Personalization, selected"], click);
+
+            Key(SDL.SDL_Scancode.SDL_SCANCODE_F10);
+            Key(SDL.SDL_Scancode.SDL_SCANCODE_RIGHT);
+            Key(SDL.SDL_Scancode.SDL_SCANCODE_RIGHT);
+            Key(SDL.SDL_Scancode.SDL_SCANCODE_ESCAPE);
+            Pump(app, TimeSpan.FromMilliseconds(500));
+            var keys = Heard();
+            output.WriteLine("keys: " + string.Join(" | ", keys));
+            Assert.Equal(["File", "View", "Help", "Personalization, selected"], keys);
+        }
+        finally { automation.UnregisterAllEvents(); }
+    }
+
+    private static unsafe SDL.SDL_WindowID WindowId()
+    {
+        int count;
+        var windows = SDL.SDL3.SDL_GetWindows(&count);
+        try
+        {
+            Assert.Equal(1, count);
+            return SDL.SDL3.SDL_GetWindowID(windows[0]);
+        }
+        finally { SDL.SDL3.SDL_free(windows); }
+    }
+
     /// <summary>Runs the window's frames, and its messages with them, for <paramref name="time"/> or
     /// until <paramref name="until"/> holds.</summary>
     private static bool Pump(Application app, TimeSpan time, Func<bool>? until = null)
