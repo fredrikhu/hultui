@@ -185,6 +185,9 @@ internal static partial class UiaInterop
     public const int UIA_IsContentElementPropertyId = 30017;
     public const int UIA_IsOffscreenPropertyId = 30022;
     public const int UIA_IsPasswordPropertyId = 30019;
+    /// <summary>An item's place in its set, from 1, and the set's size: what a reader says as "2 of 5".</summary>
+    public const int UIA_PositionInSetPropertyId = 30152;
+    public const int UIA_SizeOfSetPropertyId = 30153;
     public const int UIA_ControlTypePropertyId = 30003;
     public const int UIA_LocalizedControlTypePropertyId = 30004;
     public const int UIA_ValueValuePropertyId = 30045;

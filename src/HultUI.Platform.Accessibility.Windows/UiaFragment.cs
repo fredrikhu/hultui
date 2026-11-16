@@ -249,6 +249,8 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
             UiaInterop.UIA_IsEnabledPropertyId => UiaVariant.FromBool(_isEnabled),
             UiaInterop.UIA_IsOffscreenPropertyId => UiaVariant.FromBool(Node.IsOffscreen),
             UiaInterop.UIA_IsPasswordPropertyId => UiaVariant.FromBool(_isPassword),
+            UiaInterop.UIA_PositionInSetPropertyId when PlaceInSet(node) is var (at, _) && at > 0 => UiaVariant.FromInt(at),
+            UiaInterop.UIA_SizeOfSetPropertyId when PlaceInSet(node) is var (at, of) && at > 0 => UiaVariant.FromInt(of),
             UiaInterop.UIA_SelectionItemIsSelectedPropertyId when _isSelected is { } selected && OffersSelection(node)
                 => UiaVariant.FromBool(selected),
             UiaInterop.UIA_ValueValuePropertyId when _value is not null => UiaVariant.FromBStr(_value),
@@ -371,6 +373,45 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
     }
 
     // ── Helpers ──
+
+    /// <summary>
+    /// Where an item is in its set, from 1, and how many the set has; (0, 0) for a node that is in none.
+    /// A list's, a menu's or a menu bar's items are its children (its choices: a menu's separators are
+    /// none of them), an item node's place read from its id. Any other list item, menu item, tree item,
+    /// tab or radio button is one of its parent's children with its role: a set of elements that has no
+    /// container of its own (the Fluent sample's navigation, five list items among the window's other
+    /// children), whose size UI Automation worked out otherwise, and not always the same (6, 5, then 7
+    /// for those five). On the client's thread, from the node; a scan of the parent's children for the
+    /// second kind.
+    /// </summary>
+    internal static (int At, int Of) PlaceInSet(AccessibilityNode node)
+    {
+        if (node.Parent is not { } parent) return default;
+        var siblings = parent.Children;
+        if (parent.TracksCurrentItem)
+        {
+            int at = VirtualItemId.IsItem(node.ElementId) ? (int)(uint)(node.ElementId.Value & 0xFFFF_FFFFUL) : IndexOf(siblings, node);
+            return at >= 0 && at < siblings.Count ? (at + 1, siblings.Count) : default;
+        }
+        if (node.Role is not (AccessibilityRole.ListItem or AccessibilityRole.MenuItem or AccessibilityRole.TreeItem
+            or AccessibilityRole.Tab or AccessibilityRole.RadioButton))
+            return default;
+        int position = 0, count = 0;
+        for (int i = 0; i < siblings.Count; i++)
+        {
+            if (siblings[i].Role != node.Role) continue;
+            count++;
+            if (siblings[i].ElementId == node.ElementId) position = count;
+        }
+        return position > 0 ? (position, count) : default;
+    }
+
+    private static int IndexOf(IReadOnlyList<AccessibilityNode> nodes, AccessibilityNode node)
+    {
+        for (int i = 0; i < nodes.Count; i++)
+            if (nodes[i].ElementId == node.ElementId) return i;
+        return -1;
+    }
 
     /// <summary>Whether a node with a selected state offers it to UIA (SelectionItem, IsSelected): not a
     /// menu's entry, whose highlight is the focus moving to it.</summary>

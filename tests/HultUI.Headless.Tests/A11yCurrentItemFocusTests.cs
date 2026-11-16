@@ -868,6 +868,71 @@ public class A11yCurrentItemFocusTests
         public void NotifyWindowActivated() => Activations++;
     }
 
+    /// <summary>What a provider answers for PositionInSet and SizeOfSet, (0, 0) for nothing.</summary>
+    private static (int At, int Of) Place(UiaRig rig, ElementId id, bool served = false)
+    {
+        IntPtr native = served && VirtualItemId.TryDecode(id, out var listId, out int index)
+            ? rig.Bridge.NativeVirtualItem(listId, index) : rig.Bridge.NativeFragment(id);
+        Assert.NotEqual(IntPtr.Zero, native);
+        try
+        {
+            var simple = (INativeSimple)NativeProvider.LogicOf(native)!;
+            simple.GetPropertyValue(UiaInterop.UIA_PositionInSetPropertyId, out var at);
+            simple.GetPropertyValue(UiaInterop.UIA_SizeOfSetPropertyId, out var of);
+            return (at.Vt == 0 ? 0 : at.IntValue, of.Vt == 0 ? 0 : of.IntValue);
+        }
+        finally { Marshal.Release(native); }
+    }
+
+    /// <summary>
+    /// Neither reader said "n of N" in a list or a menu, and Narrator said "Home, 1 of 6", then
+    /// "Personalization, 2 of 5", then "2 of 7" for the Fluent sample's five navigation items: nothing
+    /// answered PositionInSet or SizeOfSet, and UI Automation worked them out. Now an item node, an
+    /// item served on demand, a menu's entry (its separators are no entries), a menu bar's title and a
+    /// list item among other children (a set with no container) each answer its place and its set's size.
+    /// </summary>
+    [WindowsFact]
+    public void Items_AnswerTheirPlaceInTheirSet()
+    {
+        using var rig = new UiaRig();
+        var (_, list, _, listRoot) = FocusableList(40, selected: 3);
+        var (_, served, _, servedRoot) = FocusableList(AccessibilityTreeBuilder.MaxEagerVirtualItems + 500, selected: 0);
+        var nav = new Element[5];
+        for (int i = 0; i < nav.Length; i++)
+        {
+            nav[i] = Flex.Row().Height(24).AccessibleRole(AccessibilityRole.ListItem).AccessibleName($"Page {i}")
+                .Children(TextB.New($"Page {i}"));
+            nav[i].AccessibleSelected = i == 1;
+        }
+        var (opener, openerRoot) = Opener();
+        rig.Session.Window.SetRoot(Flex.Row().Children(
+            Flex.Column().Children([Button.New("Back"), TextB.New("Title"), .. nav, Button.New("Close")]),
+            Flex.Column().FlexGrow(1).Children(listRoot, servedRoot, openerRoot)));
+        Settle(rig.Session);
+
+        Assert.Equal((4, 40), Place(rig, Item(list, 3)));
+        Assert.Equal((1_001, AccessibilityTreeBuilder.MaxEagerVirtualItems + 500), Place(rig, Item(served, 1_000), served: true));
+        Assert.Equal((2, 5), Place(rig, nav[1].Id));
+        Assert.Equal((5, 5), Place(rig, nav[4].Id));
+        Assert.Equal((0, 0), Place(rig, opener.Id));
+
+        opener.Focus();
+        rig.Session.Window.Window.OpenMenu(
+            [Entry("Dark mode"), Entry("Animations"), ContextMenuItem.Separator(), Entry("Personalization"), Entry("Controls gallery"), Entry("Rich text")],
+            new Point(20, 40), new MenuRequest { HighlightFirst = true });
+        rig.Session.PumpFrame();
+        var menu = rig.Menu();
+        Assert.Equal("Personalization", rig.Node(Item(menu, 2))!.Name);
+        Assert.Equal((3, 5), Place(rig, Item(menu, 2)));
+    }
+
+    [WindowsFact]
+    public void AMenuBarsTitles_AnswerTheirPlace()
+    {
+        using var f = new MenuBarFixture();
+        Assert.Equal((2, 3), Place(f.Rig, f.Title(1)));
+    }
+
     /// <summary>A menu's entries are no SelectionItems (Narrator said "selected" on every one); a list's
     /// items keep theirs. Item nodes and items served on demand alike, and no IsSelected change is
     /// raised for an entry.</summary>
