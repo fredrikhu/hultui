@@ -112,6 +112,29 @@ public class A11yCurrentItemFocusTests
         public AccessibilityNode Menu(int level = 0) =>
             Walk(Bridge.RootNode!).Where(n => n.Role == AccessibilityRole.Menu).ElementAt(level);
 
+        /// <summary>
+        /// What UI Automation's Parent steps from the reader's focus reach, up to the window's root: each
+        /// provider's element (the root as null), and its native object, which a client keeps as the
+        /// element's identity with its runtime id (made from the element).
+        /// </summary>
+        public List<(ElementId? Element, IntPtr Native)> FocusAncestors()
+        {
+            var chain = new List<(ElementId?, IntPtr)>();
+            var root = Bridge.NativeRootFragmentRoot();
+            Assert.Equal(0, ((UiaFragmentRoot)NativeProvider.LogicOf(root)!).GetFocus(out var at));
+            Marshal.Release(root);
+            while (at != IntPtr.Zero)
+            {
+                var logic = NativeProvider.LogicOf(at);
+                Assert.Equal(0, ((INativeFragment)logic!).Navigate(UiaInterop.NavigateDirection_Parent, out var up));
+                if (up != IntPtr.Zero)
+                    chain.Add((NativeProvider.LogicOf(up) switch { UiaFragment f => f.ElementId, _ => null }, up));
+                Marshal.Release(at);
+                at = up;
+            }
+            return chain;
+        }
+
         /// <summary>The elements the focus events went to, in order.</summary>
         public List<ElementId?> FocusEvents() =>
             Raised.Where(e => e.Kind == UiaRaisedKind.Event && e.Id == FocusChanged).Select(e => e.Element).ToList();
@@ -191,6 +214,10 @@ public class A11yCurrentItemFocusTests
         Assert.True(rig.Answer(Item(list, 3), IsKeyboardFocusable));
         Assert.False(rig.HasFocus(list));
         Assert.False(rig.HasFocus(before));
+        // The list is no focus stop of its own while its item stands for it, as Vesper's file list (whose
+        // pane holds the focus) is not: Narrator said "History list" again on every move in a focusable
+        // list, and nothing more in Vesper's.
+        Assert.False(rig.Answer(list.Id, IsKeyboardFocusable));
 
         // A key moves the selection: told as the items' selected state, then the focus on the new one,
         // with no tree built.
@@ -266,6 +293,7 @@ public class A11yCurrentItemFocusTests
         Assert.Equal([list.Id], rig.FocusEvents());
         Assert.Equal(list.Id, rig.GetFocus());
         Assert.True(rig.HasFocus(list));
+        Assert.True(rig.Answer(list.Id, IsKeyboardFocusable));
 
         rig.Raised.Clear();
         list.SelectedIndex = 0;
@@ -407,6 +435,21 @@ public class A11yCurrentItemFocusTests
         return (before, pane, list, Flex.Column().Children(before, pane));
     }
 
+    private static (BoxElement Pane, VirtualListElement<string> List) PaneOf(string name)
+    {
+        var list = VirtualListElement<string>.New().ItemHeight(20)
+            .RenderWith(t => Flex.Row().Children(TextB.New(t).FontSize(12f)))
+            .Items(Enumerable.Range(0, 30).Select(i => $"f{i:000}.txt").ToList())
+            .SelectedIndex(2)
+            .TakesAncestorFocus()
+            .FlexGrow(1);
+        var pane = Flex.Column().FlexGrow(1).Children(TextB.New("Name  Size  Date"), list);
+        pane.IsFocusable = true;
+        pane.Role = AccessibilityRole.Group;
+        pane.AccessibleName = name;
+        return (pane, list);
+    }
+
     [WindowsFact]
     public void AListThatTakesItsPanesFocus_IsTheReadersFocusWhileThePaneHoldsIt()
     {
@@ -436,6 +479,50 @@ public class A11yCurrentItemFocusTests
         rig.Session.PumpFrame();
         Assert.Equal([before.Id], rig.FocusEvents());
         Assert.False(rig.HasFocus(Item(list, 3)));
+    }
+
+    /// <summary>
+    /// NVDA said the window again on a Tab between Vesper's panes, and Narrator "History list" on every
+    /// move in Junction's History: a reader speaks the ancestors that differ from the last focus's. The
+    /// ancestors UI Automation reaches from the reader's focus are the same providers, element for
+    /// element, before and after a move, in a list that holds the focus and in one that takes its pane's,
+    /// and above the panes across a Tab from one pane to the other.
+    /// </summary>
+    [WindowsFact]
+    public void TheFocussAncestors_AreTheSameProviders_AcrossAMove_AndAboveThePanesAcrossATab()
+    {
+        using var rig = new UiaRig();
+        var (before, list, _, root) = FocusableList(30, selected: 3);
+        var (left, leftList) = PaneOf("Left pane, Downloads");
+        var (right, rightList) = PaneOf("Right pane, Documents");
+        rig.Session.Window.SetRoot(Flex.Column().Children(root, Flex.Row().FlexGrow(1).Children(left, right)));
+        Settle(rig.Session);
+
+        list.Focus();
+        rig.Session.PumpFrame();
+        var was = rig.FocusAncestors();
+        Assert.Equal(list.Id, was[0].Element);
+        list.SelectedIndex = 4;
+        rig.Session.PumpFrame();
+        Assert.Equal(Item(list, 4), rig.GetFocus());
+        Assert.Equal(was, rig.FocusAncestors());
+
+        left.Focus();
+        rig.Session.PumpFrame();
+        was = rig.FocusAncestors();
+        Assert.Equal([leftList.Id, left.Id], was.Take(2).Select(a => a.Element));
+        leftList.SelectedIndex = 5;
+        rig.Session.PumpFrame();
+        Assert.Equal(Item(leftList, 5), rig.GetFocus());
+        Assert.Equal(was, rig.FocusAncestors());
+
+        rig.Session.Window.PressKey(KeyCode.Tab);
+        rig.Session.PumpFrame();
+        Assert.Same(right, rig.Session.Window.Window.FocusedElement);
+        var now = rig.FocusAncestors();
+        Assert.Equal([rightList.Id, right.Id], now.Take(2).Select(a => a.Element));
+        // Above the panes: the same providers.
+        Assert.Equal(was.Skip(2), now.Skip(2));
     }
 
     [WindowsFact]
@@ -644,6 +731,8 @@ public class A11yCurrentItemFocusTests
         f.Press(KeyCode.F10);
         Assert.Equal(f.Title(0), rig.GetFocus());
         Assert.Equal([f.Title(0)], rig.FocusEvents());
+        Assert.False(rig.Answer(f.BarNode().ElementId, IsKeyboardFocusable));
+        Assert.True(rig.Answer(f.Title(1), IsKeyboardFocusable));
         Assert.True(rig.HasFocus(f.Title(0)));
         Assert.True(rig.Answer(f.Title(0), IsKeyboardFocusable));
         Assert.False(rig.HasFocus(f.BarNode().ElementId));

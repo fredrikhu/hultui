@@ -235,8 +235,13 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
             UiaInterop.UIA_ControlTypePropertyId => UiaVariant.FromInt(MapControlType(node.Role)),
             // A list's or a menu's item can have the reader's focus (its container's current item), as
             // a WPF list box's item can; and so can whatever has it now (a menu bar's title).
+            // Not the node that holds the focus while an item of its own stands for it: the items' container
+            // is then no focus stop of its own, as Vesper's file list and a context menu are not, which a
+            // reader walks item by item. A focusable list or menu bar holding the focus had Narrator say
+            // its name again on every move ("History list", "Menu bar menu bar").
             UiaInterop.UIA_IsKeyboardFocusablePropertyId
-                => UiaVariant.FromBool(_isFocusable || VirtualItemId.IsItem(ElementId) || _bridge.HasReaderFocus(ElementId)),
+                => UiaVariant.FromBool(_isFocusable && !_bridge.StandsForItem(ElementId)
+                    || VirtualItemId.IsItem(ElementId) || node.Parent?.TracksCurrentItem == true || _bridge.HasReaderFocus(ElementId)),
             // The reader's focus, as the bridge holds it: the node that holds the focus, or its current
             // item while it has one, and then not the holder (AccessibilityFocus). A focus move rebuilds
             // no tree, so a node's own state was the last rebuild's until the window marked it.

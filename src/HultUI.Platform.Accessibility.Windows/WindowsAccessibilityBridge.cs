@@ -946,6 +946,14 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     /// holder answers false then, as a WPF list does while its item has the focus. Any thread.</summary>
     internal bool HasReaderFocus(ElementId id) => unchecked((long)id.Value) == Volatile.Read(ref _targetIdRaw);
 
+    /// <summary>Whether <paramref name="id"/> is the node that holds the focus while one of its items
+    /// (or a list's that takes its focus) has the reader's focus. Any thread.</summary>
+    internal bool StandsForItem(ElementId id)
+    {
+        long raw = unchecked((long)id.Value);
+        return raw == Volatile.Read(ref _focusedIdRaw) && raw != Volatile.Read(ref _targetIdRaw);
+    }
+
     /// <summary>The reader's focus, for GetFocus: the provider of the target node (Fragment,
     /// AddRef'd), an item a list serves on demand made for it; Zero for none. Any thread.</summary>
     internal IntPtr NativeFocusTarget()
