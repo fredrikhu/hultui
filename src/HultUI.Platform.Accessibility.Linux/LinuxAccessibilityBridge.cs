@@ -630,9 +630,10 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
     public void NotifyChangesApplied(AccessibilityNode root)
     {
         if (!_registered || _signals is null) return;
-        bool moved = _holderMoved;
+        bool moved = _holderMoved, again = _activated;
         string? previousPath = _previousHint;
         _holderMoved = false;
+        _activated = false;
         _previousHint = null;
         if (!moved && _holderId == default && !_holderIsRoot) return;
         string? newPath = _holderId == default && !_holderIsRoot ? null : TargetPath();
@@ -652,10 +653,22 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
         // attached after the focus last moved).
         if (previousLost && previousPath != was)
             _signals.EmitStateChanged(previousPath!, "focused", active: false);
-        if (newPath is not null && newPath != was)
+        // The window came to the front: the focus is told again, as on a move, where it is.
+        if (newPath is not null && (newPath != was || again))
             _signals.EmitStateChanged(newPath, "focused", active: true);
         _focusedPath = newPath;
     }
+
+    /// <summary>The window came to the front: state-changed:focused goes out again, on the reader's
+    /// focus, once the frame's changes are told.</summary>
+    public void NotifyWindowActivated()
+    {
+        _activated = true;
+        _holderMoved = true;
+    }
+
+    // The window came to the front since the client was last told the focus. UI thread.
+    private bool _activated;
 
     // The holder changed since the client was last told the focus; and the path of the node the tree
     // marked focused before the first of those moves, which the client may not have been told of. UI thread.

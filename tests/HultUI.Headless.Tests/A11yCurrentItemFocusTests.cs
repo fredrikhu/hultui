@@ -38,6 +38,7 @@ public class A11yCurrentItemFocusTests
         public void NotifyFocusChanged(AccessibilityNode? focused) => inner.NotifyFocusChanged(focused);
         public void NotifyFocusChanged(AccessibilityNode? focused, AccessibilityNode? previous) => inner.NotifyFocusChanged(focused, previous);
         public void NotifyChangesApplied(AccessibilityNode root) => inner.NotifyChangesApplied(root);
+        public void NotifyWindowActivated() => inner.NotifyWindowActivated();
     }
 
     [SupportedOSPlatform("windows")]
@@ -812,6 +813,61 @@ public class A11yCurrentItemFocusTests
         Assert.False(rig.HasFocus(f.BarNode().ElementId));
     }
 
+    /// <summary>
+    /// A click on the window, or Alt+Tab to it, read nothing in either reader, or the window only
+    /// (2026-11-16): WPF, WinForms and Explorer raise a focus event on the focused element as their
+    /// window comes to the front. Each activation now raises one, on the reader's focus (here a list's
+    /// current item), in the frame after it; none while no client listens.
+    /// </summary>
+    [WindowsFact]
+    public void AWindowThatComesToTheFront_TellsTheReadersFocusAgain_OnceAnActivation()
+    {
+        using var rig = new UiaRig();
+        var (_, list, _, root) = FocusableList(10, selected: 2);
+        rig.Session.Window.SetRoot(root);
+        Settle(rig.Session);
+        list.Focus();
+        rig.Session.PumpFrame();
+        rig.Raised.Clear();
+
+        for (int i = 0; i < 2; i++)
+        {
+            rig.Session.Window.Window.RaiseActivated();
+            rig.Session.PumpFrame();
+            Assert.Equal([Item(list, 2)], rig.FocusEvents());
+            // The same node keeps the focus: no state changes, the event alone.
+            Assert.DoesNotContain(rig.Raised, e => e.Id == HasKeyboardFocus);
+            rig.Raised.Clear();
+            rig.Session.PumpFrame();
+            Assert.Empty(rig.Raised);
+        }
+    }
+
+    [Fact]
+    public void AWindowThatComesToTheFront_TellsNoBridgeWhileNoClientListens()
+    {
+        using var session = HeadlessSession.Create(300, 200);
+        var bridge = session.Window.InstallAccessibilityBridge(new Counting());
+        session.Window.SetRoot(Flex.Column().Children(Button.New("A")));
+        session.PumpFrames(2);
+        session.Window.Window.RaiseActivated();
+        Assert.Equal(1, bridge.Activations);
+        bridge.Listening = false;
+        session.PumpFrame();
+        session.Window.Window.RaiseActivated();
+        Assert.Equal(1, bridge.Activations);
+    }
+
+    private sealed class Counting : IAccessibilityBridge
+    {
+        public bool Listening = true;
+        public int Activations;
+        public bool IsActive => Listening;
+        public void ApplyChanges(TreeDiff diff, AccessibilityNode root) { }
+        public void NotifyFocusChanged(AccessibilityNode? focused) { }
+        public void NotifyWindowActivated() => Activations++;
+    }
+
     /// <summary>A menu's entries are no SelectionItems (Narrator said "selected" on every one); a list's
     /// items keep theirs. Item nodes and items served on demand alike, and no IsSelected change is
     /// raised for an entry.</summary>
@@ -950,6 +1006,25 @@ public class A11yCurrentItemFocusTests
         rig.Session.PumpFrame();
         Assert.Equal([Focused(Item(list, 4), false), Focused(after.Id, true)], rig.Signals.States());
         Assert.False(rig.Object(Item(list, 4)).Focused);
+    }
+
+    [Fact]
+    public void ATSPI_AWindowThatComesToTheFront_SendsTheFocusedStateAgain()
+    {
+        using var rig = new AtSpiRig();
+        var (_, list, _, root) = FocusableList(10, selected: 2);
+        rig.Session.Window.SetRoot(root);
+        Settle(rig.Session);
+        list.Focus();
+        rig.Session.PumpFrame();
+        rig.Signals.Lines.Clear();
+
+        rig.Session.Window.Window.RaiseActivated();
+        rig.Session.PumpFrame();
+        Assert.Equal([Focused(Item(list, 2), true)], rig.Signals.States());
+        rig.Signals.Lines.Clear();
+        rig.Session.PumpFrame();
+        Assert.Empty(rig.Signals.States());
     }
 
     [Fact]

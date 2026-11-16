@@ -983,8 +983,13 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
         _holderMoved = true;
     }
 
-    // The holder changed since the reader's focus was last told. UI thread.
+    // The holder changed since the reader's focus was last told, or the window came to the front: the
+    // next NotifyChangesApplied raises the focus event even on the node that has it. UI thread.
     private bool _holderMoved;
+
+    /// <summary>The window came to the front: the focus event goes out again, on the reader's focus,
+    /// once the frame's changes are told.</summary>
+    public void NotifyWindowActivated() => _holderMoved = true;
 
     /// <summary>
     /// Reads where the reader's focus is (<see cref="AccessibilityFocus.TargetOf"/>) and, when it moved,

@@ -654,7 +654,18 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// </summary>
     public event Action? Activated;
 
-    internal void RaiseActivated() => Activated?.Invoke();
+    internal void RaiseActivated()
+    {
+        // A reader is told where the focus is as the window comes to the front, as a WPF or a WinForms
+        // window tells it: a click on the window, or Alt+Tab to it, said nothing, or only the window. In
+        // the accessibility phase this asks for, after whatever the activation changes.
+        if (_accessibilityBridge.IsActive)
+        {
+            _accessibilityBridge.NotifyWindowActivated();
+            _a11yFocusTold = true;
+        }
+        Activated?.Invoke();
+    }
 
     // ──── Env-driven tracing (HULTUI_TRACE=<path>) ────
     // When set, recording starts at window creation and the trace is written to

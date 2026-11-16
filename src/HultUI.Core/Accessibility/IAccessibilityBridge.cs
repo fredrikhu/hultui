@@ -59,6 +59,15 @@ public interface IAccessibilityBridge
     void NotifyChangesApplied(AccessibilityNode root) { }
 
     /// <summary>
+    /// The window came to the front (the user clicked it, or switched to it): a bridge tells assistive
+    /// technology where the focus is again, on the reader's focus, at the end of the next accessibility
+    /// phase (<see cref="NotifyChangesApplied"/>), as a WPF or a WinForms window raises a focus event as
+    /// it is activated. A reader that came back to the window said nothing, or the window only. Called on
+    /// the UI thread, once per activation, only while <see cref="IsActive"/>. Does nothing by default.
+    /// </summary>
+    void NotifyWindowActivated() { }
+
+    /// <summary>
     /// Properties changed with no rebuild: the window has marked them in place on the most
     /// recently applied tree, <paramref name="root"/>, and the next diff will not report them.
     /// Today a move of a list's selection: <see cref="AccessibilityNode.IsSelected"/> on the item
