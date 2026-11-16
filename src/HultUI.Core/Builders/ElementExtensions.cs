@@ -131,6 +131,15 @@ public static class ElementExtensions
         return el;
     }
     public static T Cursor<T>(this T el, CursorType cursor) where T : Element { el.Inherited.Cursor = cursor; return el; }
+    /// <summary>A cursor of the app's own drawing over this element and its children. On a live
+    /// element, call <see cref="Element.MarkStyleDirty"/> after changing it.</summary>
+    public static T Cursor<T>(this T el, CursorImage image) where T : Element
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        el.Inherited.Cursor = CursorType.Image;
+        el.Inherited.CursorImage = image;
+        return el;
+    }
 
     // ──── Text properties ────
     public static T TextOverflow<T>(this T el, TextOverflow overflow) where T : TextElement { el.Overflow = overflow; return el; }

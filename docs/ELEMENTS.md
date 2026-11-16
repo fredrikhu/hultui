@@ -60,6 +60,12 @@ These propagate to child elements unless overridden.
 | `Inherited.FontWeight` | `.FontWeight(FontWeight.Bold)` | `FontWeight` |
 | `Inherited.TextColor` | `.TextColor(color)` | `Color` |
 | `Inherited.Cursor` | `.Cursor(CursorType.Pointer)` | `CursorType` |
+| `Inherited.CursorImage` | `.Cursor(new CursorImage(w, h, rgba, hotX, hotY))` | `CursorImage`, with `CursorType.Image` |
+
+An image cursor is RGBA pixels with a hotspot, inherited together with the cursor type: a child
+that sets its own `.Cursor(...)` does not keep its parent's picture. Make one `CursorImage` per
+shape and reuse it; the platform keeps a native cursor per instance. After changing it on a live
+element, call `MarkStyleDirty()`.
 
 ### Font families and metrics
 

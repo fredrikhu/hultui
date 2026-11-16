@@ -132,6 +132,11 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     private bool _disposed;
     private readonly Dictionary<CursorType, nint> _cursorCache = [];
     private CursorType _currentCursor = CursorType.Default;
+    // Native cursors made from CursorImages, by instance. A remote desktop's pointer shapes come
+    // and go, so the cache is bounded: past ImageCursorLimit the ones not on screen are destroyed.
+    private readonly Dictionary<CursorImage, nint> _imageCursors = new(ReferenceEqualityComparer.Instance);
+    private CursorImage? _currentImage;
+    private const int ImageCursorLimit = 32;
     private GCHandle _gcHandle;
     private bool _textInputActive;
     private TextInputKind _textInputKind;
@@ -1803,11 +1808,67 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern int ValidateRect(nint hwnd, nint rect);
 
+    public void SetCursor(CursorImage image)
+    {
+        if (_currentCursor == CursorType.Image && ReferenceEquals(image, _currentImage)) return;
+
+        if (!_imageCursors.TryGetValue(image, out var sdlCursor))
+        {
+            sdlCursor = CreateImageCursor(image);
+            // SDL could not make it (no colour cursors on this video driver): the arrow, as
+            // IPlatformWindow promises, rather than whatever was on screen before.
+            if (sdlCursor == 0)
+            {
+                SetCursor(CursorType.Default);
+                return;
+            }
+            _imageCursors[image] = sdlCursor;
+        }
+
+        var previous = _currentCursor;
+        _currentCursor = CursorType.Image;
+        _currentImage = image;
+        if (previous == CursorType.None) SDL_ShowCursor();
+        SDL_SetCursor((SDL_Cursor*)sdlCursor);
+
+        // After the new one is on screen, so none of those destroyed is the cursor in use.
+        if (_imageCursors.Count > ImageCursorLimit)
+            DestroyImageCursors(keep: image);
+    }
+
+    private static nint CreateImageCursor(CursorImage image)
+    {
+        // RGBA in memory, as Window.SetIcon: the packed format that reads that way here.
+        var format = BitConverter.IsLittleEndian
+            ? SDL_PixelFormat.SDL_PIXELFORMAT_ABGR8888
+            : SDL_PixelFormat.SDL_PIXELFORMAT_RGBA8888;
+        fixed (byte* pixels = image.Pixels)
+        {
+            var surface = SDL_CreateSurfaceFrom(image.Width, image.Height, format, (IntPtr)pixels, image.Width * 4);
+            if (surface == null) return 0;
+            // SDL copies the pixels into the cursor, so the surface can go at once.
+            var cursor = (nint)SDL_CreateColorCursor(surface, image.HotspotX, image.HotspotY);
+            SDL_DestroySurface(surface);
+            return cursor;
+        }
+    }
+
+    private void DestroyImageCursors(CursorImage? keep)
+    {
+        foreach (var (image, cursor) in _imageCursors.ToArray())
+        {
+            if (ReferenceEquals(image, keep)) continue;
+            SDL_DestroyCursor((SDL_Cursor*)cursor);
+            _imageCursors.Remove(image);
+        }
+    }
+
     public void SetCursor(CursorType cursor)
     {
         if (cursor == _currentCursor) return;
         var previous = _currentCursor;
         _currentCursor = cursor;
+        _currentImage = null;
 
         // None hides the cursor rather than naming a shape; any other shows it again.
         if (cursor == CursorType.None)
@@ -2250,6 +2311,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         foreach (var cursor in _cursorCache.Values)
             SDL_DestroyCursor((SDL_Cursor*)cursor);
         _cursorCache.Clear();
+        DestroyImageCursors(keep: null);
 
         if (_glContext != null)
         {

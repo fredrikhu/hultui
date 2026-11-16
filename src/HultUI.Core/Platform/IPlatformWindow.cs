@@ -164,6 +164,9 @@ public interface IPlatformWindow : IDisposable
     void SetMinimumSize(int layoutWidth, int layoutHeight);
     void SetIcon(int width, int height, ReadOnlySpan<byte> rgbaPixels);
     void SetCursor(CursorType cursor);
+    /// <summary>A cursor drawn from pixels (<see cref="CursorType.Image"/>). A platform that cannot
+    /// show one shows the default arrow.</summary>
+    void SetCursor(CursorImage image) => SetCursor(CursorType.Default);
 
     /// <summary>
     /// One-line description of the *achieved* graphics configuration — renderer,
