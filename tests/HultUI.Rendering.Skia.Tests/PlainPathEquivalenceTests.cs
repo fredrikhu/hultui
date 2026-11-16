@@ -175,11 +175,16 @@ public class PlainPathEquivalenceTests
     /// spacing full-width forms by their neighbours and with letter spacing, that happened within
     /// a few pixels past the measured width (198 of 828,252 layouts, every difference there was).
     /// The plain path's lines must then all fit, and be fewer.
+    /// <para>And one more: the plain path holds a single line whole at a width a float error
+    /// short of it (<see cref="TextPipeline.OneLineFitTolerance"/>), where the BiDi path breaks or
+    /// clips it. A width that came back through the layout engine's sums lands there.</para>
     /// </summary>
     private static void SameOrFitsWhereBidiBrokeEarly(TextLayout bidi, TextLayout plain, float width, string context)
     {
         try { LayoutAssert.Same(bidi, plain, context); }
         catch (Xunit.Sdk.XunitException) when (
-            plain.Lines.Count < bidi.Lines.Count && plain.Lines.All(line => line.Width <= width)) { }
+            plain.Lines.Count < bidi.Lines.Count && plain.Lines.All(line => line.Width <= width)
+            || plain.Lines.Count == 1 && plain.Size.Width > width
+                && plain.Size.Width <= width + TextPipeline.OneLineFitTolerance) { }
     }
 }
