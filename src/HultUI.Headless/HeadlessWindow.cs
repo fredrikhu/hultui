@@ -67,6 +67,9 @@ public sealed partial class HeadlessWindow
     /// <summary>The last cursor the framework requested (e.g. the text I-beam over an input).</summary>
     public CursorType LastCursor => _platform.LastCursor;
 
+    /// <summary>The picture of the last cursor, when <see cref="LastCursor"/> is <see cref="CursorType.Image"/>.</summary>
+    public CursorImage? LastCursorImage => _platform.LastCursorImage;
+
     /// <summary>Whether this window's text is pinned to the bundled fonts — see <see cref="HeadlessOptions.PinnedText"/>.</summary>
     public bool PinnedText => _platform.PinnedText;
 

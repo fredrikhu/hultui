@@ -1,5 +1,6 @@
 using HultUI.Core.Primitives;
 using HultUI.Rendering.Skia;
+using HultUI.Testing;
 using Xunit;
 
 namespace HultUI.Rendering.Skia.Tests;
@@ -87,6 +88,48 @@ public class SkiaRasterRenderSurfaceTests
         using var image = surface.Snapshot();
         Assert.Equal(10, image.Width);
         Assert.Equal(10, image.Height);
+    }
+
+    /// <summary>
+    /// What the software window copies to the screen each frame: the frame's own pixels, read
+    /// again every time. A draw after a Snapshot moves them, so an address kept from an earlier
+    /// frame would show a stale frame.
+    /// </summary>
+    [Fact]
+    public void PeekPixels_IsTheCurrentFrame_EvenAfterASnapshotMovedIt()
+    {
+        using var surface = new SkiaRasterRenderSurface();
+        Assert.False(surface.PeekPixels(out _, out _));   // nothing to show before the first Resize
+        surface.Resize(20, 10, 1f);
+
+        DrawFrame(surface, Color.Red);
+        Assert.True(surface.PeekPixels(out nint pixels, out int rowBytes));
+        Assert.Equal(80, rowBytes);
+        AssertPixel(PixelsAt(pixels, rowBytes, 10), rowBytes, x: 5, y: 5, r: 255, g: 0, b: 0);
+
+        using (surface.Snapshot())
+            DrawFrame(surface, Color.Blue);
+        Assert.True(surface.PeekPixels(out pixels, out rowBytes));
+        AssertPixel(PixelsAt(pixels, rowBytes, 10), rowBytes, x: 5, y: 5, r: 0, g: 0, b: 255);
+
+        // Every frame, so it allocates nothing.
+        long bytes = Allocations.Least(() => surface.PeekPixels(out _, out _));
+        Assert.Equal(0, bytes);
+    }
+
+    private static void DrawFrame(SkiaRasterRenderSurface surface, Color color)
+    {
+        var ctx = surface.RenderContext;
+        ctx.BeginFrame(surface.PixelWidth, surface.PixelHeight, 1f, color);
+        ctx.EndFrame();
+        surface.Present();
+    }
+
+    private static byte[] PixelsAt(nint pixels, int rowBytes, int height)
+    {
+        var copy = new byte[rowBytes * height];
+        System.Runtime.InteropServices.Marshal.Copy(pixels, copy, 0, copy.Length);
+        return copy;
     }
 
     private static void AssertPixel(byte[] pixels, int rowBytes, int x, int y, byte r, byte g, byte b)

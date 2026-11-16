@@ -70,6 +70,10 @@ using HultUI.WebView.WebView2;
 // --save-frame=<path> writes the frame with Window.SaveFrame after the frames above. The window's
 // bottom-left quarter is green then, so the file shows which way up it is.
 //
+// --window-pixels, with the same green quarter, prints the colours at the top left, the right and
+// the bottom left of the window as read from its device context: for a software window, what SDL
+// put on the screen, where SaveFrame reads what the renderer drew (Windows).
+//
 // --frame-bytes repaints one box a frame and prints the managed bytes a frame allocates, the
 // least of five rounds of 120 frames.
 //
@@ -137,7 +141,7 @@ internal static class Program
             Box.New().FlexGrow(1).Background(Color.FromHex("#FF0000")),
             Box.New().FlexGrow(1).Background(Color.FromHex("#0000FF"))));
         // A green bottom-left quarter for a saved frame, which can come out upside down (GL).
-        if (args.Any(a => a.StartsWith("--save-frame=")))
+        if (args.Any(a => a.StartsWith("--save-frame=")) || args.Contains("--window-pixels"))
             app.SetRoot(Flex.Column().Width(320f).Height(200f).Children(
                 Flex.Row().FlexGrow(1).Children(
                     Box.New().FlexGrow(1).Background(Color.FromHex("#FF0000")),
@@ -160,6 +164,8 @@ internal static class Program
             saved.GetAwaiter().GetResult();
             Console.WriteLine("probe: frame saved");
         }
+
+        if (args.Contains("--window-pixels")) PrintWindowPixels(app.PrimaryWindow.NativeHandle);
 
         Console.WriteLine("probe: done");
         return 0;
@@ -1068,6 +1074,64 @@ internal static class Program
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool GetClientRect(nint hwnd, out Rect32 rect);
+
+    /// <summary>
+    /// Prints three points of the window's client area, read from the window's own device
+    /// context: for a window drawn with GDI, as SDL draws the software renderer's, that is the
+    /// bitmap the compositor puts on the screen, whatever covers the window. Not PrintWindow,
+    /// which SDL does not answer, and not a grab of the screen, which sees whatever is in front.
+    /// </summary>
+    private static void PrintWindowPixels(nint hwnd)
+    {
+        GetClientRect(hwnd, out var client);
+        int width = client.Right - client.Left, height = client.Bottom - client.Top;
+        nint window = GetDC(hwnd);
+        nint dc = CreateCompatibleDC(window);
+        nint bitmap = CreateCompatibleBitmap(window, width, height);
+        nint old = SelectObject(dc, bitmap);
+        bool read = BitBlt(dc, 0, 0, width, height, window, 0, 0, SrcCopy);
+        // A COLORREF is 0x00BBGGRR.
+        string Pixel(int x, int y)
+        {
+            uint c = GetPixel(dc, x, y);
+            return $"{c & 0xFF},{(c >> 8) & 0xFF},{(c >> 16) & 0xFF}";
+        }
+        Console.WriteLine($"probe: window read={read} topLeft={Pixel(width / 4, height / 4)} " +
+            $"right={Pixel(width * 3 / 4, height / 2)} bottomLeft={Pixel(width / 4, height * 3 / 4)}");
+        SelectObject(dc, old);
+        DeleteObject(bitmap);
+        DeleteDC(dc);
+        ReleaseDC(hwnd, window);
+    }
+
+    private const uint SrcCopy = 0x00CC0020;
+
+    [System.Runtime.InteropServices.DllImport("gdi32.dll")]
+    private static extern bool BitBlt(nint dst, int x, int y, int width, int height, nint src, int srcX, int srcY, uint rop);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern nint GetDC(nint hwnd);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern int ReleaseDC(nint hwnd, nint dc);
+
+    [System.Runtime.InteropServices.DllImport("gdi32.dll")]
+    private static extern nint CreateCompatibleDC(nint dc);
+
+    [System.Runtime.InteropServices.DllImport("gdi32.dll")]
+    private static extern nint CreateCompatibleBitmap(nint dc, int width, int height);
+
+    [System.Runtime.InteropServices.DllImport("gdi32.dll")]
+    private static extern nint SelectObject(nint dc, nint gdiObject);
+
+    [System.Runtime.InteropServices.DllImport("gdi32.dll")]
+    private static extern bool DeleteObject(nint gdiObject);
+
+    [System.Runtime.InteropServices.DllImport("gdi32.dll")]
+    private static extern bool DeleteDC(nint dc);
+
+    [System.Runtime.InteropServices.DllImport("gdi32.dll")]
+    private static extern uint GetPixel(nint dc, int x, int y);
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool ShowWindow(nint hwnd, int command);

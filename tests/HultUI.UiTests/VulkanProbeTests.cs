@@ -1085,7 +1085,7 @@ public sealed class VulkanProbeTests
         };
         // An app's request may fall back only when HULTUI_RENDERER has not asked.
         foreach (var name in new[] { "HULTUI_RENDERER", "HULTUI_VULKAN_CAPTURE", "HULTUI_VULKAN_CAPTURE_FRAME", "HULTUI_STARTUP",
-                     "VK_LOADER_VENDOR_ID_FILTER", "VK_DRIVER_FILES", "VK_ICD_FILENAMES" })
+                     "VK_LOADER_VENDOR_ID_FILTER", "VK_DRIVER_FILES", "VK_ICD_FILENAMES", "SDL_OPENGL_LIBRARY" })
             start.Environment.Remove(name);
         start.Environment["SDL_WINDOW_ACTIVATE_WHEN_SHOWN"] = "0";   // do not take the foreground
         foreach (var (name, value) in environment)

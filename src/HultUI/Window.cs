@@ -40,6 +40,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     // the cursor on screen is still that one (not a scrollbar's, a drag's, an autoscroll's).
     // Lets a style change show without waiting for the next move.
     private CursorType _hoverCursor;
+    private CursorImage? _hoverCursorImage;
     private bool _cursorFollowsHover;
     // The element that captured the pointer on its press (PointerDownEvent.CapturePointer),
     // and the overlay offset its coordinates carry; moves and the release go to it directly.
@@ -2709,7 +2710,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 {
                     _autoScrollTarget = null;
                     _root!.MarkPaintDirty();   // take the anchor marker off the screen
-                    PlatformWindow.SetCursor(_lastHoveredElement?.ResolvedInherited.Cursor ?? CursorType.Default);
+                    SetCursorOf(_lastHoveredElement);
                 }
 
                 // End text input drag on button up
@@ -3546,18 +3547,21 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // track overrides to the default arrow, so a scrollable element's own
         // cursor (e.g. a TextArea's text caret) doesn't bleed onto its bar.
         var cursor = target?.ResolvedInherited.Cursor ?? CursorType.Default;
+        var cursorImage = CursorImageOf(target, cursor);
         IScrollbarDraggable? overScrollbar = null;
         for (var el = target; el is not null; el = el.Parent)
         {
             if (el is IScrollbarDraggable sb && sb.IsPointOverScrollbar(pos))
             {
                 cursor = CursorType.Default;
+                cursorImage = null;
                 overScrollbar = sb;
                 break;
             }
         }
-        PlatformWindow.SetCursor(cursor);
+        SetCursor(cursor, cursorImage);
         _hoverCursor = cursor;
+        _hoverCursorImage = cursorImage;
         _cursorFollowsHover = overScrollbar is null;
         SetScrollbarHover(overScrollbar, pos);
 
@@ -3767,9 +3771,32 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         if (!_cursorFollowsHover || _lastHoveredElement is not { } hovered) return;
         if (_pointerCaptureTarget is not null || _isDragging || _autoScrollTarget is not null) return;
         var cursor = hovered.ResolvedInherited.Cursor;
-        if (cursor == _hoverCursor) return;
+        var cursorImage = CursorImageOf(hovered, cursor);
+        if (cursor == _hoverCursor && ReferenceEquals(cursorImage, _hoverCursorImage)) return;
         _hoverCursor = cursor;
-        PlatformWindow.SetCursor(cursor);
+        _hoverCursorImage = cursorImage;
+        SetCursor(cursor, cursorImage);
+    }
+
+    /// <summary>The cursor an element's resolved style asks for, or the default arrow for none.</summary>
+    private void SetCursorOf(Element? element)
+    {
+        var cursor = element?.ResolvedInherited.Cursor ?? CursorType.Default;
+        SetCursor(cursor, CursorImageOf(element, cursor));
+    }
+
+    /// <summary>The picture behind <see cref="CursorType.Image"/>, looked up only for that type.</summary>
+    private static CursorImage? CursorImageOf(Element? element, CursorType cursor) =>
+        cursor == CursorType.Image && element is not null ? StyleResolver.CursorImageOf(element) : null;
+
+    /// <summary>A cursor type, or the app's picture when the type is <see cref="CursorType.Image"/>.
+    /// The platform only ever gets <see cref="CursorType.Image"/> with its picture.</summary>
+    private void SetCursor(CursorType cursor, CursorImage? image)
+    {
+        if (cursor == CursorType.Image && image is not null)
+            PlatformWindow.SetCursor(image);
+        else
+            PlatformWindow.SetCursor(cursor == CursorType.Image ? CursorType.Default : cursor);
     }
 
     /// <summary>
@@ -4020,8 +4047,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             EventDispatcher.DispatchDirect(new DragEndEvent { Position = pos, DragData = _dragData, Modifiers = modifiers, WasAccepted = accepted }, _dragSource);
 
         // Restore cursor
-        var cursorTarget = DragTargetAt(pos);
-        PlatformWindow.SetCursor(cursorTarget?.ResolvedInherited.Cursor ?? CursorType.Default);
+        SetCursorOf(DragTargetAt(pos));
 
         ResetDragState();
     }

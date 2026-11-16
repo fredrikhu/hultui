@@ -5,7 +5,8 @@ namespace HultUI.Core.Rendering;
 ///
 /// <para>This exists because HDR output does: an HDR swapchain needs Vulkan, and WGL cannot
 /// give one. An app chooses here, and the <c>HULTUI_RENDERER</c> environment variable overrides
-/// the choice in either direction. See <c>docs/design/HDR.md</c>.</para>
+/// the choice in either direction. See <c>docs/design/HDR.md</c>. <see cref="Software"/> is the
+/// renderer for machines with neither.</para>
 /// </summary>
 public enum RendererKind
 {
@@ -30,4 +31,14 @@ public enum RendererKind
     /// failure stands.</para>
     /// </summary>
     Vulkan,
+
+    /// <summary>
+    /// Skia on the CPU, into the window surface SDL keeps in main memory: no GPU and no
+    /// graphics driver at all. What a window falls back to when OpenGL cannot start, as on a
+    /// Windows server or VM without a GPU, or in a remote desktop session there, where Windows
+    /// offers only OpenGL 1.1. Costs CPU for every pixel drawn, so it is a fallback, not a
+    /// choice for an app that has a GPU. A GPU image source (video, a web view) shows only
+    /// through its pixel path, when it has one.
+    /// </summary>
+    Software,
 }

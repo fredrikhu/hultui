@@ -18,6 +18,8 @@ public sealed class SkiaRasterRenderSurface : IRenderSurface, ISkiaFrameCapture
     private readonly bool _ownsText;
 
     private SKSurface? _surface;
+    // Filled by PeekPixels each frame, so that a window presenting every frame allocates nothing.
+    private readonly SKPixmap _pixmap = new();
     private int _width;
     private int _height;
     private float _scaleFactor = 1f;
@@ -103,6 +105,25 @@ public sealed class SkiaRasterRenderSurface : IRenderSurface, ISkiaFrameCapture
     }
 
     /// <summary>
+    /// Where the current frame's pixels lie, without copying them, for a platform window that
+    /// puts them on the screen: RGBA8888 premultiplied, <see cref="PixelWidth"/> by
+    /// <see cref="PixelHeight"/>. Valid until the next draw or <see cref="Resize"/>, because a
+    /// draw after a <see cref="Snapshot"/> moves them. False before the first Resize.
+    /// </summary>
+    public bool PeekPixels(out nint pixels, out int rowBytes)
+    {
+        if (_surface is null || !_surface.PeekPixels(_pixmap))
+        {
+            pixels = 0;
+            rowBytes = 0;
+            return false;
+        }
+        pixels = _pixmap.GetPixels();
+        rowBytes = _pixmap.RowBytes;
+        return true;
+    }
+
+    /// <summary>
     /// Copies the current frame into a new RGBA8888 byte array (row-major,
     /// <paramref name="rowBytes"/> = width * 4).
     /// </summary>
@@ -136,6 +157,7 @@ public sealed class SkiaRasterRenderSurface : IRenderSurface, ISkiaFrameCapture
         _renderContext.Dispose();
         _surface?.Dispose();
         _surface = null;
+        _pixmap.Dispose();
         if (_ownsText) _text.Dispose();
     }
 }

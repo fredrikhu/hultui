@@ -21,6 +21,10 @@ public sealed class InheritedStyle
     /// <summary>Extra spacing in pixels inserted after each glyph.</summary>
     public float? LetterSpacing { get; set; }
     public CursorType? Cursor { get; set; }
+    /// <summary>The picture when <see cref="Cursor"/> is <see cref="CursorType.Image"/>; ignored
+    /// otherwise. Inherited together with <see cref="Cursor"/>: a child that sets its own cursor
+    /// type does not keep the parent's image.</summary>
+    public CursorImage? CursorImage { get; set; }
 
     internal void CopyFrom(InheritedStyle source)
     {
@@ -35,6 +39,7 @@ public sealed class InheritedStyle
         LineHeight = source.LineHeight;
         LetterSpacing = source.LetterSpacing;
         Cursor = source.Cursor;
+        CursorImage = source.CursorImage;
     }
 }
 
@@ -147,5 +152,8 @@ public enum CursorType : byte
     ColResize,
     RowResize,
     /// <summary>Busy in the background: the arrow with a spinner, still clickable.</summary>
-    Progress
+    Progress,
+    /// <summary>A picture of the app's own (<see cref="InheritedStyle.CursorImage"/>), set with
+    /// <c>.Cursor(image)</c>. Without an image it shows as <see cref="Default"/>.</summary>
+    Image
 }

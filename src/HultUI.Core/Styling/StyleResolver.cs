@@ -5,6 +5,25 @@ namespace HultUI.Core.Styling;
 
 public static class StyleResolver
 {
+    /// <summary>
+    /// The picture behind a resolved <see cref="CursorType.Image"/>: that of the nearest element,
+    /// this one or an ancestor, that sets a cursor at all. The image and the type are inherited as
+    /// one value, so a child that sets its own type does not show its parent's picture.
+    /// </summary>
+    /// <remarks>Looked up here, when the window needs it, rather than carried in
+    /// <see cref="ResolvedInheritedStyle"/>: every element stores that, and copies it into every
+    /// text draw and layout, for a value only an element under the pointer ever uses.</remarks>
+    internal static CursorImage? CursorImageOf(Element element)
+    {
+        for (var el = element; el is not null; el = el.Parent)
+        {
+            var own = el.InheritedRead;
+            if (own.Cursor is { } cursor)
+                return cursor == CursorType.Image ? own.CursorImage : null;
+        }
+        return null;
+    }
+
     public static readonly ResolvedInheritedStyle DefaultStyle = new(
         FontFamily: "sans-serif",
         FontSize: 16f,
