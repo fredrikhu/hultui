@@ -875,6 +875,10 @@ public static partial class AccessibilityTreeBuilder
         if (element is TextElement text && !string.IsNullOrEmpty(text.Content))
             return text.Content;
 
+        // A dropdown or a picker the app did not name reads as its choice (NameFromValue).
+        if (NameFromValue(element) is { } fromValue)
+            return fromValue;
+
         // Labels on checkboxes/radios serve as the accessible name when no
         // explicit AccessibleName is set.
         if (element is CheckboxElement checkbox && !string.IsNullOrEmpty(checkbox.Label))
@@ -893,6 +897,21 @@ public static partial class AccessibilityTreeBuilder
     }
 
     /// <summary>
+    /// The name of a control a reader knows by what is chosen in it, when the app gave it none: a
+    /// dropdown's choice, a picker's date or time. Null for any other element. The controls wrote
+    /// this into <see cref="Element.AccessibleName"/>, replacing a name the app gave ("Start date"
+    /// read as "2026-09-15"); now a name the app gives wins, and the choice is the value.
+    /// </summary>
+    private static string? NameFromValue(Element element) => element switch
+    {
+        DropdownElement dropdown => dropdown.SelectedItem ?? dropdown.Placeholder,
+        DatePickerElement date => date.DisplayText,
+        TimePickerElement time => time.NameFromValue,
+        CalendarElement calendar => calendar.NameFromValue,
+        _ => null,
+    };
+
+    /// <summary>
     /// Whether <see cref="ResolveName"/> would name <paramref name="element"/> <paramref name="name"/>,
     /// by the same rules, building nothing: a name from content is matched text by text. The in-place
     /// walk asks it of every node on every refresh, and joining the texts of a button named by two or
@@ -902,6 +921,7 @@ public static partial class AccessibilityTreeBuilder
     {
         if (element.AccessibleName is not null) return element.AccessibleName == name;
         if (element is TextElement text && !string.IsNullOrEmpty(text.Content)) return text.Content == name;
+        if (NameFromValue(element) is { } fromValue) return fromValue == name;
         if (element is CheckboxElement checkbox && !string.IsNullOrEmpty(checkbox.Label)) return checkbox.Label == name;
         if (element is RadioButtonElement radio && !string.IsNullOrEmpty(radio.Label)) return radio.Label == name;
         if (element is ToggleSwitchElement toggle && !string.IsNullOrEmpty(toggle.Label)) return toggle.Label == name;
@@ -1033,10 +1053,16 @@ public static partial class AccessibilityTreeBuilder
         TextAreaElement ta => ta.Text,
         NumericUpDownElement n => n.DisplayText,
         // The pickers carry a value a reader needs and a name that describes the control,
-        // so they cannot fold the two together the way a button does.
+        // so they cannot fold the two together the way a button does. Their value stays when the
+        // app gave no name and the name is the value too (NameFromValue): a reader tells an edit
+        // of a focused field by its value, and without one a time field stepped by its arrows
+        // would tell only a change of its name.
         DatePickerElement dp => dp.Value is { } d ? dp.DisplayText : "",
         TimePickerElement tp => tp.Value is null ? "" : tp.DisplayText,
         CalendarElement cal => cal.AccessibleValueText,
+        // A dropdown the app named says what it is for in its name and carries its choice here.
+        // One it did not name reads as its choice already, and a value as well would say it twice.
+        DropdownElement { AccessibleName: not null } dd => dd.AccessibleValue ?? dd.SelectedItem ?? "",
         _ => element.AccessibleValue
     };
 }

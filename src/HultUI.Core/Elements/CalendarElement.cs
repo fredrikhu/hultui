@@ -59,7 +59,7 @@ public class CalendarElement : Element
 
         _displayMonth = FirstOfMonth(_today);
         _focusDate = _today;
-        UpdateAccessibleValue();
+        NotifyValueChanged();
 
         OnOwn<PointerDownEvent>(OnPointerDown);
         OnOwn<PointerMoveEvent>(OnPointerMove);
@@ -100,7 +100,7 @@ public class CalendarElement : Element
                 _displayMonth = FirstOfMonth(d);
                 _focusDate = d;
             }
-            UpdateAccessibleValue();
+            NotifyValueChanged();
             MarkPaintDirty();
         }
     }
@@ -128,7 +128,7 @@ public class CalendarElement : Element
             if (_focusDate == value) return;
             _focusDate = value;
             _displayMonth = FirstOfMonth(value);
-            UpdateAccessibleValue();
+            NotifyValueChanged();
             MarkPaintDirty();
         }
     }
@@ -196,13 +196,13 @@ public class CalendarElement : Element
 
     private static DateOnly FirstOfMonth(DateOnly d) => new(d.Year, d.Month, 1);
 
-    private void UpdateAccessibleValue()
-    {
-        AccessibleName = _selected is { } s
-            ? s.ToString("D", Culture)
-            : "No date selected";
-        NotifyAccessibilityPropertyChanged(AccessibilityProperties.Value);
-    }
+    /// <summary>What a reader reads as the calendar's name when the app gave none: the chosen date
+    /// written out, or that there is none (AccessibilityTreeBuilder.ResolveName).</summary>
+    internal string NameFromValue => _selected is { } s ? s.ToString("D", Culture) : "No date selected";
+
+    // The node is made again: the chosen date is its value, and its name too when the app gave
+    // none. Writing the date into AccessibleName replaced the name an app gave.
+    private void NotifyValueChanged() => NotifyAccessibilityPropertyChanged(AccessibilityProperties.Value);
 
     /// <summary>The value assistive tech reads: where the keyboard is, and what is chosen.</summary>
     internal string AccessibleValueText =>
@@ -219,7 +219,7 @@ public class CalendarElement : Element
         _displayMonth = target;
         int day = Math.Min(_focusDate.Day, DateTime.DaysInMonth(target.Year, target.Month));
         _focusDate = new DateOnly(target.Year, target.Month, day);
-        UpdateAccessibleValue();
+        NotifyValueChanged();
         MarkPaintDirty();
     }
 
@@ -231,7 +231,7 @@ public class CalendarElement : Element
         _selected = date;
         _focusDate = date;
         _displayMonth = FirstOfMonth(date);
-        UpdateAccessibleValue();
+        NotifyValueChanged();
         MarkPaintDirty();
         OnDateSelected?.Invoke(date);
     }
@@ -368,7 +368,7 @@ public class CalendarElement : Element
         if (date == _focusDate) return;
         _focusDate = date;
         _displayMonth = FirstOfMonth(date);
-        UpdateAccessibleValue();
+        NotifyValueChanged();
         MarkPaintDirty();
     }
 
@@ -539,6 +539,6 @@ public class CalendarElement : Element
         SelectedDate = c._selected;
         _displayMonth = c._displayMonth;
         _focusDate = c._focusDate;
-        UpdateAccessibleValue();
+        NotifyValueChanged();
     }
 }

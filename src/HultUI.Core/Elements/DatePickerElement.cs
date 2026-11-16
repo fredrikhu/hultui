@@ -55,7 +55,7 @@ public class DatePickerElement : Element
             MarkPaintDirty();
         });
         OnOwn<KeyDownEvent>(OnKeyDown);
-        UpdateAccessibleName();
+        NotifyValueChanged();
     }
 
     public static DatePickerElement New(DateOnly? value = null,
@@ -78,7 +78,7 @@ public class DatePickerElement : Element
             if (_value == value) return;
             _value = value;
             if (_calendar is not null) _calendar.SelectedDate = value;
-            UpdateAccessibleName();
+            NotifyValueChanged();
             // Layout, not just paint: with a long format the field's width follows its
             // value (see MeasureContent), so a repaint alone would clip the new date.
             MarkLayoutDirty();
@@ -132,11 +132,10 @@ public class DatePickerElement : Element
     /// <summary>What the field prints right now.</summary>
     public string DisplayText => _value is { } d ? d.ToString(Format, Culture) : Placeholder;
 
-    private void UpdateAccessibleName()
-    {
-        AccessibleName = _value is { } d ? d.ToString(Format, Culture) : Placeholder;
-        NotifyAccessibilityPropertyChanged(AccessibilityProperties.Value);
-    }
+    // The node is made again: the date is its value, and its name too when the app gave none
+    // (AccessibilityTreeBuilder.ResolveName, DisplayText). Writing the date into AccessibleName
+    // replaced the name an app gave: "Start date" read as "2026-09-15".
+    private void NotifyValueChanged() => NotifyAccessibilityPropertyChanged(AccessibilityProperties.Value);
 
     // ── Open / close ─────────────────────────────────────────────────────
 
@@ -214,7 +213,7 @@ public class DatePickerElement : Element
     {
         if (_value == date) return;
         _value = date;
-        UpdateAccessibleName();
+        NotifyValueChanged();
         MarkLayoutDirty();
         OnValueChanged?.Invoke(date);
     }
@@ -340,6 +339,7 @@ public class DatePickerElement : Element
 
     internal override void PatchFrom(Element source)
     {
+        string shown = DisplayText;
         base.PatchFrom(source);
         if (source is not DatePickerElement p) return;
         Format = p.Format;
@@ -353,5 +353,8 @@ public class DatePickerElement : Element
         AllowClear = p.AllowClear;
         OnValueChanged = p.OnValueChanged;
         Value = p._value;
+        // A new format, culture or placeholder prints the same date differently: what a reader
+        // reads changes with it (the value setter tells only a new date).
+        if (DisplayText != shown) NotifyValueChanged();
     }
 }

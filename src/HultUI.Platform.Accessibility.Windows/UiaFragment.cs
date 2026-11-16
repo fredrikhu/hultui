@@ -170,6 +170,13 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
             // reads it, and nothing writes it.
             AccessibilityRole.Document when patternId == UiaInterop.UIA_ValuePatternId && (_value is not null || _hasText)
                 => new UiaValueProvider(_bridge, ElementId, readOnly: true),
+            // A combo box whose name says what it is for (a dropdown the app named) gives its choice
+            // as its value, read-only as a Win32 drop-down list's is: the reader reads the name, the
+            // role, then the choice. One named by its choice (a dropdown the app did not name, a date
+            // picker) offers none, or the reader would read the choice twice.
+            AccessibilityRole.ComboBox when patternId == UiaInterop.UIA_ValuePatternId
+                && _value is not null && _value != Node.Name
+                => new UiaValueProvider(_bridge, ElementId, readOnly: true),
             // A progress bar exposes the same pattern read-only; the bridge refuses SetValue.
             (AccessibilityRole.Slider or AccessibilityRole.ProgressBar or AccessibilityRole.SpinButton) when patternId == UiaInterop.UIA_RangeValuePatternId
                 => new UiaRangeValueProvider(_bridge, ElementId),

@@ -57,7 +57,7 @@ public class TimePickerElement : Element
         OnOwn<BlurEvent>(_ => { _focused = false; ResetTyping(); MarkPaintDirty(); });
         OnOwn<KeyDownEvent>(OnKeyDown);
         OnOwn<ScrollEvent>(OnScroll);
-        UpdateAccessibleName();
+        NotifyValueChanged();
     }
 
     public static TimePickerElement New(TimeOnly? value = null,
@@ -81,7 +81,7 @@ public class TimePickerElement : Element
             if (_value == normalized) return;
             _value = normalized;
             ResetTyping();
-            UpdateAccessibleName();
+            NotifyValueChanged();
             MarkPaintDirty();
         }
     }
@@ -151,11 +151,13 @@ public class TimePickerElement : Element
     private TimeOnly Truncate(TimeOnly t) =>
         _showSeconds ? new TimeOnly(t.Hour, t.Minute, t.Second) : new TimeOnly(t.Hour, t.Minute);
 
-    private void UpdateAccessibleName()
-    {
-        AccessibleName = _value is null ? "No time set" : DisplayText;
-        NotifyAccessibilityPropertyChanged(AccessibilityProperties.Value);
-    }
+    /// <summary>What a reader reads as the field's name when the app gave none: the time, or that
+    /// there is none (AccessibilityTreeBuilder.ResolveName).</summary>
+    internal string NameFromValue => _value is null ? "No time set" : DisplayText;
+
+    // The node is made again: the time is its value, and its name too when the app gave none.
+    // Writing the time into AccessibleName replaced the name an app gave: "Start" read as "09:30".
+    private void NotifyValueChanged() => NotifyAccessibilityPropertyChanged(AccessibilityProperties.Value);
 
     private void ResetTyping()
     {
@@ -173,7 +175,7 @@ public class TimePickerElement : Element
         var before = _value;
         var next = Truncate(change(_value ?? new TimeOnly(0, 0)));
         _value = next;
-        UpdateAccessibleName();
+        NotifyValueChanged();
         MarkPaintDirty();
         if (before != next) OnValueChanged?.Invoke(next);
     }
@@ -207,7 +209,7 @@ public class TimePickerElement : Element
         if (_value is null) return;
         _value = null;
         ResetTyping();
-        UpdateAccessibleName();
+        NotifyValueChanged();
         MarkPaintDirty();
         OnValueChanged?.Invoke(null);
     }
@@ -567,6 +569,7 @@ public class TimePickerElement : Element
 
     internal override void PatchFrom(Element source)
     {
+        string shown = DisplayText;
         base.PatchFrom(source);
         if (source is not TimePickerElement p) return;
         MinuteStep = p.MinuteStep;
@@ -577,5 +580,8 @@ public class TimePickerElement : Element
         ShowSeconds = p._showSeconds;
         Use12Hour = p._use12Hour;
         Value = p._value;
+        // Seconds, twelve hours or a culture print the same time differently: what a reader
+        // reads changes with it (the value setter tells only a new time).
+        if (DisplayText != shown) NotifyValueChanged();
     }
 }
