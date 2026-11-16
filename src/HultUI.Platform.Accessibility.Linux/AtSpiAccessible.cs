@@ -380,7 +380,7 @@ internal sealed class AtSpiAccessible
             Selectable = SelectableOf(node),
             // From the node's selected state, which a checked radio and a selected tab carry. It
             // was read from IsToggled, which neither ever had: no radio or tab read as selected.
-            Selected = node.IsSelected == true,
+            Selected = SelectedOf(node),
             Toggled = node.IsToggled,
             Expanded = node.Expanded,
             Range = node.Range,
@@ -422,7 +422,7 @@ internal sealed class AtSpiAccessible
         if (_enabled != node.IsEnabled) Enabled = node.IsEnabled;
         bool selectable = SelectableOf(node);
         if (_selectable != selectable) Selectable = selectable;
-        bool selected = node.IsSelected == true;
+        bool selected = SelectedOf(node);
         if (_selected != selected) Selected = selected;
         if (FromTriState(_toggled) != node.IsToggled) Toggled = node.IsToggled;
         if (FromTriState(_expanded) != node.Expanded) Expanded = node.Expanded;
@@ -439,8 +439,12 @@ internal sealed class AtSpiAccessible
     /// <summary>One of a set a reader can select in: a node with a selected state, a radio, a tab,
     /// an item.</summary>
     private static bool SelectableOf(AccessibilityNode node) =>
-        node.IsSelected is not null || node.Role is AccessibilityRole.RadioButton
-            or AccessibilityRole.Tab or AccessibilityRole.ListItem or AccessibilityRole.TreeItem;
+        node.Role != AccessibilityRole.MenuItem && (node.IsSelected is not null || node.Role is AccessibilityRole.RadioButton
+            or AccessibilityRole.Tab or AccessibilityRole.ListItem or AccessibilityRole.TreeItem);
+
+    /// <summary>Selected, from the node's state: not a menu's entry, which is no choice of a set to a
+    /// reader (as a Win32 or a WinUI menu's is not): the entry the keyboard is on has the focus.</summary>
+    internal static bool SelectedOf(AccessibilityNode node) => node.IsSelected == true && node.Role != AccessibilityRole.MenuItem;
 
     /// <summary>The role a reader is told, for anything but the root. A password is a role of
     /// its own on AT-SPI, where UIA has a flag on an edit control.</summary>

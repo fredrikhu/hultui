@@ -762,7 +762,7 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
             (bool, bool?) expandedBefore = (true, acc.Expanded);
             switch (change.PropertyName)
             {
-                case AccessibilityProperties.IsSelected: acc.Selected = node.IsSelected == true; break;
+                case AccessibilityProperties.IsSelected: acc.Selected = AtSpiAccessible.SelectedOf(node); break;
                 case AccessibilityProperties.Name: acc.Name = node.Name ?? ""; break;
                 case AccessibilityProperties.Description: acc.Description = node.Description ?? ""; break;
                 // As the snapshot takes them (AtSpiAccessible.From): a password's bullets, never its text.
@@ -849,6 +849,9 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
                 _signals!.EmitStateChanged(path, "sensitive", change.Node.IsEnabled);
                 return true;
             case AccessibilityProperties.IsSelected:
+                // A menu's entry has no selected state (AtSpiAccessible.SelectableOf): its highlight is
+                // told as the focus moving to it.
+                if (change.Node.Role == AccessibilityRole.MenuItem) return false;
                 _signals!.EmitStateChanged(path, "selected", change.Node.IsSelected == true);
                 return true;
             case AccessibilityProperties.ItemSelection:
@@ -887,7 +890,7 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
     /// </summary>
     private bool EmitServedSelection(AccessibilityNode? previous, AccessibilityNode node)
     {
-        if (_served?.GetValueOrDefault(node.ElementId) is not { } items) return false;
+        if (_served?.GetValueOrDefault(node.ElementId) is not { } items || node.Role == AccessibilityRole.Menu) return false;
         var now = node.Served;
         int sent = 0;
         foreach (var (index, selected) in ServedItems.Changes(previous?.Served ?? default, now))

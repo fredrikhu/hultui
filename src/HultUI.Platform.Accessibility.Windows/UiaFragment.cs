@@ -151,6 +151,9 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
                 => new UiaInvokeProvider(_bridge, ElementId),
             AccessibilityRole.ListItem when patternId == UiaInterop.UIA_SelectionItemPatternId
                 => new UiaSelectionItemProvider(_bridge, ElementId),
+            // A menu's entry is no SelectionItem, as a Win32 or WinUI menu's is not: a reader said
+            // "selected" on every entry it walked. The entry the keyboard is on has the focus instead.
+            AccessibilityRole.MenuItem when patternId == UiaInterop.UIA_SelectionItemPatternId => null,
             // Any node carrying a toggle state offers the pattern, whatever its role — a
             // menu item marking the current choice is a ListItem with a state, not a
             // checkbox, and a client that asks by pattern would otherwise be told no.
@@ -183,8 +186,6 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
             // selection container as a list is, with the same three patterns.
             AccessibilityRole.Menu when patternId == UiaInterop.UIA_ScrollPatternId && Node.ItemSource is not null
                 => new UiaScrollProvider(_bridge, ElementId),
-            AccessibilityRole.Menu when patternId == UiaInterop.UIA_SelectionPatternId && Node.ItemSource is not null
-                => new UiaSelectionProvider(_bridge, ElementId),
             AccessibilityRole.Menu when patternId == UiaInterop.UIA_ItemContainerPatternId && Node.ItemSource is not null
                 => new UiaItemContainerProvider(_bridge, ElementId),
             // Any expandable element (regardless of role) exposes ExpandCollapse.
@@ -243,7 +244,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
             UiaInterop.UIA_IsEnabledPropertyId => UiaVariant.FromBool(_isEnabled),
             UiaInterop.UIA_IsOffscreenPropertyId => UiaVariant.FromBool(Node.IsOffscreen),
             UiaInterop.UIA_IsPasswordPropertyId => UiaVariant.FromBool(_isPassword),
-            UiaInterop.UIA_SelectionItemIsSelectedPropertyId when _isSelected is { } selected
+            UiaInterop.UIA_SelectionItemIsSelectedPropertyId when _isSelected is { } selected && OffersSelection(node)
                 => UiaVariant.FromBool(selected),
             UiaInterop.UIA_ValueValuePropertyId when _value is not null => UiaVariant.FromBStr(_value),
             // A range as the tree was built with it, which is what its change events carry.
@@ -365,6 +366,10 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
     }
 
     // ── Helpers ──
+
+    /// <summary>Whether a node with a selected state offers it to UIA (SelectionItem, IsSelected): not a
+    /// menu's entry, whose highlight is the focus moving to it.</summary>
+    internal static bool OffersSelection(AccessibilityNode node) => node.Role != AccessibilityRole.MenuItem;
 
     private static bool InScrollable(AccessibilityNode node)
     {

@@ -495,10 +495,9 @@ public class A11yCurrentItemFocusTests
         rig.Raised.Clear();
         rig.Session.Window.PressKey(KeyCode.Down);
         rig.Session.PumpFrame();
+        // A menu's entry is no SelectionItem: the move is the focus's alone.
         Assert.Equal(
         [
-            Prop(IsSelected, Item(menu, 0)),
-            Prop(IsSelected, Item(menu, 1)),
             Prop(HasKeyboardFocus, Item(menu, 0)),
             Prop(HasKeyboardFocus, Item(menu, 1)),
             Focus(Item(menu, 1)),
@@ -724,6 +723,51 @@ public class A11yCurrentItemFocusTests
         Assert.False(rig.HasFocus(f.BarNode().ElementId));
     }
 
+    /// <summary>A menu's entries are no SelectionItems (Narrator said "selected" on every one); a list's
+    /// items keep theirs. Item nodes and items served on demand alike, and no IsSelected change is
+    /// raised for an entry.</summary>
+    [WindowsTheory]
+    [InlineData(3)]
+    [InlineData(AccessibilityTreeBuilder.MaxEagerVirtualItems + 1)]
+    public void AMenusEntries_AreNoSelectionItems_AndRaiseNoIsSelected(int count)
+    {
+        using var rig = new UiaRig();
+        var (opener, root) = Opener();
+        rig.Session.Window.SetRoot(root);
+        Settle(rig.Session);
+        opener.Focus();
+        rig.Session.PumpFrame();
+        rig.Session.Window.Window.OpenMenu(Enumerable.Range(0, count).Select(i => Entry($"Entry {i}")).ToList(),
+            new Point(20, 40), new MenuRequest { HighlightFirst = true });
+        rig.Session.PumpFrame();
+        var menu = rig.Menu();
+        Assert.Equal(count > AccessibilityTreeBuilder.MaxEagerVirtualItems, menu.IsVirtualItemContainer);
+        rig.Raised.Clear();
+        rig.Session.Window.PressKey(KeyCode.Down);
+        rig.Session.PumpFrame();
+        Assert.DoesNotContain(rig.Raised, e => e.Id == IsSelected);
+        Assert.Equal([Item(menu, 1)], rig.FocusEvents());
+
+        IntPtr native = menu.IsVirtualItemContainer ? rig.Bridge.NativeVirtualItem(menu.ElementId, 1) : rig.Bridge.NativeFragment(Item(menu, 1));
+        try
+        {
+            var entry = (INativeSimple)NativeProvider.LogicOf(native)!;
+            Assert.Equal(0, entry.GetPatternProvider(UiaInterop.UIA_SelectionItemPatternId, out var pattern));
+            Assert.Equal(IntPtr.Zero, pattern);
+            Assert.Equal(0, entry.GetPropertyValue(IsSelected, out var value));
+            Assert.Equal(0, (int)value.Vt);
+        }
+        finally { Marshal.Release(native); }
+        var menuNative = rig.Bridge.NativeFragment(menu.ElementId);
+        try
+        {
+            var logic = (INativeSimple)NativeProvider.LogicOf(menuNative)!;
+            Assert.Equal(0, logic.GetPatternProvider(UiaInterop.UIA_SelectionPatternId, out var selection));
+            Assert.Equal(IntPtr.Zero, selection);
+        }
+        finally { Marshal.Release(menuNative); }
+    }
+
     // ── AT-SPI ──
 
     private sealed class Signals : IAtSpiSignals
@@ -838,11 +882,10 @@ public class A11yCurrentItemFocusTests
         rig.Signals.Lines.Clear();
         rig.Session.Window.PressKey(KeyCode.Down);
         rig.Session.PumpFrame();
-        Assert.Equal(
-        [
-            Selected(Item(menu, 0), false), Selected(Item(menu, 1), true),
-            Focused(Item(menu, 0), false), Focused(Item(menu, 1), true),
-        ], rig.Signals.States());
+        // A menu's entry has no selected state: the move is the focus's alone.
+        Assert.Equal([Focused(Item(menu, 0), false), Focused(Item(menu, 1), true)], rig.Signals.States());
+        Assert.False(rig.Object(Item(menu, 1)).Selectable);
+        Assert.False(rig.Object(Item(menu, 1)).Selected);
 
         // Its items' ids before it closes: the menu gives its slot back as it goes.
         var entry = Item(menu, 1);

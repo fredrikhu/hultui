@@ -391,6 +391,10 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     internal int ServedItemControlType(ElementId listId) =>
         UiaFragment.MapControlType(AccessibilityTreeBuilder.ItemRoleOf(NodeOf(listId)?.Role ?? AccessibilityRole.List));
 
+    /// <summary>Whether the items a list serves on demand are a menu's entries, which offer no
+    /// SelectionItem (<see cref="UiaFragment.OffersSelection"/>).</summary>
+    internal bool ServesMenuItems(ElementId listId) => NodeOf(listId)?.Role == AccessibilityRole.Menu;
+
     /// <summary>
     /// The wrapper of item <paramref name="index"/>'s node, when its list has item nodes now: a
     /// provider of an item served on demand that a client still holds after the list shrank to 2,000
@@ -787,7 +791,8 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     /// </summary>
     private void RaiseServedSelection(AccessibilityNode? previous, AccessibilityNode node)
     {
-        if (!RaiseEvents) return;
+        // A menu's entries are no SelectionItems (UiaVirtualItem): nothing to tell of them.
+        if (!RaiseEvents || node.Role == AccessibilityRole.Menu) return;
         var now = node.Served;
         foreach (var (index, selected) in ServedItems.Changes(previous?.Served ?? default, now))
             if (index < now.Count)
@@ -1083,6 +1088,8 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
             finally { Marshal.Release(source); }
             return;
         }
+        // A menu's entry offers no SelectionItem: its highlight is told as the focus moving to it.
+        if (propertyName == AccessibilityProperties.IsSelected && !UiaFragment.OffersSelection(wrapper.Node)) return;
         if (propertyName == AccessibilityProperties.Role)
         {
             // A role change, as Chromium tells one: the control type, and its localized name with
