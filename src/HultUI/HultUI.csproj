@@ -41,6 +41,12 @@
        [Reactive] works" is the intended consumption story. Core-only consumers can
        reference the HultUI.SourceGenerators package themselves. -->
   <ItemGroup>
+    <PackageReference Include="ppy.SDL3-CS" Version="2026.1002.1" />
+    <PackageReference Include="SkiaSharp" Version="3.119.4" />
+    <PackageReference Include="SkiaSharp.HarfBuzz" Version="3.119.4" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="3.119.4" />
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.95.2" />
+    <PackageReference Include="Vortice.Vulkan" Version="3.3.0" />
     <None Include="..\HultUI.SourceGenerators\bin\$(Configuration)\netstandard2.0\HultUI.SourceGenerators.dll"
           Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
   </ItemGroup>
