@@ -17,8 +17,11 @@ file after every step and commits it with the step's work. Full survey reports a
   the archive, as `archive_r15.py` did; questions 50 and 64 are answered too (2026-11-16) and go once round 16's build
   order names their items. **Round 16 builds a11y-gate-on-client (question 50: build) and a11y-items-on-demand-sooner
   (question 64: (a), Windows only)**; the prototypes are `sr-variants\patches\gate.patch` and `items200.patch`. **The
-  screen-reader fix (a11y-keyboard-moves-silent, 9b7513d1..9550ecec, outside plan 17) is on this branch, not on main**:
-  it goes to main with round 16's release, and round 16's survey treats it as already reviewed. Open for the user, not
+  screen-reader fix (a11y-keyboard-moves-silent, 9b7513d1..9550ecec, outside plan 17) is ON MAIN** (2026-11-16, at the
+  user's word outside a round: main merged into the branch as 9df64bf6, local full suite green but one Skia allocation
+  flake, pushed as a fast-forward, CI run 43956614145 green on attempt 2), and released with junction-v1.28.0,
+  vesper-v1.28.0, meridian-v1.11.0, aperture-v1.26.0, reel-v1.12.0 on 9df64bf6. Round 16's survey treats the fix
+  as already reviewed and reviews 587f1767..75f2288a as planned. Open for the user, not
   blocking: another F16 held-drag run (Waiting) only with a new approval. Outside plan 17: CI's Linux job runs no
   Junction, Meridian, Aperture or Reel tests; AT-SPI/Orca is unchecked for the screen-reader fix.
   To resume in a fresh context, run in this worktree: `/loop Run the next step of
