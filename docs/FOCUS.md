@@ -221,6 +221,14 @@ not reach — nothing focused, or a page element focused from code while the dia
 so the page's own shortcuts cannot fire underneath. Any other overlay is a Tab scope once
 it holds the focus: Tab from a field in a popover cycles in the popover.
 
+A key that belongs to the whole window whatever holds the keyboard (a "lock now" shortcut)
+goes on `Window.PreviewKeyDown`, not on the root: an overlay's content is not under the root,
+so a root handler, capture phase included, never sees a key typed in a dialog or a popover.
+The preview sees every key first, after DevTools' F11 and F12 only; `StopPropagation` there
+ends the key, holds back the text it would type, and keeps a Tab from moving the focus. An
+idle timeout listens to `Window.InputActivity`, raised for every key, text, pointer and wheel
+input before it is routed, which nothing stops.
+
 A dialog takes the keyboard when it opens: its first control, or the dialog itself when it
 has none — the panel, which a screen reader is told has the focus as a dialog named by its
 title (until 2026-10-27 the scrim took it, a pane with no name to a reader); it is not a Tab

@@ -657,6 +657,30 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     public event Action? Closed;
 
     /// <summary>
+    /// Raised for every key pressed in the window, before it goes anywhere: before a dialog, a
+    /// menu or the focused element has it, and before Tab moves the focus. For keys that belong to
+    /// the whole window whatever holds the keyboard, as a "lock now" shortcut: a key handler on
+    /// the root never sees a key typed in a dialog, whose content is not under the root
+    /// (docs/FOCUS.md). Only DevTools' F11 and F12 come first.
+    /// <para><see cref="ElementEvent.StopPropagation"/> ends the key here: nothing else sees it,
+    /// the text it would type is not typed, and a Tab does not move the focus. Its release still
+    /// comes, as a <see cref="KeyUpEvent"/> to the focused element. The event's target is null.</para>
+    /// </summary>
+    public event Action<KeyDownEvent>? PreviewKeyDown;
+
+    /// <summary>
+    /// Raised for every input the user gives the window, before it is routed and whatever it
+    /// reaches: a key, typed text, a pointer moving, pressing or releasing, a wheel turned, a drop.
+    /// Nothing stops it, and it stops nothing. For an idle timeout: a handler on the root misses
+    /// what goes into a dialog or a popover, whose content is not under the root. A pointer move
+    /// raises it, so keep the handler to noting the time.
+    /// </summary>
+    public event Action? InputActivity;
+
+    // The text of a key PreviewKeyDown ended, which arrives next as text input and is not typed.
+    private string? _previewStoppedText;
+
+    /// <summary>
     /// Raised when the OS makes this window the foreground one — the user clicked it, or
     /// alt-tabbed back to it. Fires on the UI thread, once per activation.
     ///
@@ -2540,6 +2564,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     {
         if (_root is null) return;
 
+        InputActivity?.Invoke();
         NotePointer(evt);
         if (TryHandleDevToolsInput(evt)) return;
 
@@ -3012,6 +3037,24 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                         Tracer.StopRecording(FrameTracer.DefaultPath);
                 }
 
+                // The window's own keys first, whatever holds the keyboard (PreviewKeyDown). A key
+                // it ends goes nowhere else, and the text it would type is held back from the text
+                // input that follows it.
+                if (key.IsDown)
+                {
+                    _previewStoppedText = null;
+                    if (PreviewKeyDown is { } preview)
+                    {
+                        var previewEvent = NewKeyDown(key);
+                        preview(previewEvent);
+                        if (previewEvent.StopPropagation)
+                        {
+                            _previewStoppedText = key.Text;
+                            break;
+                        }
+                    }
+                }
+
                 // Context menu keyboard navigation. An open flyout captures
                 // Up/Down/Enter; → opens a flyout, ← / Escape close one level.
                 if (key.IsDown && _contextMenuElement is not null)
@@ -3113,6 +3156,13 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
             case InputEvent.TextInputInput textInput:
             {
+                // The text of a key PreviewKeyDown ended: not typed. Only the input right behind
+                // the key, and only the same text (an IME's commit is not the key's).
+                if (_previewStoppedText is { } stopped)
+                {
+                    _previewStoppedText = null;
+                    if (stopped == textInput.Text) break;
+                }
                 var target = KeyTarget();
                 EventDispatcher.Dispatch(new TextInputEvent { Text = textInput.Text }, target);
                 break;
