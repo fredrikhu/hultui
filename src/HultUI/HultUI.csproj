@@ -41,6 +41,7 @@
        [Reactive] works" is the intended consumption story. Core-only consumers can
        reference the HultUI.SourceGenerators package themselves. -->
   <ItemGroup>
+    <PackageReference Include="ppy.SDL3-CS" Version="2026.1002.1" />
     <None Include="..\HultUI.SourceGenerators\bin\$(Configuration)\netstandard2.0\HultUI.SourceGenerators.dll"
           Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
   </ItemGroup>
