@@ -41,9 +41,10 @@ public class HoverAfterRebuildTests
     /// <summary>A counted host holding view <paramref name="first"/>, made here so no test method
     /// holds the view; the host takes its size from the view.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static (HeadlessSession Session, BoxElement Host) Mount(Log log, string first)
+    private static (HeadlessSession Session, BoxElement Host) Mount(Log log, string first,
+        HeadlessOptions? options = null)
     {
-        var session = HeadlessSession.Create(400, 300);
+        var session = HeadlessSession.Create(400, 300, options: options);
         var host = log.Watch(Box.New(), "host").Children(View(log, first));
         session.Window.SetRoot(Flex.Column().AlignItems(AlignItems.FlexStart).Children(host));
         session.PumpFrame();
@@ -468,6 +469,50 @@ public class HoverAfterRebuildTests
         session.PumpFrame();
         session.PumpFrame(TimeSpan.FromSeconds(1));
 
+        Assert.Empty(TooltipTexts(session));
+    }
+
+    // The two below check the frame drawn, not the overlays after it: hover is settled after the
+    // present, so a tooltip of a removed owner was gone by the time a test looked, yet drawn once
+    // over what replaced its owner (a lock screen over the window's content, showing a name).
+
+    [Fact]
+    public void ATooltipComingDueAsItsOwnersAncestorIsReplaced_IsNotDrawn()
+    {
+        var log = new Log();
+        var (session, host) = Mount(log, "a", new HeadlessOptions { RecordDrawCalls = true });
+        using var _ = session;
+        Leaf(host).Tooltip("secret tip");
+        session.Window.MoveMouse(50, 20);
+        session.PumpFrame(TimeSpan.FromMilliseconds(100));
+
+        // The owner is nested in what goes, so it keeps its overlay host; its delay ends in the
+        // same pass, before the frame.
+        host.ReplaceChildren(View(log, "b"));
+        session.Window.RenderLog.Clear();
+        session.PumpFrame(TimeSpan.FromSeconds(1));
+
+        Assert.False(session.Window.RenderLog.Contains("secret tip"));
+        Assert.Empty(TooltipTexts(session));
+    }
+
+    [Fact]
+    public void AShowingTooltipWhoseOwnerIsRemoved_IsNotDrawnAgain()
+    {
+        var log = new Log();
+        var (session, host) = Mount(log, "a", new HeadlessOptions { RecordDrawCalls = true });
+        using var _ = session;
+        Leaf(host).Tooltip("secret tip");
+        session.Window.MoveMouse(50, 20);
+        session.PumpFrame(TimeSpan.FromSeconds(1));
+        session.PumpFrame();
+        Assert.True(session.Window.RenderLog.Contains("secret tip"));
+
+        host.ReplaceChildren(View(log, "b"));
+        session.Window.RenderLog.Clear();
+        session.PumpFrame();
+
+        Assert.False(session.Window.RenderLog.Contains("secret tip"));
         Assert.Empty(TooltipTexts(session));
     }
 
