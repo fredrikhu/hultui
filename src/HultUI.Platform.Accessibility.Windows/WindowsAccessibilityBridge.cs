@@ -749,8 +749,19 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     /// <summary>Raises the UIA events of property changes whose wrappers are up to date.</summary>
     private void RaisePropertyChanges(List<PropertyChange> changes)
     {
+        if (changes.Count == 0) return;
+        // The node a reader has the focus on, when this frame takes the focus off it: what else changed
+        // of it is not told. A folder entered in Vesper relabels the list's items in place (an item's id
+        // is its place), and NVDA read the item at the cursor's old place by its new name ("inbox
+        // folder") before the move to the new cursor ("Parent folder"). Its name only: the state a move
+        // changes (its selected state) is told, as it is of any item the move leaves.
+        long told = Volatile.Read(ref _targetIdRaw);
+        long leaving = told != 0 && ResolveFocusTarget() != told ? told : 0;
         foreach (var change in changes)
         {
+            if (leaving != 0 && change.PropertyName == AccessibilityProperties.Name
+                && unchecked((long)change.Node.ElementId.Value) == leaving)
+                continue;
             // An item node's wrapper is made here when it has none yet, from its node in the tree.
             if (!TryWrapper(change.Node.ElementId, out var wrapper)) continue;
             if (change.PropertyName == AccessibilityProperties.ScrollPosition)

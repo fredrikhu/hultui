@@ -868,6 +868,40 @@ public class A11yCurrentItemFocusTests
         public void NotifyWindowActivated() => Activations++;
     }
 
+    /// <summary>
+    /// NVDA read two items as Vesper entered a folder ("inbox folder", then "parent folder"): a new listing
+    /// relabels a list's items in place (an item's id is its place), and the item at the cursor's old
+    /// place, which had the focus, was told renamed before the focus moved to the new cursor. A frame
+    /// that takes the focus off an item tells no name change of it: one focus event, on the new cursor.
+    /// </summary>
+    [WindowsFact]
+    public void ANewListing_WithTheCursorMoved_TellsOneMove_AndNoRenameOfTheItemLeft()
+    {
+        using var rig = new UiaRig();
+        var (_, list, _, root) = FocusableList(20, selected: 5);
+        rig.Session.Window.SetRoot(root);
+        Settle(rig.Session);
+        list.Focus();
+        rig.Session.PumpFrame();
+        Assert.Equal(Item(list, 5), rig.GetFocus());
+        rig.Raised.Clear();
+
+        list.Items = Enumerable.Range(0, 30).Select(i => i == 0 ? ".." : $"inner {i}").ToList();
+        list.SelectedIndex = 0;
+        for (int i = 0; i < 3; i++) rig.Session.PumpFrame(TimeSpan.FromMilliseconds(150));
+        Assert.Equal([Item(list, 0)], rig.FocusEvents());
+        Assert.DoesNotContain(rig.Raised, e => e.Element == Item(list, 5) && e.Id == UiaInterop.UIA_NamePropertyId);
+        Assert.Equal("inner 5", rig.Node(Item(list, 5))!.Name);
+        Assert.Equal("..", rig.Node(Item(list, 0))!.Name);
+
+        // A rename where the focus stays is told.
+        rig.Raised.Clear();
+        list.Items = Enumerable.Range(0, 30).Select(i => i == 0 ? "up" : $"inner {i}").ToList();
+        for (int i = 0; i < 3; i++) rig.Session.PumpFrame(TimeSpan.FromMilliseconds(150));
+        Assert.Contains(rig.Raised, e => e.Element == Item(list, 0) && e.Id == UiaInterop.UIA_NamePropertyId);
+        Assert.Empty(rig.FocusEvents());
+    }
+
     /// <summary>What a provider answers for PositionInSet and SizeOfSet, (0, 0) for nothing.</summary>
     private static (int At, int Of) Place(UiaRig rig, ElementId id, bool served = false)
     {
@@ -1071,6 +1105,25 @@ public class A11yCurrentItemFocusTests
         rig.Session.PumpFrame();
         Assert.Equal([Focused(Item(list, 4), false), Focused(after.Id, true)], rig.Signals.States());
         Assert.False(rig.Object(Item(list, 4)).Focused);
+    }
+
+    [Fact]
+    public void ATSPI_ANewListing_WithTheCursorMoved_SendsNoRenameOfTheItemLeft()
+    {
+        using var rig = new AtSpiRig();
+        var (_, list, _, root) = FocusableList(20, selected: 5);
+        rig.Session.Window.SetRoot(root);
+        Settle(rig.Session);
+        list.Focus();
+        rig.Session.PumpFrame();
+        rig.Signals.Lines.Clear();
+
+        list.Items = Enumerable.Range(0, 30).Select(i => i == 0 ? ".." : $"inner {i}").ToList();
+        list.SelectedIndex = 0;
+        for (int i = 0; i < 3; i++) rig.Session.PumpFrame(TimeSpan.FromMilliseconds(150));
+        Assert.DoesNotContain($"property-change:accessible-name {Item(list, 5).Value}", rig.Signals.Lines);
+        Assert.Equal([Focused(Item(list, 5), false), Focused(Item(list, 0), true)],
+            rig.Signals.Lines.Where(l => l.StartsWith("state-changed:focused", StringComparison.Ordinal)));
     }
 
     [Fact]

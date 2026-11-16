@@ -397,6 +397,7 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
         if (!firstBuild)
         {
             TellServedLists(wasServed);
+            _leavingPath = LeavingPath();
             for (int i = 0; i < diff.PropertyChanged.Count; i++)
             {
                 var change = diff.PropertyChanged[i];
@@ -670,6 +671,20 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
     // The window came to the front since the client was last told the focus. UI thread.
     private bool _activated;
 
+    // The path of the object the client was told has the focus, while the changes being sent take the
+    // focus off it (the frame's end tells the move); null otherwise. UI thread.
+    private string? _leavingPath;
+
+    /// <summary>The path the client was told has the focus when the tree as applied now moves the
+    /// reader's focus elsewhere: a list's items relabelled in place by a new listing (an item's id is its
+    /// place), whose name change at the cursor's old place a reader read before the move. Null
+    /// otherwise.</summary>
+    private string? LeavingPath()
+    {
+        if (_focusedPath is not { } told || (_holderId == default && !_holderIsRoot)) return null;
+        return TargetPath() != told ? told : null;
+    }
+
     // The holder changed since the client was last told the focus; and the path of the node the tree
     // marked focused before the first of those moves, which the client may not have been told of. UI thread.
     private bool _holderMoved;
@@ -760,6 +775,7 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
             ApplyChanges(patch, root);
             return;
         }
+        _leavingPath = LeavingPath();
         foreach (var change in patch.PropertyChanged)
         {
             var acc = ObjectOf(change.Node)!;
@@ -806,6 +822,8 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
         switch (change.PropertyName)
         {
             case AccessibilityProperties.Name:
+                // Not the focus's while this frame takes the focus off it (LeavingPath).
+                if (path == _leavingPath) return false;
                 _signals!.EmitPropertyChange(path, AtSpiConstants.PropAccessibleName, change.Node.Name ?? "");
                 return true;
             case AccessibilityProperties.Description:
