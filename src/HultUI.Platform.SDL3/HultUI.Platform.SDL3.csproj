@@ -26,7 +26,7 @@
     <!-- Phase 1 of docs/design/HDR.md. Structs and enums only: the commands are loaded
          through vkGetDeviceProcAddr in VulkanCommands.cs, because this package generates
          the types but exposes only the global bootstrap calls as methods. -->
-    <PackageReference Include="Vortice.Vulkan" Version="3.2.3" />
+    <PackageReference Include="Vortice.Vulkan" Version="3.3.0" />
   </ItemGroup>
 
 </Project>

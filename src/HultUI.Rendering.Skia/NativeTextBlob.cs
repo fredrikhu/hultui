@@ -20,7 +20,7 @@ namespace HultUI.Rendering.Skia;
 /// keeps glyphs of its own, told by the blob's destructor when it goes), so the owner may unref
 /// it straight after a draw, as disposing the wrapper did.</para>
 ///
-/// <para>This ties the renderer to SkiaSharp's C API at the pinned version (3.119.2), as
+/// <para>This ties the renderer to SkiaSharp's C API at the pinned version (3.119.4), as
 /// SkiaSharp's own bindings are tied to it. The exports are looked up in the library SkiaSharp
 /// itself loaded, when the first render context is made, and a missing one stops it there with
 /// an error that names it; <c>NativeTextBlobTests</c> fails when the exports or SkiaSharp's own
@@ -94,7 +94,7 @@ internal static unsafe class NativeTextBlob
 
     internal static EntryPointNotFoundException Unavailable(string why) => new(
         $"HultUI.Rendering.Skia draws text through four functions of SkiaSharp's native C API " +
-        $"({string.Join(", ", Exports)}), built against SkiaSharp 3.119.2, but {why}. " +
+        $"({string.Join(", ", Exports)}), built against SkiaSharp 3.119.4, but {why}. " +
         $"The SkiaSharp package and its native assets must be the version HultUI.Rendering.Skia references.");
 
     /// <summary>The blob of the runs <paramref name="builder"/> holds, with one reference for the
