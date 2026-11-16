@@ -74,6 +74,26 @@ reviewed and explained, the perf A/B shows no regression, and the real-window ch
 
 ## 2. Kiota 2 together with Jellyfin.Sdk 2026.10
 
+**Status (2026-11-17): done on `claude/kiota2-jellyfin-sdk`. Every check below passed.**
+
+- Jellyfin.Sdk 2026.10.12 and Kiota 2.1.6 build with no code changes.
+- Aperture's tests pass: 364, plus 4 new `JellyfinSerializationTests`. These read dashless ids
+  through Kiota 2 and show that stock Kiota still loses them, so `JellyfinSerialization` stays.
+- The Native AOT publish has no trim or AOT warnings. Against the lab server (Jellyfin 12.4.0),
+  the native probe signed in with an API key as a named user (`--user`), listed both libraries,
+  and read an item in full: 9 chapters, trickplay, artwork tag. Dashless user and item ids work
+  end to end.
+- The live tests pass, 9 of 9 (`LiveServerTests`). `APERTURE_LIVE_SERVER` must be a full URL
+  (`http://jellyfin.home:8096`) because one test reads its host with `new Uri`. `APERTURE_USER`
+  must be set too, because the lab server has several users.
+- Playback works in the app (the native build, with the release's `libmpv-2.dll` beside it).
+- Found on the way, on `main` as well: `ApertureFailure.UserMessage` drops the detail of a
+  `NotFound`. So an API-key sign-in without a user, on a server with several users, reads "That
+  is no longer on jellyfin.home:8096" instead of asking which user to browse as.
+- Not taken: the SDK's `JellyfinRequestAdapter` now has its own dashless-id converter and a
+  faster parse node, but it throws on a malformed id where Aperture's converter reads
+  `Guid.Empty`, and it takes no serialization writer. Adopting it is a separate decision.
+
 **Why Kiota cannot move alone.** Jellyfin.Sdk 2025.10.21 depends on Kiota 1.20.1. The
 `Aperture.Core.csproj` comment pins Kiota forward to 1.22.2 because 1.20.1 carries
 GHSA-7j59-v9qr-6fq9; 1.22.2 is the same major and binary-compatible. Kiota 2.0.0 (2026-05-06)
