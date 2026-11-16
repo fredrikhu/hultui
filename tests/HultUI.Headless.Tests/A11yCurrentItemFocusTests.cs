@@ -641,10 +641,10 @@ public class A11yCurrentItemFocusTests
         using var f = new MenuBarFixture();
         var rig = f.Rig;
 
-        // F10: the bar has the keys, on its first title.
+        // F10: the bar has the keys, on its first title: one focus event, on the title.
         f.Press(KeyCode.F10);
         Assert.Equal(f.Title(0), rig.GetFocus());
-        Assert.Equal(f.Title(0), rig.FocusEvents().Last());
+        Assert.Equal([f.Title(0)], rig.FocusEvents());
         Assert.True(rig.HasFocus(f.Title(0)));
         Assert.True(rig.Answer(f.Title(0), IsKeyboardFocusable));
         Assert.False(rig.HasFocus(f.BarNode().ElementId));
@@ -689,6 +689,39 @@ public class A11yCurrentItemFocusTests
         Assert.Equal(f.Document.Id, rig.GetFocus());
         Assert.Equal(f.Document.Id, rig.FocusEvents().Last());
         Assert.False(rig.HasFocus(f.Title(2)));
+    }
+
+    /// <summary>
+    /// The readers on the Fluent sample (2026-11-16): after Alt+V, Escape (back to the titles) and Escape
+    /// (back to the page), F10, Right and Right read the right titles, and then the bar again ("Menu bar
+    /// menu bar"), from a focus event on the bar itself: F10 and Alt with a letter focused the bar at
+    /// once, and its title a frame later. Each step here is one focus event, on the node it ends on: a
+    /// menu's entry, a title, the page; never the bar.
+    /// </summary>
+    [WindowsFact]
+    public void AMenuBar_AltV_EscapeEscape_F10_RightRight_Escape_IsOneFocusEventAStep()
+    {
+        using var f = new MenuBarFixture();
+        var rig = f.Rig;
+        List<ElementId?> Step(KeyCode key, KeyModifiers mods = KeyModifiers.None)
+        {
+            f.Press(key, mods);
+            return rig.FocusEvents();
+        }
+
+        var altV = Step(KeyCode.V, KeyModifiers.Alt);
+        var menu = rig.Menu();
+        Assert.Equal([Item(menu, 0)], altV);
+        Assert.Equal("Zoom in", rig.Node(Item(menu, 0))!.Name);
+        Assert.Equal([f.Title(2)], Step(KeyCode.Escape));
+        Assert.Equal([f.Document.Id], Step(KeyCode.Escape));
+        Assert.Equal([f.Title(0)], Step(KeyCode.F10));
+        Assert.Equal([f.Title(1)], Step(KeyCode.Right));
+        Assert.Equal([f.Title(2)], Step(KeyCode.Right));
+        Assert.Equal([f.Document.Id], Step(KeyCode.Escape));
+        Assert.True(rig.HasFocus(f.Document));
+        Assert.False(rig.HasFocus(f.Title(2)));
+        Assert.False(rig.HasFocus(f.BarNode().ElementId));
     }
 
     // ── AT-SPI ──

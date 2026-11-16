@@ -72,6 +72,8 @@ sealed class UiaRig : IBridgeRig, IAccessibilityBridge, ITreeDiffBorrower, IDisp
         FocusMoves++;
     }
 
+    public void NotifyChangesApplied(AccessibilityNode root) => _bridge.NotifyChangesApplied(root);
+
     public void Announce(AccessibilityNode? source, string text, AnnouncementPoliteness politeness)
         => _bridge.Announce(source, text, politeness);
 

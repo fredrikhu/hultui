@@ -629,21 +629,38 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
     /// state-changed:selected went out first.</summary>
     public void NotifyChangesApplied(AccessibilityNode root)
     {
-        if (!_registered || _signals is null || _holderId == default && !_holderIsRoot) return;
-        string? newPath = TargetPath();
-        string? was = _focusedPath;
-        if (newPath == was)
-        {
-            KeepHolderUnfocused(newPath);
-            return;
-        }
-        if (was is not null) SetFocused(was, false);
-        if (newPath is not null) SetFocused(newPath, true);
+        if (!_registered || _signals is null) return;
+        bool moved = _holderMoved;
+        string? previousPath = _previousHint;
+        _holderMoved = false;
+        _previousHint = null;
+        if (!moved && _holderId == default && !_holderIsRoot) return;
+        string? newPath = _holderId == default && !_holderIsRoot ? null : TargetPath();
         KeepHolderUnfocused(newPath);
-        if (was is not null) _signals.EmitStateChanged(was, "focused", active: false);
-        if (newPath is not null) _signals.EmitStateChanged(newPath, "focused", active: true);
+
+        // The focused state a client reads (GetState, the cache), as of now. A focus move
+        // rebuilds no tree, so both objects kept the state of the last apply, and the
+        // next apply's diff sent state-changed:focused for both again, late.
+        bool previousLost = previousPath is not null && previousPath != newPath && SetFocused(previousPath, false);
+        string? was = _focusedPath;
+        if (was is not null && was != newPath) SetFocused(was, false);
+        if (newPath is not null) SetFocused(newPath, true);
+
+        if (was is not null && was != newPath)
+            _signals.EmitStateChanged(was, "focused", active: false);
+        // The object the tree had focused, when this bridge was not told of it (a client
+        // attached after the focus last moved).
+        if (previousLost && previousPath != was)
+            _signals.EmitStateChanged(previousPath!, "focused", active: false);
+        if (newPath is not null && newPath != was)
+            _signals.EmitStateChanged(newPath, "focused", active: true);
         _focusedPath = newPath;
     }
+
+    // The holder changed since the client was last told the focus; and the path of the node the tree
+    // marked focused before the first of those moves, which the client may not have been told of. UI thread.
+    private bool _holderMoved;
+    private string? _previousHint;
 
     /// <summary>The node that holds the focus, in the applied tree: its object's node.</summary>
     private AccessibilityNode? HolderNode() =>
@@ -679,25 +696,10 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
 
         _holderId = focused?.ElementId ?? default;
         _holderIsRoot = focused is { Parent: null };
-        string? newPath = focused is null ? null : TargetPath();
-        KeepHolderUnfocused(newPath);
-
-        // The focused state a client reads (GetState, the cache), as of now. A focus move
-        // rebuilds no tree, so both objects kept the state of the last apply, and the
-        // next apply's diff sent state-changed:focused for both again, late.
-        bool previousLost = previousPath is not null && previousPath != newPath && SetFocused(previousPath, false);
-        if (_focusedPath is not null && _focusedPath != newPath) SetFocused(_focusedPath, false);
-        if (newPath is not null) SetFocused(newPath, true);
-
-        if (_focusedPath is not null && _focusedPath != newPath)
-            _signals.EmitStateChanged(_focusedPath, "focused", active: false);
-        // The object the tree had focused, when this bridge was not told of it (a client
-        // attached after the focus last moved).
-        if (previousLost && previousPath != _focusedPath)
-            _signals.EmitStateChanged(previousPath!, "focused", active: false);
-        if (newPath is not null && newPath != _focusedPath)
-            _signals.EmitStateChanged(newPath, "focused", active: true);
-        _focusedPath = newPath;
+        // Told once the frame's changes are (NotifyChangesApplied): one state-changed:focused a move, on
+        // the node it ends on, after what the frame changed (a selected state the rebuild marks).
+        _previousHint ??= previousPath;
+        _holderMoved = true;
     }
 
     /// <summary>

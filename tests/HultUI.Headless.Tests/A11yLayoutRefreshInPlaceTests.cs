@@ -44,6 +44,7 @@ public class A11yLayoutRefreshInPlaceTests
         }
         public void NotifyFocusChanged(AccessibilityNode? focused) => inner.NotifyFocusChanged(focused);
         public void NotifyFocusChanged(AccessibilityNode? focused, AccessibilityNode? previous) => inner.NotifyFocusChanged(focused, previous);
+        public void NotifyChangesApplied(AccessibilityNode root) => inner.NotifyChangesApplied(root);
     }
 
     /// <summary>What a diff or a patch names, as lines: each node added with its parent, each removed

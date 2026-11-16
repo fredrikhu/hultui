@@ -917,7 +917,12 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     /// <summary>The frame's changes are told: the reader's focus is read again, once, after them. A
     /// key that moved a list's or a menu's selection moved its current item with it, and the items'
     /// selected states went out first.</summary>
-    public void NotifyChangesApplied(AccessibilityNode root) => UpdateFocusTarget(holderMoved: false);
+    public void NotifyChangesApplied(AccessibilityNode root)
+    {
+        bool moved = _holderMoved;
+        _holderMoved = false;
+        UpdateFocusTarget(moved);
+    }
 
     // The node a reader is told has the keyboard focus (AccessibilityFocus): the current item of the
     // node that holds the focus (FocusedNodeId) where it is a list, a menu or a menu bar with one, or of
@@ -957,8 +962,16 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
         // after the focus last moved): it loses the focus now, and is told so.
         if (Volatile.Read(ref _targetIdRaw) == 0 && previous is { } p && p != focused?.ElementId && _wrappers.ContainsKey(p))
             Volatile.Write(ref _targetIdRaw, unchecked((long)p.Value));
-        UpdateFocusTarget(holderMoved: true);
+        // Told once the frame's changes are (NotifyChangesApplied): one focus event a move, on the node
+        // the move ends on. A move told at once raised one on what held the focus first: F10 and
+        // Alt and a letter told the menu bar, then its title a frame later, and Narrator read the bar
+        // again; a click that focused and selected a navigation item told it "not selected", before the
+        // rebuild marked it.
+        _holderMoved = true;
     }
+
+    // The holder changed since the reader's focus was last told. UI thread.
+    private bool _holderMoved;
 
     /// <summary>
     /// Reads where the reader's focus is (<see cref="AccessibilityFocus.TargetOf"/>) and, when it moved,

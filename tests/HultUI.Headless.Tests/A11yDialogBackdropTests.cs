@@ -72,6 +72,7 @@ public class A11yDialogBackdropTests
             Focused = focused;
             inner?.NotifyFocusChanged(focused, previous);
         }
+        public void NotifyChangesApplied(AccessibilityNode root) => inner?.NotifyChangesApplied(root);
 
         /// <summary>The nodes whose name every change told since <paramref name="from"/> changed.</summary>
         public List<ElementId> NamesToldSince(int from) =>

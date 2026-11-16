@@ -247,6 +247,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     // end (NotifyChangesApplied): no diff carries it.
     private readonly List<(AccessibilityNode Node, int Current)> _a11yCurrents = [];
     private bool _a11yCurrentMoved;
+    // The bridge was told the node that holds the reader's focus since the last accessibility phase
+    // (TellA11yFocus): the next phase runs, and ends with NotifyChangesApplied, where it is told.
+    private bool _a11yFocusTold;
     // The menu the bridge was told holds the reader's focus (UpdateA11yMenuFocus): an open context menu
     // or menu bar's menu, which takes the keys while the focus stays on the element that had it. Null
     // while the focused element holds it, as everywhere else.
@@ -894,7 +897,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             // While an open menu holds the reader's focus, the bridge hears where the element focus is
             // when the menu closes (UpdateA11yMenuFocus): a command chosen from a menu bar's menu gives
             // the focus back to what had it before the bar, and the bar in between is no stop to tell.
-            if (_a11yMenuFocus is null) _accessibilityBridge.NotifyFocusChanged(focused, previous);
+            if (_a11yMenuFocus is null) TellA11yFocus(focused, previous);
         }
     }
 
@@ -967,7 +970,16 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         if (_a11yFocusElement is not { } element || id != element.Id) return;
         // While a menu holds the reader's focus, its closing tells the element's.
         if (FindA11yNode(tree, element) is { IsFocused: true } node && _a11yMenuFocus is null)
-            _accessibilityBridge.NotifyFocusChanged(node, previous: null);
+            TellA11yFocus(node, previous: null);
+    }
+
+    /// <summary>Tells the bridge the node that holds the reader's focus now, and asks for the
+    /// accessibility phase in which it tells assistive technology, once that frame's changes are
+    /// told (<see cref="IAccessibilityBridge.NotifyChangesApplied"/>): one focus event a move.</summary>
+    private void TellA11yFocus(AccessibilityNode? focused, AccessibilityNode? previous)
+    {
+        _accessibilityBridge.NotifyFocusChanged(focused, previous);
+        _a11yFocusTold = true;
     }
 
     /// <summary>
@@ -990,12 +1002,12 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             if (FindA11yNodeDown(tree, menu) is not { } node) return;
             var was = _a11yMenuFocus is { } open ? FindA11yNodeDown(tree, open) : FindA11yNodeDown(tree, _a11yFocusElement);
             _a11yMenuFocus = menu;
-            _accessibilityBridge.NotifyFocusChanged(node, was);
+            TellA11yFocus(node, was);
             return;
         }
         // The menus closed: their parts left the tree with this frame.
         _a11yMenuFocus = null;
-        _accessibilityBridge.NotifyFocusChanged(FindA11yNode(tree, _a11yFocusElement), previous: null);
+        TellA11yFocus(FindA11yNode(tree, _a11yFocusElement), previous: null);
     }
 
     /// <summary>
@@ -1751,6 +1763,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         || _a11yTextChanged.Count > 0
         || _a11yLeafChanged.Count > 0
         || _a11yOwnSelection.Count > 0
+        // A focus move told the bridge: the phase that tells assistive technology of it.
+        || _a11yFocusTold
         || _a11yWalkDue
         // An overlay a reader sees opened or closed: its part comes or goes.
         || _a11yOverlaysCameOrWent
@@ -2156,10 +2170,11 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             // focused element's again when it closed (a reference compare a frame otherwise); then the
             // bridge reads the current items again, which no diff carries, once, after all of it.
             UpdateA11yMenuFocus(told);
-            if (_a11yCurrentMoved || a11yRebuild || a11yRefreshed || a11yOverlays || a11yPatched)
+            if (_a11yCurrentMoved || _a11yFocusTold || a11yRebuild || a11yRefreshed || a11yOverlays || a11yPatched)
                 _accessibilityBridge.NotifyChangesApplied(told);
         }
         _a11yCurrentMoved = false;
+        _a11yFocusTold = false;
         if (_announcements.Count > 0)
         {
             // After the rebuild, so an element that announces as it appears has its node.
