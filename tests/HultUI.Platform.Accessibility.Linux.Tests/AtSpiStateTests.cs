@@ -58,10 +58,12 @@ public class AtSpiStateTests
         Assert.False(Has(other, AtSpiConstants.StateSelected));
     }
 
-    /// <summary>A menu an app draws with elements: a menu of menu items, each selectable, whose
-    /// action is a click. A menu item had no action, so a reader could not run one.</summary>
+    /// <summary>A menu an app draws with elements: a menu of menu items whose action is a click. A
+    /// menu item had no action, so a reader could not run one. Not selectable (2026-11-16): a reader
+    /// said "selected" on every entry, and a menu's entry is no choice of a set; the entry the keyboard
+    /// is on has the focus.</summary>
     [Fact]
-    public void AMenusEntry_IsSelectable_AndRunsAsAClick()
+    public void AMenusEntry_RunsAsAClick_AndIsNotSelectable()
     {
         var root = BoxElement.New();
         var menu = Box.New().AccessibleRole(AccessibilityRole.Menu);
@@ -73,13 +75,14 @@ public class AtSpiStateTests
         var entry = AtSpiAccessible.From(menuNode.Children[0], isRoot: false, AtSpiConstants.RootPath, 0, 1f);
         Assert.Equal(AtSpiConstants.RoleMenuItem, AtSpiAccessible.RoleOf(menuNode.Children[0]));
         Assert.Equal(AtSpiActionKind.Click, entry.Action);
-        Assert.True(Has(AtSpiMarshal.StateBits(entry), AtSpiConstants.StateSelectable));
+        Assert.False(Has(AtSpiMarshal.StateBits(entry), AtSpiConstants.StateSelectable));
     }
 
-    /// <summary>The window patches a menu's entry the pointer reached into the tree, and the
-    /// bridge tells it as a list item's: state-changed:selected, with no new snapshot.</summary>
+    /// <summary>The window patches a menu's entry the pointer reached into the tree, and the bridge
+    /// sends no state-changed:selected for it (a menu's entry has no selected state), and no new
+    /// snapshot.</summary>
     [Fact]
-    public void TheEntryThePointerReached_IsToldAsSelected()
+    public void TheEntryThePointerReached_IsNotToldAsSelected()
     {
         var root = BoxElement.New();
         var menu = Box.New().AccessibleRole(AccessibilityRole.Menu);
@@ -98,8 +101,8 @@ public class AtSpiStateTests
         patch.PropertyChanged.Add(new PropertyChange(selected.Children[0].Children[0], AccessibilityProperties.IsSelected));
         bridge.ApplyPatchedProperties(patch, selected);
 
-        var line = Assert.Single(signals.Lines);
-        Assert.StartsWith("state-changed:selected ", line);
+        Assert.DoesNotContain(signals.Lines, l => l.StartsWith("state-changed:selected ", StringComparison.Ordinal));
+        Assert.DoesNotContain(signals.Lines, l => l.StartsWith("cache-add ", StringComparison.Ordinal));
     }
 
     [Fact]
