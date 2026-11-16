@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using HultUI.Core.Elements;
 using HultUI.Core.Reactivity;
 using HultUI.Core.Threading;
@@ -12,6 +11,7 @@ namespace HultUI.Core.Components;
 /// </summary>
 public sealed class ComponentHost : Element
 {
+    private static long s_nextKey;
     private readonly Component _component;
     private Effect? _buildEffect;
 
@@ -27,9 +27,10 @@ public sealed class ComponentHost : Element
         _component = component;
         _component.Host = this;
 
-        // Key by component identity so the reconciler never patches one
-        // component's host onto a different component's host.
-        Key = $"\0CH:{RuntimeHelpers.GetHashCode(component)}";
+        // Key by component identity, so a keyed reconcile matches a host only to itself. A
+        // counter, not RuntimeHelpers.GetHashCode: hash codes repeat. The reconciler checks the
+        // component as well (TreeDiffer.CanPatch), since an app can overwrite this key.
+        Key = $"\0CH:{Interlocked.Increment(ref s_nextKey)}";
 
         // Eagerly run first build so the element tree is ready
         // before the host is necessarily mounted in a parent.
