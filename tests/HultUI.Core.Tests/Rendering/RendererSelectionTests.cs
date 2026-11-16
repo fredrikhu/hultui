@@ -5,8 +5,8 @@ namespace HultUI.Core.Tests.Rendering;
 
 /// <summary>
 /// Which renderer a window gets: <c>HULTUI_RENDERER</c> over the app's request over the
-/// default, in both directions, and a failed Vulkan start falling back to GL only when the app
-/// asked for it rather than the environment.
+/// default, in every direction, and a failed start falling back (Vulkan to GL, GL to software)
+/// only when the environment did not choose the renderer.
 /// </summary>
 public class RendererSelectionTests
 {
@@ -19,6 +19,8 @@ public class RendererSelectionTests
     [InlineData("VULKAN ", RendererKind.Vulkan)]
     [InlineData("gl", RendererKind.OpenGL)]
     [InlineData("opengl", RendererKind.OpenGL)]
+    [InlineData("software", RendererKind.Software)]
+    [InlineData(" Software", RendererKind.Software)]
     public void TheEnvironmentValue_NamesARendererOrNothing(string? value, RendererKind? expected) =>
         Assert.Equal(expected, RendererSelection.ParseEnvironment(value));
 
@@ -33,17 +35,21 @@ public class RendererSelectionTests
     [InlineData(RendererKind.OpenGL, RendererKind.Vulkan, RendererKind.OpenGL)]
     [InlineData(RendererKind.Vulkan, RendererKind.OpenGL, RendererKind.Vulkan)]
     [InlineData(RendererKind.Vulkan, null, RendererKind.Vulkan)]
+    [InlineData(null, RendererKind.Software, RendererKind.Software)]
+    [InlineData(RendererKind.Software, RendererKind.Vulkan, RendererKind.Software)]
+    [InlineData(RendererKind.OpenGL, RendererKind.Software, RendererKind.OpenGL)]
     public void TheEnvironment_BeatsTheApp_WhichBeatsTheDefault(
         RendererKind? environment, RendererKind? requested, RendererKind expected) =>
         Assert.Equal(expected, RendererSelection.Resolve(environment, requested));
 
     [Fact]
-    public void AFailedVulkanStart_FallsBack_OnlyWhenTheAppAsked()
+    public void AFailedStart_FallsBack_OnlyWhenTheEnvironmentDidNotChoose()
     {
         Assert.True(RendererSelection.MayFallBack(environment: null));
         // HULTUI_RENDERER=vulkan is how the design docs test the renderer: a quiet GL window
-        // there would make every such run a false negative.
+        // there would make every such run a false negative. The same for gl and software.
         Assert.False(RendererSelection.MayFallBack(RendererKind.Vulkan));
+        Assert.False(RendererSelection.MayFallBack(RendererKind.OpenGL));
     }
 
     [Theory]

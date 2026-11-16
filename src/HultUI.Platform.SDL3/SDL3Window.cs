@@ -46,10 +46,15 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     private SkiaGLRenderSurface? _surface;
 
     /// <summary>The Vulkan path, when the app asked for it or HULTUI_RENDERER=vulkan did (see
-    /// <see cref="UseVulkan"/>). Exactly one of this and <see cref="_surface"/> is ever
-    /// non-null. Phase 1 of docs/design/HDR.md.</summary>
+    /// <see cref="UseVulkan"/>). At most one of this, <see cref="_surface"/> and
+    /// <see cref="_rasterSurface"/> is ever non-null. Phase 1 of docs/design/HDR.md.</summary>
     private SkiaVulkanRenderSurface? _vulkanSurface;
     private SdlVulkanHost? _vulkanHost;
+
+    /// <summary>The software path (<see cref="RendererKind.Software"/>): Skia draws into main
+    /// memory and <see cref="SwapBuffers"/> copies the frame into SDL's window surface. When the
+    /// app or HULTUI_RENDERER asked for it, or when OpenGL could not start.</summary>
+    private SkiaRasterRenderSurface? _rasterSurface;
 
     /// <summary>
     /// What the app asked for, if anything. Set by <c>Application</c> before its first window
@@ -129,6 +134,11 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// the app, and the app over the default.</summary>
     internal static bool UseVulkan =>
         RendererSelection.Resolve(EnvironmentRenderer, _requestedRenderer) == RendererKind.Vulkan;
+
+    /// <summary>Whether windows in this process draw on the CPU from the start, rather than only
+    /// after OpenGL failed.</summary>
+    private static bool UseSoftware =>
+        RendererSelection.Resolve(EnvironmentRenderer, _requestedRenderer) == RendererKind.Software;
     private bool _disposed;
     private readonly Dictionary<CursorType, nint> _cursorCache = [];
     private CursorType _currentCursor = CursorType.Default;
@@ -268,7 +278,8 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// — the calls were there and quietly did nothing, and the window kept presenting a
     /// swapchain of the old size with the rest of it black.</para>
     /// </summary>
-    private IRenderSurface? ActiveSurface => (IRenderSurface?)_surface ?? _vulkanSurface;
+    private IRenderSurface? ActiveSurface =>
+        (IRenderSurface?)_surface ?? (IRenderSurface?)_vulkanSurface ?? _rasterSurface;
     public bool IsOpen { get; private set; }
 
     public EventTranslator EventTranslator { get; } = new();
@@ -397,9 +408,14 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // must agree with the flag the window was actually created with. A process that somehow
         // changed its mind between the two would build a Vulkan surface on a GL window.
         _useVulkan = UseVulkan;
+        bool useSoftware = UseSoftware;
         _anyWindowCreated = true;
 
-        var flags = (_useVulkan ? SDL_WindowFlags.SDL_WINDOW_VULKAN : SDL_WindowFlags.SDL_WINDOW_OPENGL)
+        // A software window has neither flag: SDL gives it a window surface in main memory.
+        var api = _useVulkan ? SDL_WindowFlags.SDL_WINDOW_VULKAN
+            : useSoftware ? default
+            : SDL_WindowFlags.SDL_WINDOW_OPENGL;
+        var flags = api
             | SDL_WindowFlags.SDL_WINDOW_RESIZABLE
             | SDL_WindowFlags.SDL_WINDOW_HIGH_PIXEL_DENSITY
             | SDL_WindowFlags.SDL_WINDOW_HIDDEN;
@@ -443,6 +459,18 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             StartupTrace.Mark("SDL_CreateWindow (fell back to GL)");
         }
 
+        // No OpenGL driver SDL can load. Like Vulkan above, only when the environment did not
+        // choose: the window is made again without OpenGL and drawn on the CPU.
+        if (_window == null && !_useVulkan && !useSoftware && RendererSelection.MayFallBack(EnvironmentRenderer))
+        {
+            Console.Error.WriteLine(
+                $"[HultUI] OpenGL window creation failed ({GetError()}); falling back to software rendering.");
+            useSoftware = true;
+            flags &= ~SDL_WindowFlags.SDL_WINDOW_OPENGL;
+            _window = CreateNativeWindow(titleBytes, width, height, flags);
+            StartupTrace.Mark("SDL_CreateWindow (fell back to software)");
+        }
+
         if (_window == null)
             throw new InvalidOperationException($"SDL_CreateWindow failed: {GetError()}");
 
@@ -481,8 +509,35 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
                 SettleInitialSize(width, height);
             }
 
-            if (!_useVulkan)
-                CreateGLRenderer(text);
+            if (!_useVulkan && !useSoftware && !TryCreateGLRenderer(text, out var glFailure))
+            {
+                if (!RendererSelection.MayFallBack(EnvironmentRenderer))
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(glFailure).Throw();
+
+                // The window opened but OpenGL is too old for Skia, as on Windows without a GPU
+                // driver, which offers OpenGL 1.1 in software: a remote desktop session on a
+                // server, a VM. SDL's window surface may not be combined with 3D on the same
+                // window, so the window is replaced, as for the Vulkan fallback.
+                Console.Error.WriteLine(
+                    $"[HultUI] The OpenGL renderer could not start ({glFailure.Message}); " +
+                    "falling back to software rendering.");
+                SDL_DestroyWindow(_window);
+                _window = null;
+                useSoftware = true;
+                flags &= ~SDL_WindowFlags.SDL_WINDOW_OPENGL;
+                _window = CreateNativeWindow(titleBytes, width, height, flags);
+                StartupTrace.Mark("SDL_CreateWindow (fell back to software)");
+                if (_window == null)
+                    throw new InvalidOperationException($"SDL_CreateWindow failed: {GetError()}");
+                PixelWidth = PixelHeight = 0;
+                SettleInitialSize(width, height);
+            }
+
+            if (useSoftware)
+            {
+                _rasterSurface = new SkiaRasterRenderSurface(text);
+                StartupTrace.Mark("skia raster surface");
+            }
         }
         catch
         {
@@ -490,6 +545,8 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             // watch — so without this a constructor that throws leaks a hidden native window.
             _surface?.Dispose();
             _surface = null;
+            _rasterSurface?.Dispose();
+            _rasterSurface = null;
             if (_glContext != null) SDL_GL_DestroyContext(_glContext);
             _glContext = null;
             if (_window != null) SDL_DestroyWindow(_window);
@@ -645,6 +702,32 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             // Bound to this window, which the GL fallback is about to destroy.
             if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22621)) _displayInformation?.Dispose();
             _displayInformation = null;
+            failure = ex;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Builds the GL context and Skia surface, or reports why it could not and leaves nothing
+    /// half-built behind. Without a GPU driver, Windows still makes the context, at OpenGL 1.1,
+    /// and Skia's GL interface is what fails.
+    /// </summary>
+    private bool TryCreateGLRenderer(SkiaTextServices? text,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out Exception? failure)
+    {
+        try
+        {
+            CreateGLRenderer(text);
+            failure = null;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _surface?.Dispose();
+            _surface = null;
+            if (_glContext != null) SDL_GL_DestroyContext(_glContext);
+            _glContext = null;
+            _nvidiaGL = false;
             failure = ex;
             return false;
         }
@@ -1404,7 +1487,49 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // handed to the presentation engine there, because that is where the frame's work
         // is known to be finished. There is nothing left to swap.
         if (_vulkanSurface is not null) return;
+        if (_rasterSurface is not null)
+        {
+            PresentSoftware(_rasterSurface);
+            return;
+        }
         SDL_GL_SwapWindow(_window);
+    }
+
+    private bool _softwarePresentFailed;
+
+    /// <summary>
+    /// Copies the frame Skia drew in main memory into SDL's window surface and shows it. On
+    /// Windows SDL keeps that surface as a GDI bitmap and draws it with BitBlt, which a remote
+    /// desktop session carries well.
+    /// </summary>
+    private void PresentSoftware(SkiaRasterRenderSurface frame)
+    {
+        // Asked for every frame: SDL remakes it after a resize, and returns the same one otherwise.
+        var target = SDL_GetWindowSurface(_window);
+        SDL_Surface* source = null;
+        if (target != null && frame.PeekPixels(out nint pixels, out int rowBytes))
+        {
+            // RGBA in memory, as SetIcon. Copied as it is, no blending, and converted to
+            // whatever the window surface is.
+            var format = BitConverter.IsLittleEndian
+                ? SDL_PixelFormat.SDL_PIXELFORMAT_ABGR8888
+                : SDL_PixelFormat.SDL_PIXELFORMAT_RGBA8888;
+            // shortcut: one copy a frame from Skia's pixels into SDL's; drawing straight into
+            // the window surface saves it, if the copy ever shows in a profile.
+            source = SDL_CreateSurfaceFrom(frame.PixelWidth, frame.PixelHeight, format, pixels, rowBytes);
+        }
+        bool shown = source != null
+            && SDL_SetSurfaceBlendMode(source, SDL_BLENDMODE_NONE)
+            && SDL_BlitSurface(source, null, target, null)
+            && SDL_UpdateWindowSurface(_window);
+        if (source != null) SDL_DestroySurface(source);
+
+        // Once, not every frame: a window that cannot show its frames stays black, and this says why.
+        if (!shown && !_softwarePresentFailed)
+        {
+            _softwarePresentFailed = true;
+            Console.Error.WriteLine($"[HultUI] Showing a software frame failed: {GetError()}");
+        }
     }
 
     /// <summary>
@@ -1691,6 +1816,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
                 + vulkan.Describe(PixelWidth, PixelHeight, DisplayScale, RefreshRate)
                 + $" hdrDisplay={(IsHdrDisplay ? "on" : "off")} sdrWhite={SdrWhiteLevelNits:0}nits window={vw}x{vh}";
         }
+
+        if (_rasterSurface is not null)
+            return $"video={SDL_GetCurrentVideoDriver() ?? "?"} software window={PixelWidth}x{PixelHeight}";
 
         if (_glContext == null) return null;
         SDL_GL_MakeCurrent(_window, _glContext);
@@ -2104,8 +2232,8 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         if (Environment.GetEnvironmentVariable("HULTUI_GL_PRELOAD") != "1") return;
         // Nothing to warm: a Vulkan window never loads the GL driver at start-up (only for its
         // first video frame), so preloading it would be pure cost — and Reel turns the preload
-        // on by itself on Windows.
-        if (UseVulkan) return;
+        // on by itself on Windows. A software window never loads it at all.
+        if (UseVulkan || UseSoftware) return;
         _preloadStarted = true;
 
         EnsureSDLInitialized();
@@ -2301,6 +2429,8 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         _vulkanSurface?.Dispose();
         _vulkanHost?.Dispose();
         _surface = null;
+        _rasterSurface?.Dispose();
+        _rasterSurface = null;
         // After the surface that drew with it. Null when the platform's shared set was used.
         _ownedText?.Dispose();
         _ownedText = null;
