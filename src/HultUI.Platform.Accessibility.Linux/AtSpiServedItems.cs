@@ -126,7 +126,10 @@ internal sealed class AtSpiServedItems
             Role = AtSpiConstants.MapRole(AccessibilityTreeBuilder.ItemRoleOf(list.Node?.Role ?? AccessibilityRole.List)),
             ItemOf = this,
             ItemIndex = index,
-            Selectable = true,
+            // A menu's entry has no selected state (AtSpiAccessible.SelectableOf).
+            Selectable = list.Node?.Role != AccessibilityRole.Menu,
+            // The list's current item has the reader's focus while the list holds it.
+            Focusable = true,
             Scale = list.Scale,
             ParentPath = list.Path,
             IndexInParent = index,
@@ -159,7 +162,7 @@ internal sealed class AtSpiServedItems
     }
 
     /// <summary>Selected, as the list's node carries it: what the selection's events told.</summary>
-    public bool SelectedOf(int index) => List.Node?.Served.IsSelected(index) == true;
+    public bool SelectedOf(int index) => List.Node is { Role: not AccessibilityRole.Menu } node && node.Served.IsSelected(index);
 
     /// <summary>Out of the list's viewport, at the scroll the list's node carries.</summary>
     public bool OffscreenOf(int index) =>

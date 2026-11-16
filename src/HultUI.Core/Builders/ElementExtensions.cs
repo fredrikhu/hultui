@@ -131,6 +131,15 @@ public static class ElementExtensions
         return el;
     }
     public static T Cursor<T>(this T el, CursorType cursor) where T : Element { el.Inherited.Cursor = cursor; return el; }
+    /// <summary>A cursor of the app's own drawing over this element and its children. On a live
+    /// element, call <see cref="Element.MarkStyleDirty"/> after changing it.</summary>
+    public static T Cursor<T>(this T el, CursorImage image) where T : Element
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        el.Inherited.Cursor = CursorType.Image;
+        el.Inherited.CursorImage = image;
+        return el;
+    }
 
     // ──── Text properties ────
     public static T TextOverflow<T>(this T el, TextOverflow overflow) where T : TextElement { el.Overflow = overflow; return el; }
@@ -387,6 +396,10 @@ public static class ElementExtensions
     /// <see cref="VirtualListElement{T}.SelectionOverlay"/>.</summary>
     public static VirtualListElement<T> SelectionOverlay<T>(this VirtualListElement<T> el, Element? overlay) { el.SelectionOverlay = overlay; return el; }
     public static VirtualListElement<T> CanSelectMultiple<T>(this VirtualListElement<T> el, bool value = true) { el.CanSelectMultiple = value; return el; }
+    /// <summary>A reader is told the focus is on the selected item while the nearest focusable element
+    /// above the list holds it (a pane that walks the list's cursor); see
+    /// <see cref="VirtualListElement{T}.TakesAncestorFocus"/>.</summary>
+    public static VirtualListElement<T> TakesAncestorFocus<T>(this VirtualListElement<T> el, bool value = true) { el.TakesAncestorFocus = value; return el; }
     public static VirtualListElement<T> OnSelectionChanged<T>(this VirtualListElement<T> el, Action<IReadOnlyList<int>> handler) { el.OnSelectionChanged = handler; return el; }
     /// <summary>Let the focused list scroll itself with Up/Down/Page/Home/End.
     /// Chorded keys (Shift/Ctrl/Alt/Super) still bubble to the app.</summary>

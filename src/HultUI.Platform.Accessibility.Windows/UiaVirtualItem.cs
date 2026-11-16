@@ -57,7 +57,8 @@ internal sealed class UiaVirtualItem(WindowsAccessibilityBridge bridge, ElementI
         object? provider = patternId switch
         {
             UiaInterop.UIA_InvokePatternId => new UiaInvokeProvider(bridge, id),
-            UiaInterop.UIA_SelectionItemPatternId => new UiaSelectionItemProvider(bridge, id),
+            // A menu's entry is no SelectionItem (UiaFragment.OffersSelection).
+            UiaInterop.UIA_SelectionItemPatternId when !bridge.ServesMenuItems(listId) => new UiaSelectionItemProvider(bridge, id),
             UiaInterop.UIA_ScrollItemPatternId => new UiaScrollItemProvider(bridge, id),
             _ => null,
         };
@@ -81,7 +82,14 @@ internal sealed class UiaVirtualItem(WindowsAccessibilityBridge bridge, ElementI
             UiaInterop.UIA_IsEnabledPropertyId => UiaVariant.FromBool(bridge.GetVirtualItemEnabled(listId, index)),
             UiaInterop.UIA_IsOffscreenPropertyId => UiaVariant.FromBool(bridge.GetVirtualItemOffscreen(listId, index)),
             // As an item node's wrapper answers it, from the state its events told.
-            UiaInterop.UIA_SelectionItemIsSelectedPropertyId => UiaVariant.FromBool(bridge.GetServedItemSelected(listId, index)),
+            UiaInterop.UIA_SelectionItemIsSelectedPropertyId when !bridge.ServesMenuItems(listId)
+                => UiaVariant.FromBool(bridge.GetServedItemSelected(listId, index)),
+            // The list's current item has the reader's focus while the list holds it, as an item node does.
+            UiaInterop.UIA_IsKeyboardFocusablePropertyId => UiaVariant.FromBool(true),
+            // "2 of 3,000": its place among the items the list serves, as an item node's.
+            UiaInterop.UIA_PositionInSetPropertyId => UiaVariant.FromInt(index + 1),
+            UiaInterop.UIA_SizeOfSetPropertyId => UiaVariant.FromInt(bridge.GetVirtualItemCount(listId)),
+            UiaInterop.UIA_HasKeyboardFocusPropertyId => UiaVariant.FromBool(bridge.HasReaderFocus(VirtualItemId.For(listId, index))),
             _ => UiaVariant.Empty,
         };
         return 0;

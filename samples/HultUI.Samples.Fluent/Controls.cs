@@ -400,6 +400,9 @@ public static class F
             .OnClick(_ => onClick())
             .AccessibleRole(AccessibilityRole.ListItem)
             .AccessibleName(label)
+            // A list item is a selection item to a reader, which reads "not selected" on one that
+            // says nothing: NVDA said it on the page the window was showing.
+            .AccessibleSelected(selected)
             .Children(pill, row), onClick);
     }
 }

@@ -32,6 +32,7 @@ public class A11yRoleChangeTests
         public void ApplyPatchedProperties(TreeDiff patch, AccessibilityNode root) => inner.ApplyPatchedProperties(patch, root);
         public void NotifyFocusChanged(AccessibilityNode? focused) => inner.NotifyFocusChanged(focused);
         public void NotifyFocusChanged(AccessibilityNode? focused, AccessibilityNode? previous) => inner.NotifyFocusChanged(focused, previous);
+        public void NotifyChangesApplied(AccessibilityNode root) => inner.NotifyChangesApplied(root);
     }
 
     private sealed class Signals : IAtSpiSignals

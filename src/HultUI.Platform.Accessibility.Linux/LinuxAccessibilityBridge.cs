@@ -90,7 +90,18 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
     // Set once the watch is set up: the first status, read while the bridge is made, wakes nobody.
     private volatile bool _statusWatched;
     private bool _hasBuilt;
+    // The object a client was told has the focus (state-changed:focused): the reader's focus
+    // (AccessibilityFocus), the current item of the node that holds the focus where it is a list, a
+    // menu or a menu bar that has one, or of a list that takes its focus; else that node's.
     private string? _focusedPath;
+    // The node that holds the focus, as the window last told it: its element (default for none), or
+    // the window's root node. UI thread.
+    private ElementId _holderId;
+    private bool _holderIsRoot;
+    // The lists whose current item stands for the focus of an element above them
+    // (AccessibilityNode.FocusHolder): that element's id → the list's. Kept by the apply's walk; an
+    // entry whose list has gone, or names another holder now, is read as none. UI thread.
+    private readonly Dictionary<ElementId, ElementId> _focusTakers = [];
     private int _applicationId;
     private bool _disposed;
 
@@ -316,7 +327,15 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
                 DebugSignalsEmitted++;
             }
             _focusedPath = null;
+            // And the node that held the focus: the tree marks the one that has it, as the client finds
+            // it, and the window tells the next move.
+            _holderId = default;
+            _holderIsRoot = false;
         }
+        // The objects took their focused state from the tree, which marks the node that holds the
+        // focus: the reader's focus is its current item while it has one, as the client was told.
+        if (_focusedPath is { } told && told != AtSpiConstants.RootPath) SetFocused(told, true);
+        KeepHolderUnfocused(_focusedPath);
 
         // What a caching client (libatspi, which Orca runs on) does with these signals, seen live
         // in WSL with a pyatspi client in Atspi.event_main (plan 17, round 3, step 15): a cache-add
@@ -378,6 +397,7 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
         if (!firstBuild)
         {
             TellServedLists(wasServed);
+            _leavingPath = LeavingPath();
             for (int i = 0; i < diff.PropertyChanged.Count; i++)
             {
                 var change = diff.PropertyChanged[i];
@@ -605,28 +625,109 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
     public void NotifyFocusChanged(AccessibilityNode? focused, AccessibilityNode? previous)
         => MoveFocus(focused, previous is null ? null : PathOfNode(previous));
 
-    private void MoveFocus(AccessibilityNode? focused, string? previousPath)
+    /// <summary>The frame's changes are told: the reader's focus is read again, once, after them. A
+    /// key that moved a list's or a menu's selection moved its current item with it, and the items'
+    /// state-changed:selected went out first.</summary>
+    public void NotifyChangesApplied(AccessibilityNode root)
     {
         if (!_registered || _signals is null) return;
-
-        string? newPath = focused is null ? null : PathOfNode(focused);
+        bool moved = _holderMoved, again = _activated;
+        string? previousPath = _previousHint;
+        _holderMoved = false;
+        _activated = false;
+        _previousHint = null;
+        if (!moved && _holderId == default && !_holderIsRoot) return;
+        string? newPath = _holderId == default && !_holderIsRoot ? null : TargetPath();
+        KeepHolderUnfocused(newPath);
 
         // The focused state a client reads (GetState, the cache), as of now. A focus move
         // rebuilds no tree, so both objects kept the state of the last apply, and the
         // next apply's diff sent state-changed:focused for both again, late.
         bool previousLost = previousPath is not null && previousPath != newPath && SetFocused(previousPath, false);
-        if (_focusedPath is not null && _focusedPath != newPath) SetFocused(_focusedPath, false);
+        string? was = _focusedPath;
+        if (was is not null && was != newPath) SetFocused(was, false);
         if (newPath is not null) SetFocused(newPath, true);
 
-        if (_focusedPath is not null && _focusedPath != newPath)
-            _signals.EmitStateChanged(_focusedPath, "focused", active: false);
+        if (was is not null && was != newPath)
+            _signals.EmitStateChanged(was, "focused", active: false);
         // The object the tree had focused, when this bridge was not told of it (a client
         // attached after the focus last moved).
-        if (previousLost && previousPath != _focusedPath)
+        if (previousLost && previousPath != was)
             _signals.EmitStateChanged(previousPath!, "focused", active: false);
-        if (newPath is not null && newPath != _focusedPath)
+        // The window came to the front: the focus is told again, as on a move, where it is.
+        if (newPath is not null && (newPath != was || again))
             _signals.EmitStateChanged(newPath, "focused", active: true);
         _focusedPath = newPath;
+    }
+
+    /// <summary>The window came to the front: state-changed:focused goes out again, on the reader's
+    /// focus, once the frame's changes are told.</summary>
+    public void NotifyWindowActivated()
+    {
+        _activated = true;
+        _holderMoved = true;
+    }
+
+    // The window came to the front since the client was last told the focus. UI thread.
+    private bool _activated;
+
+    // The path of the object the client was told has the focus, while the changes being sent take the
+    // focus off it (the frame's end tells the move); null otherwise. UI thread.
+    private string? _leavingPath;
+
+    /// <summary>The path the client was told has the focus when the tree as applied now moves the
+    /// reader's focus elsewhere: a list's items relabelled in place by a new listing (an item's id is its
+    /// place), whose name change at the cursor's old place a reader read before the move. Null
+    /// otherwise.</summary>
+    private string? LeavingPath()
+    {
+        if (_focusedPath is not { } told || (_holderId == default && !_holderIsRoot)) return null;
+        return TargetPath() != told ? told : null;
+    }
+
+    // The holder changed since the client was last told the focus; and the path of the node the tree
+    // marked focused before the first of those moves, which the client may not have been told of. UI thread.
+    private bool _holderMoved;
+    private string? _previousHint;
+
+    /// <summary>The node that holds the focus, in the applied tree: its object's node.</summary>
+    private AccessibilityNode? HolderNode() =>
+        _holderIsRoot ? _root?.Node : _objects.TryGetValue(_holderId, out var acc) ? acc.Node : null;
+
+    /// <summary>The path of the reader's focus (<see cref="AccessibilityFocus.TargetOf"/>): the
+    /// holder's current item's, or the holder's own; null for none. An item served on demand gets its
+    /// object, as a client asking for its path would make it, so its focused state is there to read.</summary>
+    private string? TargetPath()
+    {
+        if (HolderNode() is not { } holder)
+            return _holderIsRoot ? AtSpiConstants.RootPath : _holderId == default ? null : AtSpiAccessible.PathFor(_holderId);
+        var follower = _focusTakers.TryGetValue(holder.ElementId, out var listId) && _objects.TryGetValue(listId, out var list)
+            ? list.Node : null;
+        var target = AccessibilityFocus.TargetOf(holder, follower);
+        if (target == holder.ElementId) return PathOfNode(holder);
+        ServedItem(_served, target);
+        return AtSpiAccessible.PathFor(target);
+    }
+
+    /// <summary>The holder's object does not say it is focused while its current item has the
+    /// focus: the tree marks the holder's node focused, and each apply's objects take that.</summary>
+    private void KeepHolderUnfocused(string? target)
+    {
+        if (target is null) return;
+        var holder = _holderIsRoot ? _root : _objects.TryGetValue(_holderId, out var acc) ? acc : null;
+        if (holder is not null && holder.Path != target && holder.Focused) holder.Focused = false;
+    }
+
+    private void MoveFocus(AccessibilityNode? focused, string? previousPath)
+    {
+        if (!_registered || _signals is null) return;
+
+        _holderId = focused?.ElementId ?? default;
+        _holderIsRoot = focused is { Parent: null };
+        // Told once the frame's changes are (NotifyChangesApplied): one state-changed:focused a move, on
+        // the node it ends on, after what the frame changed (a selected state the rebuild marks).
+        _previousHint ??= previousPath;
+        _holderMoved = true;
     }
 
     /// <summary>
@@ -674,6 +775,7 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
             ApplyChanges(patch, root);
             return;
         }
+        _leavingPath = LeavingPath();
         foreach (var change in patch.PropertyChanged)
         {
             var acc = ObjectOf(change.Node)!;
@@ -689,7 +791,7 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
             (bool, bool?) expandedBefore = (true, acc.Expanded);
             switch (change.PropertyName)
             {
-                case AccessibilityProperties.IsSelected: acc.Selected = node.IsSelected == true; break;
+                case AccessibilityProperties.IsSelected: acc.Selected = AtSpiAccessible.SelectedOf(node); break;
                 case AccessibilityProperties.Name: acc.Name = node.Name ?? ""; break;
                 case AccessibilityProperties.Description: acc.Description = node.Description ?? ""; break;
                 // As the snapshot takes them (AtSpiAccessible.From): a password's bullets, never its text.
@@ -702,10 +804,11 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
         }
     }
 
-    /// <summary>Sets a published object's focused state; true when it changed.</summary>
+    /// <summary>Sets a published object's focused state, or a served item's; true when it changed.</summary>
     private bool SetFocused(string path, bool focused)
     {
-        if (Live(path) is not { } acc || acc.Focused == focused) return false;
+        if ((Live(path) ?? (TryParseId(path, out var id) ? ServedItem(_served, id) : null)) is not { } acc
+            || acc.Focused == focused) return false;
         acc.Focused = focused;
         return true;
     }
@@ -719,6 +822,8 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
         switch (change.PropertyName)
         {
             case AccessibilityProperties.Name:
+                // Not the focus's while this frame takes the focus off it (LeavingPath).
+                if (path == _leavingPath) return false;
                 _signals!.EmitPropertyChange(path, AtSpiConstants.PropAccessibleName, change.Node.Name ?? "");
                 return true;
             case AccessibilityProperties.Description:
@@ -775,6 +880,9 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
                 _signals!.EmitStateChanged(path, "sensitive", change.Node.IsEnabled);
                 return true;
             case AccessibilityProperties.IsSelected:
+                // A menu's entry has no selected state (AtSpiAccessible.SelectableOf): its highlight is
+                // told as the focus moving to it.
+                if (change.Node.Role == AccessibilityRole.MenuItem) return false;
                 _signals!.EmitStateChanged(path, "selected", change.Node.IsSelected == true);
                 return true;
             case AccessibilityProperties.ItemSelection:
@@ -813,7 +921,7 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
     /// </summary>
     private bool EmitServedSelection(AccessibilityNode? previous, AccessibilityNode node)
     {
-        if (_served?.GetValueOrDefault(node.ElementId) is not { } items) return false;
+        if (_served?.GetValueOrDefault(node.ElementId) is not { } items || node.Role == AccessibilityRole.Menu) return false;
         var now = node.Served;
         int sent = 0;
         foreach (var (index, selected) in ServedItems.Changes(previous?.Served ?? default, now))
@@ -962,6 +1070,8 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
             }
             obj.Generation = generation;
             if (list) _lists.Add(obj);
+            // A list whose current item stands for the focus of an element above it: one bit for the rest.
+            if (child.FocusHolder is var holder && holder != default) _focusTakers[holder] = id;
             found += 1 + Visit(obj, child, scale, generation);
             if (same && !ReferenceEquals(kept[i], obj.Path)) same = false;
         }

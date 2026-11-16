@@ -21,7 +21,7 @@
          screen reader — proving HultUI's providers work for standard tooling. -->
     <PackageReference Include="FlaUI.UIA3" Version="4.0.0" />
     <!-- Override the vulnerable System.Drawing.Common (5.0.2) FlaUI pulls in. -->
-    <PackageReference Include="System.Drawing.Common" Version="8.0.33" />
+    <PackageReference Include="System.Drawing.Common" Version="10.0.14" />
   </ItemGroup>
 
   <ItemGroup>

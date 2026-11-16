@@ -105,6 +105,7 @@ public class A11yKeptChildrenTests
         public void ApplyPatchedProperties(TreeDiff patch, AccessibilityNode root) { Tree = root; inner.ApplyPatchedProperties(patch, root); }
         public void NotifyFocusChanged(AccessibilityNode? focused) => inner.NotifyFocusChanged(focused);
         public void NotifyFocusChanged(AccessibilityNode? focused, AccessibilityNode? previous) => inner.NotifyFocusChanged(focused, previous);
+        public void NotifyChangesApplied(AccessibilityNode root) => inner.NotifyChangesApplied(root);
     }
 
     private sealed record Run(List<string> Told, List<string> Trees, int[] TreesPerStep, int[] BuildsPerStep);

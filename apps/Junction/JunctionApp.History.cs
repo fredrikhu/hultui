@@ -1088,7 +1088,7 @@ public partial class JunctionApp
         var tint = onPick ? Nocturne.Accent900 : Nocturne.Neutral900;
         bool comparing = _selectedCommitHashes.Count > 1;
 
-        return VirtualListElement<GitCommit>.New()
+        var list = VirtualListElement<GitCommit>.New()
             .ItemHeight((int)RowHeight)
             .Items(commits)
             .RenderWith((c, _) => HistoryRow(c,
@@ -1110,6 +1110,14 @@ public partial class JunctionApp
             .SelectedIndex(selectedIndex)
             .FlexGrow(1)
             .WithRef(_commitListRef);
+        // The arrows walk the commits from the window's key handler, whatever holds the focus, and the
+        // view had nothing focused: a reader speaks focus moves only, and heard none of the walk. The
+        // list holds the focus while nothing else does (OnAfterBuild) and is a Tab stop, so a reader is
+        // told the caret's commit has it, at each key. It takes no key itself (no keyboard scroll), so
+        // the keys are as they were, and draws no ring: the caret's tint is the cursor.
+        list.IsFocusable = true;
+        list.AccessibleName = "History";
+        return list;
     }
 
     /// <summary>What the affordance shows: which word, on which tint.</summary>

@@ -121,10 +121,11 @@ internal sealed class UiaFragmentRoot(WindowsAccessibilityBridge bridge)
         return 0;
     }
 
+    /// <summary>The reader's focus: the focused node, or its current item while it is a list, a menu
+    /// or a menu bar that has one (<see cref="AccessibilityFocus"/>), as a WPF list answers its item.</summary>
     public int GetFocus(out IntPtr pRetVal)
     {
-        var focusedId = bridge.FocusedNodeId;
-        pRetVal = focusedId is null ? IntPtr.Zero : bridge.NativeFragment(focusedId.Value);
+        pRetVal = bridge.NativeFocusTarget();
         return 0;
     }
 

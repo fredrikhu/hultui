@@ -47,6 +47,7 @@ public class A11yLeafPatchTests
         }
         public void NotifyFocusChanged(AccessibilityNode? focused) => inner.NotifyFocusChanged(focused);
         public void NotifyFocusChanged(AccessibilityNode? focused, AccessibilityNode? previous) => inner.NotifyFocusChanged(focused, previous);
+        public void NotifyChangesApplied(AccessibilityNode root) => inner.NotifyChangesApplied(root);
     }
 
     private sealed class Signals(Func<string, string> map) : IAtSpiSignals

@@ -145,6 +145,56 @@ public sealed class AccessibilityNode
     }
 
     /// <summary>
+    /// For a container whose items are its choices — a list or a menu over an
+    /// <see cref="IAccessibleItemSource"/> that publishes item nodes, a menu bar — the item the keyboard
+    /// is on (<see cref="IAccessibleItemSource.CurrentIndex"/>, a menu bar's highlighted title): its index
+    /// among the container's items, its children or the items it serves on demand. -1 for none, and for
+    /// anything else (<see cref="TracksCurrentItem"/>). While the container holds the keyboard focus, a
+    /// reader is told this item has it (<see cref="AccessibilityFocus"/>). A move of it rebuilds no tree:
+    /// the window writes it on the applied tree's node in place (<see cref="ReplaceCurrentItem"/>), and no
+    /// diff reports it; a bridge reads it again once the frame's changes are told
+    /// (<see cref="IAccessibilityBridge.NotifyChangesApplied"/>).
+    /// </summary>
+    public int CurrentItem => _extras?.Scroll?.CurrentItem ?? -1;
+
+    /// <summary>Whether the node is a container that has a <see cref="CurrentItem"/>, -1 or not.</summary>
+    internal bool TracksCurrentItem => (_flags & CurrentItemsBit) != 0;
+
+    /// <summary>
+    /// For a list whose current item stands for the focus of the nearest focusable element above it
+    /// (<see cref="IAccessibleItemSource.TakesAncestorFocus"/>): that element's id. Default for any other
+    /// node. Set as the tree is built.
+    /// </summary>
+    internal ElementId FocusHolder => (_flags & TakesFocusBit) != 0 ? _extras!.Scroll!.FocusHolder : default;
+
+    /// <summary>Gives a container its current item (-1 for none), while the tree is built.</summary>
+    internal void SetCurrentItem(int index)
+    {
+        SetFlag(CurrentItemsBit, true);
+        Scroll.CurrentItem = index;
+    }
+
+    /// <summary>Marks a list as the one whose current item stands for <paramref name="holder"/>'s
+    /// focus, while the tree is built.</summary>
+    internal void SetFocusHolder(ElementId holder)
+    {
+        SetFlag(TakesFocusBit, true);
+        Scroll.FocusHolder = holder;
+    }
+
+    /// <summary>
+    /// Gives a container in a tree that is out its current item now (UI thread): one int write into the
+    /// fields it was built with, which a reader on another thread reads as it was or as it is. The
+    /// fields are its own from the build (<see cref="SetCurrentItem"/>); a stand-in made before
+    /// (<see cref="ScrollStandIn"/>) shares them, and no bridge reads a stand-in's current item.
+    /// </summary>
+    internal void ReplaceCurrentItem(int index)
+    {
+        if (_extras?.Scroll is not { } scroll) return;
+        Volatile.Write(ref scroll.CurrentItem, index);
+    }
+
+    /// <summary>
     /// For a list whose items are served on demand (<see cref="IsVirtualItemContainer"/>): how many
     /// items it has and which of them are selected, as this tree was built or as last told, read
     /// whole on any thread. Its items have no nodes, so what a reader is told of them (how many
@@ -497,6 +547,10 @@ public sealed class AccessibilityNode
         // A list served on demand: its items' number and the selected ones, ascending (Served).
         public int ItemCount;
         public int[]? SelectedItems;
+        // A container's current item (CurrentItem), -1 for none; and, for a list that takes the focus
+        // of the element above it, that element (FocusHolder).
+        public int CurrentItem = -1;
+        public ElementId FocusHolder;
 
         public ScrollFields Copy() => (ScrollFields)MemberwiseClone();
     }
@@ -520,6 +574,9 @@ public sealed class AccessibilityNode
     private const int FocusableBit = 1 << 0, FocusedBit = 1 << 1, EnabledBit = 1 << 2, PasswordBit = 1 << 3,
         OffscreenBit = 1 << 4, VirtualItemsBit = 1 << 5;
     private const int ToggledShift = 6, ExpandedShift = 8, SelectedShift = 10;
+    // Set as the tree is built, never after: a container with a current item, a list that takes the
+    // focus of the element above it.
+    private const int CurrentItemsBit = 1 << 12, TakesFocusBit = 1 << 13;
 
     /// <summary>Every state at once, for the differ: equal when none of them differs.</summary>
     internal int States => _flags;

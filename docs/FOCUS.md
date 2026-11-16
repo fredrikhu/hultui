@@ -245,6 +245,42 @@ sets it — so a typing element written outside `HultUI.Core` should host a
 
 ---
 
+## What a screen reader is told has the focus
+
+Narrator, NVDA and Orca speak **focus moves**, not selection moves. A key that walks a list or a
+menu moves its selection while the element focus stays put, so the bridges tell the reader the
+focus is on the container's **current item** (`AccessibilityNode.CurrentItem`), as a WPF list
+box's item has the keyboard focus:
+
+| What holds the focus | What the reader is told has it |
+|---|---|
+| A list (or table) over a `VirtualListElement`, item nodes or served on demand | its `SelectedIndex` item (a multi-select list's cursor); the list itself while that is -1 |
+| An open context menu or menu bar's menu (it takes the keys; the element focus stays where it was) | its highlighted entry; a submenu's once an entry of its own is highlighted; the menu itself while none is |
+| A `MenuBar` with the keys (F10, Alt), no menu open | the title ← and → are on |
+| A focusable element above a list built with `.TakesAncestorFocus()` (a pane that walks the list's cursor) | that list's `SelectedIndex` item |
+| An element inside a row of a list (the open row) | that element, as everywhere else |
+
+So **give a list the focus**, or mark it `.TakesAncestorFocus()`, when its keys walk the
+selection: a view whose arrows move a list from the root's key handler with nothing focused tells
+a reader nothing. Meridian's History list takes the focus when its view opens, Junction's whenever
+nothing else holds it (focused from `OnAfterBuild`; a Tab stop, no ring); Vesper's Detail list takes
+its pane's. The
+current item moves with the selection, patched in place with no tree built; the bridge raises the
+focus event once a frame, after the items' selected states. The full rule is in
+`docs/ACCESSIBILITY-PLAN.md` ("The reader's focus is a list's or a menu's current item").
+
+**A pointer press that moves the focus is told at its release.** The press focuses; the app acts on
+the click. So the reader hears the move at the end of the frame the release is handled in, after
+the click's changes ("Personalization, selected", not "not selected"), and until then UI Automation
+answers the element the focus left. A drag, a key, the window coming to the front again or a second
+without the release tell it sooner. Keyboard and programmatic moves are told in their own frame.
+A selection made on the press or on the click is read with the move either way.
+
+**A `MenuBar` gives the keyboard back** to what had it before F10 or Alt, and to nothing when nothing
+had it: it keeps no focus of its own, so a reader is never told the bar.
+
+---
+
 ## Testing focus
 
 Headlessly, `Tab` is a key like any other: inject it, then read

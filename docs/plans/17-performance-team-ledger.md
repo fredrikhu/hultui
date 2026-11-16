@@ -4,35 +4,32 @@ State of [the performance team](17-performance-team.md). The orchestrator update
 file after every step and commits it with the step's work. Full survey reports are in
 [`17-reports/`](17-reports/).
 
-- **Round:** 15
-- **Phase:** release — round 15's full suite passed at 6cf0f79b (Windows 30 projects, Fedora the slnf plus Junction,
-  Meridian, Aperture and Reel, docfx 0 warnings); merge into main, push, wait for CI. Build record: (step 1 done: 6c7a6cab, docs only; step 2 landed b258f4fb..ff6922f0; step 3
-  fdd795bd..bc2426aa; a Fedora test race fixed 17e13e63; step 4 a9321aac..38629c1e; step 5 dae30194..49c7b384; step 6
-  29f1ddc0..2d5d96ee; step 7 52852f6e, 83034345; step 8 eb68bbca..da63c3d0; step 9 9fcc1397; ReviewTests races fixed
-  1d852da7, a32c8b9f, 37b9e96b; step 10 c6a19b06, 870a6fc7). The build order is done: the full suite runs
-  (`fullsuite-r15.sh` and `fedora-r15.sh` in this session's scratchpad: Windows `HultUI.slnx`, Fedora the slnf plus
-  Junction, Meridian, Aperture and Reel each in a private D-Bus session, docfx), then Phase release. The round's full suite must run Junction, Meridian, Aperture
-  and Reel tests on Fedora on their own (each in a private D-Bus session with an unlocked keyring):
-  `HultUI.CrossPlatform.slnf`, wsl-test.sh's default and CI's test-linux, has none of them. The survey is merged (reports 9906f275..587f1767, `17-reports/r15-*`,
-  2026-11-14/15, ~80 min, 71 → 80 % weekly). The weekly limit resets 2026-11-15 03:00 UTC; the 5-hour window read 73 %
-  at the merge, so step 1 starts after it resets (01:10 UTC). Build briefs `brief-r15b<N>.md`, agent ids `r15-agents.txt`,
-  probes `r15-<area>\` and `r15b<N>\`, the survey brief `brief-r15-survey.md`, `archive_r15.py` and `merge_r15.py`, all in
-  this session's scratchpad `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\8e8ba33b-db33-43fa-885a-cb6b82b7253f\scratchpad\`.
-  Questions 63 and 65 answered (a) and (b) on 2026-11-15; 64 waits for the live reader check. Build
-  briefs measure the real-app case in a guarded real window (the lock `Global\HultUI-r15-desktop` and the survey's
-  harnesses) as well as by step-ab; a step that changes when a navigation or a load applies runs its app's tests on
-  Fedora too (round 14). Round 14's files (briefs `brief-r14*.md`, `fullsuite-r14.sh`, the model for the full suite,
-  probes `r14-<area>\` and `r14b<N>\`) are in session 41943a9b's scratchpad (Probe code below).
+- **Round:** 16
+- **Phase:** survey — round 16, to start in a fresh context. Round 15 RELEASED 2026-11-15: main 75f2288a (merge, tree
+  identical to the tested branch; origin/main 5aa1d25b had not moved), CI run 43749648717 green on the first attempt
+  (test, test-linux, docs, both meridian-keyring jobs) and "Push on main" green. No app releases this round (only when
+  the user asks). Round 15's files: briefs `brief-r15*.md`, agent ids `r15-agents.txt`, probes `r15-<area>\` and
+  `r15b<N>\`, `fullsuite-r15.sh` with `fedora-r15.sh` (the model for round 16's full suite: Fedora must run Junction,
+  Meridian, Aperture and Reel on their own, each in a private D-Bus session, as `HultUI.CrossPlatform.slnf` has none of
+  them), `archive_r15.py`, `merge_r15.py`, all in session 8e8ba33b's scratchpad
+  `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\8e8ba33b-db33-43fa-885a-cb6b82b7253f\scratchpad\`.
+  For round 16's start: move round 14's Landed rows, round 15's build order and its answered questions 62, 63 and 65 to
+  the archive, as `archive_r15.py` did; questions 50 and 64 are answered too (2026-11-16) and go once round 16's build
+  order names their items. **Round 16 builds a11y-gate-on-client (question 50: build) and a11y-items-on-demand-sooner
+  (question 64: (a), Windows only)**; the prototypes are `sr-variants\patches\gate.patch` and `items200.patch`. **The
+  screen-reader fix (a11y-keyboard-moves-silent, 9b7513d1..9550ecec, outside plan 17) is on this branch, not on main**:
+  it goes to main with round 16's release, and round 16's survey treats it as already reviewed. Open for the user, not
+  blocking: another F16 held-drag run (Waiting) only with a new approval. Outside plan 17: CI's Linux job runs no
+  Junction, Meridian, Aperture or Reel tests; AT-SPI/Orca is unchecked for the screen-reader fix.
   To resume in a fresh context, run in this worktree: `/loop Run the next step of
   the performance team: follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
   Read both once per session (afterwards only the ledger's Phase and the part the step needs), do the step the ledger's
   Phase calls for, record it in the ledger, and commit.` Before resuming, `git fetch` and merge main if it moved; build
-  steps use `scripts/perf/step-ab.ps1`. Open for the user, not blocking: the live screen-reader check of menus (with
-  question 50's bridge gate and question 64); another F16 held-drag run (Waiting) only with a new approval. Older rounds
-  are in [the archive](17-performance-team-ledger-archive.md) (search it, don't read it whole). History note: rewritten
-  2026-10-25 (every commit after 3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history).
+  steps use `scripts/perf/step-ab.ps1`. Older rounds are in [the archive](17-performance-team-ledger-archive.md) (search
+  it, don't read it whole). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a pre-push
+  hook refuses pushes built on the old history).
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`)
-- **Review commits since:** round 16's survey reviews round 15's build, 587f1767..(round 15's release) (the last survey report to the round 15 release). Earlier: round 15's survey reviewed round 14's build, 06d4db59..5b2985be (the last survey report to the round 14 release; the one merge is round 14's own into main). Earlier: round 14's survey reviewed round 13's build, 8f01b6fd..e432c224 (the last survey report to the round 13 release; its two merges are round 13's own into main). Round 13's survey reviewed round 12's build, 5f1744ca..afc1ed40 (the last survey report to the round 12 release; the one merge is round 12's own into main). Round 12's survey reviewed round 11's build, 5731ee58..b0dd1954 (the last survey report to the
+- **Review commits since:** round 16's survey reviews round 15's build, 587f1767..75f2288a (the last survey report to the round 15 release; the one merge is round 15's own into main). Earlier: round 15's survey reviewed round 14's build, 06d4db59..5b2985be (the last survey report to the round 14 release; the one merge is round 14's own into main). Earlier: round 14's survey reviewed round 13's build, 8f01b6fd..e432c224 (the last survey report to the round 13 release; its two merges are round 13's own into main). Round 13's survey reviewed round 12's build, 5f1744ca..afc1ed40 (the last survey report to the round 12 release; the one merge is round 12's own into main). Round 12's survey reviewed round 11's build, 5731ee58..b0dd1954 (the last survey report to the
   round 11 release; it includes the .NET 11 upgrade's step 0 only as already reviewed). Earlier: round 11's survey reviewed round 10's build and the .NET 11 upgrade, f4d6050d..868e2ffc
   (the last survey report to the upgrade's captures; round 10's merge into main cc55bdcc is in the range). Earlier: round 10's survey reviewed round 9's build, 4919ac40..facced69 (the last survey report
   to the round 9 release; 82 commits, 81 not merges; no merge from main this round). Round 9's survey reviewed
@@ -298,7 +295,7 @@ Re-ranked by the next survey.
 - **vesper-start-focus-event** (7, lead) — at start Vesper raises a focus-changed event for a window that never had the
   foreground (round 13: 5 of 5 launches), and in 2 of 5 refuses a leaf patch and builds a second tree (~53 KB), start
   only. Cause not isolated; not perf.
-- **a11y-gate-on-client** (7; question 50: not yet) — build the tree and raise events only after a UIA client asks for
+- **a11y-gate-on-client** (7; question 50: **BUILD**, 2026-11-16, after the second live check passed in both orders, log; round 16) — build the tree and raise events only after a UIA client asks for
   the window's root. Round 13 (r13-7): 0 root asks in 22 launches; the bridge costs Junction +40 % UI bytes at start and
   +29 % a commit-walk key, Vesper +29 % a drag. New risk evidence: a desktop-wide listener receives our bounds,
   structure, name and focus events (13 provider calls each) without ever asking for the root; a gate would cut it off.
@@ -316,7 +313,8 @@ Re-ranked by the next survey.
   Round 14 (r14-5): after step 1 (a) row-start segments are 88 of 951 calls (zh) and 118 of 681 (ja) at 1200;
   short words (under 8 characters) cut at need are the largest share (461 of 951); giving 2–7 character words their cuts
   in the tables halves a new width's calls but costs opening +248 KB (zh) / +121 KB (ja): a trade.
-- **a11y-items-on-demand-sooner** (7; with question 50's live check; r14-7 Candidate 2) — serve a virtual list's items on
+- **a11y-items-on-demand-sooner** (7; question 64: **(a), Windows only**, 2026-11-16, after the second live check passed,
+  log; Linux stays at 2,000 until an Orca check; round 16; r14-7 Candidate 2) — serve a virtual list's items on
   demand above ~200 items, not 2,000 (`MaxEagerVirtualItems`, AccessibilityTreeBuilder.cs:18). AOT prototype, real
   windows with the desktop listener: Junction start 2,239.5 → 1,867.2 KB UI (−16.6 %; a11y 426 → 54 KB), Vesper's
   viewer open 1,742.5 → 1,099.2 (−37 %), a History search's 3 keys 2,840 → 718 provider calls, whole-tree builds for an
@@ -872,8 +870,9 @@ No question is open from rounds 1–14. Their answered questions are in the arch
 [round 10, with round 9's 26 and the earlier 10](17-performance-team-ledger-archive.md#needs-the-user-round-10),
 [round 9](17-performance-team-ledger-archive.md#needs-the-user-round-9), [round 8](17-performance-team-ledger-archive.md#needs-the-user-round-8),
 [round 7](17-performance-team-ledger-archive.md#needs-the-user-round-7), [round 6](17-performance-team-ledger-archive.md#needs-the-user-round-6)). Search it by candidate id
-before asking anything an earlier round asked. Recommendations in brackets. Question 50 (a11y-gate-on-client)
-and 51 (after-layout-callback) were answered "not yet" and "only if another app needs it"; both are Waiting.
+before asking anything an earlier round asked. Recommendations in brackets. Question 50 (a11y-gate-on-client) was
+answered "not yet", then **build** (2026-11-16, after the second live check); 51 (after-layout-callback) "only if
+another app needs it" (Waiting).
 Round 14's a11y-items-on-demand-sooner and apps-junction-ref-move-a11y wait with question 50 (Waiting); question
 57 (text-open-measures-every-line, full) was answered "not now" (Waiting).
 
@@ -913,7 +912,10 @@ Round 15 questions. Recommendations in brackets.
     the bridge 59 % of the frame's UI bytes. (a) a11y-items-on-demand-sooner: lists over ~200 items are served on
     demand, which removes all of it (a list crossing 200 builds the whole tree once; AT-SPI needs the Orca check). (b)
     a11y-item-renames-unfetched: items no UIA client fetched raise no Name change (UIA only, smaller; the renaming walk
-    stays). [(a), checked with the readers; (b) if (a) is declined.]
+    stays). [(a), checked with the readers; (b) if (a) is declined.] Live check 2026-11-15: today and items200 sound
+    the same to both readers, as neither reads any row a keyboard move reaches (log); decide after
+    a11y-keyboard-moves-silent is fixed and the readers check again. → **(a), Windows only** (2026-11-16, after the
+    second live check: items200 on the fix reads the same as without it in both readers; Linux keeps 2,000 until Orca).
 65. **junction-history-highlight-prefetch** (r15-4; step 10): each History rest tokenizes the opening file's two
     versions for the Commit tab, which may never be opened: a first walk of 120 Downs at 250 ms costs 3.13 MB a key on
     all threads against 0.90 with the colours cached (−71 %), app GCs 23/6/1 → 6/2/0 (UI-thread bytes the same).
@@ -1213,3 +1215,30 @@ From 2026-11-13 (round 14's survey); earlier entries are in the archive ([to 202
   whose Fedora run covers the four apps; docfx 0 warnings. origin/main 5aa1d25b unmoved (in the branch). Phase release.
   Meanwhile the user asked for the screen-reader variant builds (today / items200 / gate) for questions 50 and 64: an
   expert 7 agent builds them in its own worktree, never committed, into `sr-variants\` in this session's scratchpad.
+- 2026-11-15: round 15 RELEASED. Merged into main 75f2288a and pushed (origin/main 5aa1d25b unmoved, tree identical to
+  the tested branch; the primary checkout fast-forwarded behind the guard). CI run 43749648717 on 75f2288a green on the
+  first attempt in 23 min (test, test-linux, docs, meridian-keyring on macOS and Ubuntu); "Push on main" green. The
+  screen-reader variant builds are ready for the user (`sr-variants\` in session 8e8ba33b's scratchpad, never committed).
+  Round → 16, Phase survey, in a fresh context.
+- 2026-11-15: the user's live screen-reader check (Narrator, then NVDA; today / items200 / gate builds of Vesper,
+  Junction and the Fluent sample; notes in `sr-variants\NOTES-*.md`) decided neither question 50 nor 64. In every build
+  neither reader reads a keyboard move in a list or a menu: Vesper's files, Junction's History, the Fluent menu bar,
+  Junction's context menu and its submenu. Both read the window's name; NVDA reads what the mouse points at; a click
+  that moves the focus is read. From the code: a keyboard move in a list or menu moves the selection, not the focus; the
+  bridge raises only SelectionItem.IsSelected property changes (`WindowsAccessibilityBridge.RaiseServedSelection`), an
+  item served on demand answers no HasKeyboardFocus (`UiaVirtualItem.cs:80–84`), and the root's `GetFocus` names the
+  list (`UiaFragmentRoot.cs:124`), so a reader gets no focus event to speak. Also: NVDA reads a clicked Fluent nav item
+  "not selected" (the state as of before the rebuild). The gate logged each open "root asked, tree built at once":
+  4 for Fluent, 2 each for Vesper and Junction. **a11y-keyboard-moves-silent** is not perf and is outside plan 17; the
+  readers check questions 50 and 64 again after it is fixed. AT-SPI/Orca is unchecked.
+- 2026-11-16: **a11y-keyboard-moves-silent fixed on the branch** (9b7513d1..9550ecec, not on main; outside plan 17).
+  A reader's focus is now a list's or a menu's current item (AccessibilityNode.CurrentItem, AccessibilityFocus.TargetOf),
+  told as one focus event per move at the end of the frame (IAccessibilityBridge.NotifyChangesApplied). Also: n of N on
+  items and menu bar titles, menu entries are no SelectionItems, activation re-tells the focus, a pointer press's move
+  is told at its release, F10 then Escape with nothing focused clears the focus, and the Fluent nav items and Junction's
+  MR rows say whether they are selected. Tests include a real UIA client (HultUI.UiTests ReaderFocusTests) and
+  HeadlessUiaReader for app tests. Five listening runs (Narrator, then NVDA; `sr-variants\fixed*`, notes
+  `NOTES-fixed*.md`): the last on `fixed4` had every step right in both readers. The second variant check on the fix
+  (`items200-fixed`, `gate-fixed`) read the same as `fixed4` in both readers; for the gate, both reader-first and
+  app-first for Vesper, Junction and Fluent, 13 launches, each logged "root asked, tree built at once". **Answers:
+  question 50 → build; question 64 → (a), Windows only.** Both go to round 16's build.

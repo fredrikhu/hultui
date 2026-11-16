@@ -69,6 +69,8 @@ sealed class AtSpiRig : IBridgeRig, IAccessibilityBridge, ITreeDiffBorrower, IDi
         FocusMoves++;
     }
 
+    public void NotifyChangesApplied(AccessibilityNode root) => _bridge.NotifyChangesApplied(root);
+
     public void Announce(AccessibilityNode? source, string text, AnnouncementPoliteness politeness)
         => _bridge.Announce(source, text, politeness);
 

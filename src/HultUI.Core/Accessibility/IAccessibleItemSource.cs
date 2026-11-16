@@ -112,6 +112,23 @@ public interface IAccessibleItemSource
     int SelectedIndex { get; }
 
     /// <summary>
+    /// Index of the item the keyboard is on, or -1 for none: while the container holds the keyboard
+    /// focus, the item a reader is told has it (UIA's focus event and HasKeyboardFocus, AT-SPI's
+    /// focused state), as a WPF list box's item has the keyboard focus. The default is
+    /// <see cref="SelectedIndex"/>: a single-select list's selection, a menu's highlighted entry. A
+    /// multi-select source answers its cursor, which may be on an item that is not selected.
+    /// </summary>
+    int CurrentIndex => SelectedIndex;
+
+    /// <summary>
+    /// Whether the container's current item (<see cref="CurrentIndex"/>) is what a reader is told has
+    /// the focus while the nearest focusable element above the container holds it: a pane that takes
+    /// the keys and walks a list inside it (Vesper Commander's pane and its file list). False (the
+    /// default): only a focus on the container itself is read as on its current item.
+    /// </summary>
+    internal bool TakesAncestorFocus => false;
+
+    /// <summary>
     /// Accessible label for the item at <paramref name="index"/>, or <c>null</c>.
     /// Must be cheap: read from item data, never materialize the item's template
     /// element (that would defeat virtualization).

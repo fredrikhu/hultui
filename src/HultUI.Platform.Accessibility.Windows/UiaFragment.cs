@@ -44,7 +44,6 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
     private string? _description;
     private string? _value;
     private bool _isFocusable;
-    private bool _isFocused;
     private bool _isEnabled;
     private bool? _isToggled;
     private bool? _expanded;
@@ -89,14 +88,6 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         Generation = generation;
     }
 
-    /// <summary>Takes a focus move, which rebuilds no tree (UI thread). True when the state changed.</summary>
-    public bool SetFocused(bool focused)
-    {
-        if (_isFocused == focused) return false;
-        _isFocused = focused;
-        return true;
-    }
-
     private void Snapshot(AccessibilityNode node)
     {
         _name = node.Name;
@@ -105,7 +96,6 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         // document's is made only when asked, and its changes are told as text changes.
         _value = node.TextSource is null ? node.Value : null;
         _isFocusable = node.IsFocusable;
-        _isFocused = node.IsFocused;
         _isEnabled = node.IsEnabled;
         _isToggled = node.IsToggled;
         _expanded = node.Expanded;
@@ -161,6 +151,9 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
                 => new UiaInvokeProvider(_bridge, ElementId),
             AccessibilityRole.ListItem when patternId == UiaInterop.UIA_SelectionItemPatternId
                 => new UiaSelectionItemProvider(_bridge, ElementId),
+            // A menu's entry is no SelectionItem, as a Win32 or WinUI menu's is not: a reader said
+            // "selected" on every entry it walked. The entry the keyboard is on has the focus instead.
+            AccessibilityRole.MenuItem when patternId == UiaInterop.UIA_SelectionItemPatternId => null,
             // Any node carrying a toggle state offers the pattern, whatever its role — a
             // menu item marking the current choice is a ListItem with a state, not a
             // checkbox, and a client that asks by pattern would otherwise be told no.
@@ -193,8 +186,6 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
             // selection container as a list is, with the same three patterns.
             AccessibilityRole.Menu when patternId == UiaInterop.UIA_ScrollPatternId && Node.ItemSource is not null
                 => new UiaScrollProvider(_bridge, ElementId),
-            AccessibilityRole.Menu when patternId == UiaInterop.UIA_SelectionPatternId && Node.ItemSource is not null
-                => new UiaSelectionProvider(_bridge, ElementId),
             AccessibilityRole.Menu when patternId == UiaInterop.UIA_ItemContainerPatternId && Node.ItemSource is not null
                 => new UiaItemContainerProvider(_bridge, ElementId),
             // Any expandable element (regardless of role) exposes ExpandCollapse.
@@ -242,12 +233,25 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
             UiaInterop.UIA_AutomationIdPropertyId when node.AutomationId is { } automationId => UiaVariant.FromBStr(automationId),
             UiaInterop.UIA_HelpTextPropertyId when _description is not null => UiaVariant.FromBStr(_description),
             UiaInterop.UIA_ControlTypePropertyId => UiaVariant.FromInt(MapControlType(node.Role)),
-            UiaInterop.UIA_IsKeyboardFocusablePropertyId => UiaVariant.FromBool(_isFocusable),
-            UiaInterop.UIA_HasKeyboardFocusPropertyId => UiaVariant.FromBool(_isFocused),
+            // A list's or a menu's item can have the reader's focus (its container's current item), as
+            // a WPF list box's item can; and so can whatever has it now (a menu bar's title).
+            // Not the node that holds the focus while an item of its own stands for it: the items' container
+            // is then no focus stop of its own, as Vesper's file list and a context menu are not, which a
+            // reader walks item by item. A focusable list or menu bar holding the focus had Narrator say
+            // its name again on every move ("History list", "Menu bar menu bar").
+            UiaInterop.UIA_IsKeyboardFocusablePropertyId
+                => UiaVariant.FromBool(_isFocusable && !_bridge.StandsForItem(ElementId)
+                    || VirtualItemId.IsItem(ElementId) || node.Parent?.TracksCurrentItem == true || _bridge.HasReaderFocus(ElementId)),
+            // The reader's focus, as the bridge holds it: the node that holds the focus, or its current
+            // item while it has one, and then not the holder (AccessibilityFocus). A focus move rebuilds
+            // no tree, so a node's own state was the last rebuild's until the window marked it.
+            UiaInterop.UIA_HasKeyboardFocusPropertyId => UiaVariant.FromBool(_bridge.HasReaderFocus(ElementId)),
             UiaInterop.UIA_IsEnabledPropertyId => UiaVariant.FromBool(_isEnabled),
             UiaInterop.UIA_IsOffscreenPropertyId => UiaVariant.FromBool(Node.IsOffscreen),
             UiaInterop.UIA_IsPasswordPropertyId => UiaVariant.FromBool(_isPassword),
-            UiaInterop.UIA_SelectionItemIsSelectedPropertyId when _isSelected is { } selected
+            UiaInterop.UIA_PositionInSetPropertyId when PlaceInSet(node) is var (at, _) && at > 0 => UiaVariant.FromInt(at),
+            UiaInterop.UIA_SizeOfSetPropertyId when PlaceInSet(node) is var (at, of) && at > 0 => UiaVariant.FromInt(of),
+            UiaInterop.UIA_SelectionItemIsSelectedPropertyId when _isSelected is { } selected && OffersSelection(node)
                 => UiaVariant.FromBool(selected),
             UiaInterop.UIA_ValueValuePropertyId when _value is not null => UiaVariant.FromBStr(_value),
             // A range as the tree was built with it, which is what its change events carry.
@@ -369,6 +373,49 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
     }
 
     // ── Helpers ──
+
+    /// <summary>
+    /// Where an item is in its set, from 1, and how many the set has; (0, 0) for a node that is in none.
+    /// A list's, a menu's or a menu bar's items are its children (its choices: a menu's separators are
+    /// none of them), an item node's place read from its id. Any other list item, menu item, tree item,
+    /// tab or radio button is one of its parent's children with its role: a set of elements that has no
+    /// container of its own (the Fluent sample's navigation, five list items among the window's other
+    /// children), whose size UI Automation worked out otherwise, and not always the same (6, 5, then 7
+    /// for those five). On the client's thread, from the node; a scan of the parent's children for the
+    /// second kind.
+    /// </summary>
+    internal static (int At, int Of) PlaceInSet(AccessibilityNode node)
+    {
+        if (node.Parent is not { } parent) return default;
+        var siblings = parent.Children;
+        if (parent.TracksCurrentItem)
+        {
+            int at = VirtualItemId.IsItem(node.ElementId) ? (int)(uint)(node.ElementId.Value & 0xFFFF_FFFFUL) : IndexOf(siblings, node);
+            return at >= 0 && at < siblings.Count ? (at + 1, siblings.Count) : default;
+        }
+        if (node.Role is not (AccessibilityRole.ListItem or AccessibilityRole.MenuItem or AccessibilityRole.TreeItem
+            or AccessibilityRole.Tab or AccessibilityRole.RadioButton))
+            return default;
+        int position = 0, count = 0;
+        for (int i = 0; i < siblings.Count; i++)
+        {
+            if (siblings[i].Role != node.Role) continue;
+            count++;
+            if (siblings[i].ElementId == node.ElementId) position = count;
+        }
+        return position > 0 ? (position, count) : default;
+    }
+
+    private static int IndexOf(IReadOnlyList<AccessibilityNode> nodes, AccessibilityNode node)
+    {
+        for (int i = 0; i < nodes.Count; i++)
+            if (nodes[i].ElementId == node.ElementId) return i;
+        return -1;
+    }
+
+    /// <summary>Whether a node with a selected state offers it to UIA (SelectionItem, IsSelected): not a
+    /// menu's entry, whose highlight is the focus moving to it.</summary>
+    internal static bool OffersSelection(AccessibilityNode node) => node.Role != AccessibilityRole.MenuItem;
 
     private static bool InScrollable(AccessibilityNode node)
     {

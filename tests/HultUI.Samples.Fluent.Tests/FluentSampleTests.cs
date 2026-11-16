@@ -187,6 +187,22 @@ public class FluentSampleTests
         Assert.Equal(Color.Transparent, Pill(session, "About").BackgroundColor);
     }
 
+    /// <summary>The pill is the look; a reader is told the same thing as a selected state. With none,
+    /// NVDA read "Personalization, not selected" on the page the window was showing.</summary>
+    [Fact]
+    public void TheSelectedNavItemSaysItIsSelected()
+    {
+        var (session, _app, _root) = Start();
+        using var _ = session;
+        Assert.Equal(true, session.Window.FindByRole(AccessibilityRole.ListItem, "Home")!.Node.IsSelected);
+        Assert.Equal(false, session.Window.FindByRole(AccessibilityRole.ListItem, "Personalization")!.Node.IsSelected);
+
+        GoTo(session, "Personalization");
+
+        Assert.Equal(true, session.Window.FindByRole(AccessibilityRole.ListItem, "Personalization")!.Node.IsSelected);
+        Assert.Equal(false, session.Window.FindByRole(AccessibilityRole.ListItem, "Home")!.Node.IsSelected);
+    }
+
     private static BoxElement Pill(HeadlessSession session, string item) =>
         (BoxElement)session.Window.FindByRole(AccessibilityRole.ListItem, item)!.Element.Children[0];
 

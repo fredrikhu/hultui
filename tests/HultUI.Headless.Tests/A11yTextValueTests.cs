@@ -31,6 +31,7 @@ public class A11yTextValueTests
         public void ApplyChanges(TreeDiff diff, AccessibilityNode root) => inner.ApplyChanges(diff, root);
         public void NotifyFocusChanged(AccessibilityNode? focused) => inner.NotifyFocusChanged(focused);
         public void NotifyFocusChanged(AccessibilityNode? focused, AccessibilityNode? previous) => inner.NotifyFocusChanged(focused, previous);
+        public void NotifyChangesApplied(AccessibilityNode root) => inner.NotifyChangesApplied(root);
     }
 
     private static (RichTextEditorElement Editor, TextInputElement Input, Element Root) Fixture()

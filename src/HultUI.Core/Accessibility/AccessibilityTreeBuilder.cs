@@ -164,6 +164,10 @@ public static partial class AccessibilityTreeBuilder
         node.NativeContent = element.NativeAccessibleContent;
         if (element is IRangeValueElement range)
             node.Range = AccessibleRange.Of(range);
+        // A menu bar's titles are its choices: the highlighted one is its current item. A list's is
+        // given with its items (MarkItemSource).
+        if (element is Builders.MenuBarElement bar)
+            node.SetCurrentItem(CurrentTitleOf(bar));
         // What ChildPlace subtracts from everything under it, and what UI Automation's Scroll
         // pattern answers from: it read the live scroll view through a walk of the element tree on
         // the client's thread.
@@ -342,9 +346,8 @@ public static partial class AccessibilityTreeBuilder
         // its own: its realized rows carry the real controls, and one node per row would
         // bury them.
         if (!source.PublishesItemNodes) return false;
-        // What a bridge asks for the items it serves on demand, without finding the list first.
-        node.ItemSource = source;
         int count = source.ItemCount;
+        MarkItemSource(node, element, source, count);
         var open = OpenRow(element, source, focusManager);
         // A row that holds the focus hangs under its item's node, which a list served on demand does
         // not have: it has item nodes for as long as the row is open.
@@ -358,6 +361,70 @@ public static partial class AccessibilityTreeBuilder
             // which are selected, the list's node carries.
             ServeOnDemand(node, source, count);
         return true;
+    }
+
+    /// <summary>
+    /// What a list's node carries of the list itself, as it is built (here, and where a layout refresh
+    /// makes the node again): the list, which a bridge asks for the items it serves on demand without
+    /// finding it first; its current item (<see cref="AccessibilityNode.CurrentItem"/>); and, for a list
+    /// whose current item stands for the focus of the element above it, that element.
+    /// </summary>
+    private static void MarkItemSource(AccessibilityNode node, Element list, IAccessibleItemSource source, int count)
+    {
+        node.ItemSource = source;
+        node.SetCurrentItem(CurrentOf(source, count));
+        if (source.TakesAncestorFocus && FocusHolderOf(list) is { } holder) node.SetFocusHolder(holder.Id);
+    }
+
+    /// <summary>The item the keyboard is on (<see cref="IAccessibleItemSource.CurrentIndex"/>), or -1
+    /// for none or one past the <paramref name="count"/> items.</summary>
+    internal static int CurrentOf(IAccessibleItemSource source, int count)
+    {
+        int current = source.CurrentIndex;
+        return (uint)current < (uint)count ? current : -1;
+    }
+
+    /// <summary>The nearest focusable element above <paramref name="element"/>, or null: what holds the
+    /// focus a list that takes its ancestor's focus stands for. A walk up, for such a list only.</summary>
+    internal static Element? FocusHolderOf(Element element)
+    {
+        for (var above = element.Parent; above is not null; above = above.Parent)
+            if (above.IsFocusable) return above;
+        return null;
+    }
+
+    /// <summary>The element a list's node names as the one whose focus its current item stands for
+    /// (<see cref="AccessibilityNode.FocusHolder"/>), as a build would make it now: default for none.</summary>
+    internal static ElementId FocusHolderIdOf(Element list, IAccessibleItemSource source) =>
+        source.TakesAncestorFocus && FocusHolderOf(list) is { } holder ? holder.Id : default;
+
+    /// <summary>
+    /// A container's current item as a build would give its node now
+    /// (<see cref="AccessibilityNode.CurrentItem"/>): a list's or a menu's that publishes item nodes, a
+    /// menu bar's highlighted title; -1 for anything else.
+    /// </summary>
+    internal static int CurrentItemOf(Element element) => element switch
+    {
+        Builders.MenuBarElement bar => CurrentTitleOf(bar),
+        IAccessibleItemSource { PublishesItemNodes: true } source => CurrentOf(source, source.ItemCount),
+        _ => -1,
+    };
+
+    /// <summary>A menu bar's highlighted title among its titles, whose nodes are its node's children in
+    /// order (each is a menu item), or -1.</summary>
+    private static int CurrentTitleOf(Builders.MenuBarElement bar)
+    {
+        int title = bar.CurrentTitle;
+        return (uint)title < (uint)bar.Children.Count ? title : -1;
+    }
+
+    /// <summary>Adds <paramref name="listNode"/> and its current item now to <paramref name="currents"/>
+    /// when that is not the one the node carries.</summary>
+    private static void AddCurrentMove(AccessibilityNode listNode, IAccessibleItemSource source, int count,
+        List<(AccessibilityNode Node, int Current)> currents)
+    {
+        int current = CurrentOf(source, count);
+        if (listNode.TracksCurrentItem && current != listNode.CurrentItem) currents.Add((listNode, current));
     }
 
     /// <summary>A realized row of a list and the item it stands for.</summary>
@@ -580,10 +647,13 @@ public static partial class AccessibilityTreeBuilder
     /// served on demand has no item nodes: the selection, and the items' number, are its node's own
     /// (<see cref="ServedItemChanges"/>), what to put on it added to <paramref name="served"/>.
     /// </summary>
-    /// <remarks>Only the selected state: an item whose label changed with the move is told by the
+    /// <remarks>Only the selected state, and the item the keyboard is on (<see cref="AccessibilityNode.CurrentItem"/>):
+    /// when it moved, the node and the index now go to <paramref name="currents"/>, to write in place
+    /// (no diff reports it). An item whose label changed with the move is told by the
     /// next rebuild, when the list's layout refresh comes due, as a change of items always was.</remarks>
     internal static bool ItemSelectionChanges(AccessibilityNode listNode, IAccessibleItemSource source,
-        List<PropertyChange> changes, List<(AccessibilityNode Node, int Count, int[] Selected)> served)
+        List<PropertyChange> changes, List<(AccessibilityNode Node, int Count, int[] Selected)> served,
+        List<(AccessibilityNode Node, int Current)> currents)
     {
         if (!source.PublishesItemNodes) return false;
         int count = source.ItemCount;
@@ -591,6 +661,7 @@ public static partial class AccessibilityTreeBuilder
         {
             if (count <= MaxEagerVirtualItems) return false;
             ServedItemChanges(listNode, source, changes, served);
+            AddCurrentMove(listNode, source, count, currents);
             return true;
         }
         var items = listNode.Children;
@@ -608,6 +679,7 @@ public static partial class AccessibilityTreeBuilder
             if (selected != source.IsItemSelected(i))
                 changes.Add(new PropertyChange(item, AccessibilityProperties.IsSelected));
         }
+        AddCurrentMove(listNode, source, count, currents);
         return true;
     }
 

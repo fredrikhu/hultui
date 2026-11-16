@@ -67,7 +67,8 @@ public sealed record MenuBarItem(string Title, Func<IReadOnlyList<ContextMenuIte
 /// In an open menu ↑ ↓ Enter work as in any context menu, ← and → move to the neighbouring
 /// menu where there is no submenu to close or open, and Esc goes back to the titles. Mnemonic
 /// letters are underlined while Alt is held or the bar has the keys. The keyboard comes back to
-/// whatever had it when the bar lets go. Right Alt is left alone: on many layouts it is AltGr.</para>
+/// whatever had it when the bar lets go, and to nothing (the window's root) when nothing had it: the
+/// bar keeps no focus of its own. Right Alt is left alone: on many layouts it is AltGr.</para>
 /// <para><b>Accessibility:</b> the bar is a menu bar, each title a menu item that reports
 /// whether its menu is open.</para>
 /// <para>Its look is the theme's <see cref="MenuBarTheme"/>; the menus are context menus.</para>
@@ -227,7 +228,14 @@ public sealed class MenuBar : Component
         _highlight = -1;
         var restore = _restoreFocus;
         _restoreFocus = null;
-        if (hadKeys && Bar is { IsFocused: true } && restore is not null && restore.IsHosted) restore.Focus();
+        // The keyboard goes back to what had it, and to nothing when nothing had it (keys landed on the
+        // window's root): the bar kept it, with no title current, and a reader was told the bar ("Menu
+        // bar menu bar") on Escape after F10, Right and Right on the Fluent sample (2026-11-16).
+        if (hadKeys && Bar is { IsFocused: true } bar)
+        {
+            if (restore is not null && restore.IsHosted) restore.Focus();
+            else bar.FocusManager?.ClearFocus();
+        }
         MarkDirty();
     }
 
@@ -278,7 +286,14 @@ public sealed class MenuBar : Component
 
     public override Element Build()
     {
-        var bar = new MenuBarElement();
+        var bar = new MenuBarElement
+        {
+            // The title the keyboard is on: what a reader is told has the focus while the bar holds it,
+            // walked with ← and →. An open menu holds the reader's focus (Window), and its title stays the
+            // bar's current one, so Escape back to the titles is told as on it, and the bar is no stop
+            // between the title and the menu.
+            CurrentTitle = _keyboard ? _highlight : -1,
+        };
         bar.Flex.Direction = FlexDirection.Row;
         bar.Flex.AlignItems = AlignItems.Center;
         bar.IsFocusable = true;
@@ -346,6 +361,22 @@ public sealed class MenuBarElement : BoxElement
     // the twin's titles too (MenuTitleElement compares against those).
     private protected override bool PatchMarksOwnLayout => true;
     private protected override bool PatchThemesTwin => true;
+
+    /// <summary>The title the keyboard is on while the bar has the keys, its menu open or not, or -1:
+    /// the bar's current item (<see cref="Accessibility.AccessibilityNode.CurrentItem"/>), which a
+    /// reader is told has the focus while the bar holds it.</summary>
+    internal int CurrentTitle { get; set; } = -1;
+
+    internal override void PatchFrom(Element source)
+    {
+        base.PatchFrom(source);
+        if (source is MenuBarElement bar && bar.CurrentTitle != CurrentTitle)
+        {
+            CurrentTitle = bar.CurrentTitle;
+            // A ← or → between titles changes no node but the bar's: patched with no tree built.
+            NotifyAccessibilityPropertyChanged(Accessibility.AccessibilityProperties.CurrentItem);
+        }
+    }
 
     protected internal override void ApplyTheme(Theme theme)
     {

@@ -214,6 +214,116 @@ a closing palette's field); one of an overlay opened since has no node yet, and 
 looks for it (a palette's field taking the focus as the palette opens walked every node
 of the window).
 
+**The reader's focus is a list's or a menu's current item (2026-11-15).** Narrator and NVDA
+speak focus moves only. A key in a list or a menu moves its selection, and the element focus
+stays on the list, or on whatever had it while a menu is open, so with the bridges raising only
+the selection's changes, no reader said anything as the arrows walked Vesper's file list,
+Junction's History, the Fluent sample's View menu or Junction's commit menu and its "Quick
+rebase" submenu (the user's live check, 2026-11-15; File Explorer, the control, read normally).
+The rule now, as a WPF list box's item has the keyboard focus:
+
+- The node that **holds** the focus is the focused element's, or, while a context menu or a menu
+  bar's menu is open and takes the keys, the menu's (the submenu's once an entry of its own is
+  highlighted: → or the pointer in it). The window tells the bridge the holder
+  (`NotifyFocusChanged`), the menu once its part is in the tree, the element again when the menus
+  close (`Window.UpdateA11yMenuFocus`); an element focus move while a menu holds is told then.
+- A container whose items are its choices carries its **current item**
+  (`AccessibilityNode.CurrentItem`): a list or a menu over an `IAccessibleItemSource` that
+  publishes item nodes (`CurrentIndex`, by default `SelectedIndex`: a single-select list's
+  selection, a menu's highlighted entry, a multi-select `VirtualListElement`'s cursor, which is its
+  `SelectedIndex`), served on demand or not; and a menu bar (`MenuBarElement.CurrentTitle`, the
+  title the keyboard is on, open menu or not). No diff carries it: the builder sets it, and the
+  selection patch, the in-place refresh and the menu bar's patch (`MenuBarElement` tells
+  `AccessibilityProperties.CurrentItem`) write it on the applied node in place.
+- The reader's **focus target** (`AccessibilityFocus.TargetOf`) is the holder's current item when it
+  has one; else the current item of a list that takes the holder's focus
+  (`VirtualListElement.TakesAncestorFocus`: the nearest focusable element above the list, named on
+  the list's node as `FocusHolder`; Vesper's Detail list for its pane); else the holder. With no
+  current item the container itself has it, as before.
+- **UIA:** GetFocus answers the target (the item node's wrapper, or a `UiaVirtualItem` for an item
+  served on demand); HasKeyboardFocus is true on the target only, so the holder answers false while
+  an item stands for it; items answer IsKeyboardFocusable true. When the target moves the bridge
+  raises HasKeyboardFocus false on the old one, true on the new, then the focus event on the new one.
+  It reads the target when the holder changes and once at the end of each accessibility phase that
+  applied anything (`IAccessibilityBridge.NotifyChangesApplied`), after the frame's events: an
+  item's SelectionItem.IsSelected goes out before the focus moves to it, and a frame that opens a
+  menu moves the focus once, to the menu's entry.
+- **AT-SPI:** the same target; `state-changed:focused` 0 on the old target and 1 on the new one, the
+  item's object says focused (and keeps it across applies, the holder's object does not), items are
+  focusable. Orca is unchecked.
+- A real element inside an open row (`OpenRow`) holds the focus itself, and is the target, as before.
+- **Apps:** Junction's History list holds the focus while nothing else does (named "History", a Tab
+  stop with no ring, as Meridian's History); Vesper's Detail list takes its pane's focus.
+- **Cost:** nothing when no client listens. Per key: the patch compares one int per list
+  (`ItemSelectionChanges`), writes it in place, and the bridge reads the holder's node and one or
+  two dictionary entries; no walk, nothing allocated but the events and, for an item served on
+  demand, the provider each event gets (as the selection's events already made). Building a tree:
+  one flag test per node for the follower map (UIA's rebase, AT-SPI's walk), and the current item on
+  each list node, in the fields it had.
+- **Checked by a real client:** `HultUI.UiTests.ReaderFocusTests` registers a focus handler
+  (`IUIAutomation.AddFocusChangedEventHandler`, FlaUI) in the test process: a focused list's
+  selection move reaches it as the item, by name, with HasKeyboardFocus true, from a window that is
+  never the foreground.
+- **After the first listening round (2026-11-16, Narrator and NVDA on the `fixed` build):**
+  - *One focus event a move.* The bridges take the holder when the window tells it
+    (`TellA11yFocus`) and tell assistive technology at the end of the next accessibility phase,
+    after its changes: F10 and Alt with a letter focused the bar, then its title a frame later, and
+    the bar's event was read last ("Menu bar menu bar"). (A click that focuses and selects was not told
+    with its selection by this: the press focuses, the release selects; see the second round.)
+  - *A menu's entries are no SelectionItems* (Narrator said "selected" on each), as a Win32 or a
+    WinUI menu's are not; a menu has no Selection pattern; on AT-SPI they are neither selectable nor
+    selected. Lists keep theirs.
+  - *The holder is no focus stop while its item has the focus:* it answers IsKeyboardFocusable false
+    then (a menu bar's titles and a list's items true), as Vesper's file list and a context menu, which
+    the readers walked item by item, are no focus stops; Narrator said "History list" and "Menu bar"
+    again on every move in the two that were. The events, the ancestors and the runtime ids were the
+    same in both (`TheFocussAncestors_AreTheSameProviders…`); this is the difference left, and the next
+    listening round decides it. NVDA saying the window again on a Tab between Vesper's panes is the
+    window's title changing with the active pane.
+  - *A window that comes to the front* tells the reader's focus again
+    (`IAccessibilityBridge.NotifyWindowActivated`, from `Window.RaiseActivated`), once per activation.
+  - *Positions:* item nodes, served items, menu entries (separators excluded) and menu bar titles
+    answer PositionInSet and SizeOfSet; any other list item, menu item, tree item, tab or radio button
+    its place among its parent's children with its role (the Fluent sample's five navigation items,
+    which UI Automation counted as 6, 5 or 7).
+  - *A new listing* relabels a list's items in place (an item's id is its place): a frame that takes the
+    focus off an item tells no rename of it, so entering a folder in Vesper reads the new cursor only.
+- **After the second listening round (2026-11-16, on 21ec8bb6):**
+  - *A press holds the move until the release.* A click on the Fluent sample's "Personalization" read
+    "Personalization, not selected, 2 of 5" (NVDA) and nothing on the release that selected it: the
+    focus moves on the press, the app selects on the click, and neither reader speaks a SelectionItem
+    IsSelected change. A focus move made by a pointer press is now told at the end of the frame its
+    release is handled in, after the click's changes (`Window.BeginA11yPressHold` /
+    `EndA11yPressHold`, in `TellA11yFocus`): one focus event, on the item, selected. Explorer selects
+    on the press, which is why it reads "selected" there. Until the release the bridge has heard
+    nothing, so UIA's GetFocus and HasKeyboardFocus answer the element the focus left (the applied tree
+    marks the move at once, as for any move). The hold covers every tell of the press, an open menu
+    closed by it included (the menu's closing tells the element then), and the latest one is told. It
+    ends at the release whichever path takes it (a captured press, a text drag), at a drag's start, at
+    a key, at another press that moves the focus, when the window comes to the front again (a release that went
+    elsewhere), when no client listens any more, and after `Window.A11yPressHoldMaxMs` (1 s, asked for
+    as an idle deadline) at the latest. Keyboard and programmatic moves are told as before. AT-SPI
+    follows from the window: `state-changed:focused` at the release, after `state-changed:selected`.
+    Cost: a reference compare and the listening query on a press that moves the focus, a field compare
+    per tell; nothing allocated.
+  - *A menu bar gives the keyboard back to nothing when nothing had it.* F10, Right, Right, Escape read
+    "Menu bar menu bar" on Escape: with nothing focused before F10 (a click on the page clears the
+    focus) the bar kept the focus, its node with no current title the reader's target. It clears the
+    focus then (`MenuBar.Deactivate`): no focus event, HasKeyboardFocus false on the title, GetFocus
+    answers the window, as before F10; with an element focused before, the element is told again, as
+    it was (the Fluent sample's Home item, focused by a click: checked through the bridge and a real
+    client).
+  - *Vesper's Enter into a folder* tells one focus event, on the new folder's parent row, read "Parent
+    folder", 1 of N, selected, whether the rows land in the same frame or a few later
+    (`EnterFolderReaderFocusTests`); a folder that misses the 50 ms a navigation waits moves the pane
+    over its waiting block and tells the pane, then the row when its rows land.
+  - *App tests hear the real bridge:* `HultUI.Headless.HeadlessUiaReader` installs the Windows bridge on
+    a hidden window of its own for a headless session, keeps every event it raises, and answers
+    GetFocus, Name, IsSelected, HasKeyboardFocus and the place of an item as a client would.
+- **Left:** a dropdown's open list keeps the focus on the dropdown; Vesper's Brief and Thumbnails
+  views and its Synchronize rows mark their cursor with `AccessibleSelected` on elements the pane
+  holds, which no rule above makes the target.
+
 A move of a list's selection rebuilds no tree either (2026-10-11). The frame marks
 `IsSelected` on the item nodes it changed, in the applied tree, and hands the bridge
 those changes (`ApplyPatchedProperties`): the UIA wrappers take the new state and raise
@@ -345,9 +455,10 @@ force), the click action and the selectable state on AT-SPI, and the menu keeps 
 Selection, Scroll and ItemContainer patterns as its items' selection container. A submenu's parent
 item expands (ExpandCollapse, from the expanded state item nodes carry since the app-support merge) and has no Invoke, as a menu bar's title; every other entry keeps Invoke. The selection moves as it did
 (round 5): the keys and the pointer select an item, told as UIA's SelectionItem.IsSelected change
-and AT-SPI's `state-changed:selected`, patched with no tree built. A MenuItem tells it by
-selection, not focus: the keyboard focus stays where it was when the menu opened, since the items
-are not focusable. The recording bridge's streams for a context-menu, a menu-bar and a dropdown
+and AT-SPI's `state-changed:selected`, patched with no tree built. The keyboard focus stays where
+it was when the menu opened, since the items are not focusable; since 2026-11-15 the open menu holds
+the reader's focus and its highlighted entry has it (the focus event, AT-SPI `focused`; "The
+reader's focus is a list's or a menu's current item", above). The recording bridge's streams for a context-menu, a menu-bar and a dropdown
 walk differ in the roles and control types alone, the dropdown's in nothing.
 
 **Live reader check (still to do).** NVDA and Narrator follow a menu by focus, and these items move
@@ -366,10 +477,9 @@ then Orca on Linux:
 6. A dropdown (the Fluent sample's "Never / When plugged in / Always"), opened with Down, Enter or
    a click: "list", then its value, "list item", as before this step.
 
-If a reader says nothing on a move (it follows focus only), note which one, and whether it speaks
-when the item under the pointer changes: the fix would be to give the selected item the focus
-(UIA's focus event, AT-SPI `focused`), a change of what a reader is told that needs the user's
-approval.
+The check ran on 2026-11-15 with Narrator and NVDA: neither said anything on a move in a menu
+or a list (both follow focus only), and "Menu bar" was all Alt+V gave. The fix is the reader's
+focus on the current item (above); the same steps are to be heard again, with Orca on Linux.
 
 A disabled item is read as disabled (plan 17 round 8, step 2; the user approved it on 2026-11-03,
 question 11). Until then every item node was made enabled, so a reader offered a dimmed "Paste" as

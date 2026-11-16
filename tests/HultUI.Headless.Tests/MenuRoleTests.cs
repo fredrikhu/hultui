@@ -166,7 +166,7 @@ public class MenuRoleTests
     }
 
     [WindowsFact]
-    public void ToUia_AMenuAndItsEntry_AreControlsOfThatType_AndAnEntryRunsAndSelects()
+    public void ToUia_AMenuAndItsEntry_AreControlsOfThatType_AndAnEntryRuns_AndIsNoSelectionItem()
     {
         const int ControlType = 30003;
         using var hwnd = TestHwnd.Create();
@@ -198,12 +198,12 @@ public class MenuRoleTests
             Assert.Equal(0, Fragment(entry).GetPatternProvider(UiaInterop.UIA_InvokePatternId, out var invoke));
             Assert.NotEqual(IntPtr.Zero, invoke);
             Marshal.Release(invoke);
+            // No SelectionItem, as a Win32 or a WinUI menu's entry has none: a reader said "selected" on
+            // every entry it walked (2026-11-15). The highlighted entry has the focus instead.
             Assert.Equal(0, Fragment(entry).GetPatternProvider(UiaInterop.UIA_SelectionItemPatternId, out var selection));
-            Assert.NotEqual(IntPtr.Zero, selection);
-            Marshal.Release(selection);
-            var container = bridge.ItemSelectionContainer(entry.ElementId);
-            Assert.NotEqual(IntPtr.Zero, container);
-            Marshal.Release(container);
+            Assert.Equal(IntPtr.Zero, selection);
+            Assert.Equal(0, Fragment(entry).GetPropertyValue(UiaInterop.UIA_SelectionItemIsSelectedPropertyId, out var selected));
+            Assert.Equal(0, (int)selected.Vt);
 
             // A title that opens a menu expands; it does not run.
             Assert.Equal(0, Fragment(title).GetPatternProvider(UiaInterop.UIA_InvokePatternId, out invoke));
@@ -283,6 +283,7 @@ public class MenuRoleTests
         public void ApplyPatchedProperties(TreeDiff patch, AccessibilityNode root) => inner.ApplyPatchedProperties(patch, root);
         public void NotifyFocusChanged(AccessibilityNode? focused) => inner.NotifyFocusChanged(focused);
         public void NotifyFocusChanged(AccessibilityNode? focused, AccessibilityNode? previous) => inner.NotifyFocusChanged(focused, previous);
+        public void NotifyChangesApplied(AccessibilityNode root) => inner.NotifyChangesApplied(root);
     }
 
     private sealed class NoSignals : IAtSpiSignals
@@ -300,9 +301,9 @@ public class MenuRoleTests
         public void EmitCacheRemove(string path) { }
     }
 
-    /// <summary>AT-SPI: menu (33) and menu item (35), each item a click and selectable, as a list item
-    /// was; a dropdown's popup list (31) and list item (32). Past 2,000 items a menu's are served on
-    /// demand, and are menu items too.</summary>
+    /// <summary>AT-SPI: menu (33) and menu item (35), each item a click and not selectable (no selected
+    /// state: the highlighted entry has the focus); a dropdown's popup list (31) and list item (32),
+    /// selectable. Past 2,000 items a menu's are served on demand, and are menu items too.</summary>
     [Theory]
     [InlineData(Opened.ContextMenu, 0, AtSpiConstants.RoleMenu, AtSpiConstants.RoleMenuItem)]
     [InlineData(Opened.MenuBar, 0, AtSpiConstants.RoleMenu, AtSpiConstants.RoleMenuItem)]
@@ -322,14 +323,14 @@ public class MenuRoleTests
         foreach (int i in new[] { 0, menu.ChildCount - 1 })
         {
             var item = tree.Find(menu.ChildPathAt(i)!)!;
-            Assert.Equal((itemRole, "click", true), (item.Role, item.ActionName, item.Selectable));
+            Assert.Equal((itemRole, "click", what == Opened.Dropdown), (item.Role, item.ActionName, item.Selectable));
         }
     }
 
-    /// <summary>UIA: a context menu is Menu with MenuItems, each with Invoke and SelectionItem, as a
-    /// list item had them, and the menu their selection container with Selection, Scroll and
-    /// ItemContainer, as the list was; a dropdown's popup List and ListItem. Past 2,000 items a menu's
-    /// are served on demand, and are MenuItems too.</summary>
+    /// <summary>UIA: a context menu is Menu with MenuItems, each with Invoke and no SelectionItem (as a
+    /// Win32 or WinUI menu's: the highlighted entry has the focus), and the menu has Scroll and
+    /// ItemContainer, as the list did, and no Selection; a dropdown's popup is a List of ListItems with
+    /// SelectionItem and Selection. Past 2,000 items a menu's are served on demand, and are MenuItems too.</summary>
     [WindowsTheory]
     [InlineData(Opened.ContextMenu, 0, UiaInterop.UIA_MenuControlTypeId, UiaInterop.UIA_MenuItemControlTypeId)]
     [InlineData(Opened.MenuBar, 0, UiaInterop.UIA_MenuControlTypeId, UiaInterop.UIA_MenuItemControlTypeId)]
@@ -354,17 +355,18 @@ public class MenuRoleTests
             try { return Assert.IsAssignableFrom<INativeSimple>(NativeProvider.LogicOf(native)); }
             finally { Marshal.Release(native); }
         }
-        void Has(INativeSimple provider, int pattern)
+        void Has(INativeSimple provider, int pattern, bool has = true)
         {
             Assert.Equal(0, provider.GetPatternProvider(pattern, out var p));
-            Assert.NotEqual(IntPtr.Zero, p);
-            Marshal.Release(p);
+            Assert.Equal(has, p != IntPtr.Zero);
+            if (p != IntPtr.Zero) Marshal.Release(p);
         }
+        bool list = what == Opened.Dropdown;
 
         var menu = Provider(bridge.NativeFragment(popup.Id));
         Assert.Equal(0, menu.GetPropertyValue(ControlType, out var value));
         Assert.Equal(type, value.IntValue);
-        Has(menu, UiaInterop.UIA_SelectionPatternId);
+        Has(menu, UiaInterop.UIA_SelectionPatternId, list);
         Has(menu, UiaInterop.UIA_ScrollPatternId);
         Has(menu, UiaInterop.UIA_ItemContainerPatternId);
         foreach (int i in new[] { 0, (count > 0 ? count : 3) - 1 })
@@ -376,7 +378,9 @@ public class MenuRoleTests
             // menu bar's title does, instead of running a command; every other entry runs one.
             bool opensMenu = what != Opened.Dropdown && count == 0 && i == 2;
             Has(item, opensMenu ? UiaInterop.UIA_ExpandCollapsePatternId : UiaInterop.UIA_InvokePatternId);
-            Has(item, UiaInterop.UIA_SelectionItemPatternId);
+            Has(item, UiaInterop.UIA_SelectionItemPatternId, list);
+            Assert.Equal(0, item.GetPropertyValue(UiaInterop.UIA_SelectionItemIsSelectedPropertyId, out value));
+            Assert.Equal(list, value.Vt != 0);
         }
     }
 

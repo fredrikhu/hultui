@@ -83,6 +83,9 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
     /// <summary>The last cursor the framework asked for — assertable in tests (e.g. the text I-beam over an input).</summary>
     public CursorType LastCursor { get; private set; } = CursorType.Default;
 
+    /// <summary>The picture of the last cursor, when <see cref="LastCursor"/> is <see cref="CursorType.Image"/>.</summary>
+    public CursorImage? LastCursorImage { get; private set; }
+
     public IRenderSurface Surface => _surface;
 
     /// <summary>The raster surface, typed — for pixel readback.</summary>
@@ -408,7 +411,17 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
 
     public void SetIcon(int width, int height, ReadOnlySpan<byte> rgbaPixels) { }
 
-    public void SetCursor(CursorType cursor) => LastCursor = cursor;
+    public void SetCursor(CursorType cursor)
+    {
+        LastCursor = cursor;
+        LastCursorImage = null;
+    }
+
+    public void SetCursor(CursorImage image)
+    {
+        LastCursor = CursorType.Image;
+        LastCursorImage = image;
+    }
 
     public void Dispose()
     {

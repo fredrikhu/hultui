@@ -373,6 +373,7 @@ public class A11yCompositeListTests
         public void ApplyPatchedProperties(TreeDiff patch, AccessibilityNode root) { Tree = root; inner.ApplyPatchedProperties(patch, root); }
         public void NotifyFocusChanged(AccessibilityNode? focused) => inner.NotifyFocusChanged(focused);
         public void NotifyFocusChanged(AccessibilityNode? focused, AccessibilityNode? previous) => inner.NotifyFocusChanged(focused, previous);
+        public void NotifyChangesApplied(AccessibilityNode root) => inner.NotifyChangesApplied(root);
     }
 
     [Fact]

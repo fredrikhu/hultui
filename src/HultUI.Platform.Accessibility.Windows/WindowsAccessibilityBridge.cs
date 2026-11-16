@@ -391,6 +391,10 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     internal int ServedItemControlType(ElementId listId) =>
         UiaFragment.MapControlType(AccessibilityTreeBuilder.ItemRoleOf(NodeOf(listId)?.Role ?? AccessibilityRole.List));
 
+    /// <summary>Whether the items a list serves on demand are a menu's entries, which offer no
+    /// SelectionItem (<see cref="UiaFragment.OffersSelection"/>).</summary>
+    internal bool ServesMenuItems(ElementId listId) => NodeOf(listId)?.Role == AccessibilityRole.Menu;
+
     /// <summary>
     /// The wrapper of item <paramref name="index"/>'s node, when its list has item nodes now: a
     /// provider of an item served on demand that a client still holds after the list shrank to 2,000
@@ -619,6 +623,14 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
         // Always track the current full tree — ElementProviderFromPoint hit-tests
         // against it, and it must reflect deep changes even when the root node's
         // own properties didn't change.
+        bool adoptedFocus = false;
+        // A tree from nothing (a client attached again; the window dropped its tree meanwhile): the
+        // focus is the one it marks, as the client finds it, not the one this bridge last held.
+        if (diff.Added.Count > 0 && diff.Added[0].Parent is null && diff.Removed.Count == 0)
+        {
+            Volatile.Write(ref _focusedIdRaw, 0L);
+            Volatile.Write(ref _targetIdRaw, 0L);
+        }
         lock (_applyLock)
         {
             Volatile.Write(ref _rootNode, root);
@@ -628,6 +640,16 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
             //    item node gets none until something asks for it (TryWrapper).
             foreach (var added in diff.Added)
             {
+                // The focus the tree marks, when this bridge holds none: a tree from nothing (a client
+                // that attached), or the element the focus moved onto as it had no node, which the
+                // window tells next. Taken as it is, as the client takes the tree: no event.
+                if (added.Node.IsFocused && Volatile.Read(ref _focusedIdRaw) == 0)
+                {
+                    long focused = unchecked((long)added.Node.ElementId.Value);
+                    Volatile.Write(ref _focusedIdRaw, focused);
+                    Volatile.Write(ref _targetIdRaw, focused);
+                    adoptedFocus = true;
+                }
                 // Keep the wrapper stable per ElementId so the cached native object
                 // (which wraps it) stays valid; only create one the first time.
                 var id = added.Node.ElementId;
@@ -696,6 +718,9 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
             RaiseStructureChanged(reorderedParent.ElementId, UiaInterop.StructureChangeType_ChildrenReordered);
         }
         RaisePropertyChanges(diff.PropertyChanged);
+        // A focus taken from the tree is the client's as it finds it: no event. Any other move of the
+        // reader's focus is read once the frame's changes are all told (NotifyChangesApplied).
+        if (adoptedFocus) Volatile.Write(ref _targetIdRaw, ResolveFocusTarget());
     }
 
     /// <summary>
@@ -724,8 +749,19 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     /// <summary>Raises the UIA events of property changes whose wrappers are up to date.</summary>
     private void RaisePropertyChanges(List<PropertyChange> changes)
     {
+        if (changes.Count == 0) return;
+        // The node a reader has the focus on, when this frame takes the focus off it: what else changed
+        // of it is not told. A folder entered in Vesper relabels the list's items in place (an item's id
+        // is its place), and NVDA read the item at the cursor's old place by its new name ("inbox
+        // folder") before the move to the new cursor ("Parent folder"). Its name only: the state a move
+        // changes (its selected state) is told, as it is of any item the move leaves.
+        long told = Volatile.Read(ref _targetIdRaw);
+        long leaving = told != 0 && ResolveFocusTarget() != told ? told : 0;
         foreach (var change in changes)
         {
+            if (leaving != 0 && change.PropertyName == AccessibilityProperties.Name
+                && unchecked((long)change.Node.ElementId.Value) == leaving)
+                continue;
             // An item node's wrapper is made here when it has none yet, from its node in the tree.
             if (!TryWrapper(change.Node.ElementId, out var wrapper)) continue;
             if (change.PropertyName == AccessibilityProperties.ScrollPosition)
@@ -766,7 +802,8 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     /// </summary>
     private void RaiseServedSelection(AccessibilityNode? previous, AccessibilityNode node)
     {
-        if (!RaiseEvents) return;
+        // A menu's entries are no SelectionItems (UiaVirtualItem): nothing to tell of them.
+        if (!RaiseEvents || node.Role == AccessibilityRole.Menu) return;
         var now = node.Served;
         foreach (var (index, selected) in ServedItems.Changes(previous?.Served ?? default, now))
             if (index < now.Count)
@@ -800,6 +837,8 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
             wrapper.Rebase(node, generation);
             found = 1;
         }
+        // A list whose current item stands for the focus of an element above it: one bit for the rest.
+        if (node.FocusHolder is var holder && holder != default) _focusTakers[holder] = node.ElementId;
         var children = node.Children;
         for (int i = 0; i < children.Count; i++)
             found += Rebase(children[i], generation);
@@ -829,6 +868,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     private void Unlink(ElementId id)
     {
         _wrappers.TryRemove(id, out _);
+        if (_focusTakers.Count > 0) _focusTakers.Remove(id);
         IntPtr native;
         lock (_nativeLock)
             if (!_nativeByElement.TryRemove(id, out native)) return;
@@ -890,25 +930,129 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     public void NotifyFocusChanged(AccessibilityNode? focused, AccessibilityNode? previous)
         => MoveFocus(focused, previous?.ElementId);
 
+    /// <summary>The frame's changes are told: the reader's focus is read again, once, after them. A
+    /// key that moved a list's or a menu's selection moved its current item with it, and the items'
+    /// selected states went out first.</summary>
+    public void NotifyChangesApplied(AccessibilityNode root)
+    {
+        bool moved = _holderMoved;
+        _holderMoved = false;
+        UpdateFocusTarget(moved);
+    }
+
+    // The node a reader is told has the keyboard focus (AccessibilityFocus): the current item of the
+    // node that holds the focus (FocusedNodeId) where it is a list, a menu or a menu bar with one, or of
+    // a list that takes its focus; else the holder. An item's id is its node's, or, served on demand,
+    // its provider's (VirtualItemId). Raw, as the holder's: 0 for none. Written on the UI thread, read
+    // by UIA's threads (HasKeyboardFocus, GetFocus).
+    private long _targetIdRaw;
+
+    // The lists whose current item stands for the focus of an element above them
+    // (AccessibilityNode.FocusHolder): that element's id → the list's. Kept as the tree is applied
+    // (Rebase); an entry whose list has gone, or names another holder now, is read as none. UI thread.
+    private readonly Dictionary<ElementId, ElementId> _focusTakers = [];
+
+    /// <summary>Whether the node <paramref name="id"/> names is the one a reader is told has the
+    /// keyboard focus, for its HasKeyboardFocus: the holder's current item while it has one, so the
+    /// holder answers false then, as a WPF list does while its item has the focus. Any thread.</summary>
+    internal bool HasReaderFocus(ElementId id) => unchecked((long)id.Value) == Volatile.Read(ref _targetIdRaw);
+
+    /// <summary>Whether <paramref name="id"/> is the node that holds the focus while one of its items
+    /// (or a list's that takes its focus) has the reader's focus. Any thread.</summary>
+    internal bool StandsForItem(ElementId id)
+    {
+        long raw = unchecked((long)id.Value);
+        return raw == Volatile.Read(ref _focusedIdRaw) && raw != Volatile.Read(ref _targetIdRaw);
+    }
+
+    /// <summary>The reader's focus, for GetFocus: the provider of the target node (Fragment,
+    /// AddRef'd), an item a list serves on demand made for it; Zero for none. Any thread.</summary>
+    internal IntPtr NativeFocusTarget()
+    {
+        long raw = Volatile.Read(ref _targetIdRaw);
+        if (raw == 0) return IntPtr.Zero;
+        var id = new ElementId(unchecked((ulong)raw));
+        return ServedItem(id, out var listId, out int index) ? NativeVirtualItem(listId, index) : NativeFragment(id);
+    }
+
+    /// <summary>Whether <paramref name="id"/> is an item a list serves on demand now, and which.</summary>
+    private bool ServedItem(ElementId id, out ElementId listId, out int index) =>
+        VirtualItemId.TryDecode(id, out listId, out index) && listId != default && NodeOf(listId) is { IsVirtualItemContainer: true };
+
     private void MoveFocus(AccessibilityNode? focused, ElementId? previous)
     {
-        // What the two wrappers answer for HasKeyboardFocus, as of now. A focus move rebuilds no
-        // tree, so they kept the state of the last rebuild, and the next rebuild's diff told the
-        // change late, as IsFocused property events, often frames after the focus event. Now the
-        // state changes here and the property events go with the focus event, before it, so a
-        // client that asks on the focus event reads the new state.
-        UiaFragment? lost = previous is { } p && p != focused?.ElementId
-            && _wrappers.TryGetValue(p, out var was) && was.SetFocused(false) ? was : null;
-        UiaFragment? gained = focused is not null
-            && _wrappers.TryGetValue(focused.ElementId, out var now) && now.SetFocused(true) ? now : null;
         Volatile.Write(ref _focusedIdRaw, focused is null ? 0L : unchecked((long)focused.ElementId.Value));
-        if (lost is not null) RaisePropertyChanged(lost, AccessibilityProperties.IsFocused);
-        if (gained is not null) RaisePropertyChanged(gained, AccessibilityProperties.IsFocused);
+        // The node the tree marked focused, which this bridge was not told of (a client that attached
+        // after the focus last moved): it loses the focus now, and is told so.
+        if (Volatile.Read(ref _targetIdRaw) == 0 && previous is { } p && p != focused?.ElementId && _wrappers.ContainsKey(p))
+            Volatile.Write(ref _targetIdRaw, unchecked((long)p.Value));
+        // Told once the frame's changes are (NotifyChangesApplied): one focus event a move, on the node
+        // the move ends on. A move told at once raised one on what held the focus first: F10 and
+        // Alt and a letter told the menu bar, then its title a frame later, and Narrator read the bar
+        // again; a click that focused and selected a navigation item told it "not selected", before the
+        // rebuild marked it.
+        _holderMoved = true;
+    }
 
-        if (!RaiseEvents || focused is null) return;
-        IntPtr prov = NativeFragmentSimple(focused.ElementId);
+    // The holder changed since the reader's focus was last told, or the window came to the front: the
+    // next NotifyChangesApplied raises the focus event even on the node that has it. UI thread.
+    private bool _holderMoved;
+
+    /// <summary>The window came to the front: the focus event goes out again, on the reader's focus,
+    /// once the frame's changes are told.</summary>
+    public void NotifyWindowActivated() => _holderMoved = true;
+
+    /// <summary>
+    /// Reads where the reader's focus is (<see cref="AccessibilityFocus.TargetOf"/>) and, when it moved,
+    /// tells UI Automation: HasKeyboardFocus false on the node that had it and true on the one that has
+    /// it, then the focus event on that one. The state changes first, so a client that asks on the event
+    /// reads the new state; and whatever else the change brought (an item's selected state) was told
+    /// before this is called. After a focus move (<paramref name="holderMoved"/>) the focus event goes
+    /// out even when the target is the same node, as it always did for a move. A few reads of the
+    /// holder's node and one lookup; nothing when nothing moved.
+    /// </summary>
+    private void UpdateFocusTarget(bool holderMoved)
+    {
+        long told = Volatile.Read(ref _targetIdRaw);
+        long target = ResolveFocusTarget();
+        if (target == told && !holderMoved) return;
+        Volatile.Write(ref _targetIdRaw, target);
+        if (!RaiseEvents) return;
+        if (told != target)
+        {
+            if (told != 0) RaiseFocusState(told, focused: false);
+            if (target != 0) RaiseFocusState(target, focused: true);
+        }
+        if (target != 0) RaiseFocusEvent(target);
+    }
+
+    private long ResolveFocusTarget()
+    {
+        long holderRaw = Volatile.Read(ref _focusedIdRaw);
+        if (holderRaw == 0) return 0;
+        var holderId = new ElementId(unchecked((ulong)holderRaw));
+        if (NodeOf(holderId) is not { } holder) return holderRaw;
+        var follower = _focusTakers.TryGetValue(holderId, out var listId) ? NodeOf(listId) : null;
+        return unchecked((long)AccessibilityFocus.TargetOf(holder, follower).Value);
+    }
+
+    /// <summary>A HasKeyboardFocus property change on the node <paramref name="raw"/> names, with its
+    /// state now; nothing for one that has no provider (gone with its menu).</summary>
+    private void RaiseFocusState(long raw, bool focused)
+    {
+        var id = new ElementId(unchecked((ulong)raw));
+        if (ServedItem(id, out var listId, out int index))
+            RaiseItemProperty(listId, index, UiaInterop.UIA_HasKeyboardFocusPropertyId, UiaVariant.FromBool(focused));
+        else if (TryWrapper(id, out var wrapper))
+            RaiseProperty(wrapper, UiaInterop.UIA_HasKeyboardFocusPropertyId, UiaVariant.FromBool(focused));
+    }
+
+    private void RaiseFocusEvent(long raw)
+    {
+        var id = new ElementId(unchecked((ulong)raw));
+        IntPtr prov = ServedItem(id, out var listId, out int index) ? NativeVirtualItemSimple(listId, index) : NativeFragmentSimple(id);
         if (prov == IntPtr.Zero) return;
-        Raised?.Invoke(new UiaRaised(UiaRaisedKind.Event, UiaInterop.UIA_AutomationFocusChangedEventId, focused.ElementId));
+        Raised?.Invoke(new UiaRaised(UiaRaisedKind.Event, UiaInterop.UIA_AutomationFocusChangedEventId, id));
         try { UiaInterop.UiaRaiseAutomationEvent(prov, UiaInterop.UIA_AutomationFocusChangedEventId); }
         finally { Marshal.Release(prov); }
     }
@@ -968,6 +1112,8 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
             finally { Marshal.Release(source); }
             return;
         }
+        // A menu's entry offers no SelectionItem: its highlight is told as the focus moving to it.
+        if (propertyName == AccessibilityProperties.IsSelected && !UiaFragment.OffersSelection(wrapper.Node)) return;
         if (propertyName == AccessibilityProperties.Role)
         {
             // A role change, as Chromium tells one: the control type, and its localized name with
