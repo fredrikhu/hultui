@@ -446,6 +446,8 @@ public partial class JunctionApp
         row.Key = $"{r.Path}|{mr.Iid}" + (selected ? "#s" : "");
         row.Role = HultUI.Core.Accessibility.AccessibilityRole.ListItem;
         row.AccessibleName = $"!{mr.Iid} {mr.Title}";
+        // A list item is a selection item to a reader, which reads "not selected" on one that says nothing.
+        row.AccessibleSelected = selected;
 
         row.AddChild(Ui.Mono($"!{mr.Iid}", 11.5f, Nocturne.Alpha(Nocturne.Accent300, dim)).Width(40).FlexShrink(0));
 
