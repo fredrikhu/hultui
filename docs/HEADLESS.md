@@ -229,6 +229,17 @@ session.PumpFrame();               // property change arrives as a diff
 Assert.NotEmpty(bridge.Diffs);
 ```
 
+To hear what a Windows screen reader is told (Windows only), install the real UI Automation bridge on a
+hidden window of its own: every event it raises is kept in order, and it answers as a client asks.
+
+```csharp
+using var reader = HeadlessUiaReader.Install(window);
+window.PressKey(KeyCode.Down);
+session.PumpFrame();
+Assert.Equal([VirtualItemId.For(list.Id, 3)], reader.FocusEvents());   // one focus event a move
+Assert.Equal(true, reader.IsSelected(reader.GetFocus()!.Value));       // and its state, read now
+```
+
 ## Display-List Snapshots
 
 Recording captures the drawing calls a frame issues, as text — a snapshot baseline you can actually read:
