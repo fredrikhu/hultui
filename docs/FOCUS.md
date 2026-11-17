@@ -78,6 +78,21 @@ While an element is focused, every key event dispatches to it as target and bubb
 to the root. Handle keys on the element with `On<KeyDownEvent>` and set
 `StopPropagation` when the root must not act on the same key.
 
+**Keys typed into a field still bubble**, so the root sees them — a search box's Up and
+Down drive its list that way. Two things say what the field did with one:
+
+- `KeyDownEvent.TargetTakesText` is true when the key went to an element that types text
+  (an editable text field, area or rich text editor, a number field, a terminal; not a
+  read-only viewer). A key there that types a character (no Ctrl or Alt) matches no
+  `KeyChord`, so a one-letter window shortcut does not fire while the user types; Ctrl and
+  Alt chords, function keys, Escape and Enter still do.
+- `Handled` is set on the keys a text field or area acted on: its caret's moves,
+  Backspace, Delete, Enter in an area, Ctrl+A, the clipboard and undo. They bubble on; a
+  handler that would act on the same key checks `e.Handled` and leaves it.
+
+A text area leaves Enter with Ctrl or Alt to the app (a send, a submit): it types no
+newline, where it typed one before the app's handler sent the text with it.
+
 ---
 
 ## What a key event says
@@ -115,6 +130,9 @@ rules above so a handler does not have to:
 - **A character chord**, `KeyChord.Of('+', KeyModifiers.Ctrl)`, is the symbol the layout
   types, Shift ignored — for keys that mean their symbol, as zoom means +. On a Swedish keyboard
   `+` has a key of its own, at the US `-` position: matched by position, Ctrl and + zoomed out.
+- **Typing is no shortcut.** A letter, digit, Space or character chord without Ctrl or Alt
+  does not match a key typed into an element that types text (`e.TargetTakesText`): the
+  user is typing it. The same chord matches when the keyboard is anywhere else.
 
 `ToString()` writes the one notation (`Ctrl+Shift+P`, `Alt+↑`, `Ctrl+,`, a bare letter as
 typed: `m`) and `KeyChord.Parse` reads it back, along with the older spellings settings files

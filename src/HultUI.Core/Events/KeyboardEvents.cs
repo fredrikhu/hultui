@@ -42,6 +42,17 @@ public sealed class KeyDownEvent : ElementEvent
     /// </summary>
     public string? Text { get; init; }
 
+    /// <summary>
+    /// Whether the element the key went to types text: an editable text field, area or editor, a
+    /// number field, a terminal; not a read-only viewer. A key there that types a character (no
+    /// Ctrl or Alt) is typing, and no <see cref="KeyChord"/> matches it, so a one-letter shortcut
+    /// of the window does not fire while the user types; Ctrl and Alt chords, function keys,
+    /// Escape and Enter still match. A text element's own keys (the caret's, Backspace, Delete,
+    /// its Ctrl+A, the clipboard and undo) come with <see cref="ElementEvent.Handled"/> set: they
+    /// still bubble, and an app's handler checks it.
+    /// </summary>
+    public bool TargetTakesText { get; init; }
+
     /// <summary>The digit key pressed, 0 to 9: the number row's, or the keypad's while NumLock is
     /// on. Null for any other key.</summary>
     public int? Digit => Key switch
@@ -74,6 +85,7 @@ public sealed class KeyDownEvent : ElementEvent
         LayoutKey = LayoutKey,
         ModifierKeys = ModifierKeys,
         Text = Text,
+        TargetTakesText = TargetTakesText,
     };
 }
 

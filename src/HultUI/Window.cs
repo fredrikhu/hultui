@@ -2541,7 +2541,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             or KeyCode.AltLeft or KeyCode.AltRight or KeyCode.SuperLeft or KeyCode.SuperRight
             or KeyCode.CapsLock or KeyCode.NumLock or KeyCode.ScrollLock;
 
-    private static KeyDownEvent NewKeyDown(InputEvent.KeyInput key) => new()
+    // TargetTakesText from the element the key goes to (KeyChord.Matches: a letter typed there is no shortcut).
+    private static KeyDownEvent NewKeyDown(InputEvent.KeyInput key, Element? target) => new()
     {
         Key = key.KeyCode,
         Modifiers = key.Modifiers,
@@ -2550,6 +2551,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         LayoutKey = key.LayoutKey,
         ModifierKeys = key.ModifierKeys,
         Text = key.Text,
+        TargetTakesText = target is { TakesTypedText: true },
     };
 
     /// <summary><see cref="HandleInputEvent"/>, counted with its bytes for <see cref="FrameLog"/>.</summary>
@@ -3045,7 +3047,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     _previewStoppedText = null;
                     if (PreviewKeyDown is { } preview)
                     {
-                        var previewEvent = NewKeyDown(key);
+                        var previewEvent = NewKeyDown(key, KeyTarget());
                         preview(previewEvent);
                         if (previewEvent.StopPropagation)
                         {
@@ -3111,7 +3113,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 if (key.IsDown && key.KeyCode == KeyCode.Tab)
                 {
                     var tabTarget = KeyTarget();
-                    var tabEvent = NewKeyDown(key);
+                    var tabEvent = NewKeyDown(key, tabTarget);
                     EventDispatcher.Dispatch(tabEvent, tabTarget);
                     if (tabEvent.StopPropagation)
                         break;
@@ -3141,7 +3143,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     // changes the highlight on labels other than the focused one — so the
                     // whole realized group repaints, exactly as it does after a drag.
                     int before = _activeTextGroup?.Version ?? 0;
-                    EventDispatcher.Dispatch(NewKeyDown(key), target);
+                    EventDispatcher.Dispatch(NewKeyDown(key, target), target);
                     if (_activeTextGroup is { } keyed && keyed.Version != before)
                         RepaintGroup(keyed);
                 }

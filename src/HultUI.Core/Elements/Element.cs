@@ -624,6 +624,13 @@ public abstract class Element
     internal virtual bool WantsTextInput => false;
 
     /// <summary>
+    /// Whether a key typed while this element has the keyboard types text into it, so a letter is
+    /// typing, not a shortcut (<see cref="Events.KeyDownEvent.TargetTakesText"/>): an editable
+    /// field, area or editor, a number field, a terminal. A read-only viewer does not.
+    /// </summary>
+    internal virtual bool TakesTypedText => WantsTextInput;
+
+    /// <summary>
     /// Content of this element that keeps its own accessibility tree — a web page's engine.
     /// The accessibility tree gives it to the node as
     /// <see cref="Accessibility.AccessibilityNode.NativeContent"/>. Empty by default.
