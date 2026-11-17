@@ -438,15 +438,24 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
 
     // ── Effect objects ──
     //
-    // A blur and a gradient are native objects with a managed wrapper each: made and disposed
-    // per draw they cost 104 B a shadow and 168 B a gradient, on every frame they are on screen
-    // (a popover's or a dialog's shadow, the scrims over a picture). They are kept instead:
-    // filters by sigma, shaders by what they draw. Both maps are bounded and emptied whole when
-    // full, like the blob cache; a draw detaches what it used, so emptying never frees an object
-    // a paint still holds, and Skia keeps its own reference to anything a pending draw needs.
+    // A blur, a gradient and a dash are native objects with a managed wrapper each: made and
+    // disposed per draw they cost 104 B a shadow, 168 B a gradient and 136 B a dashed or dotted
+    // border (its interval array and the wrapper), on every frame they are on screen (a popover's
+    // or a dialog's shadow, the scrims over a picture, a drop target's dashed outline). They are
+    // kept instead: filters by sigma, shaders by what they draw, dashes by style and width. The
+    // maps are bounded and emptied whole when full, like the blob cache; a draw detaches what it
+    // used, so emptying never frees an object a paint still holds, and Skia keeps its own
+    // reference to anything a pending draw needs.
 
     private readonly Dictionary<float, SKMaskFilter?> _blurFilters = new();
     internal const int BlurFilterCacheMaxSize = 32;
+
+    // Keyed by the snapped stroke width the intervals are made from: whole device pixels
+    // (SnapWidth), so a screen has a few. Made per draw, eight dashed borders were all of the
+    // Graphite spike's mixed scene's 1,092 B a frame on Ganesh (MixedDrawAllocationTests).
+    private readonly Dictionary<(BorderStyle Style, float Width), SKPathEffect> _dashEffects = new();
+    internal const int DashEffectCacheMaxSize = 32;
+    internal int CachedDashEffectCount => _dashEffects.Count;
 
     // Keyed by content, not by the Gradient: an app that builds its gradient in Build hands an
     // equal new one on every rebuild. The rect is the snapped one the shader spans, so a box
@@ -481,6 +490,30 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
         foreach (var shader in _gradientShaders.Values)
             shader?.Dispose();
         _gradientShaders.Clear();
+    }
+
+    /// <summary>The dash a border of <paramref name="style"/> strokes with at
+    /// <paramref name="width"/>, kept; null for a solid one.</summary>
+    private SKPathEffect? DashEffect(BorderStyle style, float width)
+    {
+        if (style is not (BorderStyle.Dashed or BorderStyle.Dotted))
+            return null;
+        if (_dashEffects.TryGetValue((style, width), out var dash))
+            return dash;
+        if (_dashEffects.Count >= DashEffectCacheMaxSize)
+            ClearDashEffects();
+        dash = style == BorderStyle.Dashed
+            ? SKPathEffect.CreateDash([width * 3f, width * 2f], 0f)
+            : SKPathEffect.CreateDash([width * 0.1f, width * 2f], 0f);
+        _dashEffects[(style, width)] = dash;
+        return dash;
+    }
+
+    private void ClearDashEffects()
+    {
+        foreach (var dash in _dashEffects.Values)
+            dash.Dispose();
+        _dashEffects.Clear();
     }
 
     /// <summary>What a gradient shader draws: the gradient's kind, angle and stops over a rect. A
@@ -784,13 +817,7 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
         if (style == BorderStyle.Dotted)
             _pooledPaint.StrokeCap = SKStrokeCap.Round;
 
-        using var dash = style switch
-        {
-            BorderStyle.Dashed => SKPathEffect.CreateDash([sw * 3f, sw * 2f], 0f),
-            BorderStyle.Dotted => SKPathEffect.CreateDash([sw * 0.1f, sw * 2f], 0f),
-            _ => null,
-        };
-        _pooledPaint.PathEffect = dash;
+        _pooledPaint.PathEffect = DashEffect(style, sw);
 
         float half = sw / 2f;
         var skRect = ToSkRect(new Rect(box.X + half, box.Y + half, box.Width - sw, box.Height - sw));
@@ -799,6 +826,7 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
         else
             Canvas.DrawRoundRect(ToSkRoundRect(skRect, Deflate(radius, half)), _pooledPaint);
 
+        // Detach so the pooled paint never holds a dash the cache may dispose.
         _pooledPaint.PathEffect = null;
     }
 
@@ -2416,6 +2444,7 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
         ClearRunPathCache();
         ClearBlurFilters();
         ClearGradientShaders();
+        ClearDashEffects();
         _blobBuilder.Dispose();
         _glyphOutlines?.Dispose();
         _boundsFont.Dispose();
