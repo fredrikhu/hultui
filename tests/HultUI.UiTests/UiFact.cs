@@ -96,6 +96,15 @@ public sealed class UiMultiMonitorFactAttribute : FactAttribute
     }
 }
 
+/// <summary>The <see cref="TheoryAttribute"/> counterpart of <see cref="UiMultiMonitorFactAttribute"/>.</summary>
+public sealed class UiMultiMonitorTheoryAttribute : TheoryAttribute
+{
+    public UiMultiMonitorTheoryAttribute()
+    {
+        if (UiTestGate.MultiMonitorSkip is { } reason) Skip = reason;
+    }
+}
+
 /// <summary>
 /// A real-window test that takes the foreground on purpose: it runs only with
 /// <c>HULTUI_UITESTS_FOREGROUND=1</c> as well as <c>HULTUI_UITESTS=1</c>.

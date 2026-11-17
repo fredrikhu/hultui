@@ -40,12 +40,51 @@ public sealed unsafe class CustomFrameSystemMenuTests(ITestOutputHelper output)
 
     [UiTheory]
     [MemberData(nameof(Styles))]
-    public void EveryWindowStateChange_LeavesTheSystemMenuStyleAsTheFrameNeedsIt(WindowStyle style)
+    public void EveryWindowStateChange_LeavesTheSystemMenuStyleAsTheFrameNeedsIt(WindowStyle style) =>
+        CheckEachStep(style, (window, _, Do) =>
+        {
+            Do("maximize", window.Maximize);
+            Do("restore from maximized", window.Restore);
+            Do("minimize", window.Minimize);
+            Do("restore from minimized", window.Restore);
+            Do("full screen", () => window.SetFullscreen(true));
+            Do("leave full screen", () => window.SetFullscreen(false));
+            Do("maximize again", window.Maximize);
+            Do("full screen from maximized", () => window.SetFullscreen(true));
+            Do("leave full screen, maximized", () => window.SetFullscreen(false));
+            Do("restore again", window.Restore);
+        });
+
+    /// <summary>
+    /// The placements that move a window to another monitor and back, maximized on the way: SDL
+    /// recomputes the style for a placement that moves a maximized window. Skipped on one monitor,
+    /// where these steps used to be left out of the test above while it still reported a pass.
+    /// </summary>
+    [UiMultiMonitorTheory]
+    [MemberData(nameof(Styles))]
+    public void AMoveToAnotherMonitor_LeavesTheSystemMenuStyleAsTheFrameNeedsIt(WindowStyle style) =>
+        CheckEachStep(style, (window, normal, Do) =>
+        {
+            var other = Monitors.WorkAreas()[1];
+            var there = new WindowPlacement((int)other.X + 60, (int)other.Y + 60, 800, 600, false);
+            Do("move to another monitor", () => window.Placement = there);
+            Do("maximized on that monitor", () => window.Placement = there with { Maximized = true });
+            Do("back, maximized", () => window.Placement = normal with { Maximized = true });
+            Do("restore on the first monitor", window.Restore);
+        });
+
+    /// <summary>
+    /// Opens a window of <paramref name="style"/> at a normal placement on the first monitor, runs
+    /// <paramref name="steps"/> (each named step through <c>Do</c>, which reads the style back
+    /// after it, and on the custom frame the hit tests), then on the custom frame opens the system
+    /// menu both ways. Fails once, listing every step that went wrong.
+    /// </summary>
+    private void CheckEachStep(WindowStyle style, Action<Window, WindowPlacement, Action<string, Action>> steps,
+        [CallerMemberName] string test = "")
     {
-        using var guard = ForegroundGuard.Begin();
+        using var guard = ForegroundGuard.Begin(member: test);
         bool custom = style == WindowStyle.Borderless;
-        var areas = Monitors.WorkAreas();
-        var area = areas[0];
+        var area = Monitors.WorkAreas()[0];
         var normal = new WindowPlacement((int)area.X + 80, (int)area.Y + 80, 800, 600, false);
 
         using var app = new Application(new SdlWindowingPlatform(), "system menu", 640, 480, style);
@@ -75,26 +114,7 @@ public sealed unsafe class CustomFrameSystemMenuTests(ITestOutputHelper output)
         }
 
         Check("shown");
-        Do("maximize", window.Maximize);
-        Do("restore from maximized", window.Restore);
-        Do("minimize", window.Minimize);
-        Do("restore from minimized", window.Restore);
-        Do("full screen", () => window.SetFullscreen(true));
-        Do("leave full screen", () => window.SetFullscreen(false));
-        Do("maximize again", window.Maximize);
-        Do("full screen from maximized", () => window.SetFullscreen(true));
-        Do("leave full screen, maximized", () => window.SetFullscreen(false));
-        Do("restore again", window.Restore);
-        if (areas.Count > 1)
-        {
-            var other = areas[1];
-            var there = new WindowPlacement((int)other.X + 60, (int)other.Y + 60, 800, 600, false);
-            Do("move to another monitor", () => window.Placement = there);
-            Do("maximized on that monitor", () => window.Placement = there with { Maximized = true });
-            Do("back, maximized", () => window.Placement = normal with { Maximized = true });
-            Do("restore on the first monitor", window.Restore);
-        }
-        else output.WriteLine("one monitor: the monitor moves were not run");
+        steps(window, normal, Do);
 
         if (custom)
         {
