@@ -877,13 +877,12 @@
   suite `tests/HultUI.UiTests` is 14/14 green** — invoke/toggle/select/set-value
   all still round-trip through the shared router.
 - AT-SPI refinements (remaining polish): (1) a `state-changed:defunct` still shows up in a *mid-stream* event monitor on first contact with each node — but that's a client cold-start artifact: the monitor connects after our startup `Cache.AddAccessible` burst and only subscribes to `object:` events, so it never warms its cache. A client (Orca) running from app launch receives the cache signals. Not fixable app-side for a cold listener; our app provably emits only the intended signals. (2) `Component` extents are now device-pixel-correct (bounds × display scale, via `IAccessibilityGeometryHost` — verified: at 2× the button reads `[24,84 752x76]` vs `[12,42 376x38]` at 1×). The remaining gap is *absolute screen* coordinates: under Wayland a client has no reliable window screen origin, so SCREEN and WINDOW coordType both resolve to window-relative pixels; Wayland is the only target, so this is not planned. (3) `TreeDiff.Reordered` (same children, new order) needs **no** signal — every query is served from the freshly rebuilt snapshot, so `GetChildren`/`GetChildAtIndex` already return the new order. Verified: a persistent pyatspi client observes each reorder with the reorder signal entirely disabled. A high-level AT that caches child order and only refreshes on events (Orca) would want an `object:children-changed` nudge; add it when an Orca test shows it's needed and confirms the form (`samples/AtSpiVerify/atspi_reorder.py` reproduces reorders). (4) end-to-end Orca *speech* pass (largely covered by the pyatspi verification, since Orca reads through the same API; the gap is Orca-specific event handling and actually listening).
-- **Major dependency upgrades** — docs/plans/18-major-dependency-upgrades.md. Three Dependabot
-  pull requests closed on 2026-11-16, each now its own branch, in this order: Kiota 2 together with
-  Jellyfin.Sdk 2026.10 (fredrikhu/hultui#3: the SDK is generated against Kiota 1.x),
-  xunit.runner.visualstudio 4 (fredrikhu/hultui#6: cross-thread tests fail on both OSes), SkiaSharp 4
-  with HarfBuzzSharp 14 (fredrikhu/hultui#2: C API pin, goldens, bold-text metrics, zero-allocation
-  tests). Also open: ppy.SDL3-CS 2026.1002.1 (fredrikhu/hultui#8), which needs a real-window check before
-  it merges.
+- **Major dependency upgrades** — docs/plans/18-major-dependency-upgrades.md. All three items are
+  done and merged (2026-11-17): Kiota 2 with Jellyfin.Sdk 2026.10, xunit.runner.visualstudio 4, and
+  SkiaSharp 4.156 with HarfBuzzSharp 14.4 (its CPU surface now draws in BGRA). Still open: ppy.SDL3-CS
+  2026.1002.1 (fredrikhu/hultui#8), which needs a real-window check before it merges. Left by
+  SkiaSharp 4 for plans of their own: HarfBuzz 14.4's per-call shaping cost on words not cached yet
+  (shaping whole runs), and Graphite.
 
 ## Deferred
 - **The card fill is probably too dark, but the measurements disagree** — on one capture of the

@@ -24,7 +24,7 @@ entry, and remove it when the work starts.
 
 ## 1. SkiaSharp 4 and HarfBuzzSharp 14
 
-**Status (2026-11-17): in progress on `claude/skiasharp-4`, SkiaSharp 4.156.1 (Skia m156) with HarfBuzzSharp 14.4.0.101.**
+**Status (2026-11-17): done, merged to `main` (3530f3b4), SkiaSharp 4.156.1 (Skia m156) with HarfBuzzSharp 14.4.0.101.**
 
 - **Builds** with no compile breaks. `NativeTextBlob`'s four C functions are declared with the same signatures, so its pin moves to 4.156.1.
 - **Allocations fixed (step 5).** SkiaSharp 4's `SKPath` mutations make a new `SKPathBuilder` (80 B) each time a drawn path is changed again. The pooled path is now an `SKPathBuilder`, drawn and clipped through `NativePath` (four C functions, like `NativeTextBlob`; docs/DECISIONS.md, 2026-11-17). `PolygonTests`, `TextDrawAllocationTests` and `FrameAllocationTests` are back to 0 B a frame, and `NativePathTests` (8) hold the exports, the signatures and the pixels to SkiaSharp's own path calls.
@@ -75,7 +75,21 @@ entry, and remove it when the work starts.
   - **The one failure is not this upgrade's:** `OsDropTests.AWebPage_IsOfferedTheDrag_WithItsFiles_AndItsAnswerReachesTheOperatingSystem` ("the page's acceptance had not reached the operating system after 1013 ms") fails the same way, 3 of 3, on `main` a892dc14 from before the merge.
   - **Native AOT publishes:** Junction, Vesper Commander, Meridian, `meridian` (the CLI), Aperture and Reel all publish with no trim or AOT warnings (no IL2xxx or IL3xxx).
   - **The acquire fence stays.** SkiaSharp 4.156's managed API has no `GRBackendSemaphore`, no `GRFlushInfo` and no way to set an image's layout, and its native library exports the same five flush and submit functions as 3.119.4 (`gr_direct_context_flush`, `_flush_and_submit`, `_flush_image`, `_flush_surface`, `_submit`). So there is still nothing to hand a semaphore to, and the host still has to put the image layout back for Skia. `GRContextOptions` is unchanged too, so there is still no program cache. Nothing here can go.
-- **Left:** run each native build on the desktop, watch an HDR video on the HDR display, and do a live resize by hand.
+- **The native builds on the desktop (step 8, the rest), 2026-11-17.** Each AOT build was started from a script with a scratch configuration (`XDG_CONFIG_HOME`, `VESPER_CONFIG_DIR`) and `SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0`. Each window was resized with `SetWindowPos(SWP_NOACTIVATE)`: three sizes, then sixteen 20 px steps 16 ms apart, as a drag makes them. After each, a frame was saved through `HULTUI_FRAME_REQUESTS`, and every one was looked at. None took the foreground, and each closed cleanly on `WM_CLOSE`.
+
+    | Build | Renderer | First frame | Saved frames |
+    |---|---|---|---|
+    | Junction, on this repository | GL | 374 ms | History view, graph and accent right; at 884 px the toolbar folds to icons |
+    | Junction, `HULTUI_RENDERER=software` | software, `framebuffer=drawn` | 58 ms | same as on GL |
+    | Vesper Commander | GL | 453 ms | both panes, file icons |
+    | Meridian | GL | 390 ms | welcome page |
+    | Aperture | Vulkan, 8-bit MAILBOX | 448 ms | sign-in page; swapchain rebuilt at each size |
+    | Reel, a PQ-tagged test clip | Vulkan | 538 ms | the clip, letterboxed at every size |
+
+  - **HDR video in the native Reel:** mpv reported `transfer pq, Hdr`, and 75 ms after the first frame the swapchain was rebuilt from B8G8R8A8 to R16G16B16A16Sfloat / ExtendedSrgbLinear (scRGB). The swapchain held values up to 5.11 against SDR white at 3.00, with 920,160 channel samples above it: HDR reached the screen. Every resize after that kept the half-float swapchain. The clip is 640x360 Y4M bars, tagged BT.2020 PQ through `HULTUI_MPV_OPTIONS`.
+  - **Not done here:** a drag of a window edge through Windows' own modal sizing loop, which needs the real mouse. `LiveResizeFrameTests` (its `InsideTheModalLoop_*` tests) and the Vulkan drag tests cover that loop and passed above. Aperture was not signed in, so it showed no posters and played no server video; its playback path is the same Vulkan video path Reel took.
+
+**Item 1 is done:** the suites pass on both OSes, every golden change was reviewed, the perf A/B shows no regression beyond HarfBuzz 14.4's per-call cost on cold words and m156's gradients (both above), and the real-window check passed.
 
 **What broke in #2** (CI run 43824026613, 2026-11-16; the log was read only up to the first
 failures, so there may be more):
