@@ -725,6 +725,32 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// </summary>
     public event Action? Deactivated;
 
+    /// <summary>
+    /// Raised after the window moved on the desktop: dragged by its title bar, snapped, maximized
+    /// or restored, or placed by code (<see cref="Placement"/>, <see cref="MoveToMonitor"/>). On the
+    /// UI thread, once a frame however many moves the platform reported, so a drag raises it about
+    /// once a frame; read <see cref="Placement"/> for where the window is. A move onto a monitor at
+    /// another scale raises <see cref="Resized"/> as well, and one onto another monitor
+    /// <see cref="DisplayChanged"/>.
+    /// <para>Not raised on Wayland, which tells a window nothing of its position, nor by a
+    /// WinForms host. On Windows, while the person drags the title bar, the system runs the drag
+    /// and the moves may arrive together when it ends.</para>
+    /// </summary>
+    public event Action? Moved;
+
+    /// <summary>
+    /// Raised when the window went to another display: dragged or snapped across, placed there by
+    /// code, or left on another when its display was removed. On the UI thread, after
+    /// <see cref="Moved"/> when both happened since the last frame. <see cref="Monitor"/> says which
+    /// display it is on. Raised on Wayland too, where <see cref="Moved"/> is not; there
+    /// <see cref="Monitor"/>, which reads the window's place, cannot follow it.
+    /// </summary>
+    public event Action? DisplayChanged;
+
+    internal void RaiseMoved() => Moved?.Invoke();
+
+    internal void RaiseDisplayChanged() => DisplayChanged?.Invoke();
+
     /// <summary>The window lost the foreground: its popups close, unless the DevTools inspector
     /// took it (<paramref name="keepPopups"/>), so a menu can be inspected while it is open.</summary>
     internal void RaiseDeactivated(bool keepPopups)

@@ -1134,7 +1134,8 @@ public sealed class Application : IDisposable
     }
 
     /// <summary>Raises <see cref="Window.Activated"/> for windows the platform reported as
-    /// newly foregrounded. Runs before the main-thread queue drains, so a handler that posts
+    /// newly foregrounded, and <see cref="Window.Deactivated"/>, <see cref="Window.Moved"/> and
+    /// <see cref="Window.DisplayChanged"/> for the others it reported. Runs before the main-thread queue drains, so a handler that posts
     /// work gets it picked up in the same frame rather than the next one.</summary>
     private void ProcessPendingActivations()
     {
@@ -1155,6 +1156,18 @@ public sealed class Application : IDisposable
             {
                 platform.FramePressedPending = false;
                 if (window.IsOpen) window.DismissPopups();
+            }
+            // Moves, however many the pump brought, told once; then the display, which a move
+            // may have changed. Before the main-thread queue, like the activations.
+            if (platform.MovedPending)
+            {
+                platform.MovedPending = false;
+                if (window.IsOpen) window.RaiseMoved();
+            }
+            if (platform.DisplayChangedPending)
+            {
+                platform.DisplayChangedPending = false;
+                if (window.IsOpen) window.RaiseDisplayChanged();
             }
             if (!platform.ActivatedPending) continue;
             platform.ActivatedPending = false;

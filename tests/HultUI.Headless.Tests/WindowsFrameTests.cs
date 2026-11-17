@@ -216,18 +216,22 @@ public sealed class WindowsFrameTests
         var window = session.Window.Window;
         window.Placement = new WindowPlacement(100, 100, 800, 600, false);
         session.PumpFrame();
-        int resized = 0, moved = 0;
+        int resized = 0, moved = 0, windowMoved = 0, display = 0;
+        string? monitorTold = null;
         window.Resized += () => resized++;
         session.Window.Moved += () => moved++;
+        window.Moved += () => windowMoved++;
+        window.DisplayChanged += () => { display++; monitorTold = window.Monitor?.Name; };
 
         window.Placement = new WindowPlacement(2000, 100, 800, 600, false);
         Assert.Equal(1.5f, window.DisplayScale);
-        Assert.Equal((0, 0), (resized, moved));
+        Assert.Equal((0, 0, 0, 0), (resized, moved, windowMoved, display));
         session.PumpFrame();
 
-        Assert.Equal((1, 1), (resized, moved));
+        Assert.Equal((1, 1, 1, 1), (resized, moved, windowMoved, display));
+        Assert.Equal("B", monitorTold);   // the handler reads the display it went to
         session.PumpFrame();
-        Assert.Equal((1, 1), (resized, moved));
+        Assert.Equal((1, 1, 1, 1), (resized, moved, windowMoved, display));
     }
 
     [Fact]
@@ -237,15 +241,24 @@ public sealed class WindowsFrameTests
         var window = session.Window.Window;
         window.Placement = new WindowPlacement(100, 100, 800, 600, true);
         session.PumpFrame();
-        int moved = 0;
+        int moved = 0, windowMoved = 0, display = 0;
         session.Window.Moved += () => moved++;
+        window.Moved += () => windowMoved++;
+        window.DisplayChanged += () => display++;
 
         session.Window.MoveByUser(-300, 200, 700, 500);
 
         Assert.False(window.IsMaximized);
         Assert.Equal(new WindowPlacement(-300, 200, 700, 500, false), window.Placement);
         session.PumpFrame();
-        Assert.Equal(1, moved);
+        Assert.Equal((1, 1), (moved, windowMoved));
+        Assert.Equal(0, display);   // still on monitor A
+
+        // A drag is many moves between two frames: told once.
+        session.Window.MoveByUser(-200, 200, 700, 500);
+        session.Window.MoveByUser(-100, 200, 700, 500);
+        session.PumpFrame();
+        Assert.Equal(2, windowMoved);
     }
 
     [Fact]

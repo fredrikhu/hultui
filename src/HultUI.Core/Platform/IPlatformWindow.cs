@@ -118,6 +118,20 @@ public interface IPlatformWindow : IDisposable
     bool FramePressedPending { get => false; set { } }
 
     /// <summary>
+    /// Set by the platform when the window moved on the desktop (dragged, snapped, maximized,
+    /// restored, or placed by code), and cleared by the application loop as it raises
+    /// <c>Window.Moved</c>, once however many moves came in between. A platform that gives windows
+    /// no position (Wayland), or cannot tell, leaves it false.
+    /// </summary>
+    bool MovedPending { get => false; set { } }
+
+    /// <summary>
+    /// Set by the platform when the window went to another display, and cleared by the application
+    /// loop as it raises <c>Window.DisplayChanged</c>. A platform that cannot tell leaves it false.
+    /// </summary>
+    bool DisplayChangedPending { get => false; set { } }
+
+    /// <summary>
     /// Invoked by platforms whose native resize runs a modal loop (Win32) to draw a frame
     /// from inside it, never throttled. The framework draws a resize frame when
     /// <see cref="ResizePending"/> is set, so a platform sets it first for a new size or an
