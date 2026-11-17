@@ -15,11 +15,10 @@ namespace HultUI.UiTests;
 public sealed class WindowMovedUiTests
 {
     [UiFact]
-    public void APlacementSomewhereElse_IsToldAsAMove_AndOnAnotherMonitor_AsADisplayChange()
+    public void APlacementSomewhereElse_IsToldAsAMove()
     {
         using var guard = ForegroundGuard.Begin();
-        var areas = Monitors.WorkAreas();
-        var home = areas[0];
+        var home = Monitors.WorkAreas()[0];
         int x = (int)home.X, y = (int)home.Y;
         using var app = new Application(new SdlWindowingPlatform(), "moved", 640, 480, WindowStyle.Default);
         app.SetRoot(Box.New().FlexGrow(1));
@@ -35,9 +34,26 @@ public sealed class WindowMovedUiTests
         for (int i = 0; i < 3; i++) app.RunFrame(TimeSpan.FromMilliseconds(16));
         Assert.True(moved >= 1, "no Moved for a placement 100 px to the right");
         Assert.Equal(0, display);
+    }
 
-        if (areas.Count < 2) return;   // one monitor: nowhere else to go
-        var other = areas[1];
+    /// <summary>
+    /// Skipped on one monitor: it returned early there, inside the test above, and reported the
+    /// display change as checked when no window had left its monitor.
+    /// </summary>
+    [UiMultiMonitorFact]
+    public void APlacementOnAnotherMonitor_IsToldAsADisplayChange()
+    {
+        using var guard = ForegroundGuard.Begin();
+        var areas = Monitors.WorkAreas();
+        var (home, other) = (areas[0], areas[1]);
+        using var app = new Application(new SdlWindowingPlatform(), "moved", 640, 480, WindowStyle.Default);
+        app.SetRoot(Box.New().FlexGrow(1));
+        var window = app.PrimaryWindow;
+        window.Placement = new WindowPlacement((int)home.X + 100, (int)home.Y + 100, 640, 480, false);
+        for (int i = 0; i < 3; i++) app.RunFrame(TimeSpan.FromMilliseconds(16));
+        int display = 0;
+        window.DisplayChanged += () => display++;
+
         window.Placement = new WindowPlacement((int)other.X + 100, (int)other.Y + 100, 640, 480, false);
         for (int i = 0; i < 3; i++) app.RunFrame(TimeSpan.FromMilliseconds(16));
         Assert.Equal(1, display);

@@ -58,6 +58,15 @@ internal static class UiTestGate
     /// </summary>
     internal static string? MpvSkip =>
         !Enabled ? Reason : !HultUI.Media.Mpv.MpvBackend.IsAvailable ? NoMpvReason : null;
+
+    internal const string OneMonitorReason = "Needs a second monitor: there is one here.";
+
+    /// <summary>
+    /// Why a test that moves a window to another monitor skips, or null when it may run. On one
+    /// monitor such a test returned early and reported a pass for a move it never made.
+    /// </summary>
+    internal static string? MultiMonitorSkip =>
+        !Enabled ? Reason : Monitors.Count < 2 ? OneMonitorReason : null;
 }
 
 /// <summary>A <see cref="FactAttribute"/> that skips unless <see cref="UiTestGate"/> allows it.</summary>
@@ -75,6 +84,15 @@ public sealed class UiTheoryAttribute : TheoryAttribute
     public UiTheoryAttribute()
     {
         if (!UiTestGate.Enabled) Skip = UiTestGate.Reason;
+    }
+}
+
+/// <summary>A real-window test that needs two monitors or more (<see cref="UiTestGate.MultiMonitorSkip"/>).</summary>
+public sealed class UiMultiMonitorFactAttribute : FactAttribute
+{
+    public UiMultiMonitorFactAttribute()
+    {
+        if (UiTestGate.MultiMonitorSkip is { } reason) Skip = reason;
     }
 }
 
