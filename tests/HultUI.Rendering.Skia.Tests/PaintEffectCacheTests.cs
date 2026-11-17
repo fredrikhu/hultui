@@ -7,11 +7,13 @@ using Xunit;
 namespace HultUI.Rendering.Skia.Tests;
 
 /// <summary>
-/// Shadows and gradients keep their native objects between frames. Each blur was a new
-/// <c>SKMaskFilter</c> and each gradient a new <c>SKShader</c> plus two arrays, made and disposed
-/// per draw: 104 B a shadow and 168 B a gradient on every frame (plan 17, round 2), the last
-/// steady-frame bytes in the apps — a popover's shadow, the scrims over Aperture's artwork. The
-/// kept objects must still draw exactly what each draw asks for, and must not pile up.
+/// Shadows, gradients and dashed borders keep their native objects between frames. Each blur was
+/// a new <c>SKMaskFilter</c> and each gradient a new <c>SKShader</c> plus two arrays, made and
+/// disposed per draw: 104 B a shadow and 168 B a gradient on every frame (plan 17, round 2), the
+/// last steady-frame bytes in the apps — a popover's shadow, the scrims over Aperture's artwork.
+/// A dashed or dotted border was a new <c>SKPathEffect</c> and its interval array, 136 B a border
+/// (the Graphite spike's mixed scene; <see cref="MixedDrawAllocationTests"/>). The kept objects
+/// must still draw exactly what each draw asks for, and must not pile up.
 /// </summary>
 public class PaintEffectCacheTests
 {
@@ -172,33 +174,67 @@ public class PaintEffectCacheTests
         Assert.Equal(expected, Pixels(kept));
     }
 
-    /// <summary>A gradient box that moves every frame, or a blur that animates, makes a new object
-    /// every frame; the maps stay within their bounds and are emptied with the context.</summary>
+    /// <summary>A dashed or dotted border drawn after other dashes were kept looks exactly like the
+    /// same border drawn on a fresh surface. Each case first draws one that differs from it in one
+    /// thing only, at the same place: the style, or the width the intervals are made from.</summary>
+    [Theory]
+    [InlineData(BorderStyle.Dashed, BorderStyle.Dotted, 2f, 2f)]
+    [InlineData(BorderStyle.Dotted, BorderStyle.Dashed, 2f, 2f)]
+    [InlineData(BorderStyle.Dashed, BorderStyle.Dashed, 1f, 3f)]
+    [InlineData(BorderStyle.Dotted, BorderStyle.Dotted, 3f, 1f)]
+    [InlineData(BorderStyle.Dashed, BorderStyle.Solid, 2f, 2f)]
+    public void AKeptDashIsNeverReusedForADifferentOne(BorderStyle style, BorderStyle beforeStyle, float width,
+        float beforeWidth)
+    {
+        var box = new Rect(40, 30, 200, 120);
+        void Draw(IRenderContext ctx, BorderStyle s, float w) =>
+            ctx.DrawBorder(box, new CornerRadius(10), Indigo, new Thickness(w), s);
+
+        using var fresh = Surface();
+        Frame(fresh, ctx => Draw(ctx, style, width));
+        var expected = Pixels(fresh);
+
+        using var kept = Surface();
+        Frame(kept, ctx => Draw(ctx, beforeStyle, beforeWidth));
+        Frame(kept, ctx => Draw(ctx, style, width));
+
+        Assert.Equal(expected, Pixels(kept));
+    }
+
+    /// <summary>A gradient box that moves every frame, a blur that animates, or a dashed border
+    /// whose width animates, makes a new object every frame; the maps stay within their bounds and
+    /// are emptied with the context.</summary>
     [Fact]
     public void TheKeptObjectsStayBounded_AndGoWithTheContext()
     {
         var surface = Surface();
         var ctx = Context(surface);
         var gradient = Gradient.Horizontal(Indigo, Violet);
-        int most = 0, mostBlurs = 0;
+        int most = 0, mostBlurs = 0, mostDashes = 0;
         for (int i = 0; i < SkiaRenderContext.GradientShaderCacheMaxSize * 2 + 10; i++)
         {
             Frame(surface, c =>
             {
                 c.DrawGradientRect(new Rect(i % 50, i / 50, 100, 40), default, gradient);
                 c.DrawBoxShadow(new Rect(10, 10, 50, 50), default, new BoxShadow(0, 0, 1 + i * 0.5f, Color.Black));
+                c.DrawBorder(new Rect(10, 10, 280, 180), default, Color.Black, new Thickness(1 + i % 90),
+                    i % 2 == 0 ? BorderStyle.Dashed : BorderStyle.Dotted);
             });
             most = Math.Max(most, ctx.CachedGradientShaderCount);
             mostBlurs = Math.Max(mostBlurs, ctx.CachedBlurFilterCount);
+            mostDashes = Math.Max(mostDashes, ctx.CachedDashEffectCount);
         }
 
         Assert.Equal(SkiaRenderContext.GradientShaderCacheMaxSize, most);
         Assert.Equal(SkiaRenderContext.BlurFilterCacheMaxSize, mostBlurs);
+        Assert.Equal(SkiaRenderContext.DashEffectCacheMaxSize, mostDashes);
         Assert.InRange(ctx.CachedGradientShaderCount, 1, SkiaRenderContext.GradientShaderCacheMaxSize);
         Assert.InRange(ctx.CachedBlurFilterCount, 1, SkiaRenderContext.BlurFilterCacheMaxSize);
+        Assert.InRange(ctx.CachedDashEffectCount, 1, SkiaRenderContext.DashEffectCacheMaxSize);
 
         surface.Dispose();
         Assert.Equal(0, ctx.CachedGradientShaderCount);
         Assert.Equal(0, ctx.CachedBlurFilterCount);
+        Assert.Equal(0, ctx.CachedDashEffectCount);
     }
 }
