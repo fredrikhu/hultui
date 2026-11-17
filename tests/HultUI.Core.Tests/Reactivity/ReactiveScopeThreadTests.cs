@@ -42,7 +42,7 @@ public class ReactiveScopeThreadTests
         using var effect = new Effect(() =>
         {
             runs++;
-            _ = Task.Run(() => outside.Value).Result;
+            _ = OtherThread.Run(() => outside.Value);
         });
 
         outside.Value = 1;

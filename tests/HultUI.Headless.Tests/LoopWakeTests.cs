@@ -10,6 +10,7 @@ using HultUI.Core.Primitives;
 using HultUI.Platform.Accessibility.Linux;
 using Xunit;
 using TextB = HultUI.Core.Builders.Text;
+using HultUI.Testing;
 
 namespace HultUI.Headless.Tests;
 
@@ -467,7 +468,7 @@ public class LoopWakeTests
     {
         using var run = new Run();
         int before = run.Platform.WakeCalls;
-        Task.Run(() => Application.InvokeOnMainThread(() => { })).Wait();
+        OtherThread.Run(() => Application.InvokeOnMainThread(() => { }));
         Assert.True(run.Platform.WakeCalls > before);
     }
 
@@ -480,7 +481,7 @@ public class LoopWakeTests
         int before = run.Platform.WakeCalls;
 
         // AT-SPI's SetCurrentValue, on the bus's receive thread.
-        Task.Run(() => router.SetRangeValue(bar.Id, 40)).Wait();
+        OtherThread.Run(() => router.SetRangeValue(bar.Id, 40));
 
         Assert.True(Eventually(() => run.Platform.WakeCalls > before), "the queued action did not wake the loop");
         Assert.True(router.HasPendingActions);
@@ -526,7 +527,7 @@ public class LoopWakeTests
         try
         {
             // org.a11y.Status changed: told on a thread-pool thread (AtSpiStatusReader).
-            Task.Run(() => status.Set(true)).Wait();
+            OtherThread.Run(() => status.Set(true));
             Assert.True(Eventually(() => run.Platform.WakeCalls > before), "the status turning on did not wake the loop");
         }
         finally
@@ -542,7 +543,7 @@ public class LoopWakeTests
         int before = run.Platform.WakeCalls;
         try
         {
-            Task.Run(() => AccessibilityClients.Force = true).Wait();
+            OtherThread.Run(() => AccessibilityClients.Force = true);
             Assert.True(run.Platform.WakeCalls > before);
         }
         finally

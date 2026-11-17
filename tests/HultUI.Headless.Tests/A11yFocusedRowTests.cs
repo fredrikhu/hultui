@@ -603,7 +603,7 @@ public sealed class A11yFocusedRowTests : IDisposable
         ], rig.Raised);
         Assert.Equal(trees, rig.Session.Window.AccessibilityTreesBuilt);
         // A client's thread reads what was typed and where the caret is.
-        var text = Task.Run(() => rig.Bridge.GetText(editor)).Result!;
+        var text = OtherThread.Run(() => rig.Bridge.GetText(editor))!;
         Assert.Equal(("x", 1), (text.Text, text.Caret));
     }
 

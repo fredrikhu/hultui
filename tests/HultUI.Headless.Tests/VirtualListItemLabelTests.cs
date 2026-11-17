@@ -6,6 +6,7 @@ using HultUI.Core.Reactivity;
 using HultUI.Core.Styling;
 using Xunit;
 using TextB = HultUI.Core.Builders.Text;
+using HultUI.Testing;
 
 namespace HultUI.Headless.Tests;
 
@@ -311,6 +312,6 @@ public class VirtualListItemLabelTests
         Assert.Equal(4, pane.Labelled);     // and the one made there was not kept
 
         // Blocking on purpose: an await would come back through the session's own context.
-        static string? OffTheUIThread(Func<string?> read) => Task.Run(read).GetAwaiter().GetResult();
+        static string? OffTheUIThread(Func<string?> read) => OtherThread.Run(read);
     }
 }

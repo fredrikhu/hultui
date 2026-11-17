@@ -6,6 +6,7 @@ using Xunit;
 namespace HultUI.WebView.Tests;
 
 using Text = HultUI.Core.Builders.Text;
+using HultUI.Testing;
 
 /// <summary>
 /// <see cref="WebViewController"/> against the fake engine: what it holds until the
@@ -309,7 +310,7 @@ public class WebViewControllerTests
         var (web, view) = Ready();
         using var _web = web;
 
-        Task.Run(() => view.RaiseTitle("from a worker")).Wait();
+        OtherThread.Run(() => view.RaiseTitle("from a worker"));
         Assert.Equal("", web.Title);
 
         session.PumpFrame();

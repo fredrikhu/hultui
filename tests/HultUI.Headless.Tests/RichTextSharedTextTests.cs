@@ -53,7 +53,7 @@ public sealed class RichTextSharedTextTests : IDisposable
 
     /// <summary>What a reader on its own thread reads: the text of the version the last tree has.</summary>
     private static AccessibleText Read(Element editor) =>
-        Task.Run(() => editor.AccessibleTextSource!.AccessibleText!).Result;
+        OtherThread.Run(() => editor.AccessibleTextSource!.AccessibleText!);
 
     /// <summary>The text made afresh from the editor's layout as it is now.</summary>
     private static AccessibleText Fresh(RichTextEditorElement editor) =>

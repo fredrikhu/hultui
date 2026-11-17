@@ -11,6 +11,7 @@ using HultUI.Core.Styling;
 using HultUI.Headless;
 using HultUI.WebView.Testing;
 using Xunit;
+using HultUI.Testing;
 
 namespace HultUI.WebView.Tests;
 
@@ -424,7 +425,7 @@ public class WebViewElementTests
         int uiThread = Environment.CurrentManagedThreadId, seenOn = 0;
         web.FrameArrived += () => { arrived++; seenOn = Environment.CurrentManagedThreadId; };
 
-        Task.Run(() => engine.Views[0].RequestRepaint()).Wait();
+        OtherThread.Run(() => engine.Views[0].RequestRepaint());
         session.PumpUntil(() => arrived > 0, TimeSpan.FromSeconds(5));
 
         Assert.Equal(uiThread, seenOn);
