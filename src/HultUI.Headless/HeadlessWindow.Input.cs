@@ -21,6 +21,16 @@ public sealed partial class HeadlessWindow
     /// <c>PumpFrame</c>, the same point in the frame the real loop raises it.</summary>
     public void Activate() => _platform.ActivatedPending = true;
 
+    /// <summary>Stand in for the OS taking the foreground from this window — a click in another
+    /// application, an alt-tab away. On the next <c>PumpFrame</c> its light-dismiss popups close
+    /// and <see cref="HultUI.Window.Deactivated"/> is raised, as the real loop does.</summary>
+    public void Deactivate() => _platform.DeactivatedPending = true;
+
+    /// <summary>Stand in for a press on the window's frame — its custom title bar or a resize
+    /// edge — which the window gets no pointer event for. On the next <c>PumpFrame</c> its
+    /// light-dismiss popups close, as for a press anywhere else outside them.</summary>
+    public void PressFrame() => _platform.FramePressedPending = true;
+
     /// <summary>Moves the mouse, firing hover enter/leave and move events.</summary>
     public void MoveMouse(float x, float y, KeyModifiers modifiers = KeyModifiers.None)
     {

@@ -691,6 +691,22 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// </summary>
     public event Action? Activated;
 
+    /// <summary>
+    /// Raised when the window stops being the foreground one: the user clicked another window or
+    /// application, or Alt+Tabbed away. On the UI thread, after the window's light-dismiss popups
+    /// (a menu, a dropdown's list, a popover) have closed, as a native menu closes when its window
+    /// loses the foreground. Not raised by a headless or WinForms host, which cannot tell.
+    /// </summary>
+    public event Action? Deactivated;
+
+    /// <summary>The window lost the foreground: its popups close, unless the DevTools inspector
+    /// took it (<paramref name="keepPopups"/>), so a menu can be inspected while it is open.</summary>
+    internal void RaiseDeactivated(bool keepPopups)
+    {
+        if (!keepPopups) DismissPopups();
+        Deactivated?.Invoke();
+    }
+
     internal void RaiseActivated()
     {
         // A reader is told where the focus is as the window comes to the front, as a WPF or a WinForms
@@ -4741,14 +4757,18 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     }
 
     /// <summary>Closes the light-dismiss overlays above level <paramref name="above"/>: all of
-    /// them for a press in the main tree (-1), only anchored ones for a press in an overlay.</summary>
+    /// them for a press in the main tree (-1) or in a modal dialog, which is a page of its own;
+    /// only anchored ones for a press in any other overlay, as a menu whose flyout stays open
+    /// while its own rows are pressed. A context menu or a dropdown's list opened from a dialog
+    /// (unanchored) stayed open on a press elsewhere in the dialog.</summary>
     private void DismissOverlaysOnOutsideClick(int above = -1)
     {
+        bool all = above < 0 || _overlays[above].IsModal;
         for (int i = _overlays.Count - 1; i > above; i--)
         {
             // A dismissal callback can close other overlays.
             if (i >= _overlays.Count) continue;
-            if (_overlays[i].DismissOnOutsideClick && (above < 0 || _overlays[i].Anchor is not null))
+            if (_overlays[i].DismissOnOutsideClick && (all || _overlays[i].Anchor is not null))
             {
                 // Clear context menu state if this overlay is the context menu
                 if (_overlays[i].Id == _contextMenuOverlay.Id)
@@ -4912,9 +4932,10 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
     /// <summary>
     /// Closes every light-dismiss overlay — context menus, dropdown lists, popovers — as a press
-    /// outside them does. For the presses this window never receives: on its OS title bar or
-    /// frame, in another window, in another application. Overlays shown with
-    /// <c>dismissOnOutsideClick: false</c> (dialogs, tooltips) stay.
+    /// outside them does. The window does it itself when it loses the foreground
+    /// (<see cref="Deactivated"/>) and on a press on its custom title bar or edges; this is for the
+    /// presses it still never hears of, as one on a standard (non-custom) title bar on Windows.
+    /// Overlays shown with <c>dismissOnOutsideClick: false</c> (dialogs, tooltips) stay.
     /// </summary>
     public void DismissPopups()
     {

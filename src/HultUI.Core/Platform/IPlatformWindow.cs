@@ -102,6 +102,22 @@ public interface IPlatformWindow : IDisposable
     bool ActivatedPending { get; set; }
 
     /// <summary>
+    /// Set by the platform when this window stops being the foreground one (the user clicked
+    /// another window or application), and cleared by the application loop as it raises
+    /// <c>Window.Deactivated</c> and closes the window's light-dismiss popups. A platform that
+    /// cannot tell leaves it false.
+    /// </summary>
+    bool DeactivatedPending { get => false; set { } }
+
+    /// <summary>
+    /// Set by the platform when a press lands on the window's frame, where the window gets no
+    /// pointer event: the custom title bar or a resize edge. The application loop clears it as it
+    /// closes the window's light-dismiss popups, as a press anywhere else in the window does. A
+    /// platform that cannot tell leaves it false.
+    /// </summary>
+    bool FramePressedPending { get => false; set { } }
+
+    /// <summary>
     /// Invoked by platforms whose native resize runs a modal loop (Win32) to draw a frame
     /// from inside it, never throttled. The framework draws a resize frame when
     /// <see cref="ResizePending"/> is set, so a platform sets it first for a new size or an

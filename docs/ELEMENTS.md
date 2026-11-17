@@ -2501,7 +2501,11 @@ Button.New("Filters").OnClick(e => _filters.Toggle(e.CurrentTarget)).AccessibleE
   before it hands its element to the next one). `ActualPlacement` says which side it took.
 - **Closing:** a press outside closes it and goes on to whatever was pressed; a press on its
   own anchor only closes it, so the toggle does not reopen it. Opened from a dialog, a press
-  elsewhere in the dialog counts as outside. Esc closes it. `Closed` runs however it closed.
+  elsewhere in the dialog counts as outside, as it does for a context menu or a dropdown's list
+  opened there. The window losing the foreground (`Window.Deactivated`) or a press on a custom
+  title bar or edge closes it, as it closes every light-dismiss overlay; a standard title bar on
+  Windows tells the window nothing, and `Window.DismissPopups()` is for that. Esc closes it.
+  `Closed` runs however it closed.
 - **Keyboard:** opening moves the keyboard to its first control (the card itself when it has
   none), Tab stays inside, and closing with the keyboard inside hands it back to the anchor.
   `ArrowKeys = true` lets ↑ ↓ walk the controls, for a list of rows. With nothing focusable in

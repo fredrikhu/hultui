@@ -1140,8 +1140,24 @@ public sealed class Application : IDisposable
     {
         foreach (var window in _windows)
         {
-            if (!window.PlatformWindow.ActivatedPending) continue;
-            window.PlatformWindow.ActivatedPending = false;
+            var platform = window.PlatformWindow;
+            // A loss before a gain: a window that lost the foreground and got it back in one pump
+            // is the foreground one after both.
+            if (platform.DeactivatedPending)
+            {
+                platform.DeactivatedPending = false;
+                // Into the inspector the window's popups stay, so one can be inspected open.
+                if (window.IsOpen) window.RaiseDeactivated(keepPopups: _inspectorHost is { IsOpen: true } inspector
+                    && ReferenceEquals(inspector.Target, window));
+            }
+            // A press on the frame: the popups close, as for a press anywhere outside them.
+            if (platform.FramePressedPending)
+            {
+                platform.FramePressedPending = false;
+                if (window.IsOpen) window.DismissPopups();
+            }
+            if (!platform.ActivatedPending) continue;
+            platform.ActivatedPending = false;
             if (window.IsOpen) window.RaiseActivated();
         }
     }
