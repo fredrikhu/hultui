@@ -1226,6 +1226,53 @@ so the fix is `LayoutChangedEvent` (`.OnLayoutChanged`), not a canvas exempt fro
 - **Canvases are still culled by their box.** Exempting them would draw every canvas a scroll
   view holds off screen.
 
+### An application team's fixes that HultUI built another way, or not at all (2026-11-17)
+
+An application team sent 23 findings (checked on 5b2985be). Their analysis held up, but several
+of the fixes they proposed would have broken something. These are the designs set aside, so
+they are not proposed again without the reason in hand:
+
+- **A read-only `Key` on `ComponentHost` (finding 1).** `Key` is not virtual and every patch
+  rewrites it, and hosts with no key (a single slot, Tabs, Expander, VirtualList) meet the same
+  bug. `TreeDiffer.CanPatch` refuses two hosts of different components instead.
+- **One window key event, stopped by `Handled` (2).** The dispatcher ignores `Handled`; only
+  `StopPropagation()` ends a route. An idle timer needs every input and must not stop any, so
+  it is a second event: `Window.PreviewKeyDown` (stoppable) and `Window.InputActivity` (not).
+- **A dropdown's choice as its value alone (4).** No reader heard it: UIA offered a value only
+  for text fields and documents, AT-SPI none. The choice names a control the app left unnamed,
+  and a named combo box gets a read-only Value pattern.
+- **`Placement` redefined as the visible rectangle (10).** Every saved placement would grow by
+  the invisible borders once. `Window.VisiblePlacement` is a separate property.
+- **A remount that rebuilds, or a public `MarkDirty` (12).** A rebuild on every remount defeats
+  kept parts; a public `MarkDirty` skips an app's own wrappers and rebuilds mid-dispatch. A
+  parent asks through `[Reactive]` properties, `Part.Place(stale: true)` or
+  `PartGroup.Invalidate()`. Not built yet: a note on `Component.Mount()` saying so.
+- **Text fields that stop the keys they take (13), or a `KeyChord` that skips handled keys.**
+  Stopping hides keys from the field's ancestors (a search box's Up and Down, Esc closing a
+  dialog), and apps such as Aperture mark their own matched keys handled. Fields set `Handled`
+  on the keys they act on, stop nothing, and `KeyDownEvent.TargetTakesText` tells a chord a
+  field took the key.
+- **`Resized` raised on a move (17).** A move changes no size, and a move onto a monitor at
+  another scale already raises it. `Window.Moved` and `Window.DisplayChanged` are their own
+  events.
+- **Exact label matching by default in `GetByLabel` (23).** It breaks labels such as "Email:".
+  The nearest label decides instead, matching or not.
+- **Dropping an image's CPU bitmap after upload (19): declined.** The GPU copy is Skia's
+  evictable cache; Vulkan drops textures on resize, each window has its own GPU context, and
+  the raster renderer, headless tests and `IntrinsicSize` read the CPU copy. HultUI handles no
+  device loss to re-upload from.
+- **A colour-space tag on `FromPixels` (20).** Only the Vulkan renderer could honour it, and
+  decoding from files drops ICC profiles anyway. Converting to sRGB at decode is the better
+  form, at low priority.
+- **A real-time floor on locator waits by default (22).** It slows every failing wait, and
+  frames pumped while waiting move virtual time past the timeout, which tests assert. The form
+  to build is opt-in, pumping zero-length frames.
+
+Two are open in a smaller form than proposed: a cross-window drag (16) starts with
+`Window.DragPosition` and a `DragMove` event, since a full session needs the windows' stacking
+order and Wayland gives no positions; image seams (18) want a per-draw antialiasing switch,
+left on by default, plus an antialiased clip.
+
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
 BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction
