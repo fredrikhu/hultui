@@ -2394,7 +2394,8 @@ text colour and face, size, padding and radius; null colours come from the palet
 
 A row of menus across the top of a window — File, Edit, View — whose dropdowns are context
 menus (`ContextMenuItem`: separators, disabled and danger items, check marks, icons, shortcut
-hints, one level of submenus).
+hints, submenus at any depth: → opens one, ← closes it, and a flyout with no room on the right
+opens on its parent's left).
 
 ```csharp
 _menus = new MenuBar(

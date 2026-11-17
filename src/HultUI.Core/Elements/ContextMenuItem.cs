@@ -43,8 +43,8 @@ public sealed class ContextMenuItem
     public bool IsDanger { get; init; }
 
     /// <summary>Nested items: the item opens a flyout submenu (hover, click,
-    /// Enter or →) instead of running <see cref="Action"/>. One level of
-    /// nesting is supported.</summary>
+    /// Enter or →) instead of running <see cref="Action"/>. A flyout's own items
+    /// may have children too, at any depth; ← and Escape close one level.</summary>
     public IReadOnlyList<ContextMenuItem>? Children { get; init; }
 
     public bool HasChildren => Children is { Count: > 0 };
