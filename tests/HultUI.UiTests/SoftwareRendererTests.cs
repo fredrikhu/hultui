@@ -19,8 +19,9 @@ public sealed partial class SoftwareRendererTests
 
     /// <summary>
     /// What the renderer drew (<c>Window.SaveFrame</c>) and what reached the window, read from its
-    /// device context: red top left, green bottom left, blue on the right. Software only: a GL
-    /// window's pixels are not always in its device context, so GL cannot be read this way.
+    /// device context: red top left, green bottom left, blue on the right. On Windows Skia draws
+    /// straight into SDL's window surface, with no copy. Software only: a GL window's pixels are
+    /// not always in its device context, so GL cannot be read this way.
     /// </summary>
     [UiFact]
     public void TheFrame_IsDrawnAndReachesTheWindow()
@@ -32,6 +33,7 @@ public sealed partial class SoftwareRendererTests
                 new() { ["HULTUI_RENDERER"] = "software" }, $"--save-frame=\"{png}\" --window-pixels");
             Assert.True(run.ExitCode == 0, run.Output);
             Assert.Contains(" software window=", run.Output);
+            Assert.Contains(" framebuffer=drawn", run.Output);
 
             using var frame = SkiaSharp.SKBitmap.Decode(png);
             Assert.NotNull(frame);
@@ -46,6 +48,24 @@ public sealed partial class SoftwareRendererTests
         {
             File.Delete(png);
         }
+    }
+
+    /// <summary>
+    /// A window that grows gets new memory from SDL, which frees the old, and the frame has to be
+    /// drawn into the new: drawing on into the old would show the old size, or crash.
+    /// </summary>
+    [UiFact]
+    public void AWindowThatGrows_IsDrawnAtItsNewSize()
+    {
+        var run = VulkanProbeTests.RunProbe(new() { ["HULTUI_RENDERER"] = "software" }, "--window-pixels --grow");
+
+        Assert.True(run.ExitCode == 0, run.Output);
+        var reads = WindowLine().Matches(run.Output);
+        Assert.True(reads.Count == 2, "expected a read before and after the window grew:\n" + run.Output);
+        Assert.True(Size(reads[1]).Width > Size(reads[0]).Width && Size(reads[1]).Height > Size(reads[0]).Height,
+            "the window did not grow:\n" + run.Output);
+        // At the new size the right quarter lies past where the old frame ended.
+        AssertWindowQuarters(reads[1], run.Output);
     }
 
     /// <summary>No OpenGL driver SDL can load: SDL refuses the OpenGL window, and an app that
@@ -76,12 +96,19 @@ public sealed partial class SoftwareRendererTests
         Assert.DoesNotContain("probe: done", run.Output);
     }
 
-    private static void AssertWindowQuarters(string output)
+    private static void AssertWindowQuarters(string output) => AssertWindowQuarters(WindowLine().Match(output), output);
+
+    private static void AssertWindowQuarters(Match match, string output)
     {
-        var match = WindowLine().Match(output);
         Assert.True(match.Success, "no window line:\n" + output);
         Assert.True(match.Groups["read"].Value == "True", "reading the window failed:\n" + output);
         AssertQuarters(Rgb(match, "topLeft"), Rgb(match, "right"), Rgb(match, "bottomLeft"), "in the window", output);
+    }
+
+    private static (int Width, int Height) Size(Match match)
+    {
+        var parts = match.Groups["size"].Value.Split('x').Select(int.Parse).ToArray();
+        return (parts[0], parts[1]);
     }
 
     private static SkiaSharp.SKColor Rgb(Match match, string name)
@@ -98,6 +125,6 @@ public sealed partial class SoftwareRendererTests
         Assert.True(bottomLeft is { Red: < 60, Green: > 200, Blue: < 60 }, $"{where}, bottom left was {bottomLeft}, expected green\n{output}");
     }
 
-    [GeneratedRegex(@"probe: window read=(?<read>\w+) topLeft=(?<topLeft>[\d,]+) right=(?<right>[\d,]+) bottomLeft=(?<bottomLeft>[\d,]+)")]
+    [GeneratedRegex(@"probe: window read=(?<read>\w+) size=(?<size>\d+x\d+) topLeft=(?<topLeft>[\d,]+) right=(?<right>[\d,]+) bottomLeft=(?<bottomLeft>[\d,]+)")]
     private static partial Regex WindowLine();
 }

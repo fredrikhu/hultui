@@ -537,7 +537,11 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
             if (useSoftware)
             {
-                _rasterSurface = new SkiaRasterRenderSurface(text);
+                // Into the window surface itself when Skia can draw its pixels, which is always on
+                // Windows; otherwise into Skia's own memory, copied each frame (PresentSoftware).
+                _rasterSurface = WindowSurfaceTarget() is not null
+                    ? new SkiaRasterRenderSurface(text, WindowSurfaceTarget)
+                    : new SkiaRasterRenderSurface(text);
                 StartupTrace.Mark("skia raster surface");
             }
         }
@@ -1574,31 +1578,38 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     private bool _softwarePresentFailed;
 
     /// <summary>
-    /// Copies the frame Skia drew in main memory into SDL's window surface and shows it. On
-    /// Windows SDL keeps that surface as a GDI bitmap and draws it with BitBlt, which a remote
-    /// desktop session carries well.
+    /// SDL's window surface as somewhere Skia can draw, or null. Asked at the start of every
+    /// frame: SDL makes the surface again after a resize and frees the old one. Null when there
+    /// is none, as for a minimized window, or when its pixels are in an order Skia cannot draw.
+    /// </summary>
+    private SkiaRasterRenderSurface.PixelTarget? WindowSurfaceTarget()
+    {
+        var surface = SDL_GetWindowSurface(_window);
+        if (surface == null || surface->w <= 0 || surface->h <= 0 || !BitConverter.IsLittleEndian)
+            return null;
+        // Packed formats, read as bytes on a little-endian machine: XRGB8888 is B, G, R, X.
+        SkiaSharp.SKColorType? colorType = surface->format switch
+        {
+            SDL_PixelFormat.SDL_PIXELFORMAT_XRGB8888 or SDL_PixelFormat.SDL_PIXELFORMAT_ARGB8888
+                => SkiaSharp.SKColorType.Bgra8888,
+            SDL_PixelFormat.SDL_PIXELFORMAT_XBGR8888 or SDL_PixelFormat.SDL_PIXELFORMAT_ABGR8888
+                => SkiaSharp.SKColorType.Rgba8888,
+            _ => null,
+        };
+        return colorType is { } type
+            ? new(surface->pixels, surface->w, surface->h, surface->pitch, type)
+            : null;
+    }
+
+    /// <summary>
+    /// Shows the frame Skia drew on the CPU. On Windows SDL keeps the window surface as a GDI
+    /// bitmap and draws it with BitBlt, which a remote desktop session carries well.
     /// </summary>
     private void PresentSoftware(SkiaRasterRenderSurface frame)
     {
-        // Asked for every frame: SDL remakes it after a resize, and returns the same one otherwise.
-        var target = SDL_GetWindowSurface(_window);
-        SDL_Surface* source = null;
-        if (target != null && frame.PeekPixels(out nint pixels, out int rowBytes))
-        {
-            // RGBA in memory, as SetIcon. Copied as it is, no blending, and converted to
-            // whatever the window surface is.
-            var format = BitConverter.IsLittleEndian
-                ? SDL_PixelFormat.SDL_PIXELFORMAT_ABGR8888
-                : SDL_PixelFormat.SDL_PIXELFORMAT_RGBA8888;
-            // shortcut: one copy a frame from Skia's pixels into SDL's; drawing straight into
-            // the window surface saves it, if the copy ever shows in a profile.
-            source = SDL_CreateSurfaceFrom(frame.PixelWidth, frame.PixelHeight, format, pixels, rowBytes);
-        }
-        bool shown = source != null
-            && SDL_SetSurfaceBlendMode(source, SDL_BLENDMODE_NONE)
-            && SDL_BlitSurface(source, null, target, null)
-            && SDL_UpdateWindowSurface(_window);
-        if (source != null) SDL_DestroySurface(source);
+        bool shown = frame.DrawsIntoTarget
+            ? SDL_UpdateWindowSurface(_window)
+            : CopyAndShow(frame);
 
         // Once, not every frame: a window that cannot show its frames stays black, and this says why.
         if (!shown && !_softwarePresentFailed)
@@ -1606,6 +1617,28 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             _softwarePresentFailed = true;
             Console.Error.WriteLine($"[HultUI] Showing a software frame failed: {GetError()}");
         }
+    }
+
+    /// <summary>For a window surface Skia cannot draw into: copies the frame from Skia's own
+    /// memory into it, converting the pixels, and shows it.</summary>
+    private bool CopyAndShow(SkiaRasterRenderSurface frame)
+    {
+        var target = SDL_GetWindowSurface(_window);
+        SDL_Surface* source = null;
+        if (target != null && frame.PeekPixels(out nint pixels, out int rowBytes))
+        {
+            // RGBA in memory, as SetIcon. Copied as it is, no blending.
+            var format = BitConverter.IsLittleEndian
+                ? SDL_PixelFormat.SDL_PIXELFORMAT_ABGR8888
+                : SDL_PixelFormat.SDL_PIXELFORMAT_RGBA8888;
+            source = SDL_CreateSurfaceFrom(frame.PixelWidth, frame.PixelHeight, format, pixels, rowBytes);
+        }
+        bool shown = source != null
+            && SDL_SetSurfaceBlendMode(source, SDL_BLENDMODE_NONE)
+            && SDL_BlitSurface(source, null, target, null)
+            && SDL_UpdateWindowSurface(_window);
+        if (source != null) SDL_DestroySurface(source);
+        return shown;
     }
 
     /// <summary>
@@ -1894,7 +1927,8 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         }
 
         if (_rasterSurface is not null)
-            return $"video={SDL_GetCurrentVideoDriver() ?? "?"} software window={PixelWidth}x{PixelHeight}";
+            return $"video={SDL_GetCurrentVideoDriver() ?? "?"} software window={PixelWidth}x{PixelHeight}"
+                + $" framebuffer={(_rasterSurface.DrawsIntoTarget ? "drawn" : "copied")}";
 
         if (_glContext == null) return null;
         SDL_GL_MakeCurrent(_window, _glContext);

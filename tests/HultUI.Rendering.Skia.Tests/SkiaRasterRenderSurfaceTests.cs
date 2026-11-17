@@ -117,6 +117,56 @@ public class SkiaRasterRenderSurfaceTests
         Assert.Equal(0, bytes);
     }
 
+    /// <summary>
+    /// What a software window draws with, so no frame is copied: memory the surface does not own,
+    /// in the target's byte order. A window gets new memory when it is resized, and the surface
+    /// follows the target; a Snapshot copies rather than moving the frame elsewhere.
+    /// </summary>
+    [Fact]
+    public void WithATarget_ItDrawsIntoTheTargetsMemory_AndFollowsIt()
+    {
+        nint small = System.Runtime.InteropServices.Marshal.AllocHGlobal(4 * 16);
+        nint big = System.Runtime.InteropServices.Marshal.AllocHGlobal(6 * 32);
+        try
+        {
+            SkiaRasterRenderSurface.PixelTarget? target = new(small, 4, 4, 16, SkiaSharp.SKColorType.Bgra8888);
+            using var surface = new SkiaRasterRenderSurface(null, () => target);
+            Assert.True(surface.DrawsIntoTarget);
+            surface.Resize(100, 100, 1f);   // only the scale: the target says the size
+
+            Assert.True(surface.BeginFrame());
+            Assert.Equal((4, 4), (surface.PixelWidth, surface.PixelHeight));
+            DrawFrame(surface, Color.Red);
+            var bgra = PixelsAt(small, 16, 4);
+            Assert.Equal(new byte[] { 0, 0, 255, 255 }, bgra[(3 * 16 + 3 * 4)..(3 * 16 + 3 * 4 + 4)]);
+
+            // Resized: new memory, another size and byte order.
+            target = new(big, 8, 6, 32, SkiaSharp.SKColorType.Rgba8888);
+            Assert.True(surface.BeginFrame());
+            Assert.Equal((8, 6), (surface.PixelWidth, surface.PixelHeight));
+            DrawFrame(surface, Color.Blue);
+            AssertPixel(PixelsAt(big, 32, 6), 32, x: 7, y: 5, r: 0, g: 0, b: 255);
+
+            using (surface.Snapshot())
+            {
+                Assert.True(surface.BeginFrame());
+                DrawFrame(surface, Color.Green);
+            }
+            AssertPixel(PixelsAt(big, 32, 6), 32, x: 7, y: 5, r: 0, g: 128, b: 0);
+
+            // Every frame, so a steady one allocates nothing.
+            Assert.Equal(0, Allocations.Least(() => surface.BeginFrame()));
+
+            target = null;   // nothing to draw into, as for a minimized window
+            Assert.False(surface.BeginFrame());
+        }
+        finally
+        {
+            System.Runtime.InteropServices.Marshal.FreeHGlobal(small);
+            System.Runtime.InteropServices.Marshal.FreeHGlobal(big);
+        }
+    }
+
     private static void DrawFrame(SkiaRasterRenderSurface surface, Color color)
     {
         var ctx = surface.RenderContext;

@@ -9,7 +9,8 @@ namespace HultUI.Rendering.Skia;
 /// measure context, and text pipeline as <see cref="SkiaGLRenderSurface"/>, so
 /// layout and drawing behave identically to the on-screen backend. Used by
 /// HultUI.Headless; also suitable for server-side or golden-image rendering —
-/// <see cref="Snapshot"/> and <see cref="ReadPixels"/> expose the frame's pixels.
+/// <see cref="Snapshot"/> and <see cref="ReadPixels"/> expose the frame's pixels. Given a
+/// <see cref="PixelTarget"/>, it draws into memory a platform window shows instead of its own.
 /// </summary>
 public sealed class SkiaRasterRenderSurface : IRenderSurface, ISkiaFrameCapture
 {
@@ -18,6 +19,9 @@ public sealed class SkiaRasterRenderSurface : IRenderSurface, ISkiaFrameCapture
     private readonly bool _ownsText;
 
     private SKSurface? _surface;
+    private readonly Func<PixelTarget?>? _target;
+    // What _surface draws into while there is a target: made again when the target changes.
+    private PixelTarget _drawingInto;
     // Filled by PeekPixels each frame, so that a window presenting every frame allocates nothing.
     private readonly SKPixmap _pixmap = new();
     private int _width;
@@ -43,6 +47,31 @@ public sealed class SkiaRasterRenderSurface : IRenderSurface, ISkiaFrameCapture
         _renderContext.SetPipeline(_text.Pipeline);
     }
 
+    /// <summary>
+    /// A surface that draws into memory it does not own: a platform window's framebuffer, so a
+    /// frame is drawn where the window shows it from and needs no copy.
+    /// </summary>
+    /// <param name="text">As for the other constructor.</param>
+    /// <param name="target">Asked at the start of every frame where to draw it. A window gets new
+    /// memory when it is resized, so the answer may change from frame to frame, and the surface
+    /// follows it. Null skips the frame: there is nothing to draw into, as for a minimized
+    /// window. <see cref="Resize"/> then only records the scale; the target says the size.</param>
+    public SkiaRasterRenderSurface(SkiaTextServices? text, Func<PixelTarget?> target)
+        : this(text)
+    {
+        _target = target;
+    }
+
+    /// <summary>
+    /// Memory to draw a frame into: <paramref name="Width"/> by <paramref name="Height"/> pixels
+    /// of 32 bits, <paramref name="RowBytes"/> apart, in <paramref name="ColorType"/>'s byte
+    /// order (<see cref="SKColorType.Bgra8888"/> or <see cref="SKColorType.Rgba8888"/>).
+    /// </summary>
+    public readonly record struct PixelTarget(nint Pixels, int Width, int Height, int RowBytes, SKColorType ColorType);
+
+    /// <summary>Whether frames are drawn into a target's memory rather than the surface's own.</summary>
+    public bool DrawsIntoTarget => _target is not null;
+
     /// <summary>Draws text as outlines — see <see cref="SkiaRenderContext.TextAsOutlines"/>. With
     /// a pinned font collection, what is drawn is the same on every machine.</summary>
     public bool TextAsOutlines
@@ -60,6 +89,12 @@ public sealed class SkiaRasterRenderSurface : IRenderSurface, ISkiaFrameCapture
 
     public void Resize(int widthPx, int heightPx, float scaleFactor)
     {
+        if (_target is not null)
+        {
+            // The target says the size, at the start of each frame.
+            _scaleFactor = scaleFactor;
+            return;
+        }
         if (widthPx == _width && heightPx == _height && Math.Abs(scaleFactor - _scaleFactor) < 0.001f)
             return;
         if (widthPx <= 0 || heightPx <= 0)
@@ -77,6 +112,29 @@ public sealed class SkiaRasterRenderSurface : IRenderSurface, ISkiaFrameCapture
             ?? throw new InvalidOperationException($"Failed to create raster surface ({widthPx}x{heightPx})");
 
         _renderContext.SetCanvas(_surface.Canvas);
+    }
+
+    /// <summary>
+    /// With a target, points the canvas at it, made again whenever the target moved or changed
+    /// size, and returns false when there is none this frame. Without one there is nothing to do.
+    /// </summary>
+    public bool BeginFrame()
+    {
+        if (_target is null) return true;
+        if (_target() is not { } target) return false;
+        if (_surface is null || target != _drawingInto)
+        {
+            _surface?.Dispose();
+            var info = new SKImageInfo(target.Width, target.Height, target.ColorType, SKAlphaType.Premul);
+            _surface = SKSurface.Create(info, target.Pixels, target.RowBytes)
+                ?? throw new InvalidOperationException(
+                    $"Failed to draw into {target.Width}x{target.Height} {target.ColorType} pixels.");
+            _drawingInto = target;
+            _width = target.Width;
+            _height = target.Height;
+            _renderContext.SetCanvas(_surface.Canvas);
+        }
+        return true;
     }
 
     public void Present()
@@ -106,9 +164,10 @@ public sealed class SkiaRasterRenderSurface : IRenderSurface, ISkiaFrameCapture
 
     /// <summary>
     /// Where the current frame's pixels lie, without copying them, for a platform window that
-    /// puts them on the screen: RGBA8888 premultiplied, <see cref="PixelWidth"/> by
-    /// <see cref="PixelHeight"/>. Valid until the next draw or <see cref="Resize"/>, because a
-    /// draw after a <see cref="Snapshot"/> moves them. False before the first Resize.
+    /// copies them to the screen: <see cref="PixelWidth"/> by <see cref="PixelHeight"/>, RGBA8888
+    /// premultiplied in the surface's own memory (a target's are in its own order). Valid until
+    /// the next draw or <see cref="Resize"/>, because a draw after a <see cref="Snapshot"/> moves
+    /// them. False before the first Resize.
     /// </summary>
     public bool PeekPixels(out nint pixels, out int rowBytes)
     {
