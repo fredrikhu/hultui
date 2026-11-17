@@ -39,15 +39,48 @@ internal struct MeasureCache
     // Bytes, so the min-content width fits in the room the two ints took.
     private byte _count;   // 0 = empty; reset is the whole invalidation
     private byte _next;    // ring write position
-    private byte _flags;   // HasMinContentWidth, and the pinned entry's index + 1 above it (0: none)
+    // HasMinContentWidth; the pinned entry's index + 1 in bits 1-3 (0: none); HasSpreads, Spreads
+    // and HasMaxContentWidth above them.
+    private byte _flags;
     private byte _exactH;  // bit i: entry i holds at its FromH only (see Entry.FromH)
     private float _minContentWidth;
+    private float _maxContentWidth;
 
     private const byte HasMinContentWidth = 1;
     private const int PinShift = 1;
+    private const byte PinMask = 0b1110;
+    private const byte HasSpreads = 16;
+    private const byte Spreads = 32;
+    private const byte HasMaxContentWidth = 64;
 
     /// <summary>The pinned entry's index, or −1 for none.</summary>
-    private readonly int Pinned => (_flags >> PinShift) - 1;
+    private readonly int Pinned => ((_flags & PinMask) >> PinShift) - 1;
+
+    /// <summary>Whether the element's content comes out wider when it is offered more room
+    /// (LayoutEngine.ContentSpreads), if worked out since the last invalidation: a structural
+    /// answer, which holds until the element or something in it changes.</summary>
+    public readonly bool TryGetSpreads(out bool spreads)
+    {
+        spreads = (_flags & Spreads) != 0;
+        return (_flags & HasSpreads) != 0;
+    }
+
+    public void StoreSpreads(bool spreads) =>
+        _flags = (byte)((_flags & ~Spreads) | HasSpreads | (spreads ? Spreads : 0));
+
+    /// <summary>The element's max-content width (LayoutEngine.MaxContentWidth), if worked out since
+    /// the last invalidation; +∞ for one it cannot tell without measuring.</summary>
+    public readonly bool TryGetMaxContentWidth(out float width)
+    {
+        width = _maxContentWidth;
+        return (_flags & HasMaxContentWidth) != 0;
+    }
+
+    public void StoreMaxContentWidth(float width)
+    {
+        _maxContentWidth = width;
+        _flags |= HasMaxContentWidth;
+    }
 
     /// <summary>The element's min-content width (LayoutEngine.MinContentWidth), if worked out
     /// since the last invalidation. No constraint goes into it, so it holds until the content
@@ -138,8 +171,9 @@ internal struct MeasureCache
         }
     }
 
+    // Keeps the other flags: the min- and max-content widths and the spread answer.
     private void PinAt(int slot) =>
-        _flags = (byte)((_flags & HasMinContentWidth) | ((slot + 1) << PinShift));
+        _flags = (byte)((_flags & ~PinMask) | ((slot + 1) << PinShift));
 
     public void Invalidate()
     {

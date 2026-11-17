@@ -2008,6 +2008,15 @@ public abstract class Element
         MeasureContent(0f, LayoutSpace.Unbounded, ctx).Width;
 
     /// <summary>
+    /// The width this element's own content takes with no limit on it (content box): what a row
+    /// gives an item that would otherwise widen into all the room offered (LayoutEngine.MaxContentWidth).
+    /// +∞ for "not known without measuring at a width", which keeps the measurement the engine
+    /// made before: a leaf answers only when its content's natural width does not depend on the
+    /// room (a label's line, an empty spacer).
+    /// </summary>
+    internal virtual float MeasureMaxContentWidth(IMeasureContext ctx) => float.PositiveInfinity;
+
+    /// <summary>
     /// Where this element's own first line of text sits: the distance from the top of its
     /// border box to the baseline, at the border-box size given — what
     /// <see cref="AlignItems.Baseline"/> lines items up by. Null for an element that draws no
