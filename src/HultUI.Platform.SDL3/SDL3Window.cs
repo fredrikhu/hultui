@@ -1320,31 +1320,79 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         set
         {
             if (_window == null || value is not { IsUsable: true }) return;
-            // Leaving maximized or full screen, and a maximized placement, activate the window
-            // (see WindowsActivation).
-            using var quiet = WindowsActivation.RefuseIfUnwanted();
-            var live = LiveResizeFrame;
-            LiveResizeFrame = null;
-            try
+            Place(value, fit: true);
+        }
+    }
+
+    /// <summary>
+    /// Windows: the placement by the window's visible rectangle, without the invisible resize
+    /// borders round its left, right and bottom (the custom frame's client area, the standard
+    /// frame's DWM bounds); fitted to the work areas as that rectangle, so two windows placed on a
+    /// display's halves meet edge to edge, and one on the work area's edge reaches it. Elsewhere
+    /// <see cref="Placement"/>, which is the client area already.
+    /// </summary>
+    public WindowPlacement? VisiblePlacement
+    {
+        get
+        {
+            if (_window == null) return null;
+            if (!OperatingSystem.IsWindows()) return Placement;
+            var hwnd = GetWin32Hwnd();
+            // Full screen: the bounds it goes back to, by what will be seen of them.
+            if (IsFullscreen && Placement is { } before) return WindowsPlacement.Inset(before, hwnd);
+            return WindowsPlacement.ReadVisible(hwnd, _customFrame is not null);
+        }
+        set
+        {
+            if (_window == null || value is not { IsUsable: true }) return;
+            if (!OperatingSystem.IsWindows()) { Placement = value; return; }
+            var visible = value.FitTo(WindowsPlacement.WorkAreas());
+            Place(WindowsPlacement.OuterFor(visible), fit: false);
+            // The borders were worked out at the target monitor's scale; landed, the window says
+            // what they are, and a difference is moved out once. The standard frame needs it: its
+            // DWM bounds keep a visible one-pixel edge inside the invisible border (measured on a
+            // 100 % monitor: 1 px off on the left, right and bottom without it).
+            var hwnd = GetWin32Hwnd();
+            if (!visible.Maximized && WindowsPlacement.ReadVisible(hwnd, _customFrame is not null) is var landed && landed != visible)
             {
-                if (IsFullscreen) SetFullscreen(false);
-                if (OperatingSystem.IsWindows()) PlaceWin32(value);
-                else PlaceSdl(value);
+                var outer = WindowsPlacement.Read(hwnd);
+                WindowsPlacement.Move(hwnd, new WindowPlacement(
+                    outer.X + visible.X - landed.X, outer.Y + visible.Y - landed.Y,
+                    outer.Width + visible.Width - landed.Width, outer.Height + visible.Height - landed.Height, false));
                 UpdateSize();
-            }
-            finally
-            {
-                LiveResizeFrame = live;
-                ResizePending = true;
             }
         }
     }
 
+    private void Place(WindowPlacement value, bool fit)
+    {
+        // Leaving maximized or full screen, and a maximized placement, activate the window
+        // (see WindowsActivation).
+        using var quiet = WindowsActivation.RefuseIfUnwanted();
+        var live = LiveResizeFrame;
+        LiveResizeFrame = null;
+        try
+        {
+            if (IsFullscreen) SetFullscreen(false);
+            if (OperatingSystem.IsWindows()) PlaceWin32(value, fit);
+            else PlaceSdl(value);
+            UpdateSize();
+        }
+        finally
+        {
+            LiveResizeFrame = live;
+            ResizePending = true;
+        }
+    }
+
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private void PlaceWin32(WindowPlacement placement)
+    private void PlaceWin32(WindowPlacement placement, bool fitToWorkAreas)
     {
         var hwnd = GetWin32Hwnd();
-        var fit = placement.FitTo(WindowsPlacement.WorkAreas());
+        // Not fitted again for a placement by the visible rectangle (VisiblePlacement), fitted as
+        // that: its outer rectangle reaches past the work area by the borders, and fitting it
+        // shrank the window by them.
+        var fit = fitToWorkAreas ? placement.FitTo(WindowsPlacement.WorkAreas()) : placement;
         // A maximized window cannot be moved: Windows keeps the state and snaps the rect back.
         // Restored here and now, not through Restore: the custom frame posts its restore
         // (WindowsCustomFrame.Restore), which landed after the move and took the window back to

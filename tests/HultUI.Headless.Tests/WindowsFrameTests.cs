@@ -71,6 +71,68 @@ public sealed class WindowsFrameTests
         Assert.Equal(new Rect(8, 0, 960, 1032), session.Window.ContentBounds);
     }
 
+    /// <summary>Placed by what is seen of them (<see cref="Window.VisiblePlacement"/>), two windows
+    /// on a display's halves meet edge to edge and fill the work area: the borders reach past it,
+    /// and are not fitted back in. By <see cref="Window.Placement"/> they left a gap of two borders
+    /// and one at each edge.</summary>
+    [Fact]
+    public void TwoWindowsPlacedByWhatIsSeen_MeetEdgeToEdge_AndFillTheWorkArea()
+    {
+        using var session = Session();
+        var left = session.Window;
+        var right = session.CreateWindow("right", style: WindowStyle.Borderless);
+        right.Window.SetRoot(Box.New());
+
+        left.Window.VisiblePlacement = new WindowPlacement(0, 0, 960, 1040, false);
+        right.Window.VisiblePlacement = new WindowPlacement(960, 0, 960, 1040, false);
+
+        Assert.Equal(new Rect(0, 0, 960, 1040), left.ContentBounds);
+        Assert.Equal(new Rect(960, 0, 960, 1040), right.ContentBounds);
+        Assert.Equal(new WindowPlacement(0, 0, 960, 1040, false), left.Window.VisiblePlacement);
+        Assert.Equal(new WindowPlacement(-8, 0, 976, 1048, false), left.Window.Placement);
+    }
+
+    [Fact]
+    public void OnAMonitorAt150Percent_AVisiblePlacementIsGrownByThatScalesBorders()
+    {
+        using var session = Session();
+        var window = session.Window.Window;
+
+        window.VisiblePlacement = new WindowPlacement(1920, 0, 1920, 2160, false);
+
+        Assert.Equal(new Rect(1920, 0, 1920, 2160), session.Window.ContentBounds);
+        Assert.Equal(new WindowPlacement(1909, 0, 1942, 2171, false), window.Placement);
+    }
+
+    /// <summary>Maximized, it is the bounds the window restores to, by what will be seen of them.</summary>
+    [Fact]
+    public void AMaximizedVisiblePlacement_RestoresToTheBoundsSeen()
+    {
+        using var session = Session();
+        var window = session.Window.Window;
+
+        window.VisiblePlacement = new WindowPlacement(100, 100, 800, 600, true);
+        session.PumpFrame();
+        Assert.True(window.IsMaximized);
+        Assert.Equal(new WindowPlacement(100, 100, 800, 600, true), window.VisiblePlacement);
+
+        window.Restore();
+        session.PumpFrame();
+        Assert.Equal(new Rect(100, 100, 800, 600), session.Window.ContentBounds);
+    }
+
+    /// <summary>A standard frame is modelled with no borders: what is seen is the placement.</summary>
+    [Fact]
+    public void AStandardFrame_ItsVisiblePlacementIsItsPlacement()
+    {
+        using var session = Session(WindowStyle.Default);
+        var window = session.Window.Window;
+
+        window.VisiblePlacement = new WindowPlacement(100, 100, 800, 600, false);
+
+        Assert.Equal(window.Placement, window.VisiblePlacement);
+    }
+
     [Fact]
     public void MaximizeAndRestore_LandOnTheNextPump_AndMaximizedTheContentIsTheWorkArea()
     {

@@ -223,6 +223,32 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
         }
     }
 
+    /// <summary>
+    /// Windows-like mode: <c>SDL3Window.VisiblePlacement</c>. The placement less the invisible
+    /// borders round the sides and bottom (the content of a window not maximized; a maximized
+    /// one's restored bounds less them), and set by that: fitted to the work areas as it is, then
+    /// grown by the borders of the monitor it lands on. Otherwise <see cref="Placement"/>.
+    /// </summary>
+    public WindowPlacement? VisiblePlacement
+    {
+        get
+        {
+            if (!WindowsLike) return Placement;
+            var outer = IsMaximized ? _placement ?? DefaultPlacement() : Outer;
+            int b = Border(MonitorOf(outer).Scale);
+            return new WindowPlacement(outer.X + b, outer.Y, outer.Width - 2 * b, outer.Height - b, IsMaximized);
+        }
+        set
+        {
+            if (value is not { IsUsable: true }) return;
+            if (!WindowsLike) { Placement = value; return; }
+            var visible = value.FitTo(Monitors.Select(m => m.WorkArea).ToList());
+            int b = Border(MonitorOf(visible).Scale);
+            PlaceLikeWindows(new WindowPlacement(visible.X - b, visible.Y, visible.Width + 2 * b, visible.Height + b,
+                visible.Maximized), fitToWorkAreas: false);
+        }
+    }
+
     /// <summary>The simulated monitors this window lives on; null or empty for no desktop.</summary>
     internal Func<IReadOnlyList<MonitorInfo>>? Desktop { get; init; }
 
@@ -360,9 +386,9 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
     /// (<c>ShowWindow</c>, not the custom frame's posted restore), the outer rectangle set, then
     /// maximized — posted when shown, at once before.
     /// </summary>
-    private void PlaceLikeWindows(WindowPlacement value)
+    private void PlaceLikeWindows(WindowPlacement value, bool fitToWorkAreas = true)
     {
-        var fit = value.FitTo(Monitors.Select(m => m.WorkArea).ToList()) with { Maximized = false };
+        var fit = (fitToWorkAreas ? value.FitTo(Monitors.Select(m => m.WorkArea).ToList()) : value) with { Maximized = false };
         IsFullscreen = false;
         if (IsMaximized) SystemCommand(maximize: false);
         _outer = fit;

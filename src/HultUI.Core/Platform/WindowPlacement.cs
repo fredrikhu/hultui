@@ -13,7 +13,9 @@ namespace HultUI.Core.Platform;
 /// <para><b>In the platform's desktop units, and only for it.</b> Windows reports the outer
 /// window rectangle in physical pixels; SDL elsewhere reports the client area in its window
 /// coordinates — pixels on X11, logical units on Wayland, which never reports a position or
-/// accepts one. Save the value and hand it back on the same machine; do not compute with it.</para>
+/// accepts one. Save the value and hand it back on the same machine; do not compute with it.
+/// To place windows by their edges (tiles, halves), use <c>Window.VisiblePlacement</c>, the same
+/// record by what is seen of the window, without the invisible resize borders.</para>
 /// <para><b>Restoring never strands a window.</b> A monitor that is gone, smaller or moved
 /// would leave saved bounds partly or wholly off screen, and a window whose title bar is out of
 /// reach cannot be dragged back. The platform runs the bounds through <see cref="FitTo"/>

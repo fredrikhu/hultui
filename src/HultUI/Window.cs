@@ -501,6 +501,27 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         set => PlatformWindow.Placement = value;
     }
 
+    /// <summary>
+    /// The window's placement by what the person sees of it: its rectangle without the invisible
+    /// resize borders Windows keeps outside a window's left, right and bottom edges (8 px at 100 %,
+    /// 11 at 150 %). For placing windows by their edges, which <see cref="Placement"/> (the outer
+    /// rectangle, a value to save and give back) is not for: two windows given the halves of a
+    /// work area this way meet edge to edge, where by <see cref="Placement"/> a gap of two borders
+    /// was left between them, and one could not reach the work area's edges, since the bounds are
+    /// fitted to it and the borders reach past it.
+    /// </summary>
+    /// <remarks>
+    /// <para>Setting it fits the visible rectangle to the monitors' work areas and grows it by the
+    /// borders at the scale of the monitor it lands on. Maximized, it is the bounds the window
+    /// restores to. Off Windows it is <see cref="Placement"/>, which there is the client area: a
+    /// title bar the window system draws (X11) is outside both.</para>
+    /// </remarks>
+    public WindowPlacement? VisiblePlacement
+    {
+        get => PlatformWindow.VisiblePlacement;
+        set => PlatformWindow.VisiblePlacement = value;
+    }
+
     public void ToggleFullscreen() => SetFullscreen(!IsFullscreen);
 
     /// <summary>
