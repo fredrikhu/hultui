@@ -46,14 +46,25 @@ public sealed unsafe class OsDropTests
         failure?.Throw();
     }
 
-    private static bool PumpUntil(Application app, Func<bool> condition, double seconds = 20)
+    /// <summary>
+    /// Runs frames until the condition holds, parked between them in the platform's own wait, as
+    /// <c>Application.Run</c> parks: it dispatches each message as it arrives.
+    /// </summary>
+    /// <remarks>
+    /// Not <c>Thread.Sleep</c>: WebView2's half in this process works by messages to this thread,
+    /// and a sleeping thread takes none, so each step of a drag waited out a whole sleep. That
+    /// sleep was 1 ms only while SDL held Windows' timer at 1 ms for the whole process; since it
+    /// holds it only while frames are paced (<c>SdlTimerResolution</c>), it is 15.6 ms, and the
+    /// page's dragenter came 0.85 s after DragEnter and its acceptance never inside 6 s.
+    /// </remarks>
+    private static bool PumpUntil(Application app, SdlWindowingPlatform platform, Func<bool> condition, double seconds = 20)
     {
         var deadline = Stopwatch.StartNew();
         while (!condition())
         {
             if (deadline.Elapsed.TotalSeconds > seconds) return false;
             app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
-            Thread.Sleep(1);
+            platform.WaitForEvents(1);
         }
         return true;
     }
@@ -103,12 +114,13 @@ public sealed unsafe class OsDropTests
     public void AnElement_KnowsTheFilesWhileTheyHover_AndTheOperatingSystemIsToldItsAnswer() => OnSta(() =>
     {
         var seen = new List<string>();
-        using var app = new Application(new SdlWindowingPlatform(), "Drop", 400, 300);
+        var platform = new SdlWindowingPlatform();
+        using var app = new Application(platform, "Drop", 400, 300);
         app.SetRoot(Box.New().FlexGrow(1).Children(
             Box.New().Width(200).Height(100)
                 .OnDragOver(e => { seen.Add($"over {e.DragData.Files.Count}"); e.Accepted = e.DragData.HasFiles; })
                 .OnDrop(e => seen.Add("drop " + Path.GetFileName(e.DragData.Files[0])))));
-        PumpUntil(app, () => false, seconds: 0.3);
+        PumpUntil(app, platform, () => false, seconds: 0.3);
 
         var file = Path.Combine(Path.GetTempPath(), "hultui-drop-a.txt");
         var data = DropData.Create([file], null);
@@ -131,7 +143,8 @@ public sealed unsafe class OsDropTests
     public void AWebPage_IsOfferedTheDrag_WithItsFiles_AndItsAnswerReachesTheOperatingSystem() => OnSta(() =>
     {
         if (new WebView2Engine().Availability is { IsAvailable: false }) return;
-        using var app = new Application(new SdlWindowingPlatform(), "Drop", 480, 320);
+        var platform = new SdlWindowingPlatform();
+        using var app = new Application(platform, "Drop", 480, 320);
         using var engine = new WebView2Engine();
         using var web = new WebViewController(engine, new WebViewOptions
         {
@@ -149,7 +162,7 @@ public sealed unsafe class OsDropTests
               </script>
             </body></html>
             """);
-        Assert.True(PumpUntil(app, () => received.Contains("\"ready\"")), "the page never got ready");
+        Assert.True(PumpUntil(app, platform, () => received.Contains("\"ready\"")), "the page never got ready");
 
         var data = DropData.Create([Path.Combine(Path.GetTempPath(), "hultui-drop-page.txt")], null);
         try
@@ -159,10 +172,11 @@ public sealed unsafe class OsDropTests
             // A drag flicked into the middle of a drop zone: OLE calls DragOver on every mouse
             // event from the moment the drag enters, before the page has even seen it. The
             // page's acceptance (it cancels its dragover) must still reach OLE, and soon: with
-            // every call passed on to WebView2 it took 4 s here, and half a second by hand.
+            // every call passed on to WebView2 it took 0.5 s here (4 s with the old sleeping
+            // pump), and half a second by hand; at the engine's pace, 0.18 s.
             var clock = Stopwatch.StartNew();
             DragEnter(target, data, at);
-            Assert.True(PumpUntil(app, () => DragOver(target, at) != 0, seconds: 1),
+            Assert.True(PumpUntil(app, platform, () => DragOver(target, at) != 0, seconds: 1),
                 $"the page's acceptance had not reached the operating system after {clock.ElapsedMilliseconds} ms");
             Console.Error.WriteLine($"[timing] accepted after {clock.ElapsedMilliseconds} ms");
             Assert.Contains("\"enter:Files\"", received);

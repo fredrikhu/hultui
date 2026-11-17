@@ -649,6 +649,23 @@ with the last answer. Edge pays none of this: its drop target is in the browser'
 A first guess — that WebView2 re-asks the page only when the point moves — was wrong; it
 came from a test flooding it with calls.
 
+**The test's pump, not the page** (2026-11-17). `OsDropTests` began failing after SDL stopped
+holding Windows' timer at 1 ms for the whole process (cd7e3db2, `SdlTimerResolution`): the
+page's acceptance had not reached OLE after 1 s. WebView2's half in our process works by
+messages to the UI thread, and the test parked between frames in `Thread.Sleep(1)`, which takes
+no messages and now lasts 15.6 ms, so every step of the drag waited out a sleep: `dragenter`
+0.85 s after `DragEnter`, a `dragover` every 0.6 s, no acceptance in 6 s. With
+`SDL_TIMER_RESOLUTION=1` it passed again (0.23 s). A data object made on an MTA thread changed
+nothing, so the page's reads of the data are not the cost. The test now parks in the platform's
+own wait, as `Application.Run` does, which dispatches each message as it arrives: acceptance
+after 0.18 s, and 0.19 s with the timer forced coarse (`SDL_TIMER_RESOLUTION=0`). Apps never
+had the stall: their loop parks in that wait. So the numbers above were measured with a pump
+that took no messages, the 120 ms to `dragenter` among them. With this pump, `dragenter`
+reaches the page in 16–28 ms. Passing every hover on still costs: acceptance after 0.5 s,
+against 0.2 s at the engine's pace. The quiet 150 ms now accounts for most of that 0.2 s: with
+no quiet period and one hover per 25 ms, acceptance came after 0.06 s. Not changed without a
+check by hand.
+
 What the synthetic test could not do, for the record: played without a real `DoDragDrop`, the
 browser never finishes the drag —
 `drop` and `dragleave` never reach the page, and its `dragover` events keep coming after
