@@ -133,9 +133,10 @@ public static class Icons
 
     private static SKPath Rect(float x, float y, float w, float h, float r)
     {
-        var p = new SKPath();
-        p.AddRoundRect(new SKRect(x, y, x + w, y + h), r, r);
-        return p;
+        // SkiaSharp 4 builds paths with SKPathBuilder; SKPath's own Add* are obsolete.
+        using var builder = new SKPathBuilder();
+        builder.AddRoundRect(new SKRect(x, y, x + w, y + h), r, r);
+        return builder.Detach();
     }
 
     // The design's file-type glyphs (batch-1/2 handoff sprite). Colours read the live ramp.

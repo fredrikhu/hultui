@@ -24,6 +24,53 @@ entry, and remove it when the work starts.
 
 ## 1. SkiaSharp 4 and HarfBuzzSharp 14
 
+**Status (2026-11-17): in progress on `claude/skiasharp-4`, SkiaSharp 4.156.1 (Skia m156) with HarfBuzzSharp 14.4.0.101.**
+
+- **Builds** with no compile breaks. `NativeTextBlob`'s four C functions are declared with the same signatures, so its pin moves to 4.156.1.
+- **Allocations fixed (step 5).** SkiaSharp 4's `SKPath` mutations make a new `SKPathBuilder` (80 B) each time a drawn path is changed again. The pooled path is now an `SKPathBuilder`, drawn and clipped through `NativePath` (four C functions, like `NativeTextBlob`; docs/DECISIONS.md, 2026-11-17). `PolygonTests`, `TextDrawAllocationTests` and `FrameAllocationTests` are back to 0 B a frame, and `NativePathTests` (8) hold the exports, the signatures and the pixels to SkiaSharp's own path calls.
+- **Bold text fixed (step 4).** In 4.x, `SKTypeface.FromFamilyName(name, style)` is `MatchFamily(name, style) ?? Default`, so a family DirectWrite does not know (`sans-serif`) came back as the regular default face and dropped the weight. `SkiaFontCollection` now asks for the default family in the weight and slant wanted, as 3.x's legacy lookup answered. The four bold tests pass; `HultUI.Rendering.Skia.Tests` 435/435.
+- **Obsolete calls** replaced: the `DrawText` overload, `SKTypeface.GetGlyph` (the face's own `SKFont` now), and `SKPath.Add*` in two icon sets.
+- **Goldens (step 6): 14 baselines regenerated, each reviewed.** Five `ControlGoldenTests`, four `OpacityLayerTests` and four `RichTextGoldenTests` failed; `TablesAndPictures` holds two baselines, and its second (`richtext-picture-selected`) only showed when the first was rewritten. Same sizes; 1.3–7.4 % of pixels change, the largest channel difference is 31–72 of 255, and at most one pixel per image differs by more than 64. Zoomed, glyph shapes, positions and weights and the shadow blur are identical; only edge anti-aliasing differs, as expected of Skia's path rasterizer between m119 and m156 (the goldens draw text as outlines).
+- **Full suite on Windows** (after the regenerated goldens): 29 of 30 assemblies pass. The 30th fails only `Junction.Tests` `CommitPatchTests.AnotherCommitsDetail_LetsTheShownOneGo`, which fails locally on `main` too and passes in CI.
+- **Linux, first run (WSL Fedora, `HultUI.CrossPlatform.slnf`):** everything passed except `ControlGoldenTests.Text_WeightsFamiliesSizesAndWrapping`. In `text.png`, 21 pixels differed from the Windows baseline (largest channel difference 45): the stroke ends of the oblique `t` in "the slant", and the tops of "Åäö". Regenerated on Linux, `opacity-overflow.png` also differed in bytes (62 pixels, at most 4 apart, inside its tolerance).
+  - **Cause:** the glyph outlines. Under `TextAsOutlines` they came from `SKFont.GetGlyphPath`, which reads the font through DirectWrite on Windows and FreeType on Linux, and the two disagree on some glyphs. For the five bundled DejaVu faces at 11, 13, 14 and 24 px, 44 of 1,260 outlines differ in structure (DirectWrite keeps a cubic where FreeType has a quadratic and a line), and 16 differ by 0.005–0.02 px. SkiaSharp 3.119.4 gives exactly the same differences, so they are not new. Skia m119's rasterizer happened to make the same `text.png` pixels from both; m156's does not.
+  - **`main` was not fully byte-identical either:** at 99db58cf, `opacity-overflow.png` and `opacity-shadow.png` made on Linux differ from Windows, inside their tolerance.
+- **Fixed: pinned text takes its outlines from HarfBuzz** (`GlyphOutlines`; docs/DECISIONS.md, 2026-11-17). HarfBuzz reads the font file itself through `hb_font_draw_glyph`, which both 14.4 native libraries export but HarfBuzzSharp does not bind, so it is called through function pointers. Its outlines for the 1,260 glyphs are byte-identical on Windows and Linux, with the points Skia's have. Single-point contours (hinting anchors, such as one in DejaVu's u) are dropped, as DirectWrite and FreeType drop them. `GlyphOutlinesTests` (6) holds the exports, the bounds to Skia's within 0.03 px, and the floats to one hash. Regenerated from it, only `text.png` and `opacity-overflow.png` changed on Windows, and both became byte-identical to the frames Linux had made.
+- **Linux, second run:** `HultUI.CrossPlatform.slnf` passes in full (22 assemblies, the outline hash included). All 14 baselines regenerated on Linux are **byte-identical** to the Windows ones. Junction, Meridian, Aperture and Reel are not in that filter and were not run on Linux; Meridian's pinned-text `NarrowEditorLayoutTests` passes on Windows.
+- **Perf A/B (step 7), measured 2026-11-17** against `main` 99db58cf with `scripts/perf/step-ab.ps1`: two alternated, idle-gated pairs each on JIT and NativeAOT. Allocations moved on **no row**, and the A/A pairs flag no row.
+  - **Windows: 38–67 rows slower, 3–6 faster.** The slower rows are 10–17 % in **render**, and on AOT up to 50 % (`paint/dense text screen`, `a11y/type in a rich text editor inside a VirtualList row`): everything that draws much text, rounded boxes or 1 px borders. `paint/tiles shadow` is 55 % faster, `overlay/dialog open` 20 %, and the real-loop rows that fade (`anim/signal tween`, `media/video player bar fade`) 15–28 %.
+  - **Cause of the render rows: Skia m156 rasterizes RGBA8888 more slowly than m119 did**, and the headless surface (`SkiaRasterRenderSurface`) is RGBA8888. Each draw call timed alone on a CPU surface, SkiaSharp 3.119.4 against 4.156.1 (P-cores, min of 300 batches):
+
+    | 400 or 1,600 draws | Windows RGBA | Windows BGRA | Linux RGBA | Linux BGRA |
+    |---|---|---|---|---|
+    | AA rects | +34 % | 0 % | +14 % | +3 % |
+    | AA round rects | +14 % | −12 % | +8 % | −3 % |
+    | 1 px round-rect strokes | +36 % | −5 % | +14 % | 0 % |
+    | linear-gradient round rects | +13 % | +13 % | +3 % | +2 % |
+    | text blobs, 11 px | +20 % | −10 % | +6 % | −16 % |
+
+    BGRA8888 is Skia's native order on both OSes (`SKImageInfo.PlatformColorType`). RGBA costs about 2× BGRA on Windows and 3–8× on Linux in **both** versions: 1,600 text blobs take 1.2 ms in BGRA and 2.4 in RGBA on Windows (3.119), and 1.5 against 8.0 ms on Linux. The software renderer (`RendererKind.Software`, the fallback when OpenGL cannot start) drew into the same surface until c39c9478 (on `main` the same day) had it draw straight into SDL's window surface, which is BGRA on Windows. GPU windows do not pay it.
+  - **Cause of the layout rows: HarfBuzz 14.4's shaper costs more per call.** Swapping only `libHarfBuzzSharp.dll` 8.3.1 → 14.4 under `main`'s build reproduces every layout move: `text/create 2,000 unique labels` +14.5 %, `… emoji labels` +13.6 %, `text/styled bidi ellipsis` +6.9 %, `text/bidi ellipsis` −5.5 %. Timed alone on a kept buffer and font, `hb_shape` on a one-letter word takes 237 → 414 ns with Segoe UI (+193 ns), +137 ns with Arial and +37 ns with DejaVu Sans. On 3–9 letter words Segoe UI is +32 % slower, Arial +1 % and DejaVu 26 % faster, and 80-character lines are +4 %. It is in running the shape plan: a kept plan (`hb_shape_plan_execute`) saves 40–50 ns on both versions alike. Only words the word cache has not shaped yet pay it.
+  - **Linux (WSL Fedora, 207 rows, all but the 28 UIA rows; three pairs, unpinned because WSL shows no CPU frequencies): 0–1 slower, 2 faster.** `paint/tiles rounded + border` +11 % in two of three pairs; `paint/tiles shadow` −22 %, `anim/signal tween` −13 %; `text/create 2,000 unique labels` −6.5 %. HarfBuzz 7.3 → 14.4 here.
+  - **The m119-named decisions.** The GPU text-blob cache that the whole-pixel baseline works around (2026-11-02) is unchanged in m156: `TextBlob::Key` still takes the origin's subpixel fraction when a blob has direct sub-runs, and `BlobIDCacheEntry::findBlobIndex` still scans every entry for the blob on each draw, so the decision stands; its GPU numbers belong to step 8. The run-blob maps and the opacity layer bounds show no move of their own: `paint/tiles transform + opacity` −6 %, `paint/400 faded icons` +3 %, `scroll/jump` +10 % (render, RGBA).
+- **Fixed: the CPU surface draws in BGRA, Skia's native order** (docs/DECISIONS.md, 2026-11-17). `SkiaRasterRenderSurface` takes `SKImageInfo.PlatformColorType` and says so (`PixelColorType`); `PeekPixels` and `CapturePixels` hand out BGRA, while `ReadPixels`, `PresentCapturing` and the golden comparison still give RGBA; the software renderer's copy, kept for window surfaces Skia cannot draw into, tells SDL `ARGB8888`. Every golden was regenerated (blends round differently in the native blitters, at most 4 of 255), and all 14 are again byte-identical on Linux. `SkiaRasterRenderSurfaceTests.TheFrame_IsInSkiasNativeOrder_BgraOnTheDesktop` holds it.
+  - **Suites:** Windows, every assembly passes, Junction included; Vesper's `KeptRowTests.AFolderMeasuredWithSpace_ShowsItsTotal` failed once in the full run (a 10 s wait for a background folder size, under load) and passes 3 of 3 alone. Linux, `HultUI.CrossPlatform.slnf` passes in full; `HultUI.Headless.Tests` takes 25 s instead of 33.
+  - **Perf A/B again, against `main` 99db58cf:** Windows JIT 0 slower and 196–198 faster in both pairs; NativeAOT 0–1 slower (`text/create 2,000 unique labels` +15 %, the HarfBuzz cost above) and 190–194 faster. Linux 0–1 slower and 190–192 faster; the one is `input/wheel over a list that cannot scroll, real loop` +14–19 % in two of three pairs, a step of 8 µs that draws no frame (no Skia in it). Allocations moved on no row, and the A/A pairs flag none. Minimum ms, `main` → this branch:
+
+    | Row | Windows JIT | Linux |
+    |---|---|---|
+    | `paint/dense text screen` | 0.708 → 0.377 | 2.176 → 0.465 |
+    | `paint/tiles rounded + border` | 0.901 → 0.486 | 2.473 → 0.703 |
+    | `paint/tiles shadow` | 4.372 → 0.867 | 11.683 → 1.116 |
+    | `paint/tiles transform + opacity` | 2.111 → 0.940 | 7.684 → 1.416 |
+    | `richtext/redraw at the top of a 300x10 table` | 0.616 → 0.333 | 2.005 → 0.453 |
+    | `terminal/dense colour screen, unique rows` | 5.902 → 4.102 | 11.781 → 5.229 |
+    | `paint/tiles gradient` | 1.433 → 1.523 | 5.265 → 5.545 |
+    | `text/create 2,000 unique labels` | 2.857 → 3.249 | 3.065 → 2.419 |
+
+    Gradients stay about 6 % slower (m156's gradient shader, in either byte order), and cold Segoe UI words about 14 % (HarfBuzz 14.4). Shaping whole runs instead of word by word would be the way round the HarfBuzz cost: a text-pipeline change for a plan of its own, not part of this upgrade.
+- **Left:** the real-window check (step 8).
+
 **What broke in #2** (CI run 43824026613, 2026-11-16; the log was read only up to the first
 failures, so there may be more):
 

@@ -131,6 +131,21 @@ public static class FileIcons
 
     private static SKPath Svg(string d) => SKPath.ParseSvgPathData(d);
 
+    // SkiaSharp 4 builds paths with SKPathBuilder; SKPath's own Add* are obsolete.
+    private static SKPath RoundRect(SKRect rect, float radius)
+    {
+        using var builder = new SKPathBuilder();
+        builder.AddRoundRect(rect, radius, radius);
+        return builder.Detach();
+    }
+
+    private static SKPath Circle(float x, float y, float radius)
+    {
+        using var builder = new SKPathBuilder();
+        builder.AddCircle(x, y, radius);
+        return builder.Detach();
+    }
+
     /// <summary>
     /// Parses path data authored in a <paramref name="from"/>-unit box and places it as a
     /// <paramref name="box"/>-unit glyph at (<paramref name="x"/>, <paramref name="y"/>).
@@ -191,12 +206,8 @@ public static class FileIcons
                 break;
 
             case FileIconKind.Image:
-                var rect = new SKPath();
-                rect.AddRoundRect(new SKRect(2.5f, 3, 13.5f, 13), 1.2f, 1.2f);
-                yield return (rect, false, 1.2f, p.Neutral500);
-                var lens = new SKPath();
-                lens.AddCircle(6, 6.4f, 1);
-                yield return (lens, true, 0, p.Neutral500);
+                yield return (RoundRect(new SKRect(2.5f, 3, 13.5f, 13), 1.2f), false, 1.2f, p.Neutral500);
+                yield return (Circle(6, 6.4f, 1), true, 0, p.Neutral500);
                 yield return (Svg("M3.4 11.6l3-3 2.4 2.4 1.8-1.6 2 2.2"), false, 1.1f, p.Neutral500);
                 break;
 

@@ -37,6 +37,23 @@ public sealed class SkiaRasterRenderSurface : IRenderSurface, ISkiaFrameCapture
     /// <summary>Framebuffer height in physical pixels.</summary>
     public int PixelHeight => _height;
 
+    /// <summary>
+    /// The byte order of the frame's pixels, as <see cref="PeekPixels"/> and <see cref="Snapshot"/>
+    /// hand them out: Skia's native order (<see cref="SKImageInfo.PlatformColorType"/>), which is
+    /// <see cref="SKColorType.Bgra8888"/> on Windows, Linux and macOS. Premultiplied. A surface
+    /// that draws into a <see cref="PixelTarget"/> draws in the target's order, and says
+    /// <see cref="SKColorType.Unknown"/> until its first frame.
+    ///
+    /// <para>Not RGBA, though the GL backend's framebuffer is: Skia's CPU rasterizer takes its fast
+    /// paths only into its native order. Into RGBA the same frame cost about twice as much on
+    /// Windows and three to eight times on Linux, in Skia m119 and m156 alike, and m156 widened
+    /// the gap (docs/DECISIONS.md, 2026-11-17). <see cref="ReadPixels"/> and
+    /// <see cref="PresentCapturing"/> still give RGBA.</para>
+    /// </summary>
+    public SKColorType PixelColorType => _target is null ? ColorType : _drawingInto.ColorType;
+
+    private static readonly SKColorType ColorType = SKImageInfo.PlatformColorType;
+
     /// <param name="text">Text services to use instead of building its own: one several
     /// surfaces share. The caller keeps it and disposes it; the surface does not. Null
     /// builds a fresh one, which the surface disposes with itself.</param>
@@ -106,8 +123,8 @@ public sealed class SkiaRasterRenderSurface : IRenderSurface, ISkiaFrameCapture
         _scaleFactor = scaleFactor;
 
         _surface?.Dispose();
-        // Premul RGBA to match the GL backend's pixel format.
-        var info = new SKImageInfo(widthPx, heightPx, SKColorType.Rgba8888, SKAlphaType.Premul);
+        // Skia's native order, premultiplied (see PixelColorType).
+        var info = new SKImageInfo(widthPx, heightPx, ColorType, SKAlphaType.Premul);
         _surface = SKSurface.Create(info)
             ?? throw new InvalidOperationException($"Failed to create raster surface ({widthPx}x{heightPx})");
 
@@ -164,10 +181,10 @@ public sealed class SkiaRasterRenderSurface : IRenderSurface, ISkiaFrameCapture
 
     /// <summary>
     /// Where the current frame's pixels lie, without copying them, for a platform window that
-    /// copies them to the screen: <see cref="PixelWidth"/> by <see cref="PixelHeight"/>, RGBA8888
-    /// premultiplied in the surface's own memory (a target's are in its own order). Valid until
-    /// the next draw or <see cref="Resize"/>, because a draw after a <see cref="Snapshot"/> moves
-    /// them. False before the first Resize.
+    /// copies them to the screen: <see cref="PixelWidth"/> by <see cref="PixelHeight"/>, in
+    /// <see cref="PixelColorType"/> premultiplied. Valid until the next draw or
+    /// <see cref="Resize"/>, because a draw after a <see cref="Snapshot"/> moves them. False
+    /// before the first Resize.
     /// </summary>
     public bool PeekPixels(out nint pixels, out int rowBytes)
     {

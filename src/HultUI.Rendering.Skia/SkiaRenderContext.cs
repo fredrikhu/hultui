@@ -23,7 +23,8 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
     private readonly SKFont _pooledFont = new() { Subpixel = true };
     private readonly SKRoundRect _pooledRoundRect = new();
     private readonly SKPoint[] _pooledRadii = new SKPoint[4];
-    private readonly SKPath _pooledPath = new();
+    // Built here, drawn and clipped through NativePath, which empties it: no wrapper per shape.
+    private readonly SKPathBuilder _pooledPath = new();
     // Canvas text has always drawn SKTypeface.Default without subpixel positioning;
     // a dedicated font keeps those pixels identical rather than inheriting the text
     // renderer's settings.
@@ -67,7 +68,7 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
     internal void ReleaseGpuSource(IGpuImageSource source) => _releasedSources.Enqueue(source);
 
     internal SKPaint PooledPaint => _pooledPaint;
-    internal SKPath PooledPath => _pooledPath;
+    internal SKPathBuilder PooledPath => _pooledPath;
     internal SKFont PooledCanvasFont => _pooledCanvasFont;
 
     // Cached positioned-blob per run of glyphs. Shaping itself is cached by
@@ -160,7 +161,11 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
     // and a scrolled list draws dozens of new rows a step.
     private readonly SKTextBlobBuilder _blobBuilder = new();
 
-    public SkiaRenderContext() => NativeTextBlob.EnsureAvailable();
+    public SkiaRenderContext()
+    {
+        NativeTextBlob.EnsureAvailable();
+        NativePath.EnsureAvailable();
+    }
 
     // Sub-blobs: the glyphs of one run that can ink one colour stretch of a spanned line (see
     // DrawRunPart). Keyed by the run itself, not its glyphs, so a lookup hashes nothing: a run
@@ -282,16 +287,48 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
     // run, up to MaxBlobGlyphsComposed; a longer run puts its own array together, as before.
     private GlyphPosition[]? _blobGlyphs;
     private const int MaxBlobGlyphsComposed = 4096;
-    private readonly SKFont _outlineFont = new() { Hinting = SKFontHinting.None, Subpixel = true, LinearMetrics = true };
+    // The outlines TextAsOutlines draws; made when it is turned on.
+    private GlyphOutlines? _glyphOutlines;
+    private bool _textAsOutlines;
 
     /// <summary>
     /// Draws text as its glyphs' outlines through Skia's own path rasteriser, rather than
     /// through the platform's glyph scaler. DirectWrite on Windows and FreeType on Linux shade
-    /// the same font file differently — thousands of pixels over a few lines, even unhinted —
-    /// while the outlines come out byte for byte the same. Slower, and without hinting; for
-    /// golden images, which have to match on every machine.
+    /// the same font file differently — thousands of pixels over a few lines, even unhinted.
+    /// The outlines are read by HarfBuzz from the font file (<see cref="GlyphOutlines"/>), not
+    /// by those two, whose outlines differ slightly too, so they come out byte for byte the same
+    /// on every OS. Slower, and without hinting; for golden images, which have to match on every
+    /// machine.
     /// </summary>
-    public bool TextAsOutlines { get; set; }
+    /// <exception cref="EntryPointNotFoundException">Turned on with a HarfBuzz library that lacks
+    /// the draw API.</exception>
+    public bool TextAsOutlines
+    {
+        get => _textAsOutlines;
+        set
+        {
+            if (value) _glyphOutlines ??= new GlyphOutlines();
+            _textAsOutlines = value;
+        }
+    }
+
+    /// <summary>
+    /// <paramref name="text"/> in <paramref name="font"/> as one path of HarfBuzz-read outlines,
+    /// its origin at (<paramref name="x"/>, <paramref name="y"/>): what
+    /// <see cref="SKFont.GetTextPath(string, SKPoint)"/> makes, the glyphs placed where it places
+    /// them, but the same on every OS. Only under <see cref="TextAsOutlines"/>.
+    /// </summary>
+    internal SKPath TextOutlinePath(SKFont font, string text, float x, float y)
+    {
+        var outlines = _glyphOutlines ?? throw new InvalidOperationException("TextAsOutlines is off.");
+        var glyphs = font.GetGlyphs(text);
+        var positions = font.GetGlyphPositions(text, new SKPoint(x, y));
+        var typeface = font.Typeface ?? SKTypeface.Default;
+        using var builder = new SKPathBuilder();
+        for (int i = 0; i < glyphs.Length; i++)
+            outlines.Add(builder, typeface, glyphs[i], font.Size, positions[i].X, positions[i].Y);
+        return builder.Detach();
+    }
 
     /// <summary>The face canvas-element text draws in, when not the platform's default — a
     /// pinned collection's, so that text is pinned too.</summary>
@@ -721,14 +758,14 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
 
                 // The pooled path: the clip copies it, and Stroke draws a round rect, not a path.
                 var tri = _pooledPath;
-                tri.Rewind();
+                tri.Reset();
                 tri.MoveTo(ax, ay);
                 tri.LineTo(bx, by);
                 tri.LineTo(cx, cy);
                 tri.Close();
 
                 Canvas.Save();
-                Canvas.ClipPath(tri, antialias: true);
+                NativePath.Clip(Canvas, tri, SKClipOperation.Intersect, antialias: true);
                 Stroke(width);
                 Canvas.Restore();
             }
@@ -2020,7 +2057,7 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
         _pooledPaint.Reset();
         _pooledPaint.Color = ToSkColor(fill);
         _pooledPaint.IsAntialias = true;
-        Canvas.DrawPath(path, _pooledPaint);
+        NativePath.Draw(Canvas, path, _pooledPaint);
     }
 
     public void DrawPolyline(ReadOnlySpan<Point> points, Color color, float strokeWidth)
@@ -2034,17 +2071,18 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
         _pooledPaint.StrokeWidth = strokeWidth;
         _pooledPaint.StrokeJoin = SKStrokeJoin.Round;
         _pooledPaint.StrokeCap = SKStrokeCap.Butt;
-        Canvas.DrawPath(path, _pooledPaint);
+        NativePath.Draw(Canvas, path, _pooledPaint);
     }
 
     // The pooled path, emptied, through the points. The draw copies the geometry, so the path is
     // free again once it returns. A new SKPath per shape was ~80 B, and the shapes are drawn
     // again every frame: a terminal's Powerline separators (5.6 KB a frame over six prompt
-    // lines), a rich text editor's ticks.
-    private SKPath PathThrough(ReadOnlySpan<Point> points)
+    // lines), a rich text editor's ticks. SkiaSharp 4's SKPath costs the same again through its
+    // own builder, so this is a builder drawn through NativePath.
+    private SKPathBuilder PathThrough(ReadOnlySpan<Point> points)
     {
         var path = _pooledPath;
-        path.Rewind();
+        path.Reset();
         path.MoveTo(points[0].X, points[0].Y);
         for (int i = 1; i < points.Length; i++) path.LineTo(points[i].X, points[i].Y);
         return path;
@@ -2132,7 +2170,8 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
     ///
     /// <para>Skia's GPU text-blob cache keeps a blob's glyph vertices per text blob and per
     /// fraction of a device pixel its origin was drawn at (<c>TextBlob::Key::Make</c> in Skia
-    /// m119, which SkiaSharp 3.119 builds), in a list per blob that every draw of it scans
+    /// m119, which SkiaSharp 3.119 builds, and unchanged in m156, which SkiaSharp 4.156 builds),
+    /// in a list per blob that every draw of it scans
     /// (<c>BlobIDCacheEntry::findBlobIndex</c>). The blob maps here share one blob between every
     /// run of the same face, size and text, so a cell or line drawn at many fractional heights
     /// piled up an entry per height for as long as the blob lived: plan 17, round 7 counted
@@ -2231,15 +2270,12 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
         if (run.Glyphs.Length == 0)
             return null;
 
-        _outlineFont.Typeface = (SKTypeface)run.Font.NativeHandle;
-        _outlineFont.Size = run.FontSize;
-        var path = new SKPath();
+        var outlines = _glyphOutlines!;
+        var typeface = (SKTypeface)run.Font.NativeHandle;
+        using var builder = new SKPathBuilder();
         foreach (var glyph in run.Glyphs)
-        {
-            using var outline = _outlineFont.GetGlyphPath((ushort)glyph.GlyphId);
-            if (outline is not null)
-                path.AddPath(outline, glyph.X, glyph.Y);
-        }
+            outlines.Add(builder, typeface, (uint)glyph.GlyphId, run.FontSize, glyph.X, glyph.Y);
+        var path = builder.Detach();
 
         if (_runPathCache.Count >= RunBlobCacheMaxSize)
             ClearRunPathCache();
@@ -2381,7 +2417,7 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
         ClearBlurFilters();
         ClearGradientShaders();
         _blobBuilder.Dispose();
-        _outlineFont.Dispose();
+        _glyphOutlines?.Dispose();
         _boundsFont.Dispose();
         _pooledPaint.Dispose();
         _pooledFont.Dispose();

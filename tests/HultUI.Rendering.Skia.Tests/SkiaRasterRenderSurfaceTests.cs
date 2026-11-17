@@ -91,6 +91,22 @@ public class SkiaRasterRenderSurfaceTests
     }
 
     /// <summary>
+    /// Skia's CPU rasterizer is fast only into its native order: into RGBA8888 the same frames
+    /// cost about twice as much on Windows and three to eight times on Linux (2026-11-17). Both
+    /// OSes' native order is BGRA, so a surface back on RGBA fails here first.
+    /// </summary>
+    [Fact]
+    public void TheFrame_IsInSkiasNativeOrder_BgraOnTheDesktop()
+    {
+        using var surface = new SkiaRasterRenderSurface();
+        surface.Resize(4, 4, 1f);
+        Assert.Equal(SkiaSharp.SKImageInfo.PlatformColorType, surface.PixelColorType);
+        Assert.Equal(SkiaSharp.SKColorType.Bgra8888, surface.PixelColorType);
+        using var image = surface.Snapshot();
+        Assert.Equal(SkiaSharp.SKColorType.Bgra8888, image.ColorType);
+    }
+
+    /// <summary>
     /// What the software window copies to the screen each frame: the frame's own pixels, read
     /// again every time. A draw after a Snapshot moves them, so an address kept from an earlier
     /// frame would show a stale frame.
@@ -105,12 +121,12 @@ public class SkiaRasterRenderSurfaceTests
         DrawFrame(surface, Color.Red);
         Assert.True(surface.PeekPixels(out nint pixels, out int rowBytes));
         Assert.Equal(80, rowBytes);
-        AssertPixel(PixelsAt(pixels, rowBytes, 10), rowBytes, x: 5, y: 5, r: 255, g: 0, b: 0);
+        AssertBgraPixel(PixelsAt(pixels, rowBytes, 10), rowBytes, x: 5, y: 5, r: 255, g: 0, b: 0);
 
         using (surface.Snapshot())
             DrawFrame(surface, Color.Blue);
         Assert.True(surface.PeekPixels(out pixels, out rowBytes));
-        AssertPixel(PixelsAt(pixels, rowBytes, 10), rowBytes, x: 5, y: 5, r: 0, g: 0, b: 255);
+        AssertBgraPixel(PixelsAt(pixels, rowBytes, 10), rowBytes, x: 5, y: 5, r: 0, g: 0, b: 255);
 
         // Every frame, so it allocates nothing.
         long bytes = Allocations.Least(() => surface.PeekPixels(out _, out _));
@@ -182,10 +198,19 @@ public class SkiaRasterRenderSurfaceTests
         return copy;
     }
 
+    // RGBA8888, as ReadPixels gives them.
     private static void AssertPixel(byte[] pixels, int rowBytes, int x, int y, byte r, byte g, byte b)
     {
         int i = y * rowBytes + x * 4;
         Assert.True(pixels[i] == r && pixels[i + 1] == g && pixels[i + 2] == b,
             $"Pixel ({x},{y}) was rgba({pixels[i]},{pixels[i + 1]},{pixels[i + 2]},{pixels[i + 3]}), expected rgb({r},{g},{b})");
+    }
+
+    // BGRA8888, the order PeekPixels hands out on the desktop OSes (PixelColorType).
+    private static void AssertBgraPixel(byte[] pixels, int rowBytes, int x, int y, byte r, byte g, byte b)
+    {
+        int i = y * rowBytes + x * 4;
+        Assert.True(pixels[i + 2] == r && pixels[i + 1] == g && pixels[i] == b,
+            $"Pixel ({x},{y}) was bgra({pixels[i]},{pixels[i + 1]},{pixels[i + 2]},{pixels[i + 3]}), expected rgb({r},{g},{b})");
     }
 }

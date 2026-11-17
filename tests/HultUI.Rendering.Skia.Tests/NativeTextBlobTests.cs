@@ -44,7 +44,7 @@ public class NativeTextBlobTests
             NativeTextBlob.Absent(library.Value, [NativeTextBlob.MakeExport, "sk_no_such_function"]));
         var error = NativeTextBlob.Unavailable("libSkiaSharp does not export sk_textblob_unref");
         Assert.Contains("sk_textblob_unref", error.Message);
-        Assert.Contains("3.119.4", error.Message);
+        Assert.Contains("4.156.1", error.Message);
     }
 
     public static TheoryData<string, Type, Type[]> Signatures() => new()
@@ -82,7 +82,7 @@ public class NativeTextBlobTests
     public void SkiaSharp_IsThePinnedVersion()
     {
         string version = typeof(SKCanvas).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion;
-        Assert.True(version.StartsWith("3.119.4", StringComparison.Ordinal),
+        Assert.True(version.StartsWith("4.156.1", StringComparison.Ordinal),
             $"SkiaSharp {version}: NativeTextBlob calls its C API directly; check the four functions' signatures " +
             "against this version's headers, then pin it here and in docs/DECISIONS.md");
     }

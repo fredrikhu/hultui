@@ -65,13 +65,13 @@ internal sealed class SkiaCanvasDrawingContext : ICanvasDrawingContext
     {
         if (color.A == 0) return;
         var path = _owner.PooledPath;
-        path.Rewind();
+        path.Reset();
         path.MoveTo(Bounds.X + from.X, Bounds.Y + from.Y);
         path.CubicTo(
             Bounds.X + from.X, float.Lerp(Bounds.Y + from.Y, Bounds.Y + to.Y, 0.5f),
             Bounds.X + to.X, float.Lerp(Bounds.Y + from.Y, Bounds.Y + to.Y, 0.5f),
             Bounds.X + to.X, Bounds.Y + to.Y);
-        Canvas.DrawPath(path, Stroke(color, strokeWidth));
+        NativePath.Draw(Canvas, path, Stroke(color, strokeWidth));
     }
 
     public void DrawCircle(Point center, float radius, Color fill)
@@ -108,11 +108,11 @@ internal sealed class SkiaCanvasDrawingContext : ICanvasDrawingContext
         if (_owner.TextAsOutlines)
         {
             // As the text renderer does under TextAsOutlines: the same pixels on every OS.
-            using var path = font.GetTextPath(text, new SKPoint(x, y));
+            using var path = _owner.TextOutlinePath(font, text, x, y);
             Canvas.DrawPath(path, Fill(color));
             return;
         }
-        Canvas.DrawText(text, x, y, font, Fill(color));
+        Canvas.DrawText(text, x, y, SKTextAlign.Left, font, Fill(color));
     }
 
     public void DrawText(string text, Point position, Color color, float fontSize, Color halo, float haloWidth)
@@ -125,7 +125,9 @@ internal sealed class SkiaCanvasDrawingContext : ICanvasDrawingContext
             if (_owner.CanvasTypeface is { } pinned) font.Typeface = pinned;
             float x = Bounds.X + position.X, y = Bounds.Y + position.Y + fontSize;
             // The glyph outlines, stroked with round joins: an even rim however the text is placed.
-            using var path = font.GetTextPath(text, new SKPoint(x, y));
+            using var path = _owner.TextAsOutlines
+                ? _owner.TextOutlinePath(font, text, x, y)
+                : font.GetTextPath(text, new SKPoint(x, y));
             var paint = Stroke(halo, haloWidth);
             paint.StrokeJoin = SKStrokeJoin.Round;
             paint.StrokeCap = SKStrokeCap.Round;
