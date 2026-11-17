@@ -275,11 +275,17 @@ public sealed partial class HeadlessSession : IDisposable
         int pending = _deferredWork.Count;
         if (pending == 0) return;
 
+        // Queued to the pool's global queue, as Task.Run from a running app's UI thread (not a
+        // pool thread, so it has no local queue) always is. Plain Task.Run here would use this
+        // thread's local queue whenever the test thread is a pool thread (xunit's VSTest runner
+        // 4.x runs tests on pool threads), and WaitAll would then run the producers inline, on
+        // the UI thread they must never run on, one after another.
         var running = new Task<Action?>[pending];
         for (int i = 0; i < pending; i++)
         {
             _deferredWork.TryDequeue(out var work);
-            running[i] = Task.Run(work!);
+            running[i] = Task.Factory.StartNew(work!, CancellationToken.None,
+                TaskCreationOptions.PreferFairness, TaskScheduler.Default);
         }
         try { Task.WaitAll(running); }
         catch (AggregateException) { /* rethrown below, once the others have landed */ }

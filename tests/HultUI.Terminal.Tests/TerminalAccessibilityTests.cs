@@ -2,6 +2,7 @@ using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Primitives;
 using Xunit;
+using HultUI.Testing;
 
 namespace HultUI.Terminal.Tests;
 
@@ -180,7 +181,7 @@ public class TerminalAccessibilityTests
         var source = t.Window.FindByRole(AccessibilityRole.Document)!.Node.TextSource!;
         t.Emit("\r\nsecond");
         // No rebuild since: the source reads the screen itself, here from another thread.
-        var text = Task.Run(() => source.AccessibleText).Result;
+        var text = OtherThread.Run(() => source.AccessibleText);
         Assert.Equal("first\nsecond", text!.Text);
         Assert.Same(text, source.AccessibleText); // unchanged screen, the same snapshot
     }

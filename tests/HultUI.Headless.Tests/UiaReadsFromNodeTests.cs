@@ -8,6 +8,7 @@ using HultUI.Core.Primitives;
 using HultUI.Platform.Accessibility.Windows;
 using Xunit;
 using TextB = HultUI.Core.Builders.Text;
+using HultUI.Testing;
 
 namespace HultUI.Headless.Tests;
 
@@ -196,7 +197,7 @@ public class UiaReadsFromNodeTests
 
             // On another thread, as a client's calls come.
             static string D(double d) => Math.Round(d, 3).ToString(System.Globalization.CultureInfo.InvariantCulture);
-            var answers = Task.Run(() =>
+            var answers = OtherThread.Run(() =>
             {
                 var a = new List<string>();
                 value.GetValue(out var bstr);
@@ -227,7 +228,7 @@ public class UiaReadsFromNodeTests
                 Marshal.Release(selected);
                 Marshal.Release(inBig);
                 return a;
-            }).Result;
+            });
 
             Assert.Equal(0, rig.Counting.Reads - reads);
             // And the answers are what the elements say, the frames having told everything.

@@ -11,6 +11,7 @@ using HultUI.Core.RichText;
 using HultUI.Platform.Accessibility.Linux;
 using HultUI.Platform.Accessibility.Windows;
 using Xunit;
+using HultUI.Testing;
 
 namespace HultUI.Headless.Tests;
 
@@ -166,14 +167,14 @@ public class A11yTextValueTests
             rig.Session.Window.TypeText("y");
             Assert.NotEqual(told, editor.Document.ToPlainText());
             Assert.Equal((told, told), rig.Value(editor));
-            Assert.Equal((told, told), Task.Run(() => rig.Value(editor)).Result);
+            Assert.Equal((told, told), OtherThread.Run(() => rig.Value(editor)));
 
             // The frame tells it, and the value follows.
             rig.Session.PumpFrame();
             string now = editor.Document.ToPlainText();
             Assert.Contains(new UiaRaised(UiaRaisedKind.Event, UiaInterop.UIA_Text_TextChangedEventId, editor.Id), rig.Raised);
             Assert.Equal((now, now), rig.Value(editor));
-            Assert.Equal((now, now), Task.Run(() => rig.Value(editor)).Result);
+            Assert.Equal((now, now), OtherThread.Run(() => rig.Value(editor)));
         }
         finally { AccessibilityClients.Force = null; }
     }

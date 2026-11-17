@@ -11,7 +11,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
     <PackageReference Include="xunit" Version="2.*" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.*">
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.*">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
@@ -20,6 +20,10 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\HultUI.WebView\HultUI.WebView.csproj" />
     <ProjectReference Include="..\..\src\HultUI.Headless\HultUI.Headless.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\OtherThread.cs" Link="Shared\OtherThread.cs" />
   </ItemGroup>
 
 </Project>

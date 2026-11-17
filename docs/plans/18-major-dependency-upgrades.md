@@ -106,6 +106,29 @@ security gain, because 1.22.2 already has the fix.
 
 ## 3. xunit.runner.visualstudio 4
 
+**Status (2026-11-17): done on `claude/xunit-runner-4`, Windows. Linux and repeated CI runs
+are still to come.**
+
+- **Cause.** Runner 4 runs test bodies on thread-pool threads (`.NET TP Worker`); 2.x ran them
+  on xunit's own dedicated threads (`.NET Long Task`). A wait on a `Task.Run` from a pool thread
+  can take the task off that thread's own queue and run it inline, which happened in two runs of
+  three in a probe. So "another thread" became the test thread. An explicit `maxParallelThreads`
+  did not bring the dedicated threads back. Nothing in the product was wrong: a running app's UI
+  thread is not a pool thread, so its `Task.Run` always reaches another thread.
+- **Fixes.** `HeadlessSession` queues deferred work with `PreferFairness`, to the pool's global
+  queue, as `Task.Run` from a real UI thread does, so its `WaitAll` cannot run producers inline.
+  `tests/Shared/OtherThread.cs` runs a delegate on a thread of its own; it replaces the 24
+  `Task.Run(...).Result`, `.Wait()` and `.GetAwaiter().GetResult()` hops in 14 test files.
+- All 30 test projects are on `xunit.runner.visualstudio` `4.*`. `xunit` itself stays on `2.*`.
+- **Full suite on Windows:** 7 failures before the fixes (the cross-thread set below, less
+  Meridian and SSH, which passed that run by luck), 0 after.
+- **Left:** the Linux suite, three green CI runs in a row on both OSes, and step 3 (central
+  package management), which was not needed for this.
+- **Not changed:** `SingleInstance.Send` and `PtyConnection.Start` hop the same way
+  (`Task.Run(...).GetAwaiter().GetResult()`). That is safe from a real UI thread, and their tests
+  pass under runner 4. But a caller on a pool thread that has a synchronization context could
+  still have that hop run inline.
+
 **What broke in #6** (CI run 43645282357, 2026-11-14). Every failure involves another thread:
 
 - `ReactiveScopeThreadTests.ARead_OnAnotherThreadInsideAnEffect_DoesNotSubscribeIt`: expected 1,
