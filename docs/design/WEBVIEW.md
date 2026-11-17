@@ -644,10 +644,45 @@ second late; moved slowly to its edge, at once; Edge at once either way). Our si
 WebView2 takes about 120 ms to tell the page a drag entered, and every `DragOver` it is given
 meanwhile holds that up: from `DragEnter` to the page's acceptance, 4 s with every call passed
 on (a fast mouse makes hundreds a second), 0.5 s at one per 50 ms, 0.25 s with a quiet 150 ms
-and then one per 25 ms. The engine now passes hovers on at that pace and answers in between
-with the last answer. Edge pays none of this: its drop target is in the browser's own process.
+and then one per 25 ms. The engine passed hovers on at that pace, answering in between with the
+last answer, until the pump and the pace were found wrong (2026-11-17, the next two
+paragraphs). Edge pays none of this: its drop target is in the browser's own process.
 A first guess — that WebView2 re-asks the page only when the point moves — was wrong; it
 came from a test flooding it with calls.
+
+**The test's pump, not the page** (2026-11-17). `OsDropTests` began failing after SDL stopped
+holding Windows' timer at 1 ms for the whole process (cd7e3db2, `SdlTimerResolution`): the
+page's acceptance had not reached OLE after 1 s. WebView2's half in our process works by
+messages to the UI thread, and the test parked between frames in `Thread.Sleep(1)`, which takes
+no messages and now lasts 15.6 ms, so every step of the drag waited out a sleep: `dragenter`
+0.85 s after `DragEnter`, a `dragover` every 0.6 s, no acceptance in 6 s. With
+`SDL_TIMER_RESOLUTION=1` it passed again (0.23 s). A data object made on an MTA thread changed
+nothing, so the page's reads of the data are not the cost. The test now parks in the platform's
+own wait, as `Application.Run` does, which dispatches each message as it arrives: acceptance
+after 0.18 s, and 0.19 s with the timer forced coarse (`SDL_TIMER_RESOLUTION=0`). Apps never
+had the stall: their loop parks in that wait. So the numbers above were measured with a pump
+that took no messages, the 120 ms to `dragenter` among them. With this pump, `dragenter`
+reaches the page in 4–28 ms.
+
+**The pace, tuned again by hand** (2026-11-17). With the test's pump fixed, the synthetic drag
+shows no cost from passing hovers on. With every one passed on, about 1,000 a second,
+acceptance came after 15–38 ms, and the page saw a move within 10 ms after 10 s of hovering.
+A real drag from File Explorer is different. It was logged in the sample with the owner's
+hand: OLE's acceptance timed from `DragEnter`, and the drop zone's lighting timed from the
+pointer crossing the zone's edge.
+
+- The old pace (a quiet 150 ms, then one per 25 ms): accepted after 167–238 ms.
+- Every hover passed on: 101–197 ms. A 27 s hover (9,546 calls, about 350 a second) left the
+  page about a minute behind the pointer. WebView2 queues the calls.
+- One per 16 ms, no quiet period: first round 31–60 ms. Second round, 43 drags: 32–51 ms
+  (110 ms once). The zone lit and went out a median 20 ms after the pointer crossed its edge,
+  95 ms at most over 140 crossings, with no growth over a 30 s hold. It "felt prompt".
+
+The engine now passes on at most one call per 16 ms, `DragEnter` counted, timed on the
+`Stopwatch`. `Environment.TickCount64` moves in 15.6 ms steps, so the old "one per 25 ms" was
+one per 31 ms, and the first round's "one per 10 ms" was one per tick. Chromium accepts a file
+dropped anywhere on a page (it opens it), so OLE's answer cannot show the pointer leaving a
+zone. Only the page's own events could.
 
 What the synthetic test could not do, for the record: played without a real `DoDragDrop`, the
 browser never finishes the drag —
