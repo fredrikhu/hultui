@@ -289,6 +289,8 @@ window.RenderLog.Ops;                         // RenderOp { Name, Args, Depth }
 using var image = window.CapturePixels();   // SKImage, layout size × scale
 ```
 
+The image is in Skia's native byte order, **BGRA** on Windows, Linux and macOS (`SkiaRasterRenderSurface.PixelColorType`), because Skia's CPU rasterizer is only fast into that order (into RGBA a frame cost two to eight times as much; docs/DECISIONS.md, 2026-11-17). Read a colour with `image.PeekPixels().GetPixelColor(x, y)`, or `ReadPixels` into an RGBA bitmap; don't index its bytes as RGBA. Comparing two frames' bytes for equality is fine in either order.
+
 Sessions support DPI testing: `HeadlessSession.Create(scale: 2f)` or `window.SetScale(1.5f)`.
 
 ## Simulated Monitors
@@ -331,7 +333,7 @@ GoldenImage.Match(session.Window, "my-panel");   // Golden/my-panel.png beside t
 **Why the frames match across OSes.** `HeadlessOptions.Golden()` sets `PinnedText`:
 
 - **Pinned fonts.** Every family name — `Segoe UI`, `sans-serif`, one nobody has — resolves to DejaVu Sans (regular, bold, oblique, bold oblique) and `monospace` to DejaVu Sans Mono, embedded in `HultUI.Headless` (`SkiaFontCollection.Pinned`). Nothing falls back to an installed font: a character DejaVu lacks (CJK, emoji) draws as the missing-glyph box on every machine. Measurement uses the same faces, so layout matches too — the font file decides the metrics and HarfBuzz's advances, not the OS.
-- **Text as outlines.** Even from one font file, DirectWrite (Windows) and FreeType (Linux) shade glyphs differently — thousands of pixels over a few lines, hinted or not. `SkiaRasterRenderSurface.TextAsOutlines` draws each glyph's outline through Skia's own path rasteriser instead, which comes out byte for byte the same. The five control goldens in `tests/HultUI.Headless.Tests/Golden/` render to identical PNG bytes on Windows and Linux.
+- **Text as outlines.** Even from one font file, DirectWrite (Windows) and FreeType (Linux) shade glyphs differently — thousands of pixels over a few lines, hinted or not. `SkiaRasterRenderSurface.TextAsOutlines` draws each glyph's outline through Skia's own path rasteriser instead, which comes out byte for byte the same. The outlines themselves are read by HarfBuzz from the font file, not through those two backends, whose outlines differ slightly too (an oblique t, an Å): enough, with Skia m156, to move pixels (docs/DECISIONS.md, 2026-11-17). Every golden in `tests/HultUI.Headless.Tests/Golden/` renders to identical PNG bytes on Windows and Linux. To check that, delete the baselines in a Linux checkout, run with `HULTUI_UPDATE_GOLDENS=1` and look at `git status`: a pass alone only proves the frames are within tolerance.
 
 **Tolerance.** `GoldenTolerance.Default` lets any channel of a pixel be 2 apart and no pixel beyond that — room for Skia's SIMD paths to round a blend differently on another CPU, none for a moved edge or a changed colour (a 1 px change to the button corner radius moves ~200 pixels by up to 98). Pass `new GoldenTolerance(Channel: 4, Pixels: 20)` to loosen one test, or `GoldenTolerance.Exact`.
 

@@ -147,8 +147,18 @@ public sealed class SkiaFontCollection : IFontCollection
         return best;
     }
 
-    private static SKTypeface Legacy(string familyName, SKFontStyleWeight weight, SKFontStyleSlant slant) =>
-        SKTypeface.FromFamilyName(familyName, weight, SKFontStyleWidth.Normal, slant) ?? SKTypeface.Default;
+    // A family the platform does not know ("sans-serif" on DirectWrite) is the platform's default
+    // family in the weight and slant asked for, as SkiaSharp 3's legacy lookup answered it.
+    // SkiaSharp 4's FromFamilyName is MatchFamily ?? SKTypeface.Default, and Default is the
+    // regular face: bold and italic text in such a family came out regular.
+    private static SKTypeface Legacy(string familyName, SKFontStyleWeight weight, SKFontStyleSlant slant)
+    {
+        using var style = new SKFontStyle(weight, SKFontStyleWidth.Normal, slant);
+        var manager = SKFontManager.Default;
+        return manager.MatchFamily(familyName, style)
+            ?? manager.MatchFamily(SKTypeface.Default.FamilyName, style)
+            ?? SKTypeface.Default;
+    }
 
     private static bool IsMonospace(string name) =>
         string.Equals(name, FontFamilies.Monospace, StringComparison.OrdinalIgnoreCase);
@@ -271,7 +281,7 @@ public sealed class SkiaFontCollection : IFontCollection
             typeface = null;
             foreach (var name in EmojiFamilies)
             {
-                if (_fontManager.MatchFamily(name, style) is { } face && IsColour(face) && face.GetGlyph(codepoint) != 0)
+                if (_fontManager.MatchFamily(name, style) is { } face && IsColour(face) && Has(face, codepoint))
                 {
                     typeface = face;
                     break;
@@ -282,6 +292,14 @@ public sealed class SkiaFontCollection : IFontCollection
         var resolved = typeface is null ? null : FallbackFont(typeface);
         _emojiCache[key] = resolved;
         return resolved;
+
+        // Once per character and style (the answer is cached above), so a font for the question
+        // is cheap enough; SkiaSharp 4 marks SKTypeface.GetGlyph obsolete.
+        static bool Has(SKTypeface face, int codepoint)
+        {
+            using var font = new SKFont(face);
+            return font.GetGlyph(codepoint) != 0;
+        }
     }
 
     private static readonly string[] EmojiLanguage = ["und-Zsye"];
@@ -365,14 +383,16 @@ internal sealed class SkiaResolvedFont : IResolvedFont
 
     public bool HasGlyph(int codepoint)
     {
-        if ((uint)codepoint > 0xFFFF) return _typeface.GetGlyph(codepoint) != 0;
+        // The face's own SKFont answers (a glyph id does not depend on the size): SkiaSharp 4
+        // has SKTypeface.GetGlyph ask a font it keeps for the purpose, and marks it obsolete.
+        if ((uint)codepoint > 0xFFFF) return _font.GetGlyph(codepoint) != 0;
         var bits = _glyphBits ??= new long[2048];
         int word = codepoint >> 6;
         long bit = 1L << (codepoint & 63);
         // Asked before: the answer was written before the question was marked, and the read
         // of the mark orders the read of the answer after it — layout can run off the UI thread.
         if ((Volatile.Read(ref bits[word]) & bit) != 0) return (bits[1024 + word] & bit) != 0;
-        bool has = _typeface.GetGlyph(codepoint) != 0;
+        bool has = _font.GetGlyph(codepoint) != 0;
         if (has) Interlocked.Or(ref bits[1024 + word], bit);
         Interlocked.Or(ref bits[word], bit);
         return has;

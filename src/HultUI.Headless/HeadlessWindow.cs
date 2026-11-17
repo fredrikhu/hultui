@@ -194,7 +194,10 @@ public sealed partial class HeadlessWindow
     /// <summary>
     /// Renders a fresh frame and returns its pixels. The caller owns the
     /// returned image and must dispose it. Pixel dimensions are layout size ×
-    /// scale. Cross-machine caution: text glyphs come from system fonts unless
+    /// scale. The image is in Skia's native byte order, BGRA on the desktop OSes
+    /// (<see cref="SkiaRasterRenderSurface.PixelColorType"/>): read colours through
+    /// <c>PeekPixels().GetPixelColor</c> or <c>ReadPixels</c> into an RGBA bitmap, not by
+    /// indexing its bytes as RGBA. Cross-machine caution: text glyphs come from system fonts unless
     /// the session was created with <see cref="HeadlessOptions.Golden"/>, so
     /// without it assert on your own drawing, not text rasterization, if the
     /// test must pass on more than one OS.

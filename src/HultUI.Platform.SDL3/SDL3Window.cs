@@ -1509,11 +1509,19 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         SDL_Surface* source = null;
         if (target != null && frame.PeekPixels(out nint pixels, out int rowBytes))
         {
-            // RGBA in memory, as SetIcon. Copied as it is, no blending, and converted to
-            // whatever the window surface is.
-            var format = BitConverter.IsLittleEndian
-                ? SDL_PixelFormat.SDL_PIXELFORMAT_ABGR8888
-                : SDL_PixelFormat.SDL_PIXELFORMAT_RGBA8888;
+            // Skia's native order in memory (BGRA on the desktop OSes), which is what SDL's
+            // window surface is too where it is XRGB8888, so the blit is a plain copy. Copied as
+            // it is, no blending, and converted to whatever the window surface is otherwise.
+            // SDL names packed formats by the 32-bit word: a little-endian ARGB8888 word is B, G,
+            // R, A in memory.
+            bool bgra = frame.PixelColorType == SkiaSharp.SKColorType.Bgra8888;
+            var format = (bgra, BitConverter.IsLittleEndian) switch
+            {
+                (true, true) => SDL_PixelFormat.SDL_PIXELFORMAT_ARGB8888,
+                (true, false) => SDL_PixelFormat.SDL_PIXELFORMAT_BGRA8888,
+                (false, true) => SDL_PixelFormat.SDL_PIXELFORMAT_ABGR8888,
+                (false, false) => SDL_PixelFormat.SDL_PIXELFORMAT_RGBA8888,
+            };
             // shortcut: one copy a frame from Skia's pixels into SDL's; drawing straight into
             // the window surface saves it, if the copy ever shows in a profile.
             source = SDL_CreateSurfaceFrom(frame.PixelWidth, frame.PixelHeight, format, pixels, rowBytes);
