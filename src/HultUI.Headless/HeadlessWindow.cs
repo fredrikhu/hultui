@@ -166,8 +166,11 @@ public sealed partial class HeadlessWindow
     /// <summary>
     /// Raised from the event pump (the next <see cref="HeadlessSession.PumpFrame()"/>) after the
     /// window's outer position changed — placed, maximized, restored, moved by the person or off
-    /// a monitor that went — as SDL's window-moved event is. Windows-like windows only
-    /// (<see cref="HeadlessOptions.WindowsFrame"/>).
+    /// a monitor that went — as SDL's window-moved event is, before the frame raises
+    /// <see cref="HultUI.Window.Moved"/>. A Windows-like window (<see cref="HeadlessOptions.WindowsFrame"/>)
+    /// moves by its outer rectangle; any other once it has been given a <see cref="HultUI.Window.Placement"/>
+    /// somewhere else (maximizing it moves nothing). The frame raises
+    /// <see cref="HultUI.Window.DisplayChanged"/> when, with simulated monitors, the move took it to another.
     /// </summary>
     public event Action? Moved
     {

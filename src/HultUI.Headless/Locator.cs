@@ -104,6 +104,9 @@ public sealed class Locator
     /// The control labelled <paramref name="label"/>: a control whose own accessible name matches
     /// (what <c>AccessibleName</c> gives it), or the first control after a label node that matches,
     /// among that label's siblings and their descendants — the usual "label, then field" row.
+    /// Only the nearest label before a control labels it, so a hint or an error line between a
+    /// label and its field hides the field from that label. Buttons, and checkboxes, radios and
+    /// switches with text of their own, match only by their own name.
     /// </summary>
     public Locator GetByLabel(string label, bool exact = false)
         => Within(n => IsControl(n) && (Matches(n.Name, label, exact) || LabelledBySibling(n, label, exact)),
@@ -384,8 +387,16 @@ public sealed class Locator
 
     private static bool LabelledBySibling(AccessibilityNode control, string label, bool exact)
     {
-        // Climb until an ancestor's child list holds a matching label before the branch the
-        // control is in; the control must be the first control after that label.
+        // A button, and a checkbox, radio or switch with text of its own, is named by that text;
+        // a label before it is a heading or a message, not its label.
+        if (control.Role == AccessibilityRole.Button) return false;
+        if (control.Role is AccessibilityRole.Checkbox or AccessibilityRole.RadioButton or AccessibilityRole.Switch
+            && !string.IsNullOrWhiteSpace(control.Name)) return false;
+
+        // Climb until an ancestor's child list holds a label before the branch the control is
+        // in. The nearest one decides, matching or not: an error line "Enter the user name"
+        // between "User name" and the password field's own label must not label that field.
+        // The control must also be the first control after that label.
         for (var branch = control; branch.Parent is { } parent; branch = parent)
         {
             var siblings = parent.Children;
@@ -393,8 +404,8 @@ public sealed class Locator
             for (int i = at - 1; i >= 0; i--)
             {
                 var s = siblings[i];
-                if (s.Role == AccessibilityRole.Label && Matches(s.Name, label, exact))
-                    return FirstControlAfter(siblings, i) == control;
+                if (s.Role == AccessibilityRole.Label)
+                    return Matches(s.Name, label, exact) && FirstControlAfter(siblings, i) == control;
                 if (Subtree(s).Any(IsControl)) return false;   // another control sits between
             }
         }

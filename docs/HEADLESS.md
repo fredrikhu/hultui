@@ -186,6 +186,11 @@ Expect(session.GetByLabel("Email"), TimeSpan.FromSeconds(1)).ToHaveValue("a@b.c"
   ordinal equality. `GetByLabel` finds a control (field, checkbox, combo, slider, button) whose
   accessible name matches, or the first control after a matching label among its siblings —
   HultUI has no label-for association, so the "label, then field" row is the convention.
+  Only the **nearest** label before a control counts, matching or not: an error line such as
+  "Enter the user name and the password." does not label the password field or the button
+  after it. A hint between a label and its field hides the field from that label; name the
+  field with `AccessibleName`. Buttons, and checkboxes, radios and switches with text of their
+  own, match only by their own name, never by a label before them.
   `GetByTestId` is the `AutomationId`. The window's root node is searched too. On a
   `HeadlessWindow` the text form is `GetByText(text, exact)` — the one-argument
   `GetByText(text)` is still the eager query above.

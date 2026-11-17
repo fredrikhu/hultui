@@ -158,6 +158,8 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     public bool ActivatedPending { get; set; }
     public bool DeactivatedPending { get; set; }
     public bool FramePressedPending { get; set; }
+    public bool MovedPending { get; set; }
+    public bool DisplayChangedPending { get; set; }
     public long LastResizeRenderTick { get; set; }
 
     /// <summary>Set by the framework while it draws a frame of this window: the event watcher
@@ -1008,7 +1010,19 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
                         hitWin.FramePressedPending = true;
                     break;
 
+                // Flagged, so a drag's stream of moves is told once a frame (Window.Moved). Wayland
+                // sends none: a window there has no position.
+                case (uint)SDL_EventType.SDL_EVENT_WINDOW_MOVED:
+                    if (_registry.TryGetValue(evt.window.windowID, out var shiftedWin))
+                        shiftedWin.MovedPending = true;
+                    break;
+
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+                    // Window.DisplayChanged, then on to what any change of display refreshes.
+                    if (_registry.TryGetValue(evt.window.windowID, out var displayWin))
+                        displayWin.DisplayChangedPending = true;
+                    goto case (uint)SDL_EventType.SDL_EVENT_WINDOW_HDR_STATE_CHANGED;
+
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_HDR_STATE_CHANGED:
                     // What decides the swapchain's format and white scale: a different monitor,
                     // or the same monitor with HDR switched or its SDR brightness moved. The

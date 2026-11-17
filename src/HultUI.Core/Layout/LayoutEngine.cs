@@ -25,12 +25,15 @@ public sealed partial class LayoutEngine
         float? fw = forceRootFill && root.BoxRead.Width.IsAuto ? availableWidth : null;
         float? fh = forceRootFill && root.BoxRead.Height.IsAuto ? availableHeight : null;
         _passDepth++;
+        var outerPass = LayoutWatch.Pass;
+        LayoutWatch.Pass = this;
         try
         {
             ComputeLayout(root, constraint, absoluteX: 0, absoluteY: 0, forcedWidth: fw, forcedHeight: fh);
         }
         finally
         {
+            LayoutWatch.Pass = outerPass;
             // Only the outermost pass drops the plans: one laid out from inside another (nothing
             // does today) would otherwise clear items the outer one is still reading.
             if (--_passDepth == 0) ClearPlans();
@@ -41,6 +44,30 @@ public sealed partial class LayoutEngine
     }
 
     private int _passDepth;
+
+    // The listening elements this engine's passes wrote a box for since the window last took them
+    // (LayoutChangedEvent), in the order first written, each once.
+    private List<Element>? _layoutChanges;
+    private HashSet<Element>? _layoutChangeSet;
+
+    internal void NoteLayoutChange(Element element)
+    {
+        if ((_layoutChangeSet ??= new HashSet<Element>(ReferenceEqualityComparer.Instance)).Add(element))
+            (_layoutChanges ??= []).Add(element);
+    }
+
+    /// <summary>Whether a pass wrote a box for an element that listens for
+    /// <see cref="Events.LayoutChangedEvent"/> since <see cref="TakeLayoutChanges"/>.</summary>
+    internal bool HasLayoutChanges => _layoutChanges is { Count: > 0 };
+
+    /// <summary>Moves the noted elements into <paramref name="into"/> and forgets them.</summary>
+    internal void TakeLayoutChanges(List<Element> into)
+    {
+        if (_layoutChanges is not { Count: > 0 } changes) return;
+        into.AddRange(changes);
+        changes.Clear();
+        _layoutChangeSet!.Clear();
+    }
 
     /// <param name="element">The subtree root to lay out.</param>
     /// <param name="constraint">The space available to it.</param>
