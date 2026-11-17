@@ -1809,9 +1809,13 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// on both. A scale proportional to the monitor's brightness would have had to differ
     /// between those two and did not — see <c>docs/design/HDR-LINUX-BRIEF.md</c>.</para>
     ///
-    /// <para><b>SDL's own <c>SDR_white_level</c> is the wrong number here</b> and reads 1.0 on
-    /// Wayland, following the EGL convention where 1.0 already <i>is</i> reference white.
-    /// Feeding that in reproduces the dim picture exactly.</para>
+    /// <para><b>SDL's own <c>SDR_white_level</c> is not used here.</b> Up to SDL 3.5.0-550394e
+    /// (ppy.SDL3-CS 2026.320) it read 1.0 on Wayland, following the EGL convention where 1.0
+    /// already <i>is</i> reference white, and feeding that in reproduced the dim picture exactly.
+    /// From ea7a2da (ppy.SDL3-CS 2026.1002.1) SDL reports the output's reference luminance over
+    /// 80 (libsdl-org/SDL 2a623fd22): 2.5375 where the compositor names 203 nits, but its own
+    /// SDR brightness where it names that instead, which is the too-bright 5.1 above. Not yet
+    /// measured on KWin, so the protocol constant stays.</para>
     /// </summary>
     private const float WaylandScRgbReferenceWhite = 2.5375f;
 
@@ -1826,9 +1830,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// headroom is SDL's peak over SDL's white and the two are one snapshot. SDL re-reads them
     /// only on a display-configuration change, which the brightness slider is not, while this
     /// window's white is polled — so mixing the two would turn a slider move from 240 to 480
-    /// nits into a peak of 910 on a 455-nit panel. On Wayland SDL's white reads a useless 1.0
-    /// and the 203-nit protocol reference is used instead; its headroom is real compositor
-    /// data.</para>
+    /// nits into a peak of 910 on a 455-nit panel. On Wayland the 203-nit protocol reference is
+    /// used instead of SDL's white (see <see cref="WaylandScRgbReferenceWhite"/>); its headroom is
+    /// real compositor data.</para>
     ///
     /// <para>Zero when the window is not on an HDR display or SDL has no number, and the
     /// caller then assumes rather than believes.</para>

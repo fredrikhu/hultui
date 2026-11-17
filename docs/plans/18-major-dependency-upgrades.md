@@ -271,3 +271,50 @@ test weakened to get there.
 fredrikhu/hultui#8. The version number looks like a minor bump, but it is six months of
 SDL `main` snapshots. Hosted CI runs no real windows, so before merging, check live resize, Snap
 Layouts, HDR state, frame pacing and timer resolution on Windows, and Wayland on Linux.
+
+**Status (2026-11-17): checked on `claude/sdl3-cs-2026-1002`.** Taken on our own branch, because
+#8 again adds a PackageReference to `src/HultUI/HultUI.csproj` that does not belong there. The
+`HdrInterop` spike moves with it.
+
+- **What moves:** both packages carry SDL 3.5.0 from `main`. `SDL_GetRevision` reads
+  `SDL-3.5.0-550394e` before and `SDL-3.5.0-ea7a2da` after: 1,168 SDL commits. It builds with no code
+  changes.
+- **The SDL changes on our paths, read:**
+  - **Borderless windows:** SDL now swallows the caption painting of a borderless window on
+    Windows (`WM_NCACTIVATE` with `lParam = -1`, and the undocumented `WM_NCUAHDRAWCAPTION` and
+    `WM_NCUAHDRAWFRAME`; libsdl-org/SDL 6a9449c09). Our Windows custom frame never sets
+    `SDL_WINDOW_BORDERLESS`: it keeps the native frame and subclasses the window procedure. So the
+    change does not reach it.
+  - **Activation:** `WM_NCACTIVATE` now takes the cursor position at that moment (0a8ccb11e), and
+    the corner and border-colour DWM attributes are set only on Windows 11 (159bba9aa).
+  - **Wayland's SDR white:** SDL now reports the output's reference luminance over 80
+    (2a623fd22). HultUI does not use it there; it uses the 203-nit protocol constant
+    (`WaylandScRgbReferenceWhite`), whose comment now says so.
+  - **Timers:** both SDL3.dll import `timeBeginPeriod`, `timeEndPeriod` and
+    `MsgWaitForMultipleObjects`, and read `SDL_TIMER_RESOLUTION`. 24404d904 fixes a timer overflow.
+  - **Dependencies:** the new SDL3.dll no longer imports the Visual C++ runtime
+    (`VCRUNTIME140.dll`, `api-ms-win-crt-*`). The Linux `libSDL3.so` needs only libc and libm.
+  - **New, not taken:** `SDL_PROP_WINDOW_CREATE_WIN32_STYLE_EX_NUMBER` (5b02b2217) could set
+    `WS_EX_NOACTIVATE` when a window is made.
+- **Windows:** the full suite passes, 30 assemblies. With `HULTUI_MPV_PATH` set, `HultUI.UiTests`
+  pass 153 of 168. The 15 skips are 14 tests that take the foreground on purpose and the
+  display-change test, which needs a second monitor. No guard handed the foreground back. Among the
+  passes: live resize inside the modal loop, frame pacing, the loop's waits and wake, the custom
+  frame's activation and system menu (with the Snap Layouts band answering `HTMAXBUTTON`),
+  placement, maximized and visible placement, Vulkan in 8-bit and half-float, HDR video, mpv, the
+  software renderer, OS drops, IME for password fields, and the key map.
+- **Native builds:** the five apps publish with no IL warnings. They were run on the desktop as for
+  item 1 (Junction on GL and on software, Vesper Commander, Meridian, Aperture, and Reel with the PQ
+  clip): no foreground taken, every saved frame right, and every resize drawn. Reel's HDR numbers
+  match the old SDL exactly: scRGB swapchain, maximum 5.109 against SDR white at 3.00. Start-up,
+  six alternated runs of the native Meridian each: median first frame 227.6 ms on the old SDL and
+  229.7 on the new (minimum 221.1 and 222.5).
+- **Linux:** `HultUI.CrossPlatform.slnf` passes in full on WSL Fedora (22 assemblies). Under WSLg,
+  the TodoList sample opened and drew right on Wayland (`SDL_VIDEO_DRIVER=wayland`) and on X11: GL
+  on llvmpipe, Vulkan on Mesa's Dozen over the RTX 4080, and software, `framebuffer=drawn` on both.
+- **Not covered:**
+  - KDE on Wayland with HDR. No such machine is here, and WSLg's compositor has no colour
+    management.
+  - The Snap Layouts flyout by hand; its hit test is covered.
+  - A second monitor: only one was connected.
+  - macOS.
