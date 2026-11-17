@@ -11,7 +11,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
     <PackageReference Include="xunit" Version="2.*" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.*">
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.*">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
@@ -19,6 +19,12 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\HultUI.Rendering.Skia\HultUI.Rendering.Skia.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Two of the pinned faces, for GlyphOutlinesTests: outlines the same on every OS. -->
+    <None Include="..\..\src\HultUI.Headless\Fonts\DejaVuSans.ttf" Link="Fonts\DejaVuSans.ttf" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\src\HultUI.Headless\Fonts\DejaVuSans-Oblique.ttf" Link="Fonts\DejaVuSans-Oblique.ttf" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

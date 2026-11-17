@@ -52,7 +52,28 @@ public abstract class Component
     protected void MarkDirty() => Host?.ForceRebuild();
 
     /// <summary>
-    /// Create a ComponentHost element that can be placed in the element tree.
+    /// The <see cref="ComponentHost"/> element that shows this component in a tree. The first call
+    /// makes the host and builds it; every later call returns that same host, unbuilt, until the
+    /// host is removed from its tree, after which the next call makes a new host that builds at once.
     /// </summary>
+    /// <remarks>
+    /// <para>So a component a parent keeps between its builds, made once and placed from every
+    /// build, does not build again when the parent sets a plain property on it: the child's
+    /// <see cref="Build"/> reads the property, but nothing tells the host it changed, and the child
+    /// keeps its old tree. To have it follow, pick one:</para>
+    /// <list type="bullet">
+    /// <item>make the property a signal or a <c>[Reactive]</c> property, so a write rebuilds the child;</item>
+    /// <item>give the child a method of its own that sets the state and calls <see cref="MarkDirty"/>;</item>
+    /// <item>build that piece as a <see cref="Part"/> and place it with
+    /// <see cref="Part.Place(bool)">Place(stale: true)</see>, or <see cref="PartGroup.Invalidate"/>
+    /// for all of an owner's parts;</item>
+    /// <item>make a new component instead, which builds its own host.</item>
+    /// </list>
+    /// <para><see cref="MarkDirty"/> builds at once, and so does a signal write outside a batch, so set
+    /// any plain state the build reads before either. Element event handlers and work posted with
+    /// <c>Application.InvokeOnMainThread</c> run in a batch, where a write's build waits for the
+    /// batch to end; elsewhere, make several writes inside <c>ReactiveRuntime.Batch</c>. See
+    /// docs/REACTIVITY.md, "What triggers a rebuild".</para>
+    /// </remarks>
     public ComponentHost Mount() => Host ?? new ComponentHost(this);
 }

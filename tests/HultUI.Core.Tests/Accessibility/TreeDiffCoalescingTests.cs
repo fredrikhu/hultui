@@ -2,6 +2,7 @@ using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using Xunit;
+using HultUI.Testing;
 
 namespace HultUI.Core.Tests.Accessibility;
 
@@ -259,7 +260,7 @@ public class TreeDiffCoalescingTests
         Assert.Equal(list.Id, Assert.Single(boundary).Node.ElementId);
         Assert.Equal(list.Id, Assert.Single(boundaryGone).Node.ElementId);
         // On another thread: the same answers, from sets of its own.
-        var other = Task.Run(Search).Result;
+        var other = OtherThread.Run(Search);
         Assert.Equal(parents, other.Parents);
         Assert.Equal(boundary.Select(b => b.Node.ElementId), other.Boundary.Select(b => b.Node.ElementId));
 

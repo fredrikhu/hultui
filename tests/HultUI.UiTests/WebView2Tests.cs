@@ -27,7 +27,8 @@ namespace HultUI.UiTests;
 [Collection("ui")]
 public sealed class WebView2Tests
 {
-    private sealed class WebView2UiFactAttribute : FactAttribute
+    /// <summary>Skips unless UI tests are on and WebView2 is installed. OsDropTests uses it too.</summary>
+    internal sealed class WebView2UiFactAttribute : FactAttribute
     {
         public WebView2UiFactAttribute()
         {
@@ -77,11 +78,14 @@ public sealed class WebView2Tests
     private sealed class Page : IDisposable
     {
         public required Application App { get; init; }
+        /// <summary>The platform <see cref="App"/> runs on, whose wait <see cref="Wait"/> parks in.</summary>
+        public required SdlWindowingPlatform Platform { get; init; }
         public required WebView2Engine Engine { get; init; }
         public required WebViewController Web { get; init; }
         /// <summary>The column the page's element sits in, where <see cref="Open"/> made the page.</summary>
         public HultUI.Core.Elements.BoxElement Root { get; init; } = null!;
 
+        /// <summary>Runs frames until the condition holds, parked between them in <see cref="Wait"/>.</summary>
         public bool PumpUntil(Func<bool> condition, double seconds = 20)
         {
             var deadline = Stopwatch.StartNew();
@@ -89,10 +93,19 @@ public sealed class WebView2Tests
             {
                 if (deadline.Elapsed.TotalSeconds > seconds) return false;
                 App.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
-                Thread.Sleep(1);
+                Wait();
             }
             return true;
         }
+
+        /// <summary>
+        /// Parks between frames in the platform's own wait, as <c>Application.Run</c> parks: it
+        /// dispatches each message as it arrives. Not <c>Thread.Sleep</c>: WebView2's half in this
+        /// process works by messages to this thread, and a sleeping thread takes none, for a whole
+        /// 15.6 ms while SDL holds Windows' timer at 1 ms only for paced frames (OsDropTests'
+        /// PumpUntil has the measurements).
+        /// </summary>
+        public void Wait() => Platform.WaitForEvents(1);
 
         public T Await<T>(Task<T> task)
         {
@@ -137,13 +150,14 @@ public sealed class WebView2Tests
 
     private static Page Open(string html, bool devTools = false)
     {
-        var app = new Application(new SdlWindowingPlatform(), "WebView2", 480, 320);
+        var platform = new SdlWindowingPlatform();
+        var app = new Application(platform, "WebView2", 480, 320);
         var engine = new WebView2Engine();
         var web = new WebViewController(engine, new WebViewOptions { UserDataFolder = Profile, DevTools = devTools });
         var root = Flex.Column().Children(WebViewElement.New(web).FlexGrow(1));
         app.SetRoot(root);
         web.NavigateToString(html);
-        var page = new Page { App = app, Engine = engine, Web = web, Root = root };
+        var page = new Page { App = app, Platform = platform, Engine = engine, Web = web, Root = root };
         Assert.True(page.PumpUntil(() => web.State != WebViewState.Initializing), "the engine never became ready");
         Assert.Equal(WebViewState.Ready, web.State);
         return page;
@@ -221,7 +235,7 @@ public sealed class WebView2Tests
                 // Until the page shows and a frame WebView2 sent on show was drawn: on GL the sink's
                 // own texture keeps the last picture, which shows first.
                 if (Page.Near(colour, want) && !view.AwaitsFrame) break;
-                Thread.Sleep(1);
+                page.Wait();
             }
             Assert.True(Page.Near(seen[^1], want), $"shown again, the page never arrived: {string.Join(" → ", seen)}");
             Assert.True(view.ZeroCopy && view.HoldsInterop && !view.AwaitsFrame, "no frame came when the page was shown");
@@ -348,7 +362,8 @@ public sealed class WebView2Tests
         // Keys go to WebView2's own focus window, never through ours. A key message posted to
         // that window, in this process, stands in for the keyboard: nothing reaches the
         // foreground or anyone else's window, which is the line SendKeys crosses.
-        var app = new Application(new SdlWindowingPlatform(), "WebView2", 480, 320);
+        var platform = new SdlWindowingPlatform();
+        var app = new Application(platform, "WebView2", 480, 320);
         var engine = new WebView2Engine();
         var web = new WebViewController(engine, new WebViewOptions { UserDataFolder = Profile });
         var pressed = new List<HultUI.Core.Events.KeyCode>();
@@ -359,7 +374,7 @@ public sealed class WebView2Tests
             e.StopPropagation = true;
         }));
         web.NavigateToString("<html><body><input autofocus></body></html>");
-        using var page = new Page { App = app, Engine = engine, Web = web };
+        using var page = new Page { App = app, Platform = platform, Engine = engine, Web = web };
         Assert.True(page.PumpUntil(() => web.State == WebViewState.Ready && !web.IsLoading && web.Frames.IsLoaded));
 
         element.Focus();
@@ -406,11 +421,12 @@ public sealed class WebView2Tests
 
         static (string Result, long Ms) Load(WebViewOptions options)
         {
-            var app = new Application(new SdlWindowingPlatform(), "WebView2", 480, 320);
+            var platform = new SdlWindowingPlatform();
+            var app = new Application(platform, "WebView2", 480, 320);
             var engine = new WebView2Engine();
             var web = new WebViewController(engine, options);
             app.SetRoot(Flex.Column().Children(WebViewElement.New(web).FlexGrow(1)));
-            using var page = new Page { App = app, Engine = engine, Web = web };
+            using var page = new Page { App = app, Platform = platform, Engine = engine, Web = web };
             string? result = null;
             web.MessageReceived += m => result = m.Json;
             web.NavigationCompleted += r => { if (!r.IsSuccess) result = "failed"; };
@@ -429,11 +445,12 @@ public sealed class WebView2Tests
         // page under app.example took 11-21 ms once the engine was warm (measured 2026-10-03).
         var folder = Directory.CreateTempSubdirectory("hultui-app-timing-").FullName;
         File.WriteAllText(Path.Combine(folder, "index.html"), "<html><body><script>chrome.webview.postMessage(location.search)</script></body></html>");
-        var app = new Application(new SdlWindowingPlatform(), "WebView2", 480, 320);
+        var platform = new SdlWindowingPlatform();
+        var app = new Application(platform, "WebView2", 480, 320);
         var engine = new WebView2Engine();
         var web = new WebViewController(engine, new WebViewOptions { UserDataFolder = Profile, ContentFolder = folder });
         app.SetRoot(Flex.Column().Children(WebViewElement.New(web).FlexGrow(1)));
-        using var page = new Page { App = app, Engine = engine, Web = web };
+        using var page = new Page { App = app, Platform = platform, Engine = engine, Web = web };
         string? got = null;
         web.MessageReceived += m => got = m.Json;
         for (int i = 0; i < 6; i++)
@@ -483,13 +500,14 @@ public sealed class WebView2Tests
         bool PressF12(bool devTools, out nint window)
         {
             window = 0;
-            var app = new Application(new SdlWindowingPlatform(), "WebView2", 480, 320);
+            var platform = new SdlWindowingPlatform();
+            var app = new Application(platform, "WebView2", 480, 320);
             var engine = new WebView2Engine();
             var web = new WebViewController(engine, new WebViewOptions { UserDataFolder = Profile, DevTools = devTools });
             var element = WebViewElement.New(web).FlexGrow(1);
             app.SetRoot(Flex.Column().Children(element));
             web.NavigateToString("<html><body><input autofocus></body></html>");
-            using var page = new Page { App = app, Engine = engine, Web = web };
+            using var page = new Page { App = app, Platform = platform, Engine = engine, Web = web };
             Assert.True(page.PumpUntil(() => web.State == WebViewState.Ready && !web.IsLoading && web.Frames.IsLoaded));
             element.Focus();
             page.PumpUntil(() => false, seconds: 0.3);

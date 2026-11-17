@@ -71,6 +71,68 @@ public sealed class WindowsFrameTests
         Assert.Equal(new Rect(8, 0, 960, 1032), session.Window.ContentBounds);
     }
 
+    /// <summary>Placed by what is seen of them (<see cref="Window.VisiblePlacement"/>), two windows
+    /// on a display's halves meet edge to edge and fill the work area: the borders reach past it,
+    /// and are not fitted back in. By <see cref="Window.Placement"/> they left a gap of two borders
+    /// and one at each edge.</summary>
+    [Fact]
+    public void TwoWindowsPlacedByWhatIsSeen_MeetEdgeToEdge_AndFillTheWorkArea()
+    {
+        using var session = Session();
+        var left = session.Window;
+        var right = session.CreateWindow("right", style: WindowStyle.Borderless);
+        right.Window.SetRoot(Box.New());
+
+        left.Window.VisiblePlacement = new WindowPlacement(0, 0, 960, 1040, false);
+        right.Window.VisiblePlacement = new WindowPlacement(960, 0, 960, 1040, false);
+
+        Assert.Equal(new Rect(0, 0, 960, 1040), left.ContentBounds);
+        Assert.Equal(new Rect(960, 0, 960, 1040), right.ContentBounds);
+        Assert.Equal(new WindowPlacement(0, 0, 960, 1040, false), left.Window.VisiblePlacement);
+        Assert.Equal(new WindowPlacement(-8, 0, 976, 1048, false), left.Window.Placement);
+    }
+
+    [Fact]
+    public void OnAMonitorAt150Percent_AVisiblePlacementIsGrownByThatScalesBorders()
+    {
+        using var session = Session();
+        var window = session.Window.Window;
+
+        window.VisiblePlacement = new WindowPlacement(1920, 0, 1920, 2160, false);
+
+        Assert.Equal(new Rect(1920, 0, 1920, 2160), session.Window.ContentBounds);
+        Assert.Equal(new WindowPlacement(1909, 0, 1942, 2171, false), window.Placement);
+    }
+
+    /// <summary>Maximized, it is the bounds the window restores to, by what will be seen of them.</summary>
+    [Fact]
+    public void AMaximizedVisiblePlacement_RestoresToTheBoundsSeen()
+    {
+        using var session = Session();
+        var window = session.Window.Window;
+
+        window.VisiblePlacement = new WindowPlacement(100, 100, 800, 600, true);
+        session.PumpFrame();
+        Assert.True(window.IsMaximized);
+        Assert.Equal(new WindowPlacement(100, 100, 800, 600, true), window.VisiblePlacement);
+
+        window.Restore();
+        session.PumpFrame();
+        Assert.Equal(new Rect(100, 100, 800, 600), session.Window.ContentBounds);
+    }
+
+    /// <summary>A standard frame is modelled with no borders: what is seen is the placement.</summary>
+    [Fact]
+    public void AStandardFrame_ItsVisiblePlacementIsItsPlacement()
+    {
+        using var session = Session(WindowStyle.Default);
+        var window = session.Window.Window;
+
+        window.VisiblePlacement = new WindowPlacement(100, 100, 800, 600, false);
+
+        Assert.Equal(window.Placement, window.VisiblePlacement);
+    }
+
     [Fact]
     public void MaximizeAndRestore_LandOnTheNextPump_AndMaximizedTheContentIsTheWorkArea()
     {
@@ -95,8 +157,11 @@ public sealed class WindowsFrameTests
         Assert.Equal(new Rect(108, 100, 784, 592), session.Window.ContentBounds);
     }
 
+    /// <summary>A placement on a shown maximized window lands where it was put. The restore went
+    /// through the custom frame's posted command, which landed after the move and put back the
+    /// bounds from before the maximize, undoing the placement.</summary>
     [Fact]
-    public void APlacementOnAShownMaximizedWindow_IsUndoneByItsRestoreLandingAfterTheMove()
+    public void APlacementOnAShownMaximizedWindow_LandsWhereItWasPut()
     {
         using var session = Session();
         var window = session.Window.Window;
@@ -105,12 +170,29 @@ public sealed class WindowsFrameTests
         Assert.True(window.IsMaximized);
 
         window.Placement = new WindowPlacement(952, 0, 976, 1040, false);
-        Assert.True(window.IsMaximized);   // the restore is posted; the move is made at once
+        Assert.False(window.IsMaximized);   // restored at once, before the move
         session.PumpFrame();
 
-        // The restore lands after the move and puts back the bounds from before the maximize.
         Assert.False(window.IsMaximized);
-        Assert.Equal(new WindowPlacement(100, 100, 800, 600, false), window.Placement);
+        Assert.Equal(new WindowPlacement(952, 0, 976, 1040, false), window.Placement);
+    }
+
+    /// <summary>A maximized window moved to another monitor maximized is maximized there: its
+    /// restore and move come first, its maximize lands on the monitor it was moved to.</summary>
+    [Fact]
+    public void AMaximizedWindowMovedToAnotherMonitorMaximized_IsMaximizedThere()
+    {
+        using var session = Session();
+        var window = session.Window.Window;
+        window.Placement = new WindowPlacement(100, 100, 800, 600, true);
+        session.PumpFrame();
+        Assert.True(window.IsMaximized);
+
+        window.MoveToMonitor(session.Monitors[1], MonitorFit.Maximized);
+        session.PumpFrame();
+
+        Assert.True(window.IsMaximized);
+        Assert.Equal("B", window.Monitor?.Name);
     }
 
     [Fact]
@@ -134,18 +216,22 @@ public sealed class WindowsFrameTests
         var window = session.Window.Window;
         window.Placement = new WindowPlacement(100, 100, 800, 600, false);
         session.PumpFrame();
-        int resized = 0, moved = 0;
+        int resized = 0, moved = 0, windowMoved = 0, display = 0;
+        string? monitorTold = null;
         window.Resized += () => resized++;
         session.Window.Moved += () => moved++;
+        window.Moved += () => windowMoved++;
+        window.DisplayChanged += () => { display++; monitorTold = window.Monitor?.Name; };
 
         window.Placement = new WindowPlacement(2000, 100, 800, 600, false);
         Assert.Equal(1.5f, window.DisplayScale);
-        Assert.Equal((0, 0), (resized, moved));
+        Assert.Equal((0, 0, 0, 0), (resized, moved, windowMoved, display));
         session.PumpFrame();
 
-        Assert.Equal((1, 1), (resized, moved));
+        Assert.Equal((1, 1, 1, 1), (resized, moved, windowMoved, display));
+        Assert.Equal("B", monitorTold);   // the handler reads the display it went to
         session.PumpFrame();
-        Assert.Equal((1, 1), (resized, moved));
+        Assert.Equal((1, 1, 1, 1), (resized, moved, windowMoved, display));
     }
 
     [Fact]
@@ -155,15 +241,24 @@ public sealed class WindowsFrameTests
         var window = session.Window.Window;
         window.Placement = new WindowPlacement(100, 100, 800, 600, true);
         session.PumpFrame();
-        int moved = 0;
+        int moved = 0, windowMoved = 0, display = 0;
         session.Window.Moved += () => moved++;
+        window.Moved += () => windowMoved++;
+        window.DisplayChanged += () => display++;
 
         session.Window.MoveByUser(-300, 200, 700, 500);
 
         Assert.False(window.IsMaximized);
         Assert.Equal(new WindowPlacement(-300, 200, 700, 500, false), window.Placement);
         session.PumpFrame();
-        Assert.Equal(1, moved);
+        Assert.Equal((1, 1), (moved, windowMoved));
+        Assert.Equal(0, display);   // still on monitor A
+
+        // A drag is many moves between two frames: told once.
+        session.Window.MoveByUser(-200, 200, 700, 500);
+        session.Window.MoveByUser(-100, 200, 700, 500);
+        session.PumpFrame();
+        Assert.Equal(2, windowMoved);
     }
 
     [Fact]

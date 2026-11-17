@@ -31,6 +31,14 @@ internal static class Monitors
         return areas;
     }
 
+    /// <summary>
+    /// How many monitors there are, without <see cref="WorkAreas"/>' change to the calling thread's
+    /// DPI awareness: a skip attribute asks this on xUnit's discovery thread.
+    /// </summary>
+    public static int Count => GetSystemMetrics(SM_CMONITORS);
+
+    private const int SM_CMONITORS = 80;
+
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT { public int Left, Top, Right, Bottom; }
 
@@ -40,6 +48,7 @@ internal static class Monitors
     private delegate bool MonitorEnumProc(nint monitor, nint hdc, nint clip, nint data);
 
     [DllImport("user32")] private static extern nint SetThreadDpiAwarenessContext(nint context);
+    [DllImport("user32")] private static extern int GetSystemMetrics(int index);
     [DllImport("user32")] private static extern bool EnumDisplayMonitors(nint hdc, nint clip, MonitorEnumProc proc, nint data);
     [DllImport("user32", EntryPoint = "GetMonitorInfoW")] private static extern bool GetMonitorInfoW(nint monitor, ref MONITORINFO info);
 }

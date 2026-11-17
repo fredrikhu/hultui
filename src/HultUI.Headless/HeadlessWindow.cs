@@ -54,6 +54,13 @@ public sealed partial class HeadlessWindow
     }
 
     /// <summary>
+    /// Stands in for the system asking the window to close: Alt+F4, the title bar's or the task
+    /// bar's close. Delivered by the next pump, as a real platform's request is, and then asked as
+    /// one (<see cref="HultUI.Window.CloseRequested"/>): the window closes unless the app cancels.
+    /// </summary>
+    public void AskToClose() => _platform.CloseAsked = true;
+
+    /// <summary>
     /// The display refresh rate the window reports, in Hz. 0, the default, is unknown, which the
     /// loop takes as 60 Hz. Set it to run <see cref="HeadlessSession.RunLoop"/> as on a faster
     /// display; a pump draws whenever it is asked, whatever this says.
@@ -159,8 +166,11 @@ public sealed partial class HeadlessWindow
     /// <summary>
     /// Raised from the event pump (the next <see cref="HeadlessSession.PumpFrame()"/>) after the
     /// window's outer position changed — placed, maximized, restored, moved by the person or off
-    /// a monitor that went — as SDL's window-moved event is. Windows-like windows only
-    /// (<see cref="HeadlessOptions.WindowsFrame"/>).
+    /// a monitor that went — as SDL's window-moved event is, before the frame raises
+    /// <see cref="HultUI.Window.Moved"/>. A Windows-like window (<see cref="HeadlessOptions.WindowsFrame"/>)
+    /// moves by its outer rectangle; any other once it has been given a <see cref="HultUI.Window.Placement"/>
+    /// somewhere else (maximizing it moves nothing). The frame raises
+    /// <see cref="HultUI.Window.DisplayChanged"/> when, with simulated monitors, the move took it to another.
     /// </summary>
     public event Action? Moved
     {
@@ -187,7 +197,10 @@ public sealed partial class HeadlessWindow
     /// <summary>
     /// Renders a fresh frame and returns its pixels. The caller owns the
     /// returned image and must dispose it. Pixel dimensions are layout size ×
-    /// scale. Cross-machine caution: text glyphs come from system fonts unless
+    /// scale. The image is in Skia's native byte order, BGRA on the desktop OSes
+    /// (<see cref="Rendering.Skia.SkiaRasterRenderSurface.PixelColorType"/>): read colours through
+    /// <c>PeekPixels().GetPixelColor</c> or <c>ReadPixels</c> into an RGBA bitmap, not by
+    /// indexing its bytes as RGBA. Cross-machine caution: text glyphs come from system fonts unless
     /// the session was created with <see cref="HeadlessOptions.Golden"/>, so
     /// without it assert on your own drawing, not text rasterization, if the
     /// test must pass on more than one OS.

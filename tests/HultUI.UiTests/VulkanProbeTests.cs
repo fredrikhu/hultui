@@ -15,24 +15,58 @@ namespace HultUI.UiTests;
 [Collection("ui")]
 public sealed class VulkanProbeTests
 {
+    /// <summary>Why a probe test skips: UI tests off or no Vulkan loader. Null when it may run.</summary>
+    private static string? VulkanSkip =>
+        !UiTestGate.Enabled ? UiTestGate.Reason
+        : !NativeLibrary.TryLoad("vulkan-1.dll", out _) ? "No Vulkan loader (vulkan-1.dll)."
+        : null;
+
+    /// <summary>
+    /// Why a probe test that plays a clip skips: as <see cref="VulkanSkip"/>, and also off Windows
+    /// or without a libmpv. Without one the probe has nothing to play and exits 4, so the test
+    /// must not get that far; returning early instead reported Passed in under a millisecond.
+    /// </summary>
+    private static string? VulkanVideoSkip =>
+        VulkanSkip
+        ?? (!OperatingSystem.IsWindows() ? "The probe's video modes run on Windows only."
+            : !HultUI.Media.Mpv.MpvBackend.IsAvailable ? UiTestGate.NoMpvReason
+            : null);
+
     /// <summary>Skips unless UI tests are on and a Vulkan loader is installed.</summary>
     private sealed class VulkanUiFactAttribute : FactAttribute
     {
-        public VulkanUiFactAttribute()
-        {
-            if (!UiTestGate.Enabled) Skip = UiTestGate.Reason;
-            else if (!NativeLibrary.TryLoad("vulkan-1.dll", out _)) Skip = "No Vulkan loader (vulkan-1.dll).";
-        }
+        public VulkanUiFactAttribute() => Skip = VulkanSkip;
     }
 
     /// <summary>The <see cref="TheoryAttribute"/> counterpart of <see cref="VulkanUiFactAttribute"/>.</summary>
     private sealed class VulkanUiTheoryAttribute : TheoryAttribute
     {
-        public VulkanUiTheoryAttribute()
-        {
-            if (!UiTestGate.Enabled) Skip = UiTestGate.Reason;
-            else if (!NativeLibrary.TryLoad("vulkan-1.dll", out _)) Skip = "No Vulkan loader (vulkan-1.dll).";
-        }
+        public VulkanUiTheoryAttribute() => Skip = VulkanSkip;
+    }
+
+    /// <summary>A <see cref="VulkanUiFactAttribute"/> that also needs libmpv (<see cref="VulkanVideoSkip"/>).</summary>
+    private sealed class VulkanVideoUiFactAttribute : FactAttribute
+    {
+        public VulkanVideoUiFactAttribute() => Skip = VulkanVideoSkip;
+    }
+
+    /// <summary>The <see cref="TheoryAttribute"/> counterpart of <see cref="VulkanVideoUiFactAttribute"/>.</summary>
+    private sealed class VulkanVideoUiTheoryAttribute : TheoryAttribute
+    {
+        public VulkanVideoUiTheoryAttribute() => Skip = VulkanVideoSkip;
+    }
+
+    /// <summary>
+    /// <see cref="RunProbe"/> for a mode that plays a clip. This process found a libmpv (the
+    /// attribute saw to that), so a probe that found none ran another search and played nothing:
+    /// said plainly here, not left to the exit code.
+    /// </summary>
+    private static (int ExitCode, string Output) RunVideoProbe(Dictionary<string, string?> environment, string arguments)
+    {
+        var run = RunProbe(environment, arguments);
+        Assert.False(run.Output.Contains("probe: no libmpv"),
+            "this process found libmpv, the probe did not: it played nothing (HULTUI_MPV_PATH)\n" + run.Output);
+        return run;
     }
 
     /// <summary>What the loader sees when every driver is filtered out: a driver, but no GPU.</summary>
@@ -112,10 +146,9 @@ public sealed class VulkanProbeTests
     /// hidden GL context, each in a shared image of its own (seam W7). The clip is mpv's own
     /// lavfi colour source, so the capture is checked by pixel. Skipped where no libmpv is found.
     /// </summary>
-    [VulkanUiFact]
+    [VulkanVideoUiFact]
     public void APageAndAVideo_InOneVulkanWindow_BothReachTheScreen()
     {
-        if (!OperatingSystem.IsWindows() || !HultUI.Media.Mpv.MpvBackend.IsAvailable) return;
         string capture = Path.Combine(Path.GetTempPath(), $"hultui-vulkan-video-{Guid.NewGuid():N}.ppm");
         // Not the probe's lavfi colour source: the bundled LGPL libmpv has no lavfi ("unrecognized
         // file format", seen). Every build reads Y4M.
@@ -123,7 +156,7 @@ public sealed class VulkanProbeTests
         try
         {
             WriteMagentaClip(clip);
-            var run = RunProbe(new()
+            var run = RunVideoProbe(new()
             {
                 ["HULTUI_VULKAN_CAPTURE"] = capture,
                 ["HULTUI_VULKAN_CAPTURE_FRAME"] = "300",
@@ -542,13 +575,12 @@ public sealed class VulkanProbeTests
     /// it is installed and must leave its log empty: left to the present, the barrier comes after
     /// Skia's work and the layer reports <c>VUID-vkCmdDraw-None-09600</c>.
     /// </summary>
-    [VulkanUiTheory]
+    [VulkanVideoUiTheory]
     [InlineData("f16-mailbox")]
     [InlineData("8-bit")]
     [InlineData("gl")]
     public void ASteadyVideoFrame_AllocatesAlmostNothing_AndThePictureKeepsChanging(string variant)
     {
-        if (!OperatingSystem.IsWindows() || !HultUI.Media.Mpv.MpvBackend.IsAvailable) return;
         string clip = Path.Combine(Path.GetTempPath(), $"hultui-vulkan-ramp-{Guid.NewGuid():N}.y4m");
         string capture = Path.Combine(Path.GetTempPath(), $"hultui-vulkan-ramp-{Guid.NewGuid():N}.ppm");
         string validation = Path.Combine(Path.GetTempPath(), $"hultui-vulkan-ramp-{Guid.NewGuid():N}.log");
@@ -578,11 +610,14 @@ public sealed class VulkanProbeTests
                 case "gl": arguments += " --renderer=default"; break;
             }
 
-            var run = RunProbe(environment, arguments);
+            var run = RunVideoProbe(environment, arguments);
 
             Assert.True(run.ExitCode == 0, run.Output);
             Assert.Contains("probe: done", run.Output);
             Assert.Contains("Gpu mode", run.Output);
+            // mpv decoded the clip: its size, which only a loaded video has. GL has no capture to
+            // show it by, so this is the GL run's evidence that a picture came at all.
+            Assert.Contains("Width = 160, Height = 90", run.Output);
             var bytes = System.Text.RegularExpressions.Regex.Match(run.Output, @"probe: ([\d.]+) bytes a video frame");
             Assert.True(bytes.Success, run.Output);
             double perFrame = double.Parse(bytes.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
@@ -622,16 +657,15 @@ public sealed class VulkanProbeTests
     /// half-float one above the UI's white. The clip is tagged PQ through mpv's format filter. On an
     /// SDR display nothing is rebuilt.
     /// </summary>
-    [VulkanUiFact]
+    [VulkanVideoUiFact]
     public void AnHdrVideo_SwitchesTheSwapchainToHalfFloat_OnceEachWay()
     {
-        if (!OperatingSystem.IsWindows() || !HultUI.Media.Mpv.MpvBackend.IsAvailable) return;
         string clip = Path.Combine(Path.GetTempPath(), $"hultui-vulkan-pq-{Guid.NewGuid():N}.y4m");
         string capture = Path.Combine(Path.GetTempPath(), $"hultui-vulkan-pq-{Guid.NewGuid():N}.ppm");
         try
         {
             WritePqPatchClip(clip);
-            var run = RunProbe(new()
+            var run = RunVideoProbe(new()
             {
                 ["HULTUI_STARTUP"] = "1",
                 ["HULTUI_VULKAN_CAPTURE"] = capture,
@@ -909,13 +943,12 @@ public sealed class VulkanProbeTests
     /// Reel the next file in the folder stayed silent until the restore. The window now takes
     /// the frames without drawing them, and lets a new player set up as a draw would.
     /// </summary>
-    [VulkanUiTheory]
+    [VulkanVideoUiTheory]
     [InlineData("gl")]
     [InlineData("f16-mailbox")]
     [InlineData("8-bit")]
     public void AVideoInAMinimizedWindow_KeepsPlaying_AndANewOneLoads(string variant)
     {
-        if (!OperatingSystem.IsWindows() || !HultUI.Media.Mpv.MpvBackend.IsAvailable) return;
         // Ten seconds at 30 fps: longer than the probe runs.
         string clip = HultUI.Media.Testing.TestClip.WriteTempY4m(160, 90, fps: 30, frames: 300);
         try
@@ -934,7 +967,7 @@ public sealed class VulkanProbeTests
                 case "8-bit": environment["HULTUI_VULKAN_F16"] = "0"; break;
             }
 
-            var run = RunProbe(environment, arguments);
+            var run = RunVideoProbe(environment, arguments);
 
             Assert.True(run.ExitCode == 0, run.Output);
             Assert.Contains("probe: done", run.Output);

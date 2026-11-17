@@ -258,6 +258,8 @@ public class TextInputElement : BoxElement
     }
     private TextInputStyle? _style;
 
+    internal override bool TakesTypedText => true;
+
     protected internal override void ApplyTheme(Theme theme)
     {
         var ti = theme.TextInput;
@@ -388,6 +390,9 @@ public class TextInputElement : BoxElement
         // key KeyCode calls Y is the one printed Z, and Ctrl+Z there must undo, not redo.
         if (ctrl && TryLetterShortcut(evt.ShortcutLetter, shift))
         {
+            // Marked, not stopped: the key still bubbles, and an app's handler that checks
+            // Handled leaves it (KeyDownEvent.TargetTakesText).
+            evt.Handled = true;
             MarkPaintDirty();
             return;
         }
@@ -442,6 +447,7 @@ public class TextInputElement : BoxElement
                 return; // Don't mark paint dirty for unhandled keys
         }
 
+        evt.Handled = true;
         MarkPaintDirty();
     }
 

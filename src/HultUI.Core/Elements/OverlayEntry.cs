@@ -12,6 +12,10 @@ internal sealed class OverlayEntry
     public float WantedX { get; set; }
     /// <summary>The vertical half of <see cref="WantedX"/>.</summary>
     public float WantedY { get; set; }
+    /// <summary>Where the overlay's right edge goes when it has no room at <see cref="WantedX"/>:
+    /// a menu's flyout opens on its parent's left then, rather than being pushed back over the
+    /// parent it belongs to. Null shifts the overlay in from the window's edge.</summary>
+    public float? FlipRightEdge { get; init; }
     public bool DismissOnOutsideClick { get; init; }
     /// <summary>Runs when the host dismisses the overlay on an outside click — the one
     /// close the owner did not initiate, so the one it has to be told about. An explicit

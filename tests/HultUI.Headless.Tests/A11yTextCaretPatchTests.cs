@@ -277,12 +277,12 @@ public sealed class A11yTextCaretPatchTests : IDisposable
 
         editor.ReadOnly = true;
         session.PumpFrame();
-        Assert.True(Task.Run(() => editor.AccessibleTextSource!.AccessibleText!.IsReadOnly).Result);
+        Assert.True(OtherThread.Run(() => editor.AccessibleTextSource!.AccessibleText!.IsReadOnly));
         Assert.True(NodeOf(bridge.CurrentTree!, editor).Text!.IsReadOnly);
 
         editor.ReadOnly = false;
         session.PumpFrame();
-        Assert.False(Task.Run(() => editor.AccessibleTextSource!.AccessibleText!.IsReadOnly).Result);
+        Assert.False(OtherThread.Run(() => editor.AccessibleTextSource!.AccessibleText!.IsReadOnly));
 
         Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
         Assert.Empty(bridge.Diffs);
@@ -348,7 +348,7 @@ public sealed class A11yTextCaretPatchTests : IDisposable
         Assert.Equal([selectionChanged, selectionChanged], raised);
         Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
         // A client's thread reads the moved caret and selection.
-        var text = Task.Run(() => bridge.GetText(editor.Id)).Result!;
+        var text = OtherThread.Run(() => bridge.GetText(editor.Id))!;
         Assert.Equal((2, 1, 2), (text.Caret, text.SelectionStart, text.SelectionEnd));
     }
 
@@ -381,7 +381,7 @@ public sealed class A11yTextCaretPatchTests : IDisposable
         ], raised);
         Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
         // A client's thread reads the new text and the moved caret.
-        var text = Task.Run(() => bridge.GetText(editor.Id)).Result!;
+        var text = OtherThread.Run(() => bridge.GetText(editor.Id))!;
         Assert.StartsWith("xfirst paragraph", text.Text, StringComparison.Ordinal);
         Assert.Equal(1, text.Caret);
     }

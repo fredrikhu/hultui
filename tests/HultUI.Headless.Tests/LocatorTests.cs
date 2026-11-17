@@ -69,6 +69,54 @@ public class LocatorTests
     }
 
     [Fact]
+    public void GetByLabel_ErrorTextThatContainsTheLabel_LabelsNothing()
+    {
+        // The app team's sign-in form: the error line contains "user name", and the button after
+        // it matched too, so the locator failed strict mode.
+        var user = TextInput.New("");
+        var password = TextInput.New("");
+        using var session = Mount(
+            Text.New("User name"), user,
+            Text.New("Password"), password,
+            Text.New("Enter the user name and the password."),
+            Button.New("Sign in"));
+
+        Expect(session.GetByLabel("User name")).ToHaveCount(1);
+        session.GetByLabel("User name").Fill("ada");
+        Assert.Equal("ada", user.Text);
+        Expect(session.GetByLabel("Password")).ToHaveCount(1);
+        Expect(session.GetByLabel("Sign in")).ToHaveCount(1);   // by the button's own name
+    }
+
+    [Fact]
+    public void GetByLabel_OnlyTheNearestLabel_LabelsAField()
+    {
+        // The error line before the password's own label: the old scan skipped "Password" (no
+        // match) and reached the error line, which labelled the password field "User name".
+        var password = TextInput.New("");
+        using var session = Mount(
+            Text.New("User name"), TextInput.New(""),
+            Text.New("Enter the user name and the password."),
+            Text.New("Password"), password);
+
+        Expect(session.GetByLabel("User name")).ToHaveCount(1);
+        session.GetByLabel("Password").Fill("secret");
+        Assert.Equal("secret", password.Text);
+    }
+
+    [Fact]
+    public void GetByLabel_AToggleWithItsOwnText_IsNotLabelledByTheTextBeforeIt()
+    {
+        using var session = Mount(
+            Text.New("Notifications"), Checkbox.New(label: "Email me"),
+            Text.New("Dark mode"), ToggleSwitch.New());
+
+        Expect(session.GetByLabel("Notifications")).ToHaveCount(0);   // a heading, not its label
+        Expect(session.GetByLabel("Email me")).ToHaveCount(1);
+        Expect(session.GetByLabel("Dark mode")).ToHaveCount(1);       // a bare switch takes its label
+    }
+
+    [Fact]
     public void GetByTestId_Press_TypesIntoTheField()
     {
         var input = TextInput.New("abc");

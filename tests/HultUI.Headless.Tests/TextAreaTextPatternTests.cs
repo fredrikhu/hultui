@@ -14,6 +14,7 @@ using HultUI.Platform.Accessibility.Linux;
 using HultUI.Platform.Accessibility.Windows;
 using Xunit;
 using TextB = HultUI.Core.Builders.Text;
+using HultUI.Testing;
 
 namespace HultUI.Headless.Tests;
 
@@ -84,7 +85,7 @@ public sealed class TextAreaTextPatternTests : IDisposable
     }
 
     private static AccessibleText Read(Element area) =>
-        Task.Run(() => area.AccessibleTextSource!.AccessibleText!).Result;
+        OtherThread.Run(() => area.AccessibleTextSource!.AccessibleText!);
 
     private static List<int> Rows(TextAreaElement area) =>
         area.GetLineStarts(area.Layout.AbsoluteContentBox.Width, area.ResolvedInherited);
@@ -217,7 +218,7 @@ public sealed class TextAreaTextPatternTests : IDisposable
         rig.Session.Window.PressKey(KeyCode.Right);
         rig.Session.PumpFrame();
         Assert.Equal([new UiaRaised(UiaRaisedKind.Event, UiaInterop.UIA_Text_TextSelectionChangedEventId, area.Id)], rig.Raised);
-        Assert.Equal(2, Task.Run(() => rig.Bridge.GetText(area.Id)!.Caret).Result);
+        Assert.Equal(2, OtherThread.Run(() => rig.Bridge.GetText(area.Id)!.Caret));
     }
 
     // ── AT-SPI ──

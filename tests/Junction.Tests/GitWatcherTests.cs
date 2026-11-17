@@ -352,16 +352,30 @@ public class GitWatcherTests
     /// <summary>A build writes hundreds of files in a burst. The burst is one callback, as
     /// before, and costs no exception: the debounce used to make a token, a task and a delay per
     /// event and cancel the one before, which threw (plan 17 round 14: a Junction build of this
-    /// repository 267 events, an AOT publish 551, a caught exception each).</summary>
+    /// repository 267 events, an AOT publish 551, a caught exception each).
+    ///
+    /// <para>The debounce is counted on a clock the test moves. On the system's, a 2-core runner
+    /// that stalled for longer than the debounce in the middle of the burst closed the window
+    /// there, and the burst was two callbacks (CI, 2026-11-17: [False, False]); so could the
+    /// folder's own callback, late, after the list was cleared. Here the window stays open while
+    /// the clock stands, however long the events take to come in, and closes when it moves on.</para></summary>
     [Fact]
     public void ABurstOfEvents_IsOneCallback_AndThrowsNothing()
     {
         using var repo = TempRepo.CreateWithInitialCommit();
         using var session = HeadlessSession.Create(400, 300);
         var seen = new List<bool>();
-        using var watcher = new GitWatcher(repo.Path, refs => seen.Add(refs), debounceMs: 500);
+        var clock = new ManualClock();
+        var debounce = TimeSpan.FromMilliseconds(500);
+        using var watcher = new GitWatcher(repo.Path, refs => seen.Add(refs), (int)debounce.TotalMilliseconds, clock);
+        // The folder first, so that git is asked about it before the burst, as a build's output
+        // folder was there before the build; then whatever it left untold is forgotten, a callback
+        // already on its way to the UI thread included.
         Directory.CreateDirectory(Path.Combine(repo.Path, "out"));
-        Pump(session, TimeSpan.FromMilliseconds(800));
+        Pump(session, TimeSpan.FromMilliseconds(300));
+        clock.Advance(debounce);
+        Pump(session, TimeSpan.FromMilliseconds(300));
+        watcher.Forget();
         seen.Clear();
 
         int thrown = 0;
@@ -378,8 +392,18 @@ public class GitWatcherTests
                 File.WriteAllText(Path.Combine(repo.Path, "out", $"f{i}.bin"), "x");
                 Thread.Sleep(1);   // a build's pace: each write its own event, all inside one debounce
             }
-            var until = DateTime.UtcNow + TimeSpan.FromSeconds(5);
-            while (DateTime.UtcNow < until && seen.Count == 0) { session.PumpFrame(); Thread.Sleep(10); }
+            // Time for the events to come in; the clock stands, so a late one still joins the
+            // window. Then the clock moves past the debounce and the window closes. Moved again
+            // only if nothing came of it, as when no event had been heard yet: a callback posted
+            // is pumped well inside the two seconds.
+            Pump(session, TimeSpan.FromMilliseconds(800));
+            for (int attempt = 0; attempt < 5 && seen.Count == 0; attempt++)
+            {
+                clock.Advance(debounce);
+                var until = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+                while (DateTime.UtcNow < until && seen.Count == 0) { session.PumpFrame(); Thread.Sleep(10); }
+            }
+            // A straggler heard after that opens a window the standing clock never closes.
             Pump(session, TimeSpan.FromMilliseconds(800));
         }
         finally { AppDomain.CurrentDomain.FirstChanceException -= OnThrown; }

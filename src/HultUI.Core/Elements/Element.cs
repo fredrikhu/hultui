@@ -179,7 +179,11 @@ public abstract class Element
 #endif
             return _layout;
         }
-        internal set => _layout = value;
+        internal set
+        {
+            _layout = value;
+            if (LayoutWatch.On) LayoutWatch.Wrote(this);
+        }
     }
 
     /// <summary>
@@ -487,10 +491,33 @@ public abstract class Element
     internal virtual float RenderOpacity => _opacity;
 
     /// <summary>
-    /// Whether assistive technology should offer this element as enabled. A control with a
-    /// disabled state overrides it; everything else is enabled.
+    /// Whether assistive technology should offer this element as enabled: false when the app
+    /// marked it unavailable (<see cref="AccessibleEnabled"/>), and a control with a disabled state
+    /// of its own (a button) adds that.
     /// </summary>
-    internal virtual bool IsEnabledForAccessibility => true;
+    internal virtual bool IsEnabledForAccessibility => _accessibleEnabled;
+
+    /// <summary>
+    /// False marks an element unavailable to assistive technology: a button the app builds from a
+    /// box, drawn disabled. It is read as UIA's IsEnabled and AT-SPI's enabled and sensitive
+    /// states, and a reader can no longer invoke, toggle, select, expand or set the value of it.
+    /// True (the default) leaves it to the control; a <see cref="ButtonElement"/> is disabled
+    /// while its own <see cref="ButtonElement.IsEnabled"/> is false either way.
+    /// <para>As <c>aria-disabled</c>, it changes nothing else: the element keeps the focus, the
+    /// pointer and the keys, so an app that marks it also stops its own handlers acting. A
+    /// <see cref="ButtonElement"/> does both, and takes the element out of Tab order.</para>
+    /// </summary>
+    public bool AccessibleEnabled
+    {
+        get => _accessibleEnabled;
+        set
+        {
+            if (_accessibleEnabled == value) return;
+            _accessibleEnabled = value;
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.IsEnabled);
+        }
+    }
+    private bool _accessibleEnabled = true;
 
     /// <summary>
     /// A 2D transform (rotate/scale/translate) applied to this element and its
@@ -599,6 +626,13 @@ public abstract class Element
     /// key downs only, and typed characters never arrive.
     /// </summary>
     internal virtual bool WantsTextInput => false;
+
+    /// <summary>
+    /// Whether a key typed while this element has the keyboard types text into it, so a letter is
+    /// typing, not a shortcut (<see cref="Events.KeyDownEvent.TargetTakesText"/>): an editable
+    /// field, area or editor, a number field, a terminal. A read-only viewer does not.
+    /// </summary>
+    internal virtual bool TakesTypedText => WantsTextInput;
 
     /// <summary>
     /// Content of this element that keeps its own accessibility tree — a web page's engine.
@@ -931,6 +965,19 @@ public abstract class Element
         }
         items[count] = entry;
         if (firstClick) ClickHandlersChanged();
+        if (ReferenceEquals(entry.Kind, EventKind<LayoutChangedEvent>.Instance)) StartsWatchingLayout();
+    }
+
+    /// <summary>
+    /// A <see cref="LayoutChangedEvent"/> handler arrived: the event is switched on, and the element
+    /// is laid out again so it hears its box even when nothing else moves it. One already in a
+    /// window, given its first handler by a rebuild, would otherwise wait for the next resize.
+    /// </summary>
+    private void StartsWatchingLayout()
+    {
+        LayoutWatch.On = true;
+        LayoutWatch.Forget(this);
+        MarkLayoutDirty();
     }
 
     /// <summary>
@@ -1365,6 +1412,7 @@ public abstract class Element
         {
             _mounted = false;
             _pendingAnnouncements = null; // gone before a window took it: a rebuild's twin
+            if (LayoutWatch.On) LayoutWatch.Forget(this);   // back in a tree, it hears its box anew
             OnUnmounted();
             // Its synthetic accessibility nodes (list items, described content) go with it:
             // their ids stop resolving rather than ever naming a newer element.
@@ -1759,6 +1807,7 @@ public abstract class Element
         AccessibleExpanded = source.AccessibleExpanded;
         AccessibleSelected = source.AccessibleSelected;
         AccessibleToggled = source.AccessibleToggled;
+        AccessibleEnabled = source.AccessibleEnabled;
         // App event handlers ARE copied: the incoming build is the source of truth,
         // so a retained element always runs the latest build's handlers (matching how
         // callback props like ButtonElement.Clicked already behave). Element-OWNED
@@ -1824,6 +1873,10 @@ public abstract class Element
         if (items is null && incoming is null)
             return;
 
+        // A layout handler is app code, so a build that adds the first one is the element
+        // starting to listen. Read before the array below is written over.
+        bool hadLayoutHandler = LayoutWatch.On && Listens(items, typeof(LayoutChangedEvent));
+
         // Whether a click handler is there before and after: one coming or going is told
         // (ClickHandlersChanged), the box's own (owned) ones staying.
         var click = EventKind<ClickEvent>.Instance;
@@ -1885,6 +1938,7 @@ public abstract class Element
             Array.Clear(target, at, count - at);
         _handlers = target;
         if (hadClick != hasClick) ClickHandlersChanged();
+        if (LayoutWatch.On && !hadLayoutHandler && Listens(target, typeof(LayoutChangedEvent))) StartsWatchingLayout();
     }
 
     // ──── Rendering ────
@@ -1975,6 +2029,15 @@ public abstract class Element
     /// </summary>
     internal virtual float MeasureMinContentWidth(IMeasureContext ctx) =>
         MeasureContent(0f, LayoutSpace.Unbounded, ctx).Width;
+
+    /// <summary>
+    /// The width this element's own content takes with no limit on it (content box): what a row
+    /// gives an item that would otherwise widen into all the room offered (LayoutEngine.MaxContentWidth).
+    /// +∞ for "not known without measuring at a width", which keeps the measurement the engine
+    /// made before: a leaf answers only when its content's natural width does not depend on the
+    /// room (a label's line, an empty spacer).
+    /// </summary>
+    internal virtual float MeasureMaxContentWidth(IMeasureContext ctx) => float.PositiveInfinity;
 
     /// <summary>
     /// Where this element's own first line of text sits: the distance from the top of its

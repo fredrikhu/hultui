@@ -125,7 +125,7 @@ public class RichTextTextOnRequestTests
 
         // Nobody had read: a bridge's thread gets the text from the document alone, its paragraphs
         // as its lines and no boxes.
-        var first = Task.Run(() => source.AccessibleText).Result!;
+        var first = OtherThread.Run(() => source.AccessibleText)!;
         Assert.Equal(longText + "\nshort", first.Text);
         Assert.Equal(0, first.Caret);
         Assert.Null(first.Geometry);
@@ -134,7 +134,7 @@ public class RichTextTextOnRequestTests
         // The UI thread is asked to make it from the layout, and does at its next turn: the lines
         // as drawn, which the UI thread's own read agrees with.
         session.PumpFrame();
-        var second = Task.Run(() => source.AccessibleText).Result!;
+        var second = OtherThread.Run(() => source.AccessibleText)!;
         Assert.NotNull(second.Geometry);
         Assert.True(second.LineCount > second.ParagraphCount, $"{second.LineCount} lines");
         var fromLayout = source.AccessibleText!;
@@ -144,7 +144,7 @@ public class RichTextTextOnRequestTests
         // A reader is reading: the next version is made from the layout as the tree takes it.
         session.Window.TypeText("z");
         session.PumpFrame();
-        var third = Task.Run(() => source.AccessibleText).Result!;
+        var third = OtherThread.Run(() => source.AccessibleText)!;
         Assert.StartsWith("z", third.Text);
         Assert.NotNull(third.Geometry);
         Assert.True(third.LineCount > third.ParagraphCount);

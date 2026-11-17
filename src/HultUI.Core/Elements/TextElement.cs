@@ -567,6 +567,10 @@ public class TextElement : Element
             ? 0f
             : ctx.MinContentTextWidth(Content, ResolvedInherited, _spans);
 
+    // The text unwrapped: its widest line, as it would lay out with all the room it wanted.
+    internal override float MeasureMaxContentWidth(IMeasureContext ctx) =>
+        MeasureContent(LayoutSpace.Unbounded, LayoutSpace.Unbounded, ctx).Width;
+
     // Drawn from the top of the content box, wrapped at its width.
     internal override float? MeasureBaseline(Size borderBox, IMeasureContext ctx) =>
         string.IsNullOrEmpty(Content)

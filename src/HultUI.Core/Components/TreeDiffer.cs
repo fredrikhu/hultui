@@ -322,8 +322,15 @@ internal static class TreeDiffer
             parent.InsertChild(i, newChildren[i]);
     }
 
+    // A component host is its component: two hosts of one component type are not the same
+    // element. Patching one onto the other kept the old component live (its next rebuild put
+    // its content back) and stranded the new one off screen, never mounted, its effect leaked.
+    // Keys did not prevent it: Element.Key is settable, so an app key replaces the host's own,
+    // and a single slot (a build returning one component's host or another's) matches no key.
     private static bool CanPatch(Element existing, Element incoming) =>
-        existing.GetType() == incoming.GetType();
+        existing.GetType() == incoming.GetType()
+        && (existing is not ComponentHost host
+            || ReferenceEquals(host.Component, ((ComponentHost)incoming).Component));
 
     private static bool HasAnyKeys(Element[] children)
     {

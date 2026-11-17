@@ -108,11 +108,24 @@ public sealed partial class SingleInstance : IDisposable
         if (IsFirst) throw new InvalidOperationException("This launch claimed the app; there is no other copy to forward to.");
         ObjectDisposedException.ThrowIf(_disposed, this);
         var message = Encode(args, Environment.CurrentDirectory);
+        int budget = (int)Math.Ceiling(timeout.TotalMilliseconds);
+        long start = Environment.TickCount64;
         try
         {
-            // Off any synchronization context: this blocks, and is called before the app has one,
-            // but a continuation posted to a UI thread that is waiting here would never run.
-            return Task.Run(() => SendAsync(message, timeout)).GetAwaiter().GetResult();
+            using var pipe = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut,
+                PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+            // Retries until a listener is free: the running copy may have claimed the app a moment
+            // ago and not yet opened its pipe, or be taking another launch. On this thread, which
+            // waits anyway: ConnectAsync retries on a pool thread, and a burst of launches inside
+            // one process took every pool thread, the listener's among them, so each one ran out
+            // its time while the listener waited for a thread.
+            pipe.Connect(budget);
+            if (OperatingSystem.IsWindows()) LetServerTakeForeground(pipe);
+
+            var left = TimeSpan.FromMilliseconds(Math.Max(0, budget - (Environment.TickCount64 - start)));
+            // Waited on here, not run on the pool: overlapped I/O holds no thread while it waits,
+            // and its awaits skip the synchronization context, whose UI thread may be this one.
+            return ExchangeAsync(pipe, message, left).GetAwaiter().GetResult();
         }
         catch (Exception ex) when (ex is IOException or TimeoutException or OperationCanceledException
                                        or UnauthorizedAccessException)
@@ -319,16 +332,9 @@ public sealed partial class SingleInstance : IDisposable
 
     // ──── Launch that forwards ────
 
-    private async Task<bool> SendAsync(byte[] message, TimeSpan timeout)
+    private static async Task<bool> ExchangeAsync(NamedPipeClientStream pipe, byte[] message, TimeSpan timeout)
     {
         using var cts = new CancellationTokenSource(timeout);
-        await using var pipe = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut,
-            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-        // Retries until the listener exists: the running copy may have claimed the app a moment
-        // ago and not yet opened its pipe.
-        await pipe.ConnectAsync(cts.Token).ConfigureAwait(false);
-        if (OperatingSystem.IsWindows()) LetServerTakeForeground(pipe);
-
         await pipe.WriteAsync(message, cts.Token).ConfigureAwait(false);
         await pipe.FlushAsync(cts.Token).ConfigureAwait(false);
         var answer = new byte[1];

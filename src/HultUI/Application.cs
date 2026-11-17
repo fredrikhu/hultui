@@ -707,11 +707,13 @@ public sealed class Application : IDisposable
         if (!_platform.PumpEvents(onWindowClose: _onWindowClose ??= OnWindowCloseRequested))
         {
             _quitRequested = true;
+            CloseWindowsOnQuit();
             return false;
         }
 
         ProcessPendingResizes();
         ProcessPendingActivations();
+        ProcessPendingCloseRequests();
 
         // Drain actions posted from background threads
         DrainMainThreadQueue();
@@ -1132,14 +1134,43 @@ public sealed class Application : IDisposable
     }
 
     /// <summary>Raises <see cref="Window.Activated"/> for windows the platform reported as
-    /// newly foregrounded. Runs before the main-thread queue drains, so a handler that posts
+    /// newly foregrounded, and <see cref="Window.Deactivated"/>, <see cref="Window.Moved"/> and
+    /// <see cref="Window.DisplayChanged"/> for the others it reported. Runs before the main-thread queue drains, so a handler that posts
     /// work gets it picked up in the same frame rather than the next one.</summary>
     private void ProcessPendingActivations()
     {
         foreach (var window in _windows)
         {
-            if (!window.PlatformWindow.ActivatedPending) continue;
-            window.PlatformWindow.ActivatedPending = false;
+            var platform = window.PlatformWindow;
+            // A loss before a gain: a window that lost the foreground and got it back in one pump
+            // is the foreground one after both.
+            if (platform.DeactivatedPending)
+            {
+                platform.DeactivatedPending = false;
+                // Into the inspector the window's popups stay, so one can be inspected open.
+                if (window.IsOpen) window.RaiseDeactivated(keepPopups: _inspectorHost is { IsOpen: true } inspector
+                    && ReferenceEquals(inspector.Target, window));
+            }
+            // A press on the frame: the popups close, as for a press anywhere outside them.
+            if (platform.FramePressedPending)
+            {
+                platform.FramePressedPending = false;
+                if (window.IsOpen) window.DismissPopups();
+            }
+            // Moves, however many the pump brought, told once; then the display, which a move
+            // may have changed. Before the main-thread queue, like the activations.
+            if (platform.MovedPending)
+            {
+                platform.MovedPending = false;
+                if (window.IsOpen) window.RaiseMoved();
+            }
+            if (platform.DisplayChangedPending)
+            {
+                platform.DisplayChangedPending = false;
+                if (window.IsOpen) window.RaiseDisplayChanged();
+            }
+            if (!platform.ActivatedPending) continue;
+            platform.ActivatedPending = false;
             if (window.IsOpen) window.RaiseActivated();
         }
     }
@@ -1272,10 +1303,34 @@ public sealed class Application : IDisposable
         return anyRendered;
     }
 
+    // Inside the platform's pump: noted, and asked after it (ProcessPendingCloseRequests), where a
+    // handler of Window.CloseRequested may open a dialog, as Activated's may.
     private void OnWindowCloseRequested(IPlatformWindow platformWindow)
     {
         var window = _windows.FirstOrDefault(w => w.PlatformWindow == platformWindow);
-        window?.NotifyClosed();
+        if (window is null) return;
+        _closeRequests ??= [];
+        if (!_closeRequests.Contains(window)) _closeRequests.Add(window);
+    }
+    private List<Window>? _closeRequests;
+
+    /// <summary>The windows the system asked to close in this pass's events, asked now
+    /// (<see cref="Window.RequestClose"/>): each closes unless its app cancels.</summary>
+    private void ProcessPendingCloseRequests()
+    {
+        if (_closeRequests is not { Count: > 0 } asked) return;
+        _closeRequests = null;
+        foreach (var window in asked) window.RequestClose();
+    }
+
+    /// <summary>A quit (Cmd+Q, a signal, the session ending) is no request a window can refuse:
+    /// every window still open closes, with <see cref="Window.Closed"/>, so an app saves what it
+    /// saves on a close. The loop ended without it, and no Closed was raised.</summary>
+    private void CloseWindowsOnQuit()
+    {
+        _closeRequests = null;
+        foreach (var window in _windows.ToArray())
+            if (window.IsOpen) window.Close();
     }
 
     private void CleanupClosedWindows()

@@ -48,6 +48,25 @@ internal static class UiTestGate
     /// <summary>Why a test that takes the foreground skips, or null when it may run.</summary>
     internal static string? ForegroundSkip =>
         !Enabled ? Reason : !ForegroundEnabled ? ForegroundReason : null;
+
+    internal const string NoMpvReason = "libmpv not found (HULTUI_MPV_PATH).";
+
+    /// <summary>
+    /// Why a test that plays a video through mpv skips, or null when it may run. A test that
+    /// returned early without libmpv reported Passed in under a millisecond, having played
+    /// nothing; it must say Skipped instead.
+    /// </summary>
+    internal static string? MpvSkip =>
+        !Enabled ? Reason : !HultUI.Media.Mpv.MpvBackend.IsAvailable ? NoMpvReason : null;
+
+    internal const string OneMonitorReason = "Needs a second monitor: there is one here.";
+
+    /// <summary>
+    /// Why a test that moves a window to another monitor skips, or null when it may run. On one
+    /// monitor such a test returned early and reported a pass for a move it never made.
+    /// </summary>
+    internal static string? MultiMonitorSkip =>
+        !Enabled ? Reason : Monitors.Count < 2 ? OneMonitorReason : null;
 }
 
 /// <summary>A <see cref="FactAttribute"/> that skips unless <see cref="UiTestGate"/> allows it.</summary>
@@ -65,6 +84,24 @@ public sealed class UiTheoryAttribute : TheoryAttribute
     public UiTheoryAttribute()
     {
         if (!UiTestGate.Enabled) Skip = UiTestGate.Reason;
+    }
+}
+
+/// <summary>A real-window test that needs two monitors or more (<see cref="UiTestGate.MultiMonitorSkip"/>).</summary>
+public sealed class UiMultiMonitorFactAttribute : FactAttribute
+{
+    public UiMultiMonitorFactAttribute()
+    {
+        if (UiTestGate.MultiMonitorSkip is { } reason) Skip = reason;
+    }
+}
+
+/// <summary>The <see cref="TheoryAttribute"/> counterpart of <see cref="UiMultiMonitorFactAttribute"/>.</summary>
+public sealed class UiMultiMonitorTheoryAttribute : TheoryAttribute
+{
+    public UiMultiMonitorTheoryAttribute()
+    {
+        if (UiTestGate.MultiMonitorSkip is { } reason) Skip = reason;
     }
 }
 

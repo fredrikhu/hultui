@@ -156,6 +156,10 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
     public bool ResizePending { get; set; }
     public bool ActivatedPending { get; set; }
+    public bool DeactivatedPending { get; set; }
+    public bool FramePressedPending { get; set; }
+    public bool MovedPending { get; set; }
+    public bool DisplayChangedPending { get; set; }
     public long LastResizeRenderTick { get; set; }
 
     /// <summary>Set by the framework while it draws a frame of this window: the event watcher
@@ -535,7 +539,11 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
             if (useSoftware)
             {
-                _rasterSurface = new SkiaRasterRenderSurface(text);
+                // Into the window surface itself when Skia can draw its pixels, which is always on
+                // Windows; otherwise into Skia's own memory, copied each frame (PresentSoftware).
+                _rasterSurface = WindowSurfaceTarget() is not null
+                    ? new SkiaRasterRenderSurface(text, WindowSurfaceTarget)
+                    : new SkiaRasterRenderSurface(text);
                 StartupTrace.Mark("skia raster surface");
             }
         }
@@ -984,7 +992,37 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
                     }
                     break;
 
+                // Flagged as a gain is: the loop closes the window's light-dismiss popups (a
+                // menu, a dropdown's list) and raises Window.Deactivated. A menu stayed open over
+                // a window the user had left for another.
+                case (uint)SDL_EventType.SDL_EVENT_WINDOW_FOCUS_LOST:
+                    if (_registry.TryGetValue(evt.window.windowID, out var leftWin))
+                        leftWin.DeactivatedPending = true;
+                    break;
+
+                // A press on a part of the window SDL's hit test gave to the system (a custom
+                // title bar to drag, an edge to resize), which the window gets no press for. Off
+                // Windows only: X11 sends it for the press that starts the move or resize; Windows
+                // runs its hit test on every pointer move, and the custom frame reports its frame
+                // presses itself (WindowsCustomFrame). Not verified on Wayland.
+                case (uint)SDL_EventType.SDL_EVENT_WINDOW_HIT_TEST when !OperatingSystem.IsWindows():
+                    if (_registry.TryGetValue(evt.window.windowID, out var hitWin))
+                        hitWin.FramePressedPending = true;
+                    break;
+
+                // Flagged, so a drag's stream of moves is told once a frame (Window.Moved). Wayland
+                // sends none: a window there has no position.
+                case (uint)SDL_EventType.SDL_EVENT_WINDOW_MOVED:
+                    if (_registry.TryGetValue(evt.window.windowID, out var shiftedWin))
+                        shiftedWin.MovedPending = true;
+                    break;
+
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+                    // Window.DisplayChanged, then on to what any change of display refreshes.
+                    if (_registry.TryGetValue(evt.window.windowID, out var displayWin))
+                        displayWin.DisplayChangedPending = true;
+                    goto case (uint)SDL_EventType.SDL_EVENT_WINDOW_HDR_STATE_CHANGED;
+
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_HDR_STATE_CHANGED:
                     // What decides the swapchain's format and white scale: a different monitor,
                     // or the same monitor with HDR switched or its SDR brightness moved. The
@@ -1300,33 +1338,89 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         set
         {
             if (_window == null || value is not { IsUsable: true }) return;
-            // Leaving maximized or full screen, and a maximized placement, activate the window
-            // (see WindowsActivation).
-            using var quiet = WindowsActivation.RefuseIfUnwanted();
-            var live = LiveResizeFrame;
-            LiveResizeFrame = null;
-            try
+            Place(value, fit: true);
+        }
+    }
+
+    /// <summary>
+    /// Windows: the placement by the window's visible rectangle, without the invisible resize
+    /// borders round its left, right and bottom (the custom frame's client area, the standard
+    /// frame's DWM bounds); fitted to the work areas as that rectangle, so two windows placed on a
+    /// display's halves meet edge to edge, and one on the work area's edge reaches it. Elsewhere
+    /// <see cref="Placement"/>, which is the client area already.
+    /// </summary>
+    public WindowPlacement? VisiblePlacement
+    {
+        get
+        {
+            if (_window == null) return null;
+            if (!OperatingSystem.IsWindows()) return Placement;
+            var hwnd = GetWin32Hwnd();
+            // Full screen: the bounds it goes back to, by what will be seen of them.
+            if (IsFullscreen && Placement is { } before) return WindowsPlacement.Inset(before, hwnd);
+            return WindowsPlacement.ReadVisible(hwnd, _customFrame is not null);
+        }
+        set
+        {
+            if (_window == null || value is not { IsUsable: true }) return;
+            if (!OperatingSystem.IsWindows()) { Placement = value; return; }
+            var visible = value.FitTo(WindowsPlacement.WorkAreas());
+            Place(WindowsPlacement.OuterFor(visible), fit: false);
+            // The borders were worked out at the target monitor's scale; landed, the window says
+            // what they are, and a difference is moved out once. The standard frame needs it: its
+            // DWM bounds keep a visible one-pixel edge inside the invisible border (measured on a
+            // 100 % monitor: 1 px off on the left, right and bottom without it).
+            var hwnd = GetWin32Hwnd();
+            if (!visible.Maximized && WindowsPlacement.ReadVisible(hwnd, _customFrame is not null) is var landed && landed != visible)
             {
-                if (IsFullscreen) SetFullscreen(false);
-                if (OperatingSystem.IsWindows()) PlaceWin32(value);
-                else PlaceSdl(value);
+                var outer = WindowsPlacement.Read(hwnd);
+                WindowsPlacement.Move(hwnd, new WindowPlacement(
+                    outer.X + visible.X - landed.X, outer.Y + visible.Y - landed.Y,
+                    outer.Width + visible.Width - landed.Width, outer.Height + visible.Height - landed.Height, false));
                 UpdateSize();
-            }
-            finally
-            {
-                LiveResizeFrame = live;
-                ResizePending = true;
             }
         }
     }
 
+    private void Place(WindowPlacement value, bool fit)
+    {
+        // Leaving maximized or full screen, and a maximized placement, activate the window
+        // (see WindowsActivation).
+        using var quiet = WindowsActivation.RefuseIfUnwanted();
+        var live = LiveResizeFrame;
+        LiveResizeFrame = null;
+        try
+        {
+            if (IsFullscreen) SetFullscreen(false);
+            if (OperatingSystem.IsWindows()) PlaceWin32(value, fit);
+            else PlaceSdl(value);
+            UpdateSize();
+        }
+        finally
+        {
+            LiveResizeFrame = live;
+            ResizePending = true;
+        }
+    }
+
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private void PlaceWin32(WindowPlacement placement)
+    private void PlaceWin32(WindowPlacement placement, bool fitToWorkAreas)
     {
         var hwnd = GetWin32Hwnd();
-        var fit = placement.FitTo(WindowsPlacement.WorkAreas());
+        // Not fitted again for a placement by the visible rectangle (VisiblePlacement), fitted as
+        // that: its outer rectangle reaches past the work area by the borders, and fitting it
+        // shrank the window by them.
+        var fit = fitToWorkAreas ? placement.FitTo(WindowsPlacement.WorkAreas()) : placement;
         // A maximized window cannot be moved: Windows keeps the state and snaps the rect back.
-        if (WindowsPlacement.IsMaximizedOrMinimized(hwnd)) Restore();
+        // Restored here and now, not through Restore: the custom frame posts its restore
+        // (WindowsCustomFrame.Restore), which landed after the move and took the window back to
+        // the bounds from before the maximize, so a placement on a maximized window was undone,
+        // and a maximized one moved to another monitor was maximized again where it had been.
+        if (WindowsPlacement.IsMaximizedOrMinimized(hwnd))
+        {
+            using var quiet = WindowsActivation.RefuseIfUnwanted();
+            WindowsPlacement.RestoreNow(hwnd);
+        }
         WindowsPlacement.Move(hwnd, fit);
         if (!fit.Maximized) return;
         if (_shown) Maximize();
@@ -1498,31 +1592,38 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     private bool _softwarePresentFailed;
 
     /// <summary>
-    /// Copies the frame Skia drew in main memory into SDL's window surface and shows it. On
-    /// Windows SDL keeps that surface as a GDI bitmap and draws it with BitBlt, which a remote
-    /// desktop session carries well.
+    /// SDL's window surface as somewhere Skia can draw, or null. Asked at the start of every
+    /// frame: SDL makes the surface again after a resize and frees the old one. Null when there
+    /// is none, as for a minimized window, or when its pixels are in an order Skia cannot draw.
+    /// </summary>
+    private SkiaRasterRenderSurface.PixelTarget? WindowSurfaceTarget()
+    {
+        var surface = SDL_GetWindowSurface(_window);
+        if (surface == null || surface->w <= 0 || surface->h <= 0 || !BitConverter.IsLittleEndian)
+            return null;
+        // Packed formats, read as bytes on a little-endian machine: XRGB8888 is B, G, R, X.
+        SkiaSharp.SKColorType? colorType = surface->format switch
+        {
+            SDL_PixelFormat.SDL_PIXELFORMAT_XRGB8888 or SDL_PixelFormat.SDL_PIXELFORMAT_ARGB8888
+                => SkiaSharp.SKColorType.Bgra8888,
+            SDL_PixelFormat.SDL_PIXELFORMAT_XBGR8888 or SDL_PixelFormat.SDL_PIXELFORMAT_ABGR8888
+                => SkiaSharp.SKColorType.Rgba8888,
+            _ => null,
+        };
+        return colorType is { } type
+            ? new(surface->pixels, surface->w, surface->h, surface->pitch, type)
+            : null;
+    }
+
+    /// <summary>
+    /// Shows the frame Skia drew on the CPU. On Windows SDL keeps the window surface as a GDI
+    /// bitmap and draws it with BitBlt, which a remote desktop session carries well.
     /// </summary>
     private void PresentSoftware(SkiaRasterRenderSurface frame)
     {
-        // Asked for every frame: SDL remakes it after a resize, and returns the same one otherwise.
-        var target = SDL_GetWindowSurface(_window);
-        SDL_Surface* source = null;
-        if (target != null && frame.PeekPixels(out nint pixels, out int rowBytes))
-        {
-            // RGBA in memory, as SetIcon. Copied as it is, no blending, and converted to
-            // whatever the window surface is.
-            var format = BitConverter.IsLittleEndian
-                ? SDL_PixelFormat.SDL_PIXELFORMAT_ABGR8888
-                : SDL_PixelFormat.SDL_PIXELFORMAT_RGBA8888;
-            // shortcut: one copy a frame from Skia's pixels into SDL's; drawing straight into
-            // the window surface saves it, if the copy ever shows in a profile.
-            source = SDL_CreateSurfaceFrom(frame.PixelWidth, frame.PixelHeight, format, pixels, rowBytes);
-        }
-        bool shown = source != null
-            && SDL_SetSurfaceBlendMode(source, SDL_BLENDMODE_NONE)
-            && SDL_BlitSurface(source, null, target, null)
-            && SDL_UpdateWindowSurface(_window);
-        if (source != null) SDL_DestroySurface(source);
+        bool shown = frame.DrawsIntoTarget
+            ? SDL_UpdateWindowSurface(_window)
+            : CopyAndShow(frame);
 
         // Once, not every frame: a window that cannot show its frames stays black, and this says why.
         if (!shown && !_softwarePresentFailed)
@@ -1530,6 +1631,35 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             _softwarePresentFailed = true;
             Console.Error.WriteLine($"[HultUI] Showing a software frame failed: {GetError()}");
         }
+    }
+
+    /// <summary>For a window surface Skia cannot draw into: copies the frame from Skia's own
+    /// memory into it, converting the pixels, and shows it.</summary>
+    private bool CopyAndShow(SkiaRasterRenderSurface frame)
+    {
+        var target = SDL_GetWindowSurface(_window);
+        SDL_Surface* source = null;
+        if (target != null && frame.PeekPixels(out nint pixels, out int rowBytes))
+        {
+            // Skia's native order in memory (BGRA on the desktop OSes; PixelColorType). Copied as
+            // it is, no blending. SDL names packed formats by the 32-bit word: a little-endian
+            // ARGB8888 word is B, G, R, A in memory, and ABGR8888 is R, G, B, A.
+            bool bgra = frame.PixelColorType == SkiaSharp.SKColorType.Bgra8888;
+            var format = (bgra, BitConverter.IsLittleEndian) switch
+            {
+                (true, true) => SDL_PixelFormat.SDL_PIXELFORMAT_ARGB8888,
+                (true, false) => SDL_PixelFormat.SDL_PIXELFORMAT_BGRA8888,
+                (false, true) => SDL_PixelFormat.SDL_PIXELFORMAT_ABGR8888,
+                (false, false) => SDL_PixelFormat.SDL_PIXELFORMAT_RGBA8888,
+            };
+            source = SDL_CreateSurfaceFrom(frame.PixelWidth, frame.PixelHeight, format, pixels, rowBytes);
+        }
+        bool shown = source != null
+            && SDL_SetSurfaceBlendMode(source, SDL_BLENDMODE_NONE)
+            && SDL_BlitSurface(source, null, target, null)
+            && SDL_UpdateWindowSurface(_window);
+        if (source != null) SDL_DestroySurface(source);
+        return shown;
     }
 
     /// <summary>
@@ -1679,9 +1809,13 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// on both. A scale proportional to the monitor's brightness would have had to differ
     /// between those two and did not — see <c>docs/design/HDR-LINUX-BRIEF.md</c>.</para>
     ///
-    /// <para><b>SDL's own <c>SDR_white_level</c> is the wrong number here</b> and reads 1.0 on
-    /// Wayland, following the EGL convention where 1.0 already <i>is</i> reference white.
-    /// Feeding that in reproduces the dim picture exactly.</para>
+    /// <para><b>SDL's own <c>SDR_white_level</c> is not used here.</b> Up to SDL 3.5.0-550394e
+    /// (ppy.SDL3-CS 2026.320) it read 1.0 on Wayland, following the EGL convention where 1.0
+    /// already <i>is</i> reference white, and feeding that in reproduced the dim picture exactly.
+    /// From ea7a2da (ppy.SDL3-CS 2026.1002.1) SDL reports the output's reference luminance over
+    /// 80 (libsdl-org/SDL 2a623fd22): 2.5375 where the compositor names 203 nits, but its own
+    /// SDR brightness where it names that instead, which is the too-bright 5.1 above. Not yet
+    /// measured on KWin, so the protocol constant stays.</para>
     /// </summary>
     private const float WaylandScRgbReferenceWhite = 2.5375f;
 
@@ -1696,9 +1830,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// headroom is SDL's peak over SDL's white and the two are one snapshot. SDL re-reads them
     /// only on a display-configuration change, which the brightness slider is not, while this
     /// window's white is polled — so mixing the two would turn a slider move from 240 to 480
-    /// nits into a peak of 910 on a 455-nit panel. On Wayland SDL's white reads a useless 1.0
-    /// and the 203-nit protocol reference is used instead; its headroom is real compositor
-    /// data.</para>
+    /// nits into a peak of 910 on a 455-nit panel. On Wayland the 203-nit protocol reference is
+    /// used instead of SDL's white (see <c>WaylandScRgbReferenceWhite</c>); its headroom is
+    /// real compositor data.</para>
     ///
     /// <para>Zero when the window is not on an HDR display or SDL has no number, and the
     /// caller then assumes rather than believes.</para>
@@ -1818,7 +1952,8 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         }
 
         if (_rasterSurface is not null)
-            return $"video={SDL_GetCurrentVideoDriver() ?? "?"} software window={PixelWidth}x{PixelHeight}";
+            return $"video={SDL_GetCurrentVideoDriver() ?? "?"} software window={PixelWidth}x{PixelHeight}"
+                + $" framebuffer={(_rasterSurface.DrawsIntoTarget ? "drawn" : "copied")}";
 
         if (_glContext == null) return null;
         SDL_GL_MakeCurrent(_window, _glContext);
@@ -2303,6 +2438,13 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // — the user has to click a second time. With click-through the same click
         // both focuses the window and hits the control, as users expect.
         SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
+
+        // A request to close the last window is only that: no quit with it. By default SDL sends
+        // SDL_EVENT_QUIT along with the last window's close request, in the same poll, so an app
+        // that kept the window open (Window.CloseRequested, unsaved work) was quit anyway. The
+        // application ends when its last window has closed (Application.IsRunning). A quit SDL
+        // sends for anything else (Cmd+Q, SIGTERM, the session ending) still comes.
+        SDL_SetHint(SDL_HINT_QUIT_ON_LAST_WINDOW_CLOSE, "0");
 
         // Windows only: no 1 ms timer resolution for the life of the process, which SDL asks for
         // by default; the frame loop's waits ask for it while frames are paced (SdlTimerResolution).

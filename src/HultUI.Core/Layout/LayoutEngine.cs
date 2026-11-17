@@ -25,12 +25,15 @@ public sealed partial class LayoutEngine
         float? fw = forceRootFill && root.BoxRead.Width.IsAuto ? availableWidth : null;
         float? fh = forceRootFill && root.BoxRead.Height.IsAuto ? availableHeight : null;
         _passDepth++;
+        var outerPass = LayoutWatch.Pass;
+        LayoutWatch.Pass = this;
         try
         {
             ComputeLayout(root, constraint, absoluteX: 0, absoluteY: 0, forcedWidth: fw, forcedHeight: fh);
         }
         finally
         {
+            LayoutWatch.Pass = outerPass;
             // Only the outermost pass drops the plans: one laid out from inside another (nothing
             // does today) would otherwise clear items the outer one is still reading.
             if (--_passDepth == 0) ClearPlans();
@@ -41,6 +44,30 @@ public sealed partial class LayoutEngine
     }
 
     private int _passDepth;
+
+    // The listening elements this engine's passes wrote a box for since the window last took them
+    // (LayoutChangedEvent), in the order first written, each once.
+    private List<Element>? _layoutChanges;
+    private HashSet<Element>? _layoutChangeSet;
+
+    internal void NoteLayoutChange(Element element)
+    {
+        if ((_layoutChangeSet ??= new HashSet<Element>(ReferenceEqualityComparer.Instance)).Add(element))
+            (_layoutChanges ??= []).Add(element);
+    }
+
+    /// <summary>Whether a pass wrote a box for an element that listens for
+    /// <see cref="Events.LayoutChangedEvent"/> since <see cref="TakeLayoutChanges"/>.</summary>
+    internal bool HasLayoutChanges => _layoutChanges is { Count: > 0 };
+
+    /// <summary>Moves the noted elements into <paramref name="into"/> and forgets them.</summary>
+    internal void TakeLayoutChanges(List<Element> into)
+    {
+        if (_layoutChanges is not { Count: > 0 } changes) return;
+        into.AddRange(changes);
+        changes.Clear();
+        _layoutChangeSet!.Clear();
+    }
 
     /// <param name="element">The subtree root to lay out.</param>
     /// <param name="constraint">The space available to it.</param>
@@ -525,6 +552,18 @@ public sealed partial class LayoutEngine
                 float? fw = isRow ? (float?)basisOrSize : stretchedWidth;
                 float? fh = isRow ? null : (float?)basisOrSize;
                 measured = MeasureSize(child, childConstraint, fw, fh);
+            }
+            else if (isRow && ContentSpreads(child) && MaxContentWidth(child) is var natural
+                && natural <= ApplyMinMax(mainAvailable, childBox.MinWidth, childBox.MaxWidth, mainAvailable))
+            {
+                // Its content would widen into all the room offered: its base is its max-content
+                // width instead (see ContentSpreads). It holds at any room it fits in. Its height
+                // waits for the width flexing gives it (NaN, RemeasureFlexedCrossSizes), measured
+                // there once: measuring it here as well, at another width, would double the
+                // measurements at every row nested in it.
+                measured = new Size(natural + childBox.Margin.Horizontal, float.NaN);
+                _measuredFromH = AnyHeight;
+                _measuredW = new WidthRange(natural, float.PositiveInfinity);
             }
             else
             {
@@ -1467,6 +1506,128 @@ public sealed partial class LayoutEngine
         return result;
     }
 
+    // ── A row item's content-based base (MeasureFlexItems) ──
+    //
+    // A row item of auto basis and width was measured at all the room the row offered, and a
+    // container whose content spreads with the room it is offered (a row holding a FlexGrow child)
+    // came out as wide as that room: its base was the offered width, so a sibling beside it was
+    // pushed past the row's end or squeezed to nothing. In CSS the base is the item's max-content
+    // width, and growing comes after, never while sizing from content (css-flexbox-1 §9.2, §9.9).
+    // Such an item now takes its max-content width as its base when it is known without measuring
+    // at a width and fits; its height is measured once flexing has given it its width.
+
+    /// <summary>Whether <paramref name="e"/>'s content comes out wider when it is offered more room
+    /// than its content needs: a row with a growing child, a column holding such a row or a child it
+    /// stretches inside side margins. Structural, measuring nothing, and kept like the min-content
+    /// width. False for a box of set width and for a grid.</summary>
+    private static bool ContentSpreads(Element e)
+    {
+        if (e.MeasureCache.TryGetSpreads(out bool known)) return known;
+        bool spreads = ComputeContentSpreads(e);
+        e.MeasureCache.StoreSpreads(spreads);
+        return spreads;
+    }
+
+    private static bool ComputeContentSpreads(Element e)
+    {
+        if (!e.BoxRead.Width.IsAuto || e.GridRead.HasTemplate) return false;
+        bool row = e.FlexRead.Direction is FlexDirection.Row or FlexDirection.RowReverse;
+        var align = e.FlexRead.AlignItems;
+        var children = e.Children;
+        for (int i = 0; i < children.Count; i++)
+        {
+            var c = children[i];
+            if (c.PositionRead.Type == PositionType.Absolute) continue;
+            if (row)
+            {
+                // A child that spreads without growing takes its own content-based base as an item
+                // of this row, and so spreads nothing here.
+                if (c.FlexRead.FlexGrow > 0f) return true;
+            }
+            else if (c.BoxRead.Width.IsAuto
+                && (ContentSpreads(c)
+                    || c.BoxRead.Margin.Horizontal > 0f && ResolveAlignSelf(c.FlexRead.AlignSelf, align) == AlignItems.Stretch))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Max-content width (border box): what the element's content takes with no limit on it, worked
+    /// out without measuring at a width, and kept until the element or something in it changes. +∞
+    /// for anything it cannot tell that way (a width or limit in percent, an aspect ratio, a scroll
+    /// view, a grid, a leaf whose content does not say: <see cref="Element.MeasureMaxContentWidth"/>),
+    /// which keeps the measurement made before.
+    /// </summary>
+    private float MaxContentWidth(Element e)
+    {
+        if (e.MeasureCache.TryGetMaxContentWidth(out var known)) return known;
+        float width = ComputeMaxContentWidth(e);
+        e.MeasureCache.StoreMaxContentWidth(width);
+        return width;
+    }
+
+    private float ComputeMaxContentWidth(Element e)
+    {
+        const float Unknown = float.PositiveInfinity;
+        var box = e.BoxRead;
+        if (box.Width.Unit == DimensionUnit.Percent || box.MinWidth.Unit == DimensionUnit.Percent
+            || box.MaxWidth.Unit == DimensionUnit.Percent || RatioOf(e) > 0f
+            || box.OverflowX == Overflow.Scroll || box.OverflowY == Overflow.Scroll || e.GridRead.HasTemplate)
+            return Unknown;
+
+        float result;
+        if (!box.Width.IsAuto)
+        {
+            if (box.Width.Resolve(LayoutSpace.Unbounded) is not { } set) return Unknown;
+            result = set;
+        }
+        else
+        {
+            float content = MaxContentOfChildren(e);
+            // Unknown before any limit is applied: a max width does not make it known.
+            if (float.IsPositiveInfinity(content)) return Unknown;
+            result = content + (box.Padding + box.BorderWidth).Horizontal;
+        }
+        if (box.MinWidth.Resolve(LayoutSpace.Unbounded) is { } min) result = Math.Max(result, min);
+        if (box.MaxWidth.Resolve(LayoutSpace.Unbounded) is { } max) result = Math.Min(result, max);
+        return result;
+    }
+
+    /// <summary>The max-content width of <paramref name="e"/>'s content box: a row's items side by
+    /// side, a column's widest, a leaf's own; +∞ when any of it is unknown.</summary>
+    private float MaxContentOfChildren(Element e)
+    {
+        const float Unknown = float.PositiveInfinity;
+        var children = e.Children;
+        bool row = e.FlexRead.Direction is FlexDirection.Row or FlexDirection.RowReverse;
+        float content = 0f;
+        int flowCount = 0;
+        for (int i = 0; i < children.Count; i++)
+        {
+            var c = children[i];
+            if (c.PositionRead.Type == PositionType.Absolute) continue;
+            flowCount++;
+            var cf = c.FlexRead;
+            float w;
+            if (row && !cf.FlexBasis.IsAuto)
+            {
+                // A set basis is the item's base; a growing one takes at least its content (a
+                // FlexBasis(0) label measured at nothing would wrap to a word a line).
+                if (cf.FlexBasis.Unit == DimensionUnit.Percent || cf.FlexBasis.Resolve(LayoutSpace.Unbounded) is not { } basis)
+                    return Unknown;
+                w = cf.FlexGrow > 0f ? Math.Max(basis, MaxContentWidth(c)) : basis;
+            }
+            else w = MaxContentWidth(c);
+            if (float.IsPositiveInfinity(w)) return Unknown;
+            w += c.BoxRead.Margin.Horizontal;
+            content = row ? content + w : Math.Max(content, w);
+        }
+        if (flowCount == 0) return e.MeasureMaxContentWidth(_measureContext);
+        if (row && flowCount > 1) content += e.FlexRead.ResolvedColumnGap * (flowCount - 1);
+        return content;
+    }
+
     /// <summary>
     /// An item's cross size depends on the main size it ends up with, so it can only be
     /// known once flex grow/shrink has run. Phase 1 measured against the flex base size,
@@ -1496,8 +1657,9 @@ public sealed partial class LayoutEngine
 
             var child = item.Element;
             var childBox = child.BoxRead;
-            // A cross dimension that was given a value can't depend on the main size.
-            if (!(isRow ? childBox.Height : childBox.Width).IsAuto) continue;
+            // A cross dimension that was given a value can't depend on the main size, though one
+            // not measured yet (NaN, a content-based base) is measured all the same.
+            if (!(isRow ? childBox.Height : childBox.Width).IsAuto && !float.IsNaN(item.CrossSize)) continue;
 
             // MainSize is the outer (margin-box) size; the forced dimension is border-box.
             var margin = childBox.Margin;

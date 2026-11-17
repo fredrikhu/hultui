@@ -67,7 +67,7 @@ public sealed class LocatorAssertions
 
     private static string TextOf(HeadlessElement e) => e.Name ?? e.Value ?? "";
 
-    // A dropdown's choice is its name (ComboBox nodes carry no value).
+    // A dropdown's choice: its value when the app named it, else its name (it reads as its choice).
     private static string? ValueOf(HeadlessElement e) => e.Value ?? (e.Role == AccessibilityRole.ComboBox ? e.Name : null);
 
     /// <summary>Exactly one element matches and it satisfies <paramref name="ok"/>.</summary>

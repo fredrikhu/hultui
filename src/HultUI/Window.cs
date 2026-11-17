@@ -131,9 +131,14 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     private Action<MenuCloseReason>? _contextMenuClosed;
     // ← and → for the menu's owner when the menu has no use for them (OpenMenu).
     private Action<int>? _contextMenuNavigate;
-    // One level of nesting: the flyout for a root item with Children.
-    private OverlayHandle _contextSubmenuOverlay;
-    private ContextMenuElement? _contextSubmenuElement;
+    // The flyouts open under the menu, outermost first: [0] is the flyout of a root item with
+    // Children, [1] the flyout of an item in that, and so on. One level was all there was: a
+    // third level never opened, by hover, click or →, and its parent item did nothing.
+    private readonly List<(OverlayHandle Overlay, ContextMenuElement Menu)> _contextSubmenus = [];
+
+    /// <summary>The menu the keyboard is in: the innermost flyout open, else the menu.</summary>
+    private ContextMenuElement? DeepestContextMenu =>
+        _contextSubmenus.Count > 0 ? _contextSubmenus[^1].Menu : _contextMenuElement;
 
     // ──── Accessibility state ────
     private IAccessibilityBridge _accessibilityBridge = NullAccessibilityBridge.Instance;
@@ -496,6 +501,27 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         set => PlatformWindow.Placement = value;
     }
 
+    /// <summary>
+    /// The window's placement by what the person sees of it: its rectangle without the invisible
+    /// resize borders Windows keeps outside a window's left, right and bottom edges (8 px at 100 %,
+    /// 11 at 150 %). For placing windows by their edges, which <see cref="Placement"/> (the outer
+    /// rectangle, a value to save and give back) is not for: two windows given the halves of a
+    /// work area this way meet edge to edge, where by <see cref="Placement"/> a gap of two borders
+    /// was left between them, and one could not reach the work area's edges, since the bounds are
+    /// fitted to it and the borders reach past it.
+    /// </summary>
+    /// <remarks>
+    /// <para>Setting it fits the visible rectangle to the monitors' work areas and grows it by the
+    /// borders at the scale of the monitor it lands on. Maximized, it is the bounds the window
+    /// restores to. Off Windows it is <see cref="Placement"/>, which there is the client area: a
+    /// title bar the window system draws (X11) is outside both.</para>
+    /// </remarks>
+    public WindowPlacement? VisiblePlacement
+    {
+        get => PlatformWindow.VisiblePlacement;
+        set => PlatformWindow.VisiblePlacement = value;
+    }
+
     public void ToggleFullscreen() => SetFullscreen(!IsFullscreen);
 
     /// <summary>
@@ -657,6 +683,30 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     public event Action? Closed;
 
     /// <summary>
+    /// Raised for every key pressed in the window, before it goes anywhere: before a dialog, a
+    /// menu or the focused element has it, and before Tab moves the focus. For keys that belong to
+    /// the whole window whatever holds the keyboard, as a "lock now" shortcut: a key handler on
+    /// the root never sees a key typed in a dialog, whose content is not under the root
+    /// (docs/FOCUS.md). Only DevTools' F11 and F12 come first.
+    /// <para><see cref="ElementEvent.StopPropagation"/> ends the key here: nothing else sees it,
+    /// the text it would type is not typed, and a Tab does not move the focus. Its release still
+    /// comes, as a <see cref="KeyUpEvent"/> to the focused element. The event's target is null.</para>
+    /// </summary>
+    public event Action<KeyDownEvent>? PreviewKeyDown;
+
+    /// <summary>
+    /// Raised for every input the user gives the window, before it is routed and whatever it
+    /// reaches: a key, typed text, a pointer moving, pressing or releasing, a wheel turned, a drop.
+    /// Nothing stops it, and it stops nothing. For an idle timeout: a handler on the root misses
+    /// what goes into a dialog or a popover, whose content is not under the root. A pointer move
+    /// raises it, so keep the handler to noting the time.
+    /// </summary>
+    public event Action? InputActivity;
+
+    // The text of a key PreviewKeyDown ended, which arrives next as text input and is not typed.
+    private string? _previewStoppedText;
+
+    /// <summary>
     /// Raised when the OS makes this window the foreground one — the user clicked it, or
     /// alt-tabbed back to it. Fires on the UI thread, once per activation.
     ///
@@ -666,6 +716,48 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// a folder that may have been written to, a clipboard that may have new contents.</para>
     /// </summary>
     public event Action? Activated;
+
+    /// <summary>
+    /// Raised when the window stops being the foreground one: the user clicked another window or
+    /// application, or Alt+Tabbed away. On the UI thread, after the window's light-dismiss popups
+    /// (a menu, a dropdown's list, a popover) have closed, as a native menu closes when its window
+    /// loses the foreground. Not raised by a headless or WinForms host, which cannot tell.
+    /// </summary>
+    public event Action? Deactivated;
+
+    /// <summary>
+    /// Raised after the window moved on the desktop: dragged by its title bar, snapped, maximized
+    /// or restored, or placed by code (<see cref="Placement"/>, <see cref="MoveToMonitor"/>). On the
+    /// UI thread, once a frame however many moves the platform reported, so a drag raises it about
+    /// once a frame; read <see cref="Placement"/> for where the window is. A move onto a monitor at
+    /// another scale raises <see cref="Resized"/> as well, and one onto another monitor
+    /// <see cref="DisplayChanged"/>.
+    /// <para>Not raised on Wayland, which tells a window nothing of its position, nor by a
+    /// WinForms host. On Windows, while the person drags the title bar, the system runs the drag
+    /// and the moves may arrive together when it ends.</para>
+    /// </summary>
+    public event Action? Moved;
+
+    /// <summary>
+    /// Raised when the window went to another display: dragged or snapped across, placed there by
+    /// code, or left on another when its display was removed. On the UI thread, after
+    /// <see cref="Moved"/> when both happened since the last frame. <see cref="Monitor"/> says which
+    /// display it is on. Raised on Wayland too, where <see cref="Moved"/> is not; there
+    /// <see cref="Monitor"/>, which reads the window's place, cannot follow it.
+    /// </summary>
+    public event Action? DisplayChanged;
+
+    internal void RaiseMoved() => Moved?.Invoke();
+
+    internal void RaiseDisplayChanged() => DisplayChanged?.Invoke();
+
+    /// <summary>The window lost the foreground: its popups close, unless the DevTools inspector
+    /// took it (<paramref name="keepPopups"/>), so a menu can be inspected while it is open.</summary>
+    internal void RaiseDeactivated(bool keepPopups)
+    {
+        if (!keepPopups) DismissPopups();
+        Deactivated?.Invoke();
+    }
 
     internal void RaiseActivated()
     {
@@ -1066,7 +1158,11 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// </summary>
     private void UpdateA11yMenuFocus(AccessibilityNode tree)
     {
-        var menu = _contextSubmenuElement is { HoveredIndex: >= 0 } sub ? sub : _contextMenuElement;
+        // The innermost menu with an entry highlighted holds it; a flyout the pointer opened over
+        // its parent, nothing in it highlighted yet, leaves it on the parent.
+        var menu = _contextMenuElement;
+        for (int i = _contextSubmenus.Count - 1; i >= 0; i--)
+            if (_contextSubmenus[i].Menu.HoveredIndex >= 0) { menu = _contextSubmenus[i].Menu; break; }
         if (ReferenceEquals(menu, _a11yMenuFocus)) return;
         if (menu is not null)
         {
@@ -1802,6 +1898,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // A static overlay (a tooltip) costs nothing once painted.
         || AnyOverlayContentDirty()
         || _postFrameCallbacks.Count > 0
+        // Boxes a frame's layout-changed handlers left untold after their last round. Only those:
+        // a pass later in a frame (a drag image's) would otherwise ask for every frame after it.
+        || _layoutChangesLeft
         // A drag or a hover that follows the pointer once a frame has a position to apply.
         || _preFrameCallbacks.Count > 0
         // An autoscroll moves the view with no input arriving at all, so it has to ask for
@@ -2052,6 +2151,12 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // style/layout so its effect is visible this frame.
         TreeDiffer.DrainDeferred();
 
+        // A tooltip whose owner has left the window since the last frame (removed by posted work,
+        // a key handler, a rebuild drained above, or its overlay closing) is not drawn over what
+        // replaced it: showing, or coming due this pass. SettleHover would close it only after
+        // this frame's present, and a lock screen that replaced the content would show the name.
+        if (_tooltipOwner is { } tipOwner && !IsShownInWindow(tipOwner)) HideTooltip();
+
         // Whether this frame has anything to draw. A frame only accessibility asked for (a
         // coalesced refresh coming due between keys of a walk, a client attaching) runs the
         // accessibility phase and stops there, as a minimized window's does: drawing it painted
@@ -2120,6 +2225,11 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             }
             if (_overlays.Count > 0) overlayChanges |= PrepareOverlays(theme);
         }
+
+        // What was laid out at a new box hears of it, and what its handlers change is laid out in
+        // this frame, before the accessibility phase reads the boxes and before anything is drawn.
+        if (_layoutEngine.HasLayoutChanges)
+            DeliverLayoutChanges(theme, ref styleWasDirty, ref layoutWasDirty, ref overlayChanges);
 
         // Accessibility: rebuild + diff when the tree changed and something is
         // actually listening. The Null bridge's IsActive is false, so this is a
@@ -2511,7 +2621,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             or KeyCode.AltLeft or KeyCode.AltRight or KeyCode.SuperLeft or KeyCode.SuperRight
             or KeyCode.CapsLock or KeyCode.NumLock or KeyCode.ScrollLock;
 
-    private static KeyDownEvent NewKeyDown(InputEvent.KeyInput key) => new()
+    // TargetTakesText from the element the key goes to (KeyChord.Matches: a letter typed there is no shortcut).
+    private static KeyDownEvent NewKeyDown(InputEvent.KeyInput key, Element? target) => new()
     {
         Key = key.KeyCode,
         Modifiers = key.Modifiers,
@@ -2520,6 +2631,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         LayoutKey = key.LayoutKey,
         ModifierKeys = key.ModifierKeys,
         Text = key.Text,
+        TargetTakesText = target is { TakesTypedText: true },
     };
 
     /// <summary><see cref="HandleInputEvent"/>, counted with its bytes for <see cref="FrameLog"/>.</summary>
@@ -2534,6 +2646,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     {
         if (_root is null) return;
 
+        InputActivity?.Invoke();
         NotePointer(evt);
         if (TryHandleDevToolsInput(evt)) return;
 
@@ -3006,11 +3119,31 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                         Tracer.StopRecording(FrameTracer.DefaultPath);
                 }
 
-                // Context menu keyboard navigation. An open flyout captures
-                // Up/Down/Enter; → opens a flyout, ← / Escape close one level.
+                // The window's own keys first, whatever holds the keyboard (PreviewKeyDown). A key
+                // it ends goes nowhere else, and the text it would type is held back from the text
+                // input that follows it.
+                if (key.IsDown)
+                {
+                    _previewStoppedText = null;
+                    if (PreviewKeyDown is { } preview)
+                    {
+                        var previewEvent = NewKeyDown(key, KeyTarget());
+                        preview(previewEvent);
+                        if (previewEvent.StopPropagation)
+                        {
+                            _previewStoppedText = key.Text;
+                            break;
+                        }
+                    }
+                }
+
+                // Context menu keyboard navigation, in the innermost menu open. Up/Down/Enter
+                // there; → opens the highlighted entry's flyout, at any depth; ← / Escape close
+                // one level.
                 if (key.IsDown && _contextMenuElement is not null)
                 {
-                    var activeMenu = _contextSubmenuElement ?? _contextMenuElement;
+                    var activeMenu = DeepestContextMenu!;
+                    int depth = _contextSubmenus.Count;
                     switch (key.KeyCode)
                     {
                         case KeyCode.Up:
@@ -3020,30 +3153,25 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                             activeMenu.MoveSelection(1);
                             break;
                         case KeyCode.Right:
-                            if (_contextSubmenuElement is null
-                                && _contextMenuElement.ItemAt(_contextMenuElement.HoveredIndex) is { HasChildren: true })
+                            if (activeMenu.ItemAt(activeMenu.HoveredIndex) is { HasChildren: true })
                             {
-                                OnContextMenuHover(_contextMenuElement, _contextMenuElement.HoveredIndex);
-                                _contextSubmenuElement?.MoveSelection(1);
+                                OnContextMenuHover(activeMenu, activeMenu.HoveredIndex);
+                                if (_contextSubmenus.Count > depth) DeepestContextMenu!.MoveSelection(1);
                             }
                             // Nothing to open here: a menu bar moves to the next menu.
                             else _contextMenuNavigate?.Invoke(1);
                             break;
                         case KeyCode.Left:
-                            if (_contextSubmenuElement is not null) CloseContextSubmenu();
+                            if (depth > 0) CloseContextSubmenus(depth);
                             else _contextMenuNavigate?.Invoke(-1);
                             break;
                         case KeyCode.Enter:
-                        {
-                            var hadSubmenu = _contextSubmenuElement is not null;
                             activeMenu.ActivateSelected();
                             // Enter on a parent item opened its flyout — land on its first entry.
-                            if (!hadSubmenu && _contextSubmenuElement is not null)
-                                _contextSubmenuElement.MoveSelection(1);
+                            if (_contextSubmenus.Count > depth) DeepestContextMenu!.MoveSelection(1);
                             break;
-                        }
                         case KeyCode.Escape:
-                            if (_contextSubmenuElement is not null) CloseContextSubmenu();
+                            if (depth > 0) CloseContextSubmenus(depth);
                             else CloseContextMenu(MenuCloseReason.Escape);
                             break;
                         default:
@@ -3062,7 +3190,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 if (key.IsDown && key.KeyCode == KeyCode.Tab)
                 {
                     var tabTarget = KeyTarget();
-                    var tabEvent = NewKeyDown(key);
+                    var tabEvent = NewKeyDown(key, tabTarget);
                     EventDispatcher.Dispatch(tabEvent, tabTarget);
                     if (tabEvent.StopPropagation)
                         break;
@@ -3092,7 +3220,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     // changes the highlight on labels other than the focused one — so the
                     // whole realized group repaints, exactly as it does after a drag.
                     int before = _activeTextGroup?.Version ?? 0;
-                    EventDispatcher.Dispatch(NewKeyDown(key), target);
+                    EventDispatcher.Dispatch(NewKeyDown(key, target), target);
                     if (_activeTextGroup is { } keyed && keyed.Version != before)
                         RepaintGroup(keyed);
                 }
@@ -3107,6 +3235,13 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
             case InputEvent.TextInputInput textInput:
             {
+                // The text of a key PreviewKeyDown ended: not typed. Only the input right behind
+                // the key, and only the same text (an IME's commit is not the key's).
+                if (_previewStoppedText is { } stopped)
+                {
+                    _previewStoppedText = null;
+                    if (stopped == textInput.Text) break;
+                }
                 var target = KeyTarget();
                 EventDispatcher.Dispatch(new TextInputEvent { Text = textInput.Text }, target);
                 break;
@@ -3728,6 +3863,76 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         return false;
     }
 
+    /// <summary>How many times a frame tells changed boxes and lays out what their handlers changed
+    /// before it leaves the rest to the next frame. A handler that grows what it measures would
+    /// otherwise never let the frame finish; this way it costs a frame each time instead.</summary>
+    internal const int LayoutChangeRounds = 4;
+
+    private readonly List<Element> _layoutChanged = [];
+    private bool _layoutChangesLeft, _layoutChangeLoopTold;
+
+    /// <summary>
+    /// Raises <see cref="LayoutChangedEvent"/> on each element a pass laid out at a box it was not
+    /// told yet, then styles and lays out again what the handlers marked, so the frame drawn has
+    /// it, and tells what that moved, up to <see cref="LayoutChangeRounds"/> times.
+    /// </summary>
+    private void DeliverLayoutChanges(Theme theme, ref bool styleWasDirty, ref bool layoutWasDirty,
+        ref OverlayChanges overlayChanges)
+    {
+        _layoutChangesLeft = false;
+        for (int round = 0; round < LayoutChangeRounds && _layoutEngine.HasLayoutChanges; round++)
+        {
+            _layoutChanged.Clear();
+            _layoutEngine.TakeLayoutChanges(_layoutChanged);
+            bool told = false;
+            // By index: a handler can lay out nothing, but it can add to the engine's list only
+            // through a pass, which runs after this loop.
+            for (int i = 0; i < _layoutChanged.Count; i++)
+            {
+                var element = _layoutChanged[i];
+                // One a build removed or whose overlay closed since the pass is not told; back in a
+                // tree, it hears its box as new (Unmount forgets the one it was told).
+                if (!IsShownInWindow(element) || !element.HasEventHandler<LayoutChangedEvent>()) continue;
+                if (LayoutWatch.Tell(element) is not { } evt) continue;
+                EventDispatcher.DispatchDirect(evt, element);
+                told = true;
+            }
+            _layoutChanged.Clear();
+            if (!told || _root is null) return;
+
+            // A reconcile a handler's signal write deferred, then what the handlers marked.
+            TreeDiffer.DrainDeferred();
+            if ((_root.DirtyFlags & DirtyFlags.Style) != 0)
+            {
+                StyleResolver.Resolve(_root, theme);
+                ClearFlags(_root, DirtyFlags.Style | DirtyFlags.StyleSubtree);
+                ReapplyHoverCursor();
+                styleWasDirty = true;
+            }
+            if ((_root.DirtyFlags & DirtyFlags.Layout) != 0)
+            {
+                _layoutEngine.PerformLayout(_root, PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight);
+                layoutWasDirty = true;
+                UpdateCaptionHeight();
+            }
+            if (_overlays.Count > 0) overlayChanges |= PrepareOverlays(theme);
+        }
+        // The last round's layout may have moved something again: told in the next frame, which
+        // NeedsDraw asks for. Only a box that is new is kept; one laid out where it was told is not.
+        _layoutChanged.Clear();
+        _layoutEngine.TakeLayoutChanges(_layoutChanged);
+        for (int i = 0; i < _layoutChanged.Count; i++)
+            if (IsShownInWindow(_layoutChanged[i]) && LayoutWatch.IsUntold(_layoutChanged[i]))
+                _layoutEngine.NoteLayoutChange(_layoutChanged[i]);
+        _layoutChanged.Clear();
+        _layoutChangesLeft = _layoutEngine.HasLayoutChanges;
+        if (_layoutChangesLeft && !_layoutChangeLoopTold)
+        {
+            _layoutChangeLoopTold = true;
+            Console.Error.WriteLine($"[HultUI] Layout-changed handlers were still changing the layout after {LayoutChangeRounds} rounds in one frame; the rest waits for the next frame. A handler that grows what it measures never settles.");
+        }
+    }
+
     /// <summary>Whether <paramref name="element"/> is in this window's tree or an open overlay's: what
     /// the pointer can be over. Not one a build removed, nor one in an overlay that has closed (which
     /// keeps its host, so <see cref="Element.IsHosted"/> does not tell).</summary>
@@ -4203,13 +4408,43 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             ClearAllFlags(children[i]);
     }
 
+    /// <summary>Closes the window at once: <see cref="CloseRequested"/> is not asked, as an app
+    /// that calls this has decided. <see cref="Closed"/> is raised.</summary>
     public void Close()
     {
         PlatformWindow.Close();
         Closed?.Invoke();
     }
 
-    internal void NotifyClosed() => Close();
+    /// <summary>
+    /// Raised when the window is asked to close, before it does: Alt+F4, the title bar's or the
+    /// taskbar's close, the window menu's, another program's WM_CLOSE, or
+    /// <see cref="RequestClose"/>. Call <see cref="WindowCloseRequest.Cancel"/> to keep it open, to
+    /// ask "Close? There is unsaved work", and call <see cref="Close"/> once the user has answered.
+    /// <para>On the UI thread, after the platform's events are taken, as <see cref="Activated"/>
+    /// is: a handler may open a dialog. Not raised by <see cref="Close"/>, nor when the
+    /// application quits (Cmd+Q, a signal, the session ending), which no window can stop: each
+    /// window still open then closes, with <see cref="Closed"/>.</para>
+    /// </summary>
+    public event Action<WindowCloseRequest>? CloseRequested;
+
+    /// <summary>
+    /// Asks the window to close as the system's close does: <see cref="CloseRequested"/> runs, and
+    /// the window closes unless a handler cancels. A custom title bar's close button calls this
+    /// rather than <see cref="Close"/>, so the app's question is asked there too. Asked again from
+    /// inside a handler, it does nothing.
+    /// </summary>
+    public void RequestClose()
+    {
+        if (!IsOpen || _closeRequesting) return;
+        var request = new WindowCloseRequest();
+        _closeRequesting = true;
+        try { CloseRequested?.Invoke(request); }
+        finally { _closeRequesting = false; }
+        // A handler may have closed the window itself.
+        if (!request.IsCancelled && IsOpen) Close();
+    }
+    private bool _closeRequesting;
 
     // ──── Overlay system (IOverlayHost) ────
 
@@ -4313,7 +4548,12 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         var content = entry.Content;
         float vw = PlatformWindow.LayoutWidth;
         float vh = PlatformWindow.LayoutHeight;
-        float x = entry.WantedX + content.Layout.Width > vw ? Math.Max(0, vw - content.Layout.Width) : entry.WantedX;
+        float width = content.Layout.Width;
+        // No room where it was asked for: a flyout goes to its parent's other side when it fits
+        // there (FlipRightEdge), anything else in from the window's edge.
+        float x = entry.WantedX + width <= vw ? entry.WantedX
+            : entry.FlipRightEdge is { } edge && edge - width >= 0 ? edge - width
+            : Math.Max(0, vw - width);
         float y = entry.WantedY + content.Layout.Height > vh ? Math.Max(0, vh - content.Layout.Height) : entry.WantedY;
         MoveOverlay(entry, x, y);
     }
@@ -4653,14 +4893,18 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     }
 
     /// <summary>Closes the light-dismiss overlays above level <paramref name="above"/>: all of
-    /// them for a press in the main tree (-1), only anchored ones for a press in an overlay.</summary>
+    /// them for a press in the main tree (-1) or in a modal dialog, which is a page of its own;
+    /// only anchored ones for a press in any other overlay, as a menu whose flyout stays open
+    /// while its own rows are pressed. A context menu or a dropdown's list opened from a dialog
+    /// (unanchored) stayed open on a press elsewhere in the dialog.</summary>
     private void DismissOverlaysOnOutsideClick(int above = -1)
     {
+        bool all = above < 0 || _overlays[above].IsModal;
         for (int i = _overlays.Count - 1; i > above; i--)
         {
             // A dismissal callback can close other overlays.
             if (i >= _overlays.Count) continue;
-            if (_overlays[i].DismissOnOutsideClick && (above < 0 || _overlays[i].Anchor is not null))
+            if (_overlays[i].DismissOnOutsideClick && (all || _overlays[i].Anchor is not null))
             {
                 // Clear context menu state if this overlay is the context menu
                 if (_overlays[i].Id == _contextMenuOverlay.Id)
@@ -4670,10 +4914,15 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     _contextMenuNavigate = null;
                     NotifyContextMenuClosed(MenuCloseReason.Dismissed);
                 }
-                if (_overlays[i].Id == _contextSubmenuOverlay.Id)
+                // A flyout: it and the flyouts inside it leave the stack (those, above it, have gone
+                // already in this loop), and the item it belonged to is no longer pinned open. Left
+                // pinned, a hover back over that item opened nothing: its flyout was taken as open.
+                for (int level = _contextSubmenus.Count - 1; level >= 0; level--)
                 {
-                    _contextSubmenuOverlay = default;
-                    _contextSubmenuElement = null;
+                    if (_contextSubmenus[level].Overlay.Id != _overlays[i].Id) continue;
+                    _contextSubmenus.RemoveRange(level, _contextSubmenus.Count - level);
+                    if (ContextMenuAt(level) is { } parent) PinContextMenuItem(parent, -1);
+                    break;
                 }
                 var dismissed = _overlays[i].OnDismissed;
                 RemoveOverlayAt(i);
@@ -4717,8 +4966,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     {
         _tooltipDelayTween = null;
 
-        // Owner may have been removed from tree during the delay
-        if (owner.OverlayHost is null) return;
+        // Owner may have left the window during the delay: removed itself, or under an ancestor
+        // that was (which keeps the owner's OverlayHost), or in an overlay that has closed.
+        if (owner.OverlayHost is null || !IsShownInWindow(owner)) return;
 
         var theme = Application.Theme;
         var tt = theme.Tooltip;
@@ -4823,9 +5073,10 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
     /// <summary>
     /// Closes every light-dismiss overlay — context menus, dropdown lists, popovers — as a press
-    /// outside them does. For the presses this window never receives: on its OS title bar or
-    /// frame, in another window, in another application. Overlays shown with
-    /// <c>dismissOnOutsideClick: false</c> (dialogs, tooltips) stay.
+    /// outside them does. The window does it itself when it loses the foreground
+    /// (<see cref="Deactivated"/>) and on a press on its custom title bar or edges; this is for the
+    /// presses it still never hears of, as one on a standard (non-custom) title bar on Windows.
+    /// Overlays shown with <c>dismissOnOutsideClick: false</c> (dialogs, tooltips) stay.
     /// </summary>
     public void DismissPopups()
     {
@@ -4884,47 +5135,77 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         _contextMenuOverlay = ShowOverlay(menuElement, pos.X, pos.Y, dismissOnOutsideClick: true, hitTestable: true);
     }
 
-    /// <summary>Hover moved to a new root-menu item: open its flyout when it has
-    /// children (anchored next to the item), close any open flyout otherwise.</summary>
+    /// <summary>The menu at <paramref name="level"/>: 0 the menu, 1 its open flyout, 2 that one's, and
+    /// so on; null past the innermost open.</summary>
+    private ContextMenuElement? ContextMenuAt(int level) =>
+        level == 0 ? _contextMenuElement
+        : level <= _contextSubmenus.Count ? _contextSubmenus[level - 1].Menu
+        : null;
+
+    /// <summary>The level of <paramref name="menu"/> (see <see cref="ContextMenuAt"/>), or -1 for a menu
+    /// that is not open.</summary>
+    private int ContextMenuLevel(ContextMenuElement menu)
+    {
+        if (ReferenceEquals(menu, _contextMenuElement)) return 0;
+        for (int i = 0; i < _contextSubmenus.Count; i++)
+            if (ReferenceEquals(_contextSubmenus[i].Menu, menu)) return i + 1;
+        return -1;
+    }
+
+    /// <summary>Hover moved to an item of a menu at any level: open its flyout when it has children
+    /// (beside the item), closing the flyouts deeper than its menu; close them when it has none.</summary>
     private void OnContextMenuHover(ContextMenuElement menu, int index)
     {
-        if (!ReferenceEquals(menu, _contextMenuElement)) return;
+        int level = ContextMenuLevel(menu);
+        if (level < 0) return;
 
         var item = menu.ItemAt(index);
         if (item is not { HasChildren: true })
         {
-            CloseContextSubmenu();
+            CloseContextSubmenus(level + 1);
             return;
         }
         if (menu.PinnedIndex == index) return;   // this item's flyout is already open
 
-        CloseContextSubmenu();
+        CloseContextSubmenus(level + 1);
         var theme = Application.Theme;
         var sub = new ContextMenuElement(item.Children!, theme.ContextMenu, () => CloseContextMenu(MenuCloseReason.Chosen));
-        _contextSubmenuElement = sub;
+        sub.HoverChanged = i => OnContextMenuHover(sub, i);
         PinContextMenuItem(menu, index);
 
-        float rootX = 0, rootY = 0;
+        var parent = level == 0 ? _contextMenuOverlay : _contextSubmenus[level - 1].Overlay;
+        float parentX = 0, parentY = 0;
         foreach (var o in _overlays)
-            if (o.Id == _contextMenuOverlay.Id) { rootX = o.X; rootY = o.Y; break; }
-        // Slight overlap keeps the pointer inside a menu while crossing over;
-        // the first child row lines up with the parent item.
-        _contextSubmenuOverlay = ShowOverlay(sub,
-            rootX + menu.Layout.Width - 4,
-            rootY + menu.ItemTop(index) - theme.ContextMenu.Padding.Top,
-            dismissOnOutsideClick: true, hitTestable: true);
+            if (o.Id == parent.Id) { parentX = o.X; parentY = o.Y; break; }
+        // Slight overlap keeps the pointer inside a menu while crossing over; the first child row
+        // lines up with the parent item. With no room on the right it opens on the parent's left
+        // (FlipRightEdge), as a deep menu near the window's edge does, rather than over the parent.
+        var flyout = Show(new OverlayEntry
+        {
+            Id = _nextOverlayId++,
+            Content = sub,
+            X = parentX + menu.Layout.Width - 4,
+            Y = parentY + menu.ItemTop(index) - theme.ContextMenu.Padding.Top,
+            FlipRightEdge = parentX + 4,
+            DismissOnOutsideClick = true,
+            IsHitTestable = true,
+            FocusBefore = _focusManager.FocusedElement,
+        });
+        _contextSubmenus.Add((flyout, sub));
     }
 
-    private void CloseContextSubmenu()
+    /// <summary>Closes the flyouts at <paramref name="fromLevel"/> and deeper (1 is the menu's own
+    /// flyout; see <see cref="ContextMenuAt"/>), innermost first, and unpins the item of the menu
+    /// above them whose flyout that was.</summary>
+    private void CloseContextSubmenus(int fromLevel)
     {
-        if (_contextSubmenuOverlay.IsValid)
+        if (fromLevel < 1 || fromLevel > _contextSubmenus.Count) return;
+        for (int i = _contextSubmenus.Count - 1; i >= fromLevel - 1; i--)
         {
-            CloseOverlay(_contextSubmenuOverlay);
-            _contextSubmenuOverlay = default;
+            CloseOverlay(_contextSubmenus[i].Overlay);
+            _contextSubmenus.RemoveAt(i);
         }
-        _contextSubmenuElement = null;
-        if (_contextMenuElement is not null)
-            PinContextMenuItem(_contextMenuElement, -1);
+        if (ContextMenuAt(fromLevel - 1) is { } parent) PinContextMenuItem(parent, -1);
     }
 
     /// <summary>Pins the entry of <paramref name="menu"/> whose flyout is open (-1: none). The entry's
@@ -4942,7 +5223,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
     private void CloseContextMenu(MenuCloseReason reason = MenuCloseReason.Dismissed)
     {
-        CloseContextSubmenu();
+        CloseContextSubmenus(1);
         if (_contextMenuOverlay.IsValid)
         {
             CloseOverlay(_contextMenuOverlay);
@@ -5173,7 +5454,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         FailFrameSaves();
         if (_tracer.IsRecording && !string.IsNullOrEmpty(_envTracePath))
             _tracer.StopRecording(_envTracePath);
-        PlatformWindow.InputReceived -= HandleInputEvent;
+        // The handler the constructor subscribed: the logging one while a frame log is on.
+        PlatformWindow.InputReceived -= FrameLog.On ? HandleInputEventLogged : HandleInputEvent;
         (_accessibilityBridge as IDisposable)?.Dispose();
         PlatformWindow.Dispose();
     }

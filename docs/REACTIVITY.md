@@ -1263,9 +1263,12 @@ with a signal write on a switch between pretty and raw. The bar does not need th
 
 **`OnAfterBuild` runs before the style and layout passes.** The new tree has been
 reconciled but not laid out, so any geometry read there — a viewport height, a column
-width — is the *previous* frame's, and a fresh element has none at all. Anything that
-needs the laid-out result goes through `Window.RequestPostFrameCallback(...)`, which
-runs once after the next frame is presented. A scroll reveal wired straight into
+width — is the *previous* frame's, and a fresh element has none at all. Work that needs
+an element's laid-out size goes in `.OnLayoutChanged` on that element (docs/ELEMENTS.md,
+Events): it hears the new box after the layout and before the frame is drawn, and what it
+changes is laid out in that same frame. Work that must follow the drawn frame goes through
+`Window.RequestPostFrameCallback(...)`, which runs once after the next frame is presented.
+A scroll reveal wired straight into
 `OnAfterBuild` used to do nothing for exactly this reason; `ScrollViewElement` now holds
 such a request until it has a viewport, but a hand-rolled version will not.
 

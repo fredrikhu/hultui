@@ -90,6 +90,9 @@ A run past `limit` (default 60 s of virtual time) throws `TimeoutException`. Two
 settings shape it: `window.RefreshRate = 120` paces it as on a 120 Hz display (0, the
 default, is taken as 60), and `window.Minimized = true` stands in for the OS minimizing the
 window, which then draws nothing (its animations still run) until it is set back.
+`window.AskToClose()` stands in for the system asking the window to close (Alt+F4, the title
+bar's close): the next pump hands it on, and `Window.CloseRequested` is asked as on a real
+platform.
 
 ## Virtual Time
 
@@ -183,6 +186,11 @@ Expect(session.GetByLabel("Email"), TimeSpan.FromSeconds(1)).ToHaveValue("a@b.c"
   ordinal equality. `GetByLabel` finds a control (field, checkbox, combo, slider, button) whose
   accessible name matches, or the first control after a matching label among its siblings —
   HultUI has no label-for association, so the "label, then field" row is the convention.
+  Only the **nearest** label before a control counts, matching or not: an error line such as
+  "Enter the user name and the password." does not label the password field or the button
+  after it. A hint between a label and its field hides the field from that label; name the
+  field with `AccessibleName`. Buttons, and checkboxes, radios and switches with text of their
+  own, match only by their own name, never by a label before them.
   `GetByTestId` is the `AutomationId`. The window's root node is searched too. On a
   `HeadlessWindow` the text form is `GetByText(text, exact)` — the one-argument
   `GetByText(text)` is still the eager query above.
@@ -286,6 +294,8 @@ window.RenderLog.Ops;                         // RenderOp { Name, Args, Depth }
 using var image = window.CapturePixels();   // SKImage, layout size × scale
 ```
 
+The image is in Skia's native byte order, **BGRA** on Windows, Linux and macOS (`SkiaRasterRenderSurface.PixelColorType`), because Skia's CPU rasterizer is only fast into that order (into RGBA a frame cost two to eight times as much; docs/DECISIONS.md, 2026-11-17). Read a colour with `image.PeekPixels().GetPixelColor(x, y)`, or `ReadPixels` into an RGBA bitmap; don't index its bytes as RGBA. Comparing two frames' bytes for equality is fine in either order.
+
 Sessions support DPI testing: `HeadlessSession.Create(scale: 2f)` or `window.SetScale(1.5f)`.
 
 ## Simulated Monitors
@@ -305,7 +315,7 @@ session.PumpFrame();                                          // MonitorsChanged
 
 - **Placement is applied.** With monitors, a placement is fitted to the work areas and moves and resizes the surface; maximized fills the monitor's work area, full screen its bounds, and the window takes the monitor's `Scale`. Bounds are pixels, as on Windows. Without monitors, placement is only recorded, as before.
 - **Hot-plug like an OS.** `SetMonitors` moves windows off a monitor that went (onto the nearest remaining one), re-fills maximized and full-screen ones, and raises `MonitorsChanged` from the next `PumpFrame`'s event pump — not from inside `SetMonitors`.
-- **Windows-like windows, opt-in.** `HeadlessOptions.WindowsFrame = new()` makes the windows behave as HultUI's SDL3 window does on Windows, so placement code that breaks on real monitors breaks headless too: `Placement` is the outer rectangle, and a borderless window's content (`HeadlessWindow.ContentBounds`) is inset by the invisible resize borders round its sides and bottom (`ResizeBorders`, default Windows 11's: 8 px at 100 %, 11 at 150 %); `Maximize`/`Restore` of a borderless window are posted and land on the next pump, so a placement set on a shown maximized window is undone by its restore landing after the move; a move onto a monitor at another scale changes the window's scale and raises `Resized` on the next frame; `HeadlessWindow.Moved` is raised from the pump after a move, and `HeadlessWindow.MoveByUser` stands in for the person dragging the window. See `HeadlessWindowsFrame`.
+- **Windows-like windows, opt-in.** `HeadlessOptions.WindowsFrame = new()` makes the windows behave as HultUI's SDL3 window does on Windows, so placement code that breaks on real monitors breaks headless too: `Placement` is the outer rectangle, and a borderless window's content (`HeadlessWindow.ContentBounds`) is inset by the invisible resize borders round its sides and bottom (`ResizeBorders`, default Windows 11's: 8 px at 100 %, 11 at 150 %); `Maximize`/`Restore` of a borderless window are posted and land on the next pump, while a placement set on a shown maximized window restores it at once and moves it (as `SDL3Window` does since 2026-11-17: the posted restore landed after the move and undid it); a move onto a monitor at another scale changes the window's scale and raises `Resized` on the next frame; `HeadlessWindow.Moved` is raised from the pump after a move, and `HeadlessWindow.MoveByUser` stands in for the person dragging the window. See `HeadlessWindowsFrame`.
 - `HeadlessMonitors.Row` stands monitors side by side, top edges aligned, the first primary (with the optional task bar); `HeadlessMonitors.Create` makes one anywhere, at any scale.
 
 **Without golden options, do not assert pixel-exact text across OSes.** Fonts come from the system (`SKFontManager.Default`), so glyphs and text metrics differ between Windows and Linux. Assert on behavior, semantics, and your own drawing — or use golden images, below, which pin the fonts.
@@ -328,7 +338,7 @@ GoldenImage.Match(session.Window, "my-panel");   // Golden/my-panel.png beside t
 **Why the frames match across OSes.** `HeadlessOptions.Golden()` sets `PinnedText`:
 
 - **Pinned fonts.** Every family name — `Segoe UI`, `sans-serif`, one nobody has — resolves to DejaVu Sans (regular, bold, oblique, bold oblique) and `monospace` to DejaVu Sans Mono, embedded in `HultUI.Headless` (`SkiaFontCollection.Pinned`). Nothing falls back to an installed font: a character DejaVu lacks (CJK, emoji) draws as the missing-glyph box on every machine. Measurement uses the same faces, so layout matches too — the font file decides the metrics and HarfBuzz's advances, not the OS.
-- **Text as outlines.** Even from one font file, DirectWrite (Windows) and FreeType (Linux) shade glyphs differently — thousands of pixels over a few lines, hinted or not. `SkiaRasterRenderSurface.TextAsOutlines` draws each glyph's outline through Skia's own path rasteriser instead, which comes out byte for byte the same. The five control goldens in `tests/HultUI.Headless.Tests/Golden/` render to identical PNG bytes on Windows and Linux.
+- **Text as outlines.** Even from one font file, DirectWrite (Windows) and FreeType (Linux) shade glyphs differently — thousands of pixels over a few lines, hinted or not. `SkiaRasterRenderSurface.TextAsOutlines` draws each glyph's outline through Skia's own path rasteriser instead, which comes out byte for byte the same. The outlines themselves are read by HarfBuzz from the font file, not through those two backends, whose outlines differ slightly too (an oblique t, an Å): enough, with Skia m156, to move pixels (docs/DECISIONS.md, 2026-11-17). Every golden in `tests/HultUI.Headless.Tests/Golden/` renders to identical PNG bytes on Windows and Linux. To check that, delete the baselines in a Linux checkout, run with `HULTUI_UPDATE_GOLDENS=1` and look at `git status`: a pass alone only proves the frames are within tolerance.
 
 **Tolerance.** `GoldenTolerance.Default` lets any channel of a pixel be 2 apart and no pixel beyond that — room for Skia's SIMD paths to round a blend differently on another CPU, none for a moved edge or a changed colour (a 1 px change to the button corner radius moves ~200 pixels by up to 98). Pass `new GoldenTolerance(Channel: 4, Pixels: 20)` to loosen one test, or `GoldenTolerance.Exact`.
 

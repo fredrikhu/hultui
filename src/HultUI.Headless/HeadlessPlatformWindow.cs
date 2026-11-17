@@ -127,6 +127,10 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
 
     public bool ResizePending { get; set; }
     public bool ActivatedPending { get; set; }
+    public bool DeactivatedPending { get; set; }
+    public bool FramePressedPending { get; set; }
+    public bool MovedPending { get; set; }
+    public bool DisplayChangedPending { get; set; }
     public long LastResizeRenderTick { get; set; }
     public Action? LiveResizeFrame { get; set; }
 
@@ -221,6 +225,32 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
         }
     }
 
+    /// <summary>
+    /// Windows-like mode: <c>SDL3Window.VisiblePlacement</c>. The placement less the invisible
+    /// borders round the sides and bottom (the content of a window not maximized; a maximized
+    /// one's restored bounds less them), and set by that: fitted to the work areas as it is, then
+    /// grown by the borders of the monitor it lands on. Otherwise <see cref="Placement"/>.
+    /// </summary>
+    public WindowPlacement? VisiblePlacement
+    {
+        get
+        {
+            if (!WindowsLike) return Placement;
+            var outer = IsMaximized ? _placement ?? DefaultPlacement() : Outer;
+            int b = Border(MonitorOf(outer).Scale);
+            return new WindowPlacement(outer.X + b, outer.Y, outer.Width - 2 * b, outer.Height - b, IsMaximized);
+        }
+        set
+        {
+            if (value is not { IsUsable: true }) return;
+            if (!WindowsLike) { Placement = value; return; }
+            var visible = value.FitTo(Monitors.Select(m => m.WorkArea).ToList());
+            int b = Border(MonitorOf(visible).Scale);
+            PlaceLikeWindows(new WindowPlacement(visible.X - b, visible.Y, visible.Width + 2 * b, visible.Height + b,
+                visible.Maximized), fitToWorkAreas: false);
+        }
+    }
+
     /// <summary>The simulated monitors this window lives on; null or empty for no desktop.</summary>
     internal Func<IReadOnlyList<MonitorInfo>>? Desktop { get; init; }
 
@@ -291,8 +321,21 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
     /// <summary>Maximize (true) and restore (false) commands posted and not yet delivered.</summary>
     private List<bool>? _posted;
 
-    /// <summary>Where the pump last told of the window being (<see cref="Moved"/>).</summary>
-    private (int X, int Y) _movedAt;
+    /// <summary>Where the pump last told of the window being (<see cref="Moved"/>); null while a
+    /// window that is not Windows-like has not been placed.</summary>
+    private (int X, int Y)? _movedAt;
+
+    /// <summary>The bounds of the monitor the pump last told of the window being on
+    /// (<see cref="IPlatformWindow.DisplayChangedPending"/>); null with no simulated monitors.</summary>
+    private Rect? _displayAt;
+
+    /// <summary>Where the window is for the pump's moves: its outer rectangle in Windows-like mode,
+    /// else the placement it was given. Null while it has none.</summary>
+    private (int X, int Y)? Where() => (WindowsLike ? _outer : _placement) is { } p ? (p.X, p.Y) : null;
+
+    /// <summary>The monitor the window is on, with simulated monitors.</summary>
+    private MonitorInfo? CurrentMonitor => Monitors.Count == 0 ? null
+        : MonitorOf(WindowsLike ? Outer : _placement ?? DefaultPlacement());
 
     private bool WindowsLike => _frame is not null && Monitors.Count > 0;
 
@@ -354,17 +397,17 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
     }
 
     /// <summary>
-    /// <c>SDL3Window.PlaceWin32</c>: fitted to the work areas, a maximized window's restore
-    /// posted, the outer rectangle set at once (a maximized window takes it and stays maximized,
-    /// its restored bounds unchanged), then maximized — posted when shown, at once before.
+    /// <c>SDL3Window.PlaceWin32</c>: fitted to the work areas, a maximized window restored at once
+    /// (<c>ShowWindow</c>, not the custom frame's posted restore), the outer rectangle set, then
+    /// maximized — posted when shown, at once before.
     /// </summary>
-    private void PlaceLikeWindows(WindowPlacement value)
+    private void PlaceLikeWindows(WindowPlacement value, bool fitToWorkAreas = true)
     {
-        var fit = value.FitTo(Monitors.Select(m => m.WorkArea).ToList()) with { Maximized = false };
+        var fit = (fitToWorkAreas ? value.FitTo(Monitors.Select(m => m.WorkArea).ToList()) : value) with { Maximized = false };
         IsFullscreen = false;
-        if (IsMaximized) Post(maximize: false);
+        if (IsMaximized) SystemCommand(maximize: false);
         _outer = fit;
-        if (!IsMaximized) _placement = fit;
+        _placement = fit;
         if (value.Maximized)
         {
             if (IsShown) Post(maximize: true);
@@ -385,14 +428,22 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
         ApplyDesktop();
     }
 
-    /// <summary>Notes where the window is now, so the first pump tells of no move.</summary>
+    /// <summary>Notes where the window is now, and on which monitor, so the first pump tells of no
+    /// move and no change of display.</summary>
     internal void NoteWhereItIs()
     {
-        if (WindowsLike) _movedAt = (Outer.X, Outer.Y);
+        _movedAt = WindowsLike ? (Outer.X, Outer.Y) : Where();
+        _displayAt = CurrentMonitor?.Bounds;
     }
 
+    /// <summary>The system asked the window to close (<see cref="HeadlessWindow.AskToClose"/>), for
+    /// the next pump to hand on, as a real platform's close request.</summary>
+    internal bool CloseAsked { get; set; }
+
     /// <summary>The pump: delivers the posted commands in order, then raises <see cref="Moved"/>
-    /// when the window is somewhere else than the pump last told of.</summary>
+    /// and flags <see cref="MovedPending"/> when the window is somewhere else than the pump last
+    /// told of, and flags <see cref="DisplayChangedPending"/> when that is on another monitor, as
+    /// SDL's window-moved and display-changed events.</summary>
     internal void DeliverPosted()
     {
         if (_posted is { Count: > 0 } posted)
@@ -400,9 +451,17 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
             for (int i = 0; i < posted.Count; i++) SystemCommand(posted[i]);
             posted.Clear();
         }
-        if (_outer is not { } at || (at.X, at.Y) == _movedAt) return;
-        _movedAt = (at.X, at.Y);
-        Moved?.Invoke();
+        if (Where() is { } at && at != _movedAt)
+        {
+            _movedAt = at;
+            MovedPending = true;
+            Moved?.Invoke();
+        }
+        if (CurrentMonitor?.Bounds is { } display && display != _displayAt)
+        {
+            if (_displayAt is not null) DisplayChangedPending = true;
+            _displayAt = display;
+        }
     }
 
     public void Raise() { }

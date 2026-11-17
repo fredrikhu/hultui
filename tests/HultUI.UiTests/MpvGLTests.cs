@@ -25,8 +25,7 @@ public sealed class MpvGLTests
     {
         public MpvUiFactAttribute()
         {
-            if (!UiTestGate.Enabled) Skip = UiTestGate.Reason;
-            else if (!MpvBackend.IsAvailable) Skip = "libmpv not found (HULTUI_MPV_PATH).";
+            if (UiTestGate.MpvSkip is { } reason) Skip = reason;
         }
     }
 

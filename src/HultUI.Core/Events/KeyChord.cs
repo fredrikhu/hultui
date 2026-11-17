@@ -66,6 +66,11 @@ public readonly record struct KeyChord
     /// <summary>True for a chord that names a character rather than a key.</summary>
     public bool IsCharacter => Char != '\0';
 
+    // A chord whose key types a character when no Ctrl or Alt is held: a letter, a digit, Space,
+    // a character chord.
+    private bool IsTypedChord =>
+        IsCharacter || Key is (>= KeyCode.A and <= KeyCode.Z) or (>= KeyCode.Digit0 and <= KeyCode.Digit9) or KeyCode.Space;
+
     private static KeyModifiers Normalize(KeyModifiers m) =>
         ((m & KeyModifiers.Super) != 0 ? m | KeyModifiers.Ctrl : m) & Compared;
 
@@ -73,6 +78,12 @@ public readonly record struct KeyChord
     public bool Matches(KeyDownEvent e)
     {
         var held = Normalize(e.Modifiers);
+        // Typing, not a shortcut: a character typed (no Ctrl or Alt) into an element that types
+        // text (KeyDownEvent.TargetTakesText). A one-letter shortcut of the window fired as the
+        // user typed it into a field. A key the platform says types nothing ("") is no typing.
+        if (e.TargetTakesText && (held & (KeyModifiers.Ctrl | KeyModifiers.Alt)) == 0
+            && IsTypedChord && e.Text is not "")
+            return false;
         if (IsCharacter)
             return (held & ~KeyModifiers.Shift) == Modifiers && Typed(e) == Char;
         if (held != Modifiers) return false;

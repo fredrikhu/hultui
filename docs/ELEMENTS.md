@@ -117,8 +117,24 @@ element, call `MarkStyleDirty()`.
 | `.OnPointerEnter(handler)` | `Action<PointerEnterEvent>` |
 | `.OnPointerLeave(handler)` | `Action<PointerLeaveEvent>` |
 | `.OnScroll(handler)` | `Action<ScrollEvent>` |
+| `.OnLayoutChanged(handler)` | `Action<LayoutChangedEvent>` |
 
 You can also call `el.On<TEvent>(handler)` directly for any event type.
+
+**Work that needs the laid-out size goes in `.OnLayoutChanged`.** The element hears its border
+box (window coordinates, unscrolled) after the frame's layout and before that frame is drawn:
+after its first layout (`Previous` is null) and whenever its size or place changes after that:
+once a frame, unless a handler's change moves it again. It is told on the element alone; it does
+not bubble. What the handler
+changes (a signal a build reads, a size set and marked) is styled and laid out again in the same
+frame, so a toolbar that fits its items to its width draws fitted, not one frame late as with
+`Window.RequestPostFrameCallback`. A handler that keeps changing the layout is stopped after
+`Window.LayoutChangeRounds` (4) rounds in a frame; the rest is told in the next frame, and the
+window writes one warning. Test `SizeChanged` when only the size matters: a sibling above that
+grows moves the element without resizing it. Scrolling moves no box, so it tells nothing.
+Don't use a canvas's `Draw` as this hook: a frame that changes nothing draws nothing, a minimized
+window draws nothing, and a canvas whose box lies outside a clipping ancestor's visible area is
+skipped, which is how a canvas of no size is never drawn.
 
 **A pointer event is made only for a listener.** A move, enter or leave event is created
 only when an element it would reach has a handler for it. Hover styles (`.OnHover`),
@@ -911,6 +927,11 @@ Canvas.New()       // Without draw callback (set Draw property later)
 
 A clip or transform the callback leaves open is undone when it returns (`PopAll`), so it never
 leaks into the elements painted after the canvas.
+
+**`Draw` runs only when the canvas is drawn.** That is in a frame that draws, and only while
+the canvas's box meets the visible area of the scroll view or clipping box around it; a box of
+no size meets nothing. Work that must follow the canvas's size goes in `.OnLayoutChanged`
+(Events, above), not in `Draw`.
 
 **Showing an image under your own zoom, pan and rotation.** `DrawImage` with a source
 rectangle is the zoom and pan, `PushTransform` around it the rotation or mirror, and the
@@ -2394,7 +2415,8 @@ text colour and face, size, padding and radius; null colours come from the palet
 
 A row of menus across the top of a window — File, Edit, View — whose dropdowns are context
 menus (`ContextMenuItem`: separators, disabled and danger items, check marks, icons, shortcut
-hints, one level of submenus).
+hints, submenus at any depth: → opens one, ← closes it, and a flyout with no room on the right
+opens on its parent's left).
 
 ```csharp
 _menus = new MenuBar(
@@ -2501,7 +2523,11 @@ Button.New("Filters").OnClick(e => _filters.Toggle(e.CurrentTarget)).AccessibleE
   before it hands its element to the next one). `ActualPlacement` says which side it took.
 - **Closing:** a press outside closes it and goes on to whatever was pressed; a press on its
   own anchor only closes it, so the toggle does not reopen it. Opened from a dialog, a press
-  elsewhere in the dialog counts as outside. Esc closes it. `Closed` runs however it closed.
+  elsewhere in the dialog counts as outside, as it does for a context menu or a dropdown's list
+  opened there. The window losing the foreground (`Window.Deactivated`) or a press on a custom
+  title bar or edge closes it, as it closes every light-dismiss overlay; a standard title bar on
+  Windows tells the window nothing, and `Window.DismissPopups()` is for that. Esc closes it.
+  `Closed` runs however it closed.
 - **Keyboard:** opening moves the keyboard to its first control (the card itself when it has
   none), Tab stays inside, and closing with the keyboard inside hands it back to the anchor.
   `ArrowKeys = true` lets ↑ ↓ walk the controls, for a list of rows. With nothing focusable in

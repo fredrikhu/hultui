@@ -72,7 +72,9 @@ using HultUI.WebView.WebView2;
 //
 // --window-pixels, with the same green quarter, prints the colours at the top left, the right and
 // the bottom left of the window as read from its device context: for a software window, what SDL
-// put on the screen, where SaveFrame reads what the renderer drew (Windows).
+// put on the screen, where SaveFrame reads what the renderer drew (Windows). With --grow the quarters
+// fill the window, which is then made 640x400 without activating it and drawn, and read again: a
+// software window draws into memory SDL makes again at the new size.
 //
 // --frame-bytes repaints one box a frame and prints the managed bytes a frame allocates, the
 // least of five rounds of 120 frames.
@@ -141,14 +143,18 @@ internal static class Program
             Box.New().FlexGrow(1).Background(Color.FromHex("#FF0000")),
             Box.New().FlexGrow(1).Background(Color.FromHex("#0000FF"))));
         // A green bottom-left quarter for a saved frame, which can come out upside down (GL).
+        bool grow = args.Contains("--grow");
         if (args.Any(a => a.StartsWith("--save-frame=")) || args.Contains("--window-pixels"))
-            app.SetRoot(Flex.Column().Width(320f).Height(200f).Children(
+        {
+            var quarters = Flex.Column().Children(
                 Flex.Row().FlexGrow(1).Children(
                     Box.New().FlexGrow(1).Background(Color.FromHex("#FF0000")),
                     Box.New().FlexGrow(1).Background(Color.FromHex("#0000FF"))),
                 Flex.Row().FlexGrow(1).Children(
                     Box.New().FlexGrow(1).Background(Color.FromHex("#00FF00")),
-                    Box.New().FlexGrow(1).Background(Color.FromHex("#0000FF")))));
+                    Box.New().FlexGrow(1).Background(Color.FromHex("#0000FF"))));
+            app.SetRoot(grow ? quarters : quarters.Width(320f).Height(200f));
+        }
 
         for (int i = 0; i < frames; i++)
             app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
@@ -166,6 +172,13 @@ internal static class Program
         }
 
         if (args.Contains("--window-pixels")) PrintWindowPixels(app.PrimaryWindow.NativeHandle);
+        if (grow)
+        {
+            SetWindowPos(app.PrimaryWindow.NativeHandle, 0, 0, 0, 640, 400, NoMove | NoZOrder | NoActivate);
+            for (int i = 0; i < frames; i++)
+                app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+            PrintWindowPixels(app.PrimaryWindow.NativeHandle);
+        }
 
         Console.WriteLine("probe: done");
         return 0;
@@ -1096,7 +1109,7 @@ internal static class Program
             uint c = GetPixel(dc, x, y);
             return $"{c & 0xFF},{(c >> 8) & 0xFF},{(c >> 16) & 0xFF}";
         }
-        Console.WriteLine($"probe: window read={read} topLeft={Pixel(width / 4, height / 4)} " +
+        Console.WriteLine($"probe: window read={read} size={width}x{height} topLeft={Pixel(width / 4, height / 4)} " +
             $"right={Pixel(width * 3 / 4, height / 2)} bottomLeft={Pixel(width / 4, height * 3 / 4)}");
         SelectObject(dc, old);
         DeleteObject(bitmap);

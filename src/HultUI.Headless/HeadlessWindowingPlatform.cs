@@ -81,16 +81,30 @@ internal sealed class HeadlessWindowingPlatform : IWindowingPlatform, IMonitorSo
         _monitorsChangedPending = true;
     }
 
+    /// <summary>For tests: the next pump asks the application to quit, as SDL's does for Cmd+Q,
+    /// a signal or the session ending.</summary>
+    internal bool QuitAsked { get; set; }
+
     /// <summary>Takes the queued wake, as a real platform's pump takes its wake event, and
-    /// announces a pending change of the simulated monitors; never requests quit.</summary>
+    /// announces a pending change of the simulated monitors; requests quit only when a test asked
+    /// (<see cref="QuitAsked"/>).</summary>
     public bool PumpEvents(Action<IPlatformWindow>? onWindowClose)
     {
         Volatile.Write(ref _wakePending, false);
-        // Windows-like windows: the maximize and restore the custom frame posts land here, as
-        // posted messages do in SDL's pump, and moves are told of (HeadlessWindowsFrame).
-        if (_options?.WindowsFrame is not null)
-            for (int i = 0; i < _windows.Count; i++)
-                if (_windows[i].IsOpen) _windows[i].DeliverPosted();
+        if (QuitAsked) return false;
+        // The maximize and restore a Windows-like custom frame posts land here, as posted
+        // messages do in SDL's pump (HeadlessWindowsFrame), and every window's moves and changes
+        // of monitor are told of.
+        for (int i = 0; i < _windows.Count; i++)
+            if (_windows[i].IsOpen) _windows[i].DeliverPosted();
+        // The system's requests to close (HeadlessWindow.AskToClose), handed on as SDL's pump does.
+        for (int i = 0; i < _windows.Count; i++)
+        {
+            var window = _windows[i];
+            if (!window.CloseAsked) continue;
+            window.CloseAsked = false;
+            if (window.IsOpen) onWindowClose?.Invoke(window);
+        }
         if (_monitorsChangedPending)
         {
             _monitorsChangedPending = false;
