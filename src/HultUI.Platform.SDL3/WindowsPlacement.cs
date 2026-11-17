@@ -28,6 +28,7 @@ namespace HultUI.Platform.SDL3;
 internal static unsafe class WindowsPlacement
 {
     private const int SW_SHOWMAXIMIZED = 3;
+    private const int SW_SHOWNOACTIVATE = 4;
     private const uint WPF_RESTORETOMAXIMIZED = 0x0002;
     private const uint MONITOR_DEFAULTTONEAREST = 2;
     private const uint SWP_NOZORDER = 0x0004;
@@ -154,6 +155,11 @@ internal static unsafe class WindowsPlacement
     private static extern int GetDpiForMonitor(IntPtr hmonitor, int dpiType, out uint dpiX, out uint dpiY);
 
     public static bool IsMaximizedOrMinimized(IntPtr hwnd) => IsZoomed(hwnd) || IsIconic(hwnd);
+
+    /// <summary>Takes a maximized or minimized window back to its restored bounds before this
+    /// returns, without activating it: a placement then moves it from there. The custom frame's
+    /// own restore is posted, for the handlers that call it from inside a window message.</summary>
+    public static void RestoreNow(IntPtr hwnd) => ShowWindow(hwnd, SW_SHOWNOACTIVATE);
 
     /// <summary>
     /// Moves and sizes a window that is neither maximized nor minimized to the bounds' outer

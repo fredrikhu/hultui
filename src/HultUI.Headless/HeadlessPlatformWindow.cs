@@ -127,6 +127,8 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
 
     public bool ResizePending { get; set; }
     public bool ActivatedPending { get; set; }
+    public bool DeactivatedPending { get; set; }
+    public bool FramePressedPending { get; set; }
     public long LastResizeRenderTick { get; set; }
     public Action? LiveResizeFrame { get; set; }
 
@@ -354,17 +356,17 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
     }
 
     /// <summary>
-    /// <c>SDL3Window.PlaceWin32</c>: fitted to the work areas, a maximized window's restore
-    /// posted, the outer rectangle set at once (a maximized window takes it and stays maximized,
-    /// its restored bounds unchanged), then maximized — posted when shown, at once before.
+    /// <c>SDL3Window.PlaceWin32</c>: fitted to the work areas, a maximized window restored at once
+    /// (<c>ShowWindow</c>, not the custom frame's posted restore), the outer rectangle set, then
+    /// maximized — posted when shown, at once before.
     /// </summary>
     private void PlaceLikeWindows(WindowPlacement value)
     {
         var fit = value.FitTo(Monitors.Select(m => m.WorkArea).ToList()) with { Maximized = false };
         IsFullscreen = false;
-        if (IsMaximized) Post(maximize: false);
+        if (IsMaximized) SystemCommand(maximize: false);
         _outer = fit;
-        if (!IsMaximized) _placement = fit;
+        _placement = fit;
         if (value.Maximized)
         {
             if (IsShown) Post(maximize: true);

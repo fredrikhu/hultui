@@ -40,6 +40,7 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
     private const uint WM_NCMOUSEMOVE = 0x00A0;
     private const uint WM_NCLBUTTONDOWN = 0x00A1;
     private const uint WM_NCLBUTTONUP = 0x00A2;
+    private const uint WM_NCRBUTTONDOWN = 0x00A4;
     private const uint WM_NCRBUTTONUP = 0x00A5;
     private const uint WM_NCMOUSELEAVE = 0x02A2;
     private const uint WM_SYSKEYDOWN = 0x0104;
@@ -379,7 +380,16 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
 
                 case WM_NCLBUTTONDOWN when (int)wParam.ToUInt64() == HTMAXBUTTON:
                     frame._maxPressed = true;
+                    frame._window.FramePressedPending = true;
                     return IntPtr.Zero; // swallow: don't let DefWindowProc open a menu / start a move
+
+                // Any other press on the frame (the title bar, an edge): a press outside the
+                // window's popups, which its client area never hears of. Flagged for the loop to
+                // close them (Window.DismissPopups); the press goes on to move or resize.
+                case WM_NCLBUTTONDOWN:
+                case WM_NCRBUTTONDOWN:
+                    frame._window.FramePressedPending = true;
+                    break;
 
                 case WM_NCLBUTTONUP when (int)wParam.ToUInt64() == HTMAXBUTTON:
                     if (frame._maxPressed)

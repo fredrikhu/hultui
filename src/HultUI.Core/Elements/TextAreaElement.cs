@@ -257,6 +257,9 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     }
     private bool _readOnly;
 
+    // A read-only viewer types nothing: its letters are the app's shortcuts.
+    internal override bool TakesTypedText => !_readOnly;
+
     /// <summary>Optional per-range text colors (syntax highlighting and similar), in
     /// whole-buffer UTF-16 offsets. Purely a paint concern — never affects wrapping or
     /// measurement. Each visible line slices the spans it overlaps.
@@ -1423,6 +1426,8 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         // By the letter on the key, not its position — see TextInputElement.OnKeyDown.
         if (ctrl && TryLetterShortcut(evt.ShortcutLetter, shift))
         {
+            // Marked, not stopped: see TextInputElement.OnKeyDown.
+            evt.Handled = true;
             MarkPaintDirty();
             return;
         }
@@ -1483,7 +1488,9 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
                 break;
 
             case KeyCode.Enter:
-                if (ReadOnly) return;
+                // Enter and Shift+Enter break the line. With Ctrl or Alt it is the app's (a send
+                // or a submit): it inserted a newline as well, into the text it was sending.
+                if (ReadOnly || (evt.Modifiers & (KeyModifiers.Ctrl | KeyModifiers.Alt | KeyModifiers.Super)) != 0) return;
                 Replace(SelectionStart, SelectionEnd, "\n", TextUndoHistory.EditKind.Typing);
                 NotifyChanged();
                 break;
@@ -1518,6 +1525,7 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
                 return;
         }
 
+        evt.Handled = true;
         MarkPaintDirty();
     }
 

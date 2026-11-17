@@ -156,6 +156,8 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
     public bool ResizePending { get; set; }
     public bool ActivatedPending { get; set; }
+    public bool DeactivatedPending { get; set; }
+    public bool FramePressedPending { get; set; }
     public long LastResizeRenderTick { get; set; }
 
     /// <summary>Set by the framework while it draws a frame of this window: the event watcher
@@ -984,6 +986,24 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
                     }
                     break;
 
+                // Flagged as a gain is: the loop closes the window's light-dismiss popups (a
+                // menu, a dropdown's list) and raises Window.Deactivated. A menu stayed open over
+                // a window the user had left for another.
+                case (uint)SDL_EventType.SDL_EVENT_WINDOW_FOCUS_LOST:
+                    if (_registry.TryGetValue(evt.window.windowID, out var leftWin))
+                        leftWin.DeactivatedPending = true;
+                    break;
+
+                // A press on a part of the window SDL's hit test gave to the system (a custom
+                // title bar to drag, an edge to resize), which the window gets no press for. Off
+                // Windows only: X11 sends it for the press that starts the move or resize; Windows
+                // runs its hit test on every pointer move, and the custom frame reports its frame
+                // presses itself (WindowsCustomFrame). Not verified on Wayland.
+                case (uint)SDL_EventType.SDL_EVENT_WINDOW_HIT_TEST when !OperatingSystem.IsWindows():
+                    if (_registry.TryGetValue(evt.window.windowID, out var hitWin))
+                        hitWin.FramePressedPending = true;
+                    break;
+
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_DISPLAY_CHANGED:
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_HDR_STATE_CHANGED:
                     // What decides the swapchain's format and white scale: a different monitor,
@@ -1326,7 +1346,15 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         var hwnd = GetWin32Hwnd();
         var fit = placement.FitTo(WindowsPlacement.WorkAreas());
         // A maximized window cannot be moved: Windows keeps the state and snaps the rect back.
-        if (WindowsPlacement.IsMaximizedOrMinimized(hwnd)) Restore();
+        // Restored here and now, not through Restore: the custom frame posts its restore
+        // (WindowsCustomFrame.Restore), which landed after the move and took the window back to
+        // the bounds from before the maximize, so a placement on a maximized window was undone,
+        // and a maximized one moved to another monitor was maximized again where it had been.
+        if (WindowsPlacement.IsMaximizedOrMinimized(hwnd))
+        {
+            using var quiet = WindowsActivation.RefuseIfUnwanted();
+            WindowsPlacement.RestoreNow(hwnd);
+        }
         WindowsPlacement.Move(hwnd, fit);
         if (!fit.Maximized) return;
         if (_shown) Maximize();

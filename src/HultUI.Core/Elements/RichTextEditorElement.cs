@@ -133,6 +133,9 @@ public partial class RichTextEditorElement : BoxElement, IScrollbarDraggable, IA
             NotifyAccessibilityPropertyChanged(AccessibilityProperties.TextSelection);
         }
     }
+
+    // A read-only viewer types nothing: its letters are the app's shortcuts.
+    internal override bool TakesTypedText => !ReadOnly;
     private bool _readOnly;
 
     public string Placeholder { get; set; } = "";
