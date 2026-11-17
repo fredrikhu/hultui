@@ -27,7 +27,8 @@ namespace HultUI.UiTests;
 [Collection("ui")]
 public sealed class WebView2Tests
 {
-    private sealed class WebView2UiFactAttribute : FactAttribute
+    /// <summary>Skips unless UI tests are on and WebView2 is installed. OsDropTests uses it too.</summary>
+    internal sealed class WebView2UiFactAttribute : FactAttribute
     {
         public WebView2UiFactAttribute()
         {

@@ -37,7 +37,17 @@ $env:HULTUI_UITESTS = "1"; dotnet test tests/HultUI.UiTests
 
 # Plus the few that take the foreground on purpose — only on a desktop nobody is using:
 $env:HULTUI_UITESTS = "1"; $env:HULTUI_UITESTS_FOREGROUND = "1"; dotnet test tests/HultUI.UiTests
+
+# The video tests (mpv's GL path, the Vulkan probe's video and HDR modes) need a libmpv:
+$env:HULTUI_UITESTS = "1"; $env:HULTUI_MPV_PATH = "$env:LOCALAPPDATA\Programs\Reel\libmpv-2.dll"; dotnet test tests/HultUI.UiTests
 ```
+
+**The video UiTests need `HULTUI_MPV_PATH`.** The test projects carry no libmpv, so without the
+variable `MpvGLTests` and the video tests in `VulkanProbeTests` report *skipped*, "libmpv not
+found (HULTUI_MPV_PATH)". Point it at a `libmpv-2.dll` (an installed Reel has one). A run
+that shows them passed in under a millisecond played nothing: they used to return early that
+way. A test that needs a library or runtime gets an attribute that skips without it
+(`[VulkanVideoUiFact]`, `[WebView2Tests.WebView2UiFact]`), never an early `return`.
 
 **`HULTUI_UITESTS` is the gate for the real-window suite.** Without it every UiTest
 reports as *skipped* — deliberately visible, rather than silently absent the way the old
