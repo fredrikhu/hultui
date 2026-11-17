@@ -127,10 +127,11 @@ public sealed unsafe class OsDropTests
         finally { Marshal.Release(data); }
     });
 
-    [UiFact]
+    // Skipped, not passed, without WebView2: it returned early then, reporting a pass for a drag
+    // no page was offered.
+    [WebView2Tests.WebView2UiFact]
     public void AWebPage_IsOfferedTheDrag_WithItsFiles_AndItsAnswerReachesTheOperatingSystem() => OnSta(() =>
     {
-        if (new WebView2Engine().Availability is { IsAvailable: false }) return;
         using var app = new Application(new SdlWindowingPlatform(), "Drop", 480, 320);
         using var engine = new WebView2Engine();
         using var web = new WebViewController(engine, new WebViewOptions

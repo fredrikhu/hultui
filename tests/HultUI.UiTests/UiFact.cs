@@ -48,6 +48,16 @@ internal static class UiTestGate
     /// <summary>Why a test that takes the foreground skips, or null when it may run.</summary>
     internal static string? ForegroundSkip =>
         !Enabled ? Reason : !ForegroundEnabled ? ForegroundReason : null;
+
+    internal const string NoMpvReason = "libmpv not found (HULTUI_MPV_PATH).";
+
+    /// <summary>
+    /// Why a test that plays a video through mpv skips, or null when it may run. A test that
+    /// returned early without libmpv reported Passed in under a millisecond, having played
+    /// nothing; it must say Skipped instead.
+    /// </summary>
+    internal static string? MpvSkip =>
+        !Enabled ? Reason : !HultUI.Media.Mpv.MpvBackend.IsAvailable ? NoMpvReason : null;
 }
 
 /// <summary>A <see cref="FactAttribute"/> that skips unless <see cref="UiTestGate"/> allows it.</summary>
