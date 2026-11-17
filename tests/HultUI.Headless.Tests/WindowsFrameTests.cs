@@ -95,8 +95,11 @@ public sealed class WindowsFrameTests
         Assert.Equal(new Rect(108, 100, 784, 592), session.Window.ContentBounds);
     }
 
+    /// <summary>A placement on a shown maximized window lands where it was put. The restore went
+    /// through the custom frame's posted command, which landed after the move and put back the
+    /// bounds from before the maximize, undoing the placement.</summary>
     [Fact]
-    public void APlacementOnAShownMaximizedWindow_IsUndoneByItsRestoreLandingAfterTheMove()
+    public void APlacementOnAShownMaximizedWindow_LandsWhereItWasPut()
     {
         using var session = Session();
         var window = session.Window.Window;
@@ -105,12 +108,29 @@ public sealed class WindowsFrameTests
         Assert.True(window.IsMaximized);
 
         window.Placement = new WindowPlacement(952, 0, 976, 1040, false);
-        Assert.True(window.IsMaximized);   // the restore is posted; the move is made at once
+        Assert.False(window.IsMaximized);   // restored at once, before the move
         session.PumpFrame();
 
-        // The restore lands after the move and puts back the bounds from before the maximize.
         Assert.False(window.IsMaximized);
-        Assert.Equal(new WindowPlacement(100, 100, 800, 600, false), window.Placement);
+        Assert.Equal(new WindowPlacement(952, 0, 976, 1040, false), window.Placement);
+    }
+
+    /// <summary>A maximized window moved to another monitor maximized is maximized there: its
+    /// restore and move come first, its maximize lands on the monitor it was moved to.</summary>
+    [Fact]
+    public void AMaximizedWindowMovedToAnotherMonitorMaximized_IsMaximizedThere()
+    {
+        using var session = Session();
+        var window = session.Window.Window;
+        window.Placement = new WindowPlacement(100, 100, 800, 600, true);
+        session.PumpFrame();
+        Assert.True(window.IsMaximized);
+
+        window.MoveToMonitor(session.Monitors[1], MonitorFit.Maximized);
+        session.PumpFrame();
+
+        Assert.True(window.IsMaximized);
+        Assert.Equal("B", window.Monitor?.Name);
     }
 
     [Fact]

@@ -1346,7 +1346,15 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         var hwnd = GetWin32Hwnd();
         var fit = placement.FitTo(WindowsPlacement.WorkAreas());
         // A maximized window cannot be moved: Windows keeps the state and snaps the rect back.
-        if (WindowsPlacement.IsMaximizedOrMinimized(hwnd)) Restore();
+        // Restored here and now, not through Restore: the custom frame posts its restore
+        // (WindowsCustomFrame.Restore), which landed after the move and took the window back to
+        // the bounds from before the maximize, so a placement on a maximized window was undone,
+        // and a maximized one moved to another monitor was maximized again where it had been.
+        if (WindowsPlacement.IsMaximizedOrMinimized(hwnd))
+        {
+            using var quiet = WindowsActivation.RefuseIfUnwanted();
+            WindowsPlacement.RestoreNow(hwnd);
+        }
         WindowsPlacement.Move(hwnd, fit);
         if (!fit.Maximized) return;
         if (_shown) Maximize();

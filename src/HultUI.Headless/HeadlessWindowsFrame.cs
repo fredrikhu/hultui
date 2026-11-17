@@ -16,10 +16,12 @@ namespace HultUI.Headless;
 /// modelled with no borders.</para>
 /// <para><b>Posted maximize and restore.</b> The custom frame maximizes and restores with a posted
 /// <c>WM_SYSCOMMAND</c>, so on a borderless window <c>Maximize</c> and <c>Restore</c> land on the
-/// next pump, in the order they were made. A placement set on a shown maximized window posts its
-/// restore and moves the window at once, as <c>SDL3Window.Placement</c> does: the restore lands
-/// after the move and takes the window back to the bounds it had before it was maximized. A
-/// window not shown yet is maximized at once (shown maximized and cloaked).</para>
+/// next pump, in the order they were made. A placement set on a shown maximized window restores
+/// it at once and then moves it, as <c>SDL3Window.Placement</c> does (it restores with
+/// <c>ShowWindow</c>, not the posted command, which landed after the move and took the window back
+/// to the bounds it had before it was maximized); a maximized placement then posts its maximize,
+/// which lands where the window was moved. A window not shown yet is maximized at once (shown
+/// maximized and cloaked).</para>
 /// <para><b>Monitors and scale.</b> The window is on the monitor its outer rectangle overlaps
 /// most and takes that monitor's scale, and its borders are that scale's: a move to a monitor
 /// at another scale changes the window's <c>DisplayScale</c> and raises <c>Window.Resized</c>
