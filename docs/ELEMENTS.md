@@ -117,8 +117,24 @@ element, call `MarkStyleDirty()`.
 | `.OnPointerEnter(handler)` | `Action<PointerEnterEvent>` |
 | `.OnPointerLeave(handler)` | `Action<PointerLeaveEvent>` |
 | `.OnScroll(handler)` | `Action<ScrollEvent>` |
+| `.OnLayoutChanged(handler)` | `Action<LayoutChangedEvent>` |
 
 You can also call `el.On<TEvent>(handler)` directly for any event type.
+
+**Work that needs the laid-out size goes in `.OnLayoutChanged`.** The element hears its border
+box (window coordinates, unscrolled) after the frame's layout and before that frame is drawn:
+after its first layout (`Previous` is null) and whenever its size or place changes after that:
+once a frame, unless a handler's change moves it again. It is told on the element alone; it does
+not bubble. What the handler
+changes (a signal a build reads, a size set and marked) is styled and laid out again in the same
+frame, so a toolbar that fits its items to its width draws fitted, not one frame late as with
+`Window.RequestPostFrameCallback`. A handler that keeps changing the layout is stopped after
+`Window.LayoutChangeRounds` (4) rounds in a frame; the rest is told in the next frame, and the
+window writes one warning. Test `SizeChanged` when only the size matters: a sibling above that
+grows moves the element without resizing it. Scrolling moves no box, so it tells nothing.
+Don't use a canvas's `Draw` as this hook: a frame that changes nothing draws nothing, a minimized
+window draws nothing, and a canvas whose box lies outside a clipping ancestor's visible area is
+skipped, which is how a canvas of no size is never drawn.
 
 **A pointer event is made only for a listener.** A move, enter or leave event is created
 only when an element it would reach has a handler for it. Hover styles (`.OnHover`),
@@ -911,6 +927,11 @@ Canvas.New()       // Without draw callback (set Draw property later)
 
 A clip or transform the callback leaves open is undone when it returns (`PopAll`), so it never
 leaks into the elements painted after the canvas.
+
+**`Draw` runs only when the canvas is drawn.** That is in a frame that draws, and only while
+the canvas's box meets the visible area of the scroll view or clipping box around it; a box of
+no size meets nothing. Work that must follow the canvas's size goes in `.OnLayoutChanged`
+(Events, above), not in `Draw`.
 
 **Showing an image under your own zoom, pan and rotation.** `DrawImage` with a source
 rectangle is the zoom and pan, `PushTransform` around it the rotation or mirror, and the

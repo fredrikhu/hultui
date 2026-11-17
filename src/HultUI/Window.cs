@@ -1898,6 +1898,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // A static overlay (a tooltip) costs nothing once painted.
         || AnyOverlayContentDirty()
         || _postFrameCallbacks.Count > 0
+        // Boxes a frame's layout-changed handlers left untold after their last round. Only those:
+        // a pass later in a frame (a drag image's) would otherwise ask for every frame after it.
+        || _layoutChangesLeft
         // A drag or a hover that follows the pointer once a frame has a position to apply.
         || _preFrameCallbacks.Count > 0
         // An autoscroll moves the view with no input arriving at all, so it has to ask for
@@ -2222,6 +2225,11 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             }
             if (_overlays.Count > 0) overlayChanges |= PrepareOverlays(theme);
         }
+
+        // What was laid out at a new box hears of it, and what its handlers change is laid out in
+        // this frame, before the accessibility phase reads the boxes and before anything is drawn.
+        if (_layoutEngine.HasLayoutChanges)
+            DeliverLayoutChanges(theme, ref styleWasDirty, ref layoutWasDirty, ref overlayChanges);
 
         // Accessibility: rebuild + diff when the tree changed and something is
         // actually listening. The Null bridge's IsActive is false, so this is a
@@ -3853,6 +3861,76 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         for (int i = 0; i < _overlays.Count; i++)
             if ((_overlays[i].Content.DirtyFlags & DirtyFlags.Children) != 0) return true;
         return false;
+    }
+
+    /// <summary>How many times a frame tells changed boxes and lays out what their handlers changed
+    /// before it leaves the rest to the next frame. A handler that grows what it measures would
+    /// otherwise never let the frame finish; this way it costs a frame each time instead.</summary>
+    internal const int LayoutChangeRounds = 4;
+
+    private readonly List<Element> _layoutChanged = [];
+    private bool _layoutChangesLeft, _layoutChangeLoopTold;
+
+    /// <summary>
+    /// Raises <see cref="LayoutChangedEvent"/> on each element a pass laid out at a box it was not
+    /// told yet, then styles and lays out again what the handlers marked, so the frame drawn has
+    /// it, and tells what that moved, up to <see cref="LayoutChangeRounds"/> times.
+    /// </summary>
+    private void DeliverLayoutChanges(Theme theme, ref bool styleWasDirty, ref bool layoutWasDirty,
+        ref OverlayChanges overlayChanges)
+    {
+        _layoutChangesLeft = false;
+        for (int round = 0; round < LayoutChangeRounds && _layoutEngine.HasLayoutChanges; round++)
+        {
+            _layoutChanged.Clear();
+            _layoutEngine.TakeLayoutChanges(_layoutChanged);
+            bool told = false;
+            // By index: a handler can lay out nothing, but it can add to the engine's list only
+            // through a pass, which runs after this loop.
+            for (int i = 0; i < _layoutChanged.Count; i++)
+            {
+                var element = _layoutChanged[i];
+                // One a build removed or whose overlay closed since the pass is not told; back in a
+                // tree, it hears its box as new (Unmount forgets the one it was told).
+                if (!IsShownInWindow(element) || !element.HasEventHandler<LayoutChangedEvent>()) continue;
+                if (LayoutWatch.Tell(element) is not { } evt) continue;
+                EventDispatcher.DispatchDirect(evt, element);
+                told = true;
+            }
+            _layoutChanged.Clear();
+            if (!told || _root is null) return;
+
+            // A reconcile a handler's signal write deferred, then what the handlers marked.
+            TreeDiffer.DrainDeferred();
+            if ((_root.DirtyFlags & DirtyFlags.Style) != 0)
+            {
+                StyleResolver.Resolve(_root, theme);
+                ClearFlags(_root, DirtyFlags.Style | DirtyFlags.StyleSubtree);
+                ReapplyHoverCursor();
+                styleWasDirty = true;
+            }
+            if ((_root.DirtyFlags & DirtyFlags.Layout) != 0)
+            {
+                _layoutEngine.PerformLayout(_root, PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight);
+                layoutWasDirty = true;
+                UpdateCaptionHeight();
+            }
+            if (_overlays.Count > 0) overlayChanges |= PrepareOverlays(theme);
+        }
+        // The last round's layout may have moved something again: told in the next frame, which
+        // NeedsDraw asks for. Only a box that is new is kept; one laid out where it was told is not.
+        _layoutChanged.Clear();
+        _layoutEngine.TakeLayoutChanges(_layoutChanged);
+        for (int i = 0; i < _layoutChanged.Count; i++)
+            if (IsShownInWindow(_layoutChanged[i]) && LayoutWatch.IsUntold(_layoutChanged[i]))
+                _layoutEngine.NoteLayoutChange(_layoutChanged[i]);
+        _layoutChanged.Clear();
+        _layoutChangesLeft = _layoutEngine.HasLayoutChanges;
+        if (_layoutChangesLeft && !_layoutChangeLoopTold)
+        {
+            _layoutChangeLoopTold = true;
+            Console.Error.WriteLine($"[HultUI] Layout-changed handlers were still changing the layout after {LayoutChangeRounds} rounds in one frame; the rest waits for the next frame. A handler that grows what it measures never settles.");
+        }
     }
 
     /// <summary>Whether <paramref name="element"/> is in this window's tree or an open overlay's: what

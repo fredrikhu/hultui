@@ -1205,6 +1205,24 @@ after). The fix gives such an item its max-content width as its base, under thre
 Found by an application team (finding 8). The layout audit across every suite lists the boxes it
 moves.
 
+### After-layout work is an element event, not a canvas drawn at any size (2026-11-17)
+
+An application team re-fitted a toolbar from a 0×0 canvas's `Draw`, which never ran: a box of
+no area meets no clip. Drawing is no layout hook at any size (a frame that changes nothing
+draws nothing, nor does a minimized window, and state set while drawing shows a frame late),
+so the fix is `LayoutChangedEvent` (`.OnLayoutChanged`), not a canvas exempt from culling:
+
+- **Told after the layout, laid out before the drawing.** The window tells each changed box once,
+  after the frame's layout passes, then styles and lays out what the handlers marked, so the
+  frame drawn has it. `RequestPostFrameCallback` drew every such change twice.
+- **Bounded.** Four rounds a frame; what is still changing is told in the next frame, with one
+  warning. A handler that grows what it measures costs a frame each time instead of hanging one.
+- **Free until used.** The `Layout` setter notes a box only after some element has listened, and
+  only for the engine running the pass. No per-element field: the box last told lives in a weak
+  table keyed by the element.
+- **Canvases are still culled by their box.** Exempting them would draw every canvas a scroll
+  view holds off screen.
+
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
 BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction

@@ -5,6 +5,9 @@ namespace HultUI.Core.Elements;
 
 public class CanvasElement : BoxElement
 {
+    /// <summary>Draws the canvas. It runs only in a frame that draws, and only while the canvas's
+    /// box meets the visible area of a clipping ancestor (a box of no size meets nothing), so it is
+    /// no after-layout hook: use <c>.OnLayoutChanged</c> for work that follows the canvas's size.</summary>
     public Action<ICanvasDrawingContext>? Draw { get; set; }
 
     public static CanvasElement New(Action<ICanvasDrawingContext>? draw = null, [OriginFile] string? file = null, [OriginLine] int line = 0) =>

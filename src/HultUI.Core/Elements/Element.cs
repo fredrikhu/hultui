@@ -179,7 +179,11 @@ public abstract class Element
 #endif
             return _layout;
         }
-        internal set => _layout = value;
+        internal set
+        {
+            _layout = value;
+            if (LayoutWatch.On) LayoutWatch.Wrote(this);
+        }
     }
 
     /// <summary>
@@ -961,6 +965,19 @@ public abstract class Element
         }
         items[count] = entry;
         if (firstClick) ClickHandlersChanged();
+        if (ReferenceEquals(entry.Kind, EventKind<LayoutChangedEvent>.Instance)) StartsWatchingLayout();
+    }
+
+    /// <summary>
+    /// A <see cref="LayoutChangedEvent"/> handler arrived: the event is switched on, and the element
+    /// is laid out again so it hears its box even when nothing else moves it. One already in a
+    /// window, given its first handler by a rebuild, would otherwise wait for the next resize.
+    /// </summary>
+    private void StartsWatchingLayout()
+    {
+        LayoutWatch.On = true;
+        LayoutWatch.Forget(this);
+        MarkLayoutDirty();
     }
 
     /// <summary>
@@ -1395,6 +1412,7 @@ public abstract class Element
         {
             _mounted = false;
             _pendingAnnouncements = null; // gone before a window took it: a rebuild's twin
+            if (LayoutWatch.On) LayoutWatch.Forget(this);   // back in a tree, it hears its box anew
             OnUnmounted();
             // Its synthetic accessibility nodes (list items, described content) go with it:
             // their ids stop resolving rather than ever naming a newer element.
@@ -1855,6 +1873,10 @@ public abstract class Element
         if (items is null && incoming is null)
             return;
 
+        // A layout handler is app code, so a build that adds the first one is the element
+        // starting to listen. Read before the array below is written over.
+        bool hadLayoutHandler = LayoutWatch.On && Listens(items, typeof(LayoutChangedEvent));
+
         // Whether a click handler is there before and after: one coming or going is told
         // (ClickHandlersChanged), the box's own (owned) ones staying.
         var click = EventKind<ClickEvent>.Instance;
@@ -1916,6 +1938,7 @@ public abstract class Element
             Array.Clear(target, at, count - at);
         _handlers = target;
         if (hadClick != hasClick) ClickHandlersChanged();
+        if (LayoutWatch.On && !hadLayoutHandler && Listens(target, typeof(LayoutChangedEvent))) StartsWatchingLayout();
     }
 
     // ──── Rendering ────

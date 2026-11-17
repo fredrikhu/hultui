@@ -705,7 +705,9 @@ the sideways wheel stopped short of the end of the longest line (361 of 963 px a
 with a thumb the size it was built at. Read the width from the laid-out element after the
 frame (`Window.RequestPostFrameCallback`, asked for after a build and on `Window.Resized`)
 and assign it then: with the scrollbar on screen, its thumb takes the new size and place with
-no build. Build again only for what the build itself shows: the scrollbar coming or going
+no build. Or listen with `.OnLayoutChanged` on the element whose width it is: the handler
+hears the width after the layout of the frame that changed it, and what it assigns is laid
+out before that frame is drawn (ELEMENTS.md, Events). Build again only for what the build itself shows: the scrollbar coming or going
 (`CanPan`), or an `Offset` a wider viewport clamped below the one the cells were built at.
 
 A width read after the frame reaches the screen a frame late, though: that frame drew the old

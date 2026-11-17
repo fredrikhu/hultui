@@ -286,6 +286,10 @@ public static class ElementExtensions
     public static T OnPointerLeave<T>(this T el, Action<PointerLeaveEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnScroll<T>(this T el, Action<ScrollEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnKeyDown<T>(this T el, Action<KeyDownEvent> handler) where T : Element { el.On(handler); return el; }
+    /// <summary>Runs <paramref name="handler"/> after a frame's layout when this element's box changed,
+    /// and after its first layout; what it changes is laid out in the same frame. See
+    /// <see cref="LayoutChangedEvent"/>.</summary>
+    public static T OnLayoutChanged<T>(this T el, Action<LayoutChangedEvent> handler) where T : Element { el.On(handler); return el; }
 
     // ──── Visual ────
     public static T Opacity<T>(this T el, float opacity) where T : Element { el.Opacity = opacity; return el; }
