@@ -171,9 +171,10 @@ public sealed unsafe class OsDropTests
             var at = OnScreen(app, 200, 150);
             // A drag flicked into the middle of a drop zone: OLE calls DragOver on every mouse
             // event from the moment the drag enters, before the page has even seen it. The
-            // page's acceptance (it cancels its dragover) must still reach OLE, and soon: with
-            // every call passed on to WebView2 it took 0.5 s here (4 s with the old sleeping
-            // pump), and half a second by hand; at the engine's pace, 0.18 s.
+            // page's acceptance (it cancels its dragover) must still reach OLE, and soon: by
+            // hand, from File Explorer at the engine's pace, after 32–51 ms. Played like this
+            // it comes as soon; the flood of calls that a real drag queues in WebView2 (a page a
+            // minute behind) does not build here (docs/design/WEBVIEW.md, step 6).
             var clock = Stopwatch.StartNew();
             DragEnter(target, data, at);
             Assert.True(PumpUntil(app, platform, () => DragOver(target, at) != 0, seconds: 1),

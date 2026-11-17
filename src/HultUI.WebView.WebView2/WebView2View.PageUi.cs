@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using HultUI.Core.Events;
 using HultUI.WebView.WebView2.Interop;
 
@@ -19,18 +20,28 @@ internal sealed unsafe partial class WebView2View
     private const int DownloadUserCancelled = 26; // COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED
     private nint _webview4, _webview11, _composition3;
     private nint _dragData; // a data object we made for a drag that came without one
-    private long _dragEntered, _dragForwarded;
+    private long _dragForwarded; // Stopwatch timestamp of the last call passed to WebView2
     private bool _dragAccepted;
 
     /// <summary>
-    /// How often a hover is passed on. OLE calls DragOver on every mouse event — hundreds a
-    /// second from a fast mouse — and each call WebView2 takes while it is still telling the
-    /// page the drag has entered holds that up: measured from DragEnter to the page's
-    /// acceptance, 4 s with every call passed on, 0.5 s one per 50 ms (what a quick flick into
-    /// a drop zone felt like), 0.25 s with a quiet 150 ms and then one per 25 ms. Edge, whose
-    /// drop target is in-process, has no such cost. Between calls the last answer stands.
+    /// How often a hover is passed on: one call to WebView2 per 16 ms at most, the DragEnter
+    /// counted. Between calls the last answer stands.
     /// </summary>
-    private const int DragQuietMs = 150, DragEveryMs = 25;
+    /// <remarks>
+    /// <para>OLE calls DragOver on every mouse event, 300–560 a second from a quick hand. In a
+    /// real drag from File Explorer, WebView2 queues every call it is given. With all of them
+    /// passed on, a 27 s hover left the page a minute behind the pointer, and the first
+    /// acceptance came after 0.10–0.20 s.</para>
+    /// <para>At this pace, by hand (2026-11-17, 43 drags), acceptance came after 32–51 ms. The
+    /// page saw the pointer cross its drop zone a median 20 ms later, 95 ms at most over 140
+    /// crossings, with no growth over a 30 s hold. The earlier pace (a quiet 150 ms after
+    /// DragEnter, then one per 25 ms) was tuned on a test pump that took no messages; by hand
+    /// it accepted after 167–238 ms.</para>
+    /// <para>Timed on the Stopwatch: <see cref="Environment.TickCount64"/> moves in 15.6 ms
+    /// steps, so a pace set in it is not the pace it says. Edge, whose drop target is
+    /// in-process, has no such cost.</para>
+    /// </remarks>
+    private const int DragEveryMs = 16;
     private readonly List<ActiveDownload> _downloads = [];
 
     private void SubscribePageUi()
@@ -92,16 +103,18 @@ internal sealed unsafe partial class WebView2View
     {
         if (_phase != Phase.Ready || _composition3 == 0) return false;
         var point = new Native.POINT { X = input.X, Y = input.Y };
-        long now = Environment.TickCount64;
+        long now = Stopwatch.GetTimestamp();
         if (input.Action == WebDragAction.Enter)
         {
-            _dragEntered = now;
+            _dragForwarded = now;
             _dragAccepted = false;
         }
-        else if (input.Action == WebDragAction.Over
-                 && (now - _dragEntered < DragQuietMs || now - _dragForwarded < DragEveryMs))
-            return _dragAccepted;
-        if (input.Action == WebDragAction.Over) _dragForwarded = now;
+        else if (input.Action == WebDragAction.Over)
+        {
+            if (Stopwatch.GetElapsedTime(_dragForwarded, now).TotalMilliseconds < DragEveryMs)
+                return _dragAccepted;
+            _dragForwarded = now;
+        }
         // During an OLE drag the left button is down, and up by the drop; the modifiers pick
         // the effect.
         uint keys = (input.Action == WebDragAction.Drop ? 0 : MK_LBUTTON)
