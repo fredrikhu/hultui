@@ -1245,8 +1245,8 @@ they are not proposed again without the reason in hand:
   the invisible borders once. `Window.VisiblePlacement` is a separate property.
 - **A remount that rebuilds, or a public `MarkDirty` (12).** A rebuild on every remount defeats
   kept parts; a public `MarkDirty` skips an app's own wrappers and rebuilds mid-dispatch. A
-  parent asks through `[Reactive]` properties, `Part.Place(stale: true)` or
-  `PartGroup.Invalidate()`. Not built yet: a note on `Component.Mount()` saying so.
+  parent asks through `[Reactive]` properties, a method of the child's that calls `MarkDirty`,
+  `Part.Place(stale: true)` or `PartGroup.Invalidate()`; `Component.Mount()`'s doc says so.
 - **Text fields that stop the keys they take (13), or a `KeyChord` that skips handled keys.**
   Stopping hides keys from the field's ancestors (a search box's Up and Down, Esc closing a
   dialog), and apps such as Aperture mark their own matched keys handled. Fields set `Handled`
