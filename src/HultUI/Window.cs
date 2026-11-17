@@ -131,9 +131,14 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     private Action<MenuCloseReason>? _contextMenuClosed;
     // ← and → for the menu's owner when the menu has no use for them (OpenMenu).
     private Action<int>? _contextMenuNavigate;
-    // One level of nesting: the flyout for a root item with Children.
-    private OverlayHandle _contextSubmenuOverlay;
-    private ContextMenuElement? _contextSubmenuElement;
+    // The flyouts open under the menu, outermost first: [0] is the flyout of a root item with
+    // Children, [1] the flyout of an item in that, and so on. One level was all there was: a
+    // third level never opened, by hover, click or →, and its parent item did nothing.
+    private readonly List<(OverlayHandle Overlay, ContextMenuElement Menu)> _contextSubmenus = [];
+
+    /// <summary>The menu the keyboard is in: the innermost flyout open, else the menu.</summary>
+    private ContextMenuElement? DeepestContextMenu =>
+        _contextSubmenus.Count > 0 ? _contextSubmenus[^1].Menu : _contextMenuElement;
 
     // ──── Accessibility state ────
     private IAccessibilityBridge _accessibilityBridge = NullAccessibilityBridge.Instance;
@@ -494,6 +499,27 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     {
         get => PlatformWindow.Placement;
         set => PlatformWindow.Placement = value;
+    }
+
+    /// <summary>
+    /// The window's placement by what the person sees of it: its rectangle without the invisible
+    /// resize borders Windows keeps outside a window's left, right and bottom edges (8 px at 100 %,
+    /// 11 at 150 %). For placing windows by their edges, which <see cref="Placement"/> (the outer
+    /// rectangle, a value to save and give back) is not for: two windows given the halves of a
+    /// work area this way meet edge to edge, where by <see cref="Placement"/> a gap of two borders
+    /// was left between them, and one could not reach the work area's edges, since the bounds are
+    /// fitted to it and the borders reach past it.
+    /// </summary>
+    /// <remarks>
+    /// <para>Setting it fits the visible rectangle to the monitors' work areas and grows it by the
+    /// borders at the scale of the monitor it lands on. Maximized, it is the bounds the window
+    /// restores to. Off Windows it is <see cref="Placement"/>, which there is the client area: a
+    /// title bar the window system draws (X11) is outside both.</para>
+    /// </remarks>
+    public WindowPlacement? VisiblePlacement
+    {
+        get => PlatformWindow.VisiblePlacement;
+        set => PlatformWindow.VisiblePlacement = value;
     }
 
     public void ToggleFullscreen() => SetFullscreen(!IsFullscreen);
@@ -1106,7 +1132,11 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// </summary>
     private void UpdateA11yMenuFocus(AccessibilityNode tree)
     {
-        var menu = _contextSubmenuElement is { HoveredIndex: >= 0 } sub ? sub : _contextMenuElement;
+        // The innermost menu with an entry highlighted holds it; a flyout the pointer opened over
+        // its parent, nothing in it highlighted yet, leaves it on the parent.
+        var menu = _contextMenuElement;
+        for (int i = _contextSubmenus.Count - 1; i >= 0; i--)
+            if (_contextSubmenus[i].Menu.HoveredIndex >= 0) { menu = _contextSubmenus[i].Menu; break; }
         if (ReferenceEquals(menu, _a11yMenuFocus)) return;
         if (menu is not null)
         {
@@ -3073,11 +3103,13 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     }
                 }
 
-                // Context menu keyboard navigation. An open flyout captures
-                // Up/Down/Enter; → opens a flyout, ← / Escape close one level.
+                // Context menu keyboard navigation, in the innermost menu open. Up/Down/Enter
+                // there; → opens the highlighted entry's flyout, at any depth; ← / Escape close
+                // one level.
                 if (key.IsDown && _contextMenuElement is not null)
                 {
-                    var activeMenu = _contextSubmenuElement ?? _contextMenuElement;
+                    var activeMenu = DeepestContextMenu!;
+                    int depth = _contextSubmenus.Count;
                     switch (key.KeyCode)
                     {
                         case KeyCode.Up:
@@ -3087,30 +3119,25 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                             activeMenu.MoveSelection(1);
                             break;
                         case KeyCode.Right:
-                            if (_contextSubmenuElement is null
-                                && _contextMenuElement.ItemAt(_contextMenuElement.HoveredIndex) is { HasChildren: true })
+                            if (activeMenu.ItemAt(activeMenu.HoveredIndex) is { HasChildren: true })
                             {
-                                OnContextMenuHover(_contextMenuElement, _contextMenuElement.HoveredIndex);
-                                _contextSubmenuElement?.MoveSelection(1);
+                                OnContextMenuHover(activeMenu, activeMenu.HoveredIndex);
+                                if (_contextSubmenus.Count > depth) DeepestContextMenu!.MoveSelection(1);
                             }
                             // Nothing to open here: a menu bar moves to the next menu.
                             else _contextMenuNavigate?.Invoke(1);
                             break;
                         case KeyCode.Left:
-                            if (_contextSubmenuElement is not null) CloseContextSubmenu();
+                            if (depth > 0) CloseContextSubmenus(depth);
                             else _contextMenuNavigate?.Invoke(-1);
                             break;
                         case KeyCode.Enter:
-                        {
-                            var hadSubmenu = _contextSubmenuElement is not null;
                             activeMenu.ActivateSelected();
                             // Enter on a parent item opened its flyout — land on its first entry.
-                            if (!hadSubmenu && _contextSubmenuElement is not null)
-                                _contextSubmenuElement.MoveSelection(1);
+                            if (_contextSubmenus.Count > depth) DeepestContextMenu!.MoveSelection(1);
                             break;
-                        }
                         case KeyCode.Escape:
-                            if (_contextSubmenuElement is not null) CloseContextSubmenu();
+                            if (depth > 0) CloseContextSubmenus(depth);
                             else CloseContextMenu(MenuCloseReason.Escape);
                             break;
                         default:
@@ -4417,7 +4444,12 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         var content = entry.Content;
         float vw = PlatformWindow.LayoutWidth;
         float vh = PlatformWindow.LayoutHeight;
-        float x = entry.WantedX + content.Layout.Width > vw ? Math.Max(0, vw - content.Layout.Width) : entry.WantedX;
+        float width = content.Layout.Width;
+        // No room where it was asked for: a flyout goes to its parent's other side when it fits
+        // there (FlipRightEdge), anything else in from the window's edge.
+        float x = entry.WantedX + width <= vw ? entry.WantedX
+            : entry.FlipRightEdge is { } edge && edge - width >= 0 ? edge - width
+            : Math.Max(0, vw - width);
         float y = entry.WantedY + content.Layout.Height > vh ? Math.Max(0, vh - content.Layout.Height) : entry.WantedY;
         MoveOverlay(entry, x, y);
     }
@@ -4778,10 +4810,15 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     _contextMenuNavigate = null;
                     NotifyContextMenuClosed(MenuCloseReason.Dismissed);
                 }
-                if (_overlays[i].Id == _contextSubmenuOverlay.Id)
+                // A flyout: it and the flyouts inside it leave the stack (those, above it, have gone
+                // already in this loop), and the item it belonged to is no longer pinned open. Left
+                // pinned, a hover back over that item opened nothing: its flyout was taken as open.
+                for (int level = _contextSubmenus.Count - 1; level >= 0; level--)
                 {
-                    _contextSubmenuOverlay = default;
-                    _contextSubmenuElement = null;
+                    if (_contextSubmenus[level].Overlay.Id != _overlays[i].Id) continue;
+                    _contextSubmenus.RemoveRange(level, _contextSubmenus.Count - level);
+                    if (ContextMenuAt(level) is { } parent) PinContextMenuItem(parent, -1);
+                    break;
                 }
                 var dismissed = _overlays[i].OnDismissed;
                 RemoveOverlayAt(i);
@@ -4994,47 +5031,77 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         _contextMenuOverlay = ShowOverlay(menuElement, pos.X, pos.Y, dismissOnOutsideClick: true, hitTestable: true);
     }
 
-    /// <summary>Hover moved to a new root-menu item: open its flyout when it has
-    /// children (anchored next to the item), close any open flyout otherwise.</summary>
+    /// <summary>The menu at <paramref name="level"/>: 0 the menu, 1 its open flyout, 2 that one's, and
+    /// so on; null past the innermost open.</summary>
+    private ContextMenuElement? ContextMenuAt(int level) =>
+        level == 0 ? _contextMenuElement
+        : level <= _contextSubmenus.Count ? _contextSubmenus[level - 1].Menu
+        : null;
+
+    /// <summary>The level of <paramref name="menu"/> (see <see cref="ContextMenuAt"/>), or -1 for a menu
+    /// that is not open.</summary>
+    private int ContextMenuLevel(ContextMenuElement menu)
+    {
+        if (ReferenceEquals(menu, _contextMenuElement)) return 0;
+        for (int i = 0; i < _contextSubmenus.Count; i++)
+            if (ReferenceEquals(_contextSubmenus[i].Menu, menu)) return i + 1;
+        return -1;
+    }
+
+    /// <summary>Hover moved to an item of a menu at any level: open its flyout when it has children
+    /// (beside the item), closing the flyouts deeper than its menu; close them when it has none.</summary>
     private void OnContextMenuHover(ContextMenuElement menu, int index)
     {
-        if (!ReferenceEquals(menu, _contextMenuElement)) return;
+        int level = ContextMenuLevel(menu);
+        if (level < 0) return;
 
         var item = menu.ItemAt(index);
         if (item is not { HasChildren: true })
         {
-            CloseContextSubmenu();
+            CloseContextSubmenus(level + 1);
             return;
         }
         if (menu.PinnedIndex == index) return;   // this item's flyout is already open
 
-        CloseContextSubmenu();
+        CloseContextSubmenus(level + 1);
         var theme = Application.Theme;
         var sub = new ContextMenuElement(item.Children!, theme.ContextMenu, () => CloseContextMenu(MenuCloseReason.Chosen));
-        _contextSubmenuElement = sub;
+        sub.HoverChanged = i => OnContextMenuHover(sub, i);
         PinContextMenuItem(menu, index);
 
-        float rootX = 0, rootY = 0;
+        var parent = level == 0 ? _contextMenuOverlay : _contextSubmenus[level - 1].Overlay;
+        float parentX = 0, parentY = 0;
         foreach (var o in _overlays)
-            if (o.Id == _contextMenuOverlay.Id) { rootX = o.X; rootY = o.Y; break; }
-        // Slight overlap keeps the pointer inside a menu while crossing over;
-        // the first child row lines up with the parent item.
-        _contextSubmenuOverlay = ShowOverlay(sub,
-            rootX + menu.Layout.Width - 4,
-            rootY + menu.ItemTop(index) - theme.ContextMenu.Padding.Top,
-            dismissOnOutsideClick: true, hitTestable: true);
+            if (o.Id == parent.Id) { parentX = o.X; parentY = o.Y; break; }
+        // Slight overlap keeps the pointer inside a menu while crossing over; the first child row
+        // lines up with the parent item. With no room on the right it opens on the parent's left
+        // (FlipRightEdge), as a deep menu near the window's edge does, rather than over the parent.
+        var flyout = Show(new OverlayEntry
+        {
+            Id = _nextOverlayId++,
+            Content = sub,
+            X = parentX + menu.Layout.Width - 4,
+            Y = parentY + menu.ItemTop(index) - theme.ContextMenu.Padding.Top,
+            FlipRightEdge = parentX + 4,
+            DismissOnOutsideClick = true,
+            IsHitTestable = true,
+            FocusBefore = _focusManager.FocusedElement,
+        });
+        _contextSubmenus.Add((flyout, sub));
     }
 
-    private void CloseContextSubmenu()
+    /// <summary>Closes the flyouts at <paramref name="fromLevel"/> and deeper (1 is the menu's own
+    /// flyout; see <see cref="ContextMenuAt"/>), innermost first, and unpins the item of the menu
+    /// above them whose flyout that was.</summary>
+    private void CloseContextSubmenus(int fromLevel)
     {
-        if (_contextSubmenuOverlay.IsValid)
+        if (fromLevel < 1 || fromLevel > _contextSubmenus.Count) return;
+        for (int i = _contextSubmenus.Count - 1; i >= fromLevel - 1; i--)
         {
-            CloseOverlay(_contextSubmenuOverlay);
-            _contextSubmenuOverlay = default;
+            CloseOverlay(_contextSubmenus[i].Overlay);
+            _contextSubmenus.RemoveAt(i);
         }
-        _contextSubmenuElement = null;
-        if (_contextMenuElement is not null)
-            PinContextMenuItem(_contextMenuElement, -1);
+        if (ContextMenuAt(fromLevel - 1) is { } parent) PinContextMenuItem(parent, -1);
     }
 
     /// <summary>Pins the entry of <paramref name="menu"/> whose flyout is open (-1: none). The entry's
@@ -5052,7 +5119,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
     private void CloseContextMenu(MenuCloseReason reason = MenuCloseReason.Dismissed)
     {
-        CloseContextSubmenu();
+        CloseContextSubmenus(1);
         if (_contextMenuOverlay.IsValid)
         {
             CloseOverlay(_contextMenuOverlay);

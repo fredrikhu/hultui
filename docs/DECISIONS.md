@@ -1186,6 +1186,25 @@ in Narrator and NVDA. One way is a single ChildrenInvalidated on the list instea
 changes. Another is no Name change for rows no client has fetched, a finer form of question 50's
 gate.
 
+### A spreading row item's base is its max-content width: rows only, opt-in leaves (2026-11-17)
+
+A row item of auto basis whose content grows with the room (a row with a `FlexGrow` child) took
+all the room offered as its base, against CSS (§9.2: the base is max-content; grow runs only
+after). The fix gives such an item its max-content width as its base, under three limits:
+
+- **Rows only.** A column's max-content height depends on its width, so it is no constraint-free
+  number to keep, and apps lean on a column of auto height filling the room (the many
+  `FlexShrink(0)` headers). Grid `auto` tracks are a follow-up with the same query.
+- **Known without measuring, or nothing changes.** The width comes from labels' lines, empty
+  boxes, set widths and sums of them (`Element.MeasureMaxContentWidth`, +∞ by default). Anything
+  else (a scroll view, a grid, a percentage, a control drawing its own content) keeps the
+  measurement made before, so split panes holding lists keep splitting evenly.
+- **Measured once.** The item's height is measured when flexing has given it its width, not at
+  the room as well: two measurements per level would double at every nested row.
+
+Found by an application team (finding 8). The layout audit across every suite lists the boxes it
+moves.
+
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
 BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction

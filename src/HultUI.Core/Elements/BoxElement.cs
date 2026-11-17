@@ -81,6 +81,11 @@ public class BoxElement : Element
     // What it copies below is paint.
     private protected override bool PatchMarksOwnLayout => GetType() == typeof(BoxElement);
 
+    // An empty box (a spacer, a rule) has no content of its own. A control built on a box draws
+    // or measures its own, which only it can tell.
+    internal override float MeasureMaxContentWidth(IMeasureContext ctx) =>
+        GetType() == typeof(BoxElement) ? 0f : float.PositiveInfinity;
+
     internal override void PatchFrom(Element source)
     {
         base.PatchFrom(source);

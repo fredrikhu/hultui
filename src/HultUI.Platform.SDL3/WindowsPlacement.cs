@@ -156,6 +156,72 @@ internal static unsafe class WindowsPlacement
 
     public static bool IsMaximizedOrMinimized(IntPtr hwnd) => IsZoomed(hwnd) || IsIconic(hwnd);
 
+    // ──── By the visible rectangle (Window.VisiblePlacement) ────
+    //
+    // A resizable window keeps an invisible resize border outside its visible edge on the left,
+    // the right and the bottom: none on top, where the caption (or the custom title bar) is the
+    // edge. GetWindowRect includes it, so two windows placed on a display's halves by their
+    // window rectangles left a gap of two borders between them: 16 px at 100 %, 22 at 150 %.
+
+    private const int SM_CXSIZEFRAME = 32;
+    private const int SM_CXPADDEDBORDER = 92;
+    private const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
+
+    /// <summary>The invisible resize border at <paramref name="dpi"/>, as Windows sizes a thick frame.</summary>
+    public static int InvisibleBorder(uint dpi) =>
+        GetSystemMetricsForDpi(SM_CXSIZEFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+
+    /// <summary>The window's visible rectangle, in screen coordinates. Neither maximized nor
+    /// minimized: the custom frame's client area (it draws all of it), the standard frame's DWM
+    /// bounds. Otherwise its restored bounds less the borders at the window's scale.</summary>
+    public static WindowPlacement ReadVisible(IntPtr hwnd, bool customFrame)
+    {
+        if (!IsZoomed(hwnd) && !IsIconic(hwnd))
+        {
+            if (customFrame && GetClientRect(hwnd, out var client))
+            {
+                var origin = new POINT();
+                if (ClientToScreen(hwnd, ref origin))
+                    return new(origin.X, origin.Y, client.Right - client.Left, client.Bottom - client.Top, false);
+            }
+            else if (!customFrame && DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, out var frame, sizeof(RECT)) == 0)
+                return new(frame.Left, frame.Top, frame.Right - frame.Left, frame.Bottom - frame.Top, false);
+        }
+        return Inset(Read(hwnd), hwnd);
+    }
+
+    /// <summary>Outer bounds less the borders at the window's scale.</summary>
+    public static WindowPlacement Inset(WindowPlacement outer, IntPtr hwnd)
+    {
+        int b = InvisibleBorder(GetDpiForWindow(hwnd));
+        return new(outer.X + b, outer.Y, outer.Width - 2 * b, outer.Height - b, outer.Maximized);
+    }
+
+    /// <summary>The outer rectangle whose visible part is <paramref name="visible"/>: grown by the
+    /// borders at the scale of the monitor it is on, where the window lands.</summary>
+    public static WindowPlacement OuterFor(WindowPlacement visible)
+    {
+        var rect = new RECT { Left = visible.X, Top = visible.Y, Right = visible.X + visible.Width, Bottom = visible.Y + visible.Height };
+        uint dpi = GetDpiForMonitor(MonitorFromRect(ref rect, MONITOR_DEFAULTTONEAREST), 0, out uint dpiX, out _) == 0 && dpiX > 0 ? dpiX : 96;
+        int b = InvisibleBorder(dpi);
+        return new(visible.X - b, visible.Y, visible.Width + 2 * b, visible.Height + b, visible.Maximized);
+    }
+
+    [DllImport("user32")]
+    private static extern int GetSystemMetricsForDpi(int index, uint dpi);
+
+    [DllImport("user32")]
+    private static extern bool GetClientRect(IntPtr hWnd, out RECT rect);
+
+    [DllImport("user32")]
+    private static extern bool ClientToScreen(IntPtr hWnd, ref POINT point);
+
+    [DllImport("user32")]
+    private static extern IntPtr MonitorFromRect(ref RECT rect, uint flags);
+
+    [DllImport("dwmapi")]
+    private static extern int DwmGetWindowAttribute(IntPtr hWnd, int attribute, out RECT value, int size);
+
     /// <summary>Takes a maximized or minimized window back to its restored bounds before this
     /// returns, without activating it: a placement then moves it from there. The custom frame's
     /// own restore is posted, for the handlers that call it from inside a window message.</summary>

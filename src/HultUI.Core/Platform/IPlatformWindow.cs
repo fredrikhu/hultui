@@ -170,6 +170,14 @@ public interface IPlatformWindow : IDisposable
     /// </summary>
     WindowPlacement? Placement { get => null; set { } }
 
+    /// <summary>
+    /// <see cref="Placement"/> by what is seen of the window: its rectangle without the invisible
+    /// resize borders a platform keeps outside its edges (Windows: left, right and bottom). For
+    /// placing windows against each other or a work area's edges. A platform with no such borders
+    /// gives <see cref="Placement"/>.
+    /// </summary>
+    WindowPlacement? VisiblePlacement { get => Placement; set => Placement = value; }
+
     void Close();
     void Minimize();
     void Maximize();

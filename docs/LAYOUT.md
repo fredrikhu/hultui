@@ -314,6 +314,30 @@ The related trap in the other direction is in `TODO.md`'s durable notes: **`Flex
 alone does not mean "take the leftover space"**, because the default `auto` basis sizes
 the item to its own content first. `FlexBasis(0)` is what says "start from nothing".
 
+**An item whose content would grow into the room still starts from its content** (2026-11-17).
+A row item of auto basis and width that holds a growing child — a row with a spacer, or a
+column holding one — was measured at all the room the row offered, so its base was that room:
+it came out as wide as the row and pushed a sibling past the end, or squeezed one to nothing.
+Its base is now its max-content width, as in CSS, where growing never runs while a box is sized
+from its content. So:
+
+```csharp
+// "x" sits at the left, "y" right after it: the inner row is as wide as "x".
+Flex.Row().Children(
+    Flex.Row().FlexShrink(0).Children(Flex.Row().FlexGrow(1), Text.New("x")),
+    Text.New("y"))
+```
+
+- The item still grows wherever it is given room: stretched in a column, as the root, given a
+  `Width`, or growing itself (`FlexGrow(1)` on the item, the usual title-bar right group).
+- Two growing items of auto basis now share the free room from their content, not evenly; give
+  them `FlexBasis(0)` for an even split.
+- The max-content width is worked out without measuring at a width, from labels' lines, empty
+  boxes and set widths. Content it cannot tell that way (a scroll view, a grid, a percentage, a
+  control that draws its own content) keeps the measurement made before: two panes holding lists
+  still split evenly.
+- Rows only. A column of auto height with a growing child still fills the height offered.
+
 ---
 
 ## 7. Wrapping
