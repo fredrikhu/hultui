@@ -1467,7 +1467,10 @@ var list = VirtualListElement<FileEntry>.New()
 | `.RowHeights(Func<T,int,float>)` | `ItemHeightFor` | per-row heights (the extension is not called `ItemHeightFor`: that name would bind to invoking the delegate) |
 | `.RenderWith(Func<T,Element>)` | `ItemTemplate` | builds a row; called for every realized row on every pass |
 | `.RenderWith(Func<T,bool,Element>)` | `ItemRowTemplate` | builds a row from its item and whether it is selected, and nothing else; the list keeps a realized row until one of those changes — see **Rows that show only their item** below |
-| `.SelectedIndex(i)`, `.CanSelectMultiple()`, `.OnSelectionChanged(h)` | `SelectedIndex`, `CanSelectMultiple`, `SelectedIndices` | built-in selection, keyboard included |
+| `.RenderWithState(Func<T,ListItemState,Element>)` | `ItemStateTemplate` | builds a row from its item and its `ListItemState` (selected, current), and nothing else; kept like item rows, and a cursor move makes only the two rows it moved between — see **Cursor** below |
+| `.SelectedIndex(i)`, `.CanSelectMultiple()`, `.OnSelectionChanged(h)` | `SelectedIndex`, `CanSelectMultiple`, `SelectedIndices` | built-in selection, set by the app or by assistive technology |
+| `.CurrentIndex(i)` | `CurrentIndex` | the current item, the keyboard's cursor (-1 for none); not the selection, and the list never moves it — see **Cursor** below |
+| — | `ScrollIndexIntoView(i, alignment)` | scrolls a row into view by its index, `Nearest` (the least scroll) by default, or with its top, middle or bottom at the viewport's (`ScrollAlignment`) |
 | `.OnActivateItem(h)` | `OnItemActivate` | called when assistive technology invokes or selects a row through the accessibility bridge; pointer and keyboard activation are the row template's own `OnClick` / `On<KeyDownEvent>` handlers |
 | `.KeyboardScroll(bool)` | `KeyboardScrollEnabled` | arrows / PageUp / PageDown / Home / End |
 | — | `RowsAreComposite` | one item is a row of controls (a wrap grid), so the realized rows answer to assistive tech rather than one node per item — see **A row that is not one thing** below |
@@ -1847,7 +1850,40 @@ with `.ScrollSidewaysWith(pan)` so middle-click autoscroll follows it.
 **Revealing a row.** `ScrollRangeIntoView(top, height)` works from `OnAfterBuild`, before
 layout, because the virtual list clamps against the rows it holds *now* rather than the
 extent the last layout left behind; a request made in the same frame the list grew is
-honoured, not clamped back to 0.
+honoured, not clamped back to 0. `ScrollIndexIntoView(index)` does the same by the row's
+index, from its own offset and height (with `RowHeights` too); call it after `Items` is set.
+
+**Cursor.** A file manager walks a list with a cursor and selects, or marks, apart from it.
+`CurrentIndex` is that cursor: the row a cursor is drawn on, and, while the list has the
+keyboard, the item a screen reader's focus is on. The list never moves it; the app does, with
+its own keys, on the mounted list:
+
+```csharp
+var list = VirtualListElement<Entry>.New()
+    .Items(tab.Rows)
+    .ItemHeight(RowHeight)
+    .CurrentIndex(tab.Cursor)
+    .RenderWithState((e, s) => FileRow(e, s.IsCurrent, s.IsSelected))
+    .AccessibleItemLabel(FileLabel)
+    .WithRef(_listRef);
+list.IsFocusable = true;    // the list itself takes keyboard focus; key handlers above it still get keys by bubbling
+
+// A key that only moves the cursor needs no rebuild: the list makes the two rows again and moves
+// the reader's focus to the new row. Keep the app's own cursor too: the build's value wins on
+// every rebuild.
+tab.Cursor = next;
+_listRef.Current!.CurrentIndex = next;
+_listRef.Current!.ScrollIndexIntoView(next);
+```
+
+Rows show the cursor only with `.RenderWithState`; rows from the other templates show it when
+the owner rebuilds them. A reader follows the cursor while the list holds keyboard focus, or
+its focusable ancestor does and `.TakesAncestorFocus()` is set: the cursor is the list node's
+current item, as the selection is when no cursor is set (`CurrentIndex` -1). Setting
+`CurrentIndex` allocates nothing, and a move builds no accessibility tree: the window marks the
+list's current item on the tree it last built and tells the reader, as for a selection move.
+Composite rows (`RowsAreComposite`) have no item nodes, so a reader is told nothing of their
+cursor.
 
 **Very long lists.** A list of a million items costs the rows on screen: give it an
 `IReadOnlyList<T>` that makes each item when it is read, and mounting it allocates well under

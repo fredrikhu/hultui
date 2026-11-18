@@ -255,4 +255,101 @@ public class VirtualListElementTests
 
         Assert.True(vl.Children.Count > 1);
     }
+
+    // ── ScrollIndexIntoView: a row by its index, where the alignment says ──
+
+    [Fact]
+    public void ScrollIndexIntoView_Nearest_ScrollsOnlyWhenTheRowIsOutside()
+    {
+        var vl = CreateList(100, viewportHeight: 200, itemHeight: 40);
+
+        vl.ScrollIndexIntoView(10);            // below: its bottom (440) at the viewport's bottom
+        Assert.Equal(240, vl.ScrollOffsetY);
+        vl.ScrollIndexIntoView(8);             // already shown whole: no scroll
+        Assert.Equal(240, vl.ScrollOffsetY);
+        vl.ScrollIndexIntoView(2);             // above: its top at the viewport's top
+        Assert.Equal(80, vl.ScrollOffsetY);
+    }
+
+    [Theory]
+    [InlineData(ScrollAlignment.Start, 400f)]
+    [InlineData(ScrollAlignment.Center, 320f)]
+    [InlineData(ScrollAlignment.End, 240f)]
+    public void ScrollIndexIntoView_StartCenterAndEnd_AlignTheRow(ScrollAlignment alignment, float offset)
+    {
+        var vl = CreateList(100, viewportHeight: 200, itemHeight: 40);
+
+        vl.ScrollIndexIntoView(10, alignment);   // row 10 is 400–440
+
+        Assert.Equal(offset, vl.ScrollOffsetY);
+    }
+
+    [Fact]
+    public void ScrollIndexIntoView_ClampsAnIndexOutOfRange()
+    {
+        var vl = CreateList(100, viewportHeight: 200, itemHeight: 40);
+
+        vl.ScrollIndexIntoView(500);
+        Assert.Equal(3800, vl.ScrollOffsetY);   // the last row, at the bottom
+        vl.ScrollIndexIntoView(-5);
+        Assert.Equal(0, vl.ScrollOffsetY);
+    }
+
+    [Fact]
+    public void ScrollIndexIntoView_OnAnEmptyList_DoesNothing()
+    {
+        var vl = CreateList(0, viewportHeight: 200, itemHeight: 40);
+
+        vl.ScrollIndexIntoView(3, ScrollAlignment.Center);
+
+        Assert.Equal(0, vl.ScrollOffsetY);
+    }
+
+    [Fact]
+    public void ScrollIndexIntoView_BeforeLayout_IsHonouredByTheLayoutPass()
+    {
+        // Asked from OnAfterBuild: the items are in, the viewport has no size yet.
+        var items = Enumerable.Range(0, 100).Select(i => $"Item {i}").ToList();
+        var vl = VirtualListElement<string>.New().ItemHeight(40).Items(items).RenderWith(item => TextElement.New(item));
+        vl.Box.Width = 300;
+        vl.Box.Height = 200;
+
+        vl.ScrollIndexIntoView(50, ScrollAlignment.Start);
+        _layout.PerformLayout(vl, 300, 200);
+        StyleResolver.Resolve(vl);
+        vl.UpdateContentSize();
+
+        Assert.Equal(2000, vl.ScrollOffsetY);
+    }
+
+    [Fact]
+    public void ScrollIndexIntoView_BeforeLayout_KeepsTheRowOutFromUnderAHeldHeader()
+    {
+        // A section header every 40 rows, held at the top: row 10 revealed at the top would sit
+        // under row 0, held there. Asked before layout, it lands where it does when asked after.
+        VirtualListElement<string> Sticky()
+        {
+            var items = Enumerable.Range(0, 100).Select(i => $"Item {i}").ToList();
+            var list = VirtualListElement<string>.New().ItemHeight(24).Items(items)
+                .StickyRows((_, i) => i % 40 == 0).RenderWith(item => TextElement.New(item));
+            list.Box.Width = 300;
+            list.Box.Height = 200;
+            return list;
+        }
+
+        var held = Sticky();
+        held.ScrollIndexIntoView(10, ScrollAlignment.Start);
+        _layout.PerformLayout(held, 300, 200);
+        StyleResolver.Resolve(held);
+        held.UpdateContentSize();
+
+        var laidOut = Sticky();
+        _layout.PerformLayout(laidOut, 300, 200);
+        StyleResolver.Resolve(laidOut);
+        laidOut.UpdateContentSize();
+        laidOut.ScrollIndexIntoView(10, ScrollAlignment.Start);
+
+        Assert.Equal(216, laidOut.ScrollOffsetY);   // 240, less the held header's 24
+        Assert.Equal(laidOut.ScrollOffsetY, held.ScrollOffsetY);
+    }
 }

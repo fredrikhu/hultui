@@ -112,7 +112,7 @@ public sealed class FindBar
     /// before the layout pass, so a reveal that reads a viewport height there reads the last
     /// frame's — or zero, on the frame the text first appears — and scrolls to the wrong place or
     /// not at all. False for a reveal that defers itself, such as
-    /// <see cref="ScrollViewElement.ScrollRangeIntoView"/>, which then lands on the same frame.
+    /// <see cref="ScrollViewElement.ScrollRangeIntoView(float, float)"/>, which then lands on the same frame.
     /// </summary>
     public bool RevealAfterLayout { get; set; } = true;
 

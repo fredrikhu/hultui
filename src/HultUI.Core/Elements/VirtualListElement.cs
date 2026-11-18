@@ -21,6 +21,15 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     // Rows that depend only on their item and whether it is selected, opt-in. Null means every
     // patch realizes the visible rows again from _itemTemplate, as it always has.
     private Func<T, bool, Element>? _itemRowTemplate;
+    // Rows that depend only on their item and its ListItemState (selected, current), opt-in; kept
+    // like item rows.
+    private Func<T, ListItemState, Element>? _itemStateTemplate;
+    // The current item: the keyboard's cursor, apart from the selection. -1 for none.
+    private int _currentIndex = -1;
+
+    /// <summary>Whether realized rows are kept across rebuilds: with <see cref="ItemRowTemplate"/>
+    /// or <see cref="ItemStateTemplate"/>, which promise a row shows only its item and state.</summary>
+    private bool KeepsRows => _itemRowTemplate is not null || _itemStateTemplate is not null;
 
     // Variable row heights, opt-in. Null means every row is _itemHeight and every path below
     // takes the original uniform arithmetic — existing lists are untouched.
@@ -113,8 +122,8 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     public bool RowsAreComposite { get; set; }
 
     /// <summary>
-    /// Whether the item at <see cref="SelectedIndex"/> is what a reader is told has the focus while the
-    /// nearest focusable element above the list holds it: for a pane that takes the keys and walks the
+    /// Whether the list's current item (<see cref="CurrentIndex"/>, else <see cref="SelectedIndex"/>) is
+    /// what a reader is told has the focus while the nearest focusable element above the list holds it: for a pane that takes the keys and walks the
     /// list's cursor without the list holding the focus (Vesper Commander's pane). A reader speaks focus
     /// moves, not selection moves, so without it a walk of the cursor is heard from no reader. Off (the
     /// default), only a focus on the list itself is read as on its item. Set it when the list is built;
@@ -139,8 +148,9 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// cursor, on an item selected or not.
     /// </summary>
     /// <remarks>A change tells assistive technology, as a checkbox's toggle does: the item that
-    /// had the selection and the one that has it change their selected state. It is also the item the
-    /// keyboard is on (<see cref="Accessibility.IAccessibleItemSource.CurrentIndex"/>): while the list
+    /// had the selection and the one that has it change their selected state. Unless
+    /// <see cref="CurrentIndex"/> is set, it is also the item the keyboard is on
+    /// (<see cref="Accessibility.IAccessibleItemSource.CurrentIndex"/>): while the list
     /// holds the keyboard focus, or its focusable ancestor does and <see cref="TakesAncestorFocus"/> is
     /// set, a reader is told the focus moved to it.</remarks>
     public int SelectedIndex
@@ -161,8 +171,39 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         _selectedIndex = value;
         NotifyAccessibilityPropertyChanged(AccessibilityProperties.IsSelected);
         TellRowsSelected();
-        if (dropRows) DropRowsWhoseSelectionChanged();
+        if (dropRows) DropRowsWhoseStateChanged();
         if (_selectionHighlight is not null || _selectionOverlay is not null) MarkPaintDirty();
+    }
+
+    /// <summary>
+    /// The current item: where the keyboard is, the row a cursor is drawn on and the item
+    /// assistive technology's focus is on while the list has keyboard focus (or its focusable
+    /// ancestor has, with <see cref="TakesAncestorFocus"/>). -1 for none, and then that item is
+    /// <see cref="SelectedIndex"/>'s, as it always was.
+    /// <para>It is not the selection (<see cref="SelectedIndex"/>): an app moves it with the
+    /// arrows and selects, or marks, apart from it. The list never moves it itself; an index out
+    /// of range means none. Setting it does not scroll: call <see cref="ScrollIndexIntoView"/>.
+    /// Rows show it only with <see cref="ItemStateTemplate"/>, where a move makes the two rows
+    /// again and keeps the rest; rows from the other templates show it when the owner rebuilds
+    /// them. Composite rows (<see cref="RowsAreComposite"/>) have no item nodes, so a reader is
+    /// told nothing of it there.</para>
+    /// </summary>
+    public int CurrentIndex
+    {
+        get => _currentIndex;
+        set => SetCurrentIndex(value, dropRows: true);
+    }
+
+    /// <summary>Sets <see cref="CurrentIndex"/>; <paramref name="dropRows"/> as for
+    /// <see cref="SetSelectedIndex"/>.</summary>
+    private void SetCurrentIndex(int value, bool dropRows)
+    {
+        if (_currentIndex == value) return;
+        _currentIndex = value;
+        if (dropRows) DropRowsWhoseStateChanged();
+        // Only a list with item nodes has an item to move a reader's focus to; on others the
+        // window would take the property for a change it has no route for and build the tree.
+        if (!RowsAreComposite) NotifyAccessibilityPropertyChanged(AccessibilityProperties.CurrentItem);
     }
 
     /// <summary>
@@ -200,7 +241,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             _selectionHighlight = value;
             MarkPaintDirty();
             // Rows made for the template's own selection, or made unselected for the list's.
-            if (onOrOff) DropRowsWhoseSelectionChanged();
+            if (onOrOff) DropRowsWhoseStateChanged();
         }
     }
     private RowHighlight? _selectionHighlight;
@@ -315,7 +356,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         MarkPaintDirty();
         NotifyAccessibilityPropertyChanged(AccessibilityProperties.IsSelected);
         TellRowsSelected();
-        DropRowsWhoseSelectionChanged();
+        DropRowsWhoseStateChanged();
         OnSelectionChanged?.Invoke(SelectedIndices);
     }
 
@@ -326,6 +367,11 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// list draws the selection itself (<see cref="SelectionHighlight"/>), when every row is
     /// made unselected.</summary>
     private bool RowSelected(int index) => _selectionHighlight is null && IsItemSelected(index);
+
+    /// <summary>The state a row is made with, and kept while: <see cref="RowSelected"/>, and whether
+    /// it is the cursor's, which only a state template shows (for the others it is never current).</summary>
+    private ListItemState StateOf(int index) =>
+        new(RowSelected(index), _itemStateTemplate is not null && index == _currentIndex);
 
     /// <summary>
     /// A reader reads composite rows (<see cref="RowsAreComposite"/>) as they are, and a row made
@@ -368,6 +414,8 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         return (OffsetOf(index) + (IsStickyRow(index) ? ShiftOfStickyRow(index) : 0f), HeightOf(index));
     }
     int IAccessibleItemSource.SelectedIndex => SelectedIndex;
+    // The cursor when the app keeps one, else the selection, as for any item source.
+    int IAccessibleItemSource.CurrentIndex => _currentIndex >= 0 ? _currentIndex : SelectedIndex;
     bool IAccessibleItemSource.TakesAncestorFocus => TakesAncestorFocus;
     bool IAccessibleItemSource.CanSelectMultiple => CanSelectMultiple;
 
@@ -402,7 +450,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         var item = _items[index];
         // Kept on item rows, and only on the UI thread: a UI Automation client reads a long
         // list's labels on its own threads, while the UI thread may be changing what is kept.
-        if (_itemRowTemplate is null || !UIThread.IsCurrent) return LabelOf(item);
+        if (!KeepsRows || !UIThread.IsCurrent) return LabelOf(item);
 
         var labels = _labels;
         if (labels is null || labels.Length != _items.Count)
@@ -449,7 +497,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
     /// <summary>A realized row and what it was made from. With <see cref="ItemRowTemplate"/> a
     /// rebuild keeps the row while its item and its selected state are still these.</summary>
-    private readonly record struct Row(Element Element, T Item, bool Selected);
+    private readonly record struct Row(Element Element, T Item, ListItemState State);
 
     // The indices of rows about to be let go, gathered before the dictionary is changed. Kept
     // so that letting go of a row or two on a selection move allocates nothing.
@@ -544,7 +592,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         // Kept rows were made with the colours of the theme in force then. Another theme makes
         // them again (their labels stay); this runs on every style pass, so only a different
         // theme object counts.
-        if (_itemRowTemplate is not null && _activeTheme is not null && !ReferenceEquals(theme, _activeTheme))
+        if (KeepsRows && _activeTheme is not null && !ReferenceEquals(theme, _activeTheme))
             InvalidateItems(keepLabels: true);
         _activeTheme = theme;
     }
@@ -556,7 +604,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// junction-v1.20.0: every icon gone after a move to 150 % and back). The items' labels stay.</summary>
     internal override void OnDisplayScaleChanged()
     {
-        if (_itemRowTemplate is not null) InvalidateItems(keepLabels: true);
+        if (KeepsRows) InvalidateItems(keepLabels: true);
     }
 
     internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx)
@@ -589,7 +637,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// <summary>
     /// Builds a row from its item. Every rebuild of the owner realizes the visible rows again
     /// from it, so a row may show anything the owner's state holds. Setting it clears
-    /// <see cref="ItemRowTemplate"/>.
+    /// <see cref="ItemRowTemplate"/> and <see cref="ItemStateTemplate"/>.
     /// </summary>
     public Func<T, Element>? ItemTemplate
     {
@@ -597,7 +645,11 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         set
         {
             _itemTemplate = value;
-            if (value is not null) _itemRowTemplate = null;
+            if (value is not null)
+            {
+                _itemRowTemplate = null;
+                _itemStateTemplate = null;
+            }
             InvalidateItems();
         }
     }
@@ -605,7 +657,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// <summary>
     /// Builds a row from its item and whether that item is selected — and from nothing else,
     /// which is what lets the list keep the row. Set by <c>.RenderWith((item, selected) => …)</c>;
-    /// setting it clears <see cref="ItemTemplate"/>.
+    /// setting it clears <see cref="ItemTemplate"/> and <see cref="ItemStateTemplate"/>.
     /// <para>
     /// With it, a rebuild of the owner keeps every realized row whose item at that index is
     /// still equal to the one it was made from (<see cref="EqualityComparer{T}.Default"/>:
@@ -641,7 +693,36 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         set
         {
             _itemRowTemplate = value;
-            if (value is not null) _itemTemplate = null;
+            if (value is not null)
+            {
+                _itemTemplate = null;
+                _itemStateTemplate = null;
+            }
+            InvalidateItems();
+        }
+    }
+
+    /// <summary>
+    /// Builds a row from its item and its <see cref="ListItemState"/> — whether it is selected
+    /// and whether it is the <see cref="CurrentIndex"/> — and from nothing else. Set by
+    /// <c>.RenderWithState((item, state) => …)</c>; setting it clears <see cref="ItemTemplate"/>
+    /// and <see cref="ItemRowTemplate"/>.
+    /// <para>The list keeps rows exactly as with <see cref="ItemRowTemplate"/>, under the same
+    /// contract, and also when the cursor moves: a move makes the row it left and the row it
+    /// reached again, with no rebuild of the owner. With <see cref="SelectionHighlight"/> rows are
+    /// made unselected, as item rows are, so a selection move makes none.</para>
+    /// </summary>
+    public Func<T, ListItemState, Element>? ItemStateTemplate
+    {
+        get => _itemStateTemplate;
+        set
+        {
+            _itemStateTemplate = value;
+            if (value is not null)
+            {
+                _itemTemplate = null;
+                _itemRowTemplate = null;
+            }
             InvalidateItems();
         }
     }
@@ -683,7 +764,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// item rows it is kept while its item is, so a rebuild makes it no more often than another
     /// row. <see cref="SelectionHighlight"/> and <see cref="HoverHighlight"/> go on its background,
     /// under its content, where it is drawn; <see cref="SelectionOverlay"/> goes with it, over it.
-    /// <see cref="ScrollViewElement.ScrollRangeIntoView"/> leaves a row clear of the row held at the top.
+    /// <see cref="ScrollViewElement.ScrollRangeIntoView(float, float)"/> leaves a row clear of the row held at the top.
     /// With <see cref="RowsAreComposite"/> the held row is in the accessibility tree where it is
     /// drawn, before the rows on screen; otherwise its item's node is told where it is drawn.
     /// </para>
@@ -730,6 +811,21 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     public void InvalidateRows() => InvalidateItems(keepLabels: true);
 
     /// <summary>
+    /// Scrolls the row of item <paramref name="index"/> into view, left where
+    /// <paramref name="alignment"/> says (by default the least scroll that shows it whole). An
+    /// index out of range is taken as the nearest end; an empty list does nothing. Works from
+    /// <c>OnAfterBuild</c>, before layout, as <see cref="ScrollViewElement.ScrollRangeIntoView(float, float)"/>
+    /// does; call it after <see cref="Items"/> is set, since it measures the rows the list holds.
+    /// </summary>
+    public void ScrollIndexIntoView(int index, ScrollAlignment alignment = ScrollAlignment.Nearest)
+    {
+        if (_items.Count == 0) return;
+        index = Math.Clamp(index, 0, _items.Count - 1);
+        EnsureOffsets();
+        ScrollRangeIntoView(OffsetOf(index), HeightOf(index), alignment);
+    }
+
+    /// <summary>
     /// <see cref="InvalidateRows"/> for one item: throws away the realized row at
     /// <paramref name="index"/>, and (unlike <see cref="InvalidateRows"/>) the item's kept
     /// accessible label, so the next frame makes them again from the latest template and label;
@@ -749,7 +845,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     {
         // What the app follows by place moved, perhaps to an index the old items did not reach:
         // until the window has been realized, no row moves to another index (see _moving).
-        if (_itemRowTemplate is not null)
+        if (KeepsRows)
         {
             _rowsToldByPlace = true;
             _moving?.Clear();
@@ -788,15 +884,15 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     }
 
     /// <summary>
-    /// With <see cref="ItemRowTemplate"/>, lets go of the realized rows whose selected state is
-    /// not the one they were made with (<see cref="RowSelected"/>), so the next frame makes them
-    /// again; the rest stay.
+    /// With kept rows, lets go of the realized rows whose state (selected, current) is not the
+    /// one they were made with (<see cref="StateOf"/>), so the next frame makes them again; the
+    /// rest stay.
     /// </summary>
-    private void DropRowsWhoseSelectionChanged()
+    private void DropRowsWhoseStateChanged()
     {
-        if (_itemRowTemplate is null || _activeElements.Count == 0) return;
+        if (!KeepsRows || _activeElements.Count == 0) return;
         foreach (var (index, row) in _activeElements)
-            if (row.Selected != RowSelected(index))
+            if (row.State != StateOf(index))
                 _dropping.Add(index);
         DropGathered();
     }
@@ -1251,7 +1347,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
     private void SyncVisibleItems()
     {
-        if ((_itemTemplate is null && _itemRowTemplate is null) || _items.Count == 0)
+        if ((_itemTemplate is null && _itemRowTemplate is null && _itemStateTemplate is null) || _items.Count == 0)
         {
             if (Children.Count > 0)
                 ReplaceChildren();
@@ -1336,7 +1432,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
         // Kept rows, all of them, in the order they stand: only a height moved, and replacing
         // the children with themselves would tell assistive technology the structure changed.
-        if (_itemRowTemplate is not null && ChildrenAreRealized(newStart, newEnd, held))
+        if (KeepsRows && ChildrenAreRealized(newStart, newEnd, held))
         {
             MarkLayoutDirty();
             _visibleStart = newStart;
@@ -1375,7 +1471,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         {
             // A kept row's height can move without its item changing (a height function
             // rebuilt with the owner); it is forced again, the way a new row is below.
-            if (_itemRowTemplate is not null && live.Element.Box.Height != Dimension.Px(RowHeight(live.Element, index)))
+            if (KeepsRows && live.Element.Box.Height != Dimension.Px(RowHeight(live.Element, index)))
             {
                 live.Element.Box.Height = RowHeight(live.Element, index);
                 live.Element.MarkLayoutDirty();
@@ -1390,10 +1486,10 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         if (_recyclePool.Count > 0)
             _recyclePool.RemoveAt(_recyclePool.Count - 1);
         var item = _items[index];
-        bool selected = _itemRowTemplate is not null && RowSelected(index);
+        var state = KeepsRows ? StateOf(index) : default;
 
         // A row the patch moved off this item's old index comes back unmade.
-        if (_moving is { Count: > 0 } && TakeMovingRow(item, selected) is { } moved)
+        if (_moving is { Count: > 0 } && TakeMovingRow(item, state) is { } moved)
         {
             if (moved.Box.Height != Dimension.Px(RowHeight(moved, index)))
             {
@@ -1402,11 +1498,13 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             }
             if (_stickyRowFor is not null) MarkSticky(moved, index);
             TellSelected(moved, index);
-            _activeElements[index] = new Row(moved, item, selected);
+            _activeElements[index] = new Row(moved, item, state);
             return;
         }
 
-        var element = _itemRowTemplate is { } rowTemplate ? rowTemplate(item, selected) : _itemTemplate!(item);
+        var element = _itemStateTemplate is { } stateTemplate ? stateTemplate(item, state)
+            : _itemRowTemplate is { } rowTemplate ? rowTemplate(item, state.IsSelected)
+            : _itemTemplate!(item);
 
         // A keyed row that was on screen before the invalidation is patched from the
         // fresh one and kept, the way the reconciler keeps a keyed child: same object,
@@ -1429,7 +1527,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         if (_stickyRowFor is not null) MarkSticky(element, index);
         TellSelected(element, index);
 
-        _activeElements[index] = new Row(element, item, selected);
+        _activeElements[index] = new Row(element, item, state);
     }
 
     /// <summary>Whether a row a patch let go of may move to another index: not one the pointer is on
@@ -1458,10 +1556,10 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     }
 
     /// <summary>Takes out of <see cref="_moving"/> a row made from an item equal to
-    /// <paramref name="item"/> in the <paramref name="selected"/> state, or null. The search starts
+    /// <paramref name="item"/> in the <paramref name="state"/> it is made in at its new index, or null. The search starts
     /// after the row handed back last: a shift hands them back in the order they stood, so each is
     /// found at once.</summary>
-    private Element? TakeMovingRow(T item, bool selected)
+    private Element? TakeMovingRow(T item, ListItemState state)
     {
         var moving = _moving!;
         var comparer = EqualityComparer<T>.Default;
@@ -1471,7 +1569,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         {
             int m = start + n < count ? start + n : start + n - count;
             var row = moving[m];
-            if (row.Selected != selected || !comparer.Equals(row.Item, item)) continue;
+            if (row.State != state || !comparer.Equals(row.Item, item)) continue;
             moving.RemoveAt(m);
             _movingNext = m;
             // Held back by its key as well (DropGathered): it is taken, and no other realization
@@ -1525,13 +1623,15 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         base.PatchFrom(source);
         if (source is VirtualListElement<T> vl)
         {
-            // Rows are kept only from item rows to item rows of the same height; anything else
-            // makes them another way, and they are all made again.
-            bool keepRows = _itemRowTemplate is not null && vl._itemRowTemplate is not null
+            // Rows are kept only from item rows to item rows, or state rows to state rows, of the
+            // same height; anything else makes them another way, and they are all made again.
+            bool keepRows = ((_itemRowTemplate is not null && vl._itemRowTemplate is not null)
+                    || (_itemStateTemplate is not null && vl._itemStateTemplate is not null))
                 && _itemHeight == vl._itemHeight;
             bool heightsFromFunction = _itemHeightFor is not null || vl._itemHeightFor is not null;
             _itemTemplate = vl._itemTemplate;
             _itemRowTemplate = vl._itemRowTemplate;
+            _itemStateTemplate = vl._itemStateTemplate;
             _itemHeight = vl._itemHeight;
             // The height function closes over the freshly built row model, so it must ride
             // across the patch like the template does — keeping the old one would measure
@@ -1560,6 +1660,9 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             // so it must ride across the patch — otherwise the a11y selection and
             // activation wiring freeze at their first-mount values.
             SetSelectedIndex(vl.SelectedIndex, dropRows: !keepRows);
+            // The cursor rides across the same way, before rows are kept or dropped: the kept
+            // rows' check below compares the state each row is made in, cursor included.
+            SetCurrentIndex(vl.CurrentIndex, dropRows: !keepRows);
             OnItemActivate = vl.OnItemActivate;
             AccessibleLabel = vl.AccessibleLabel;
             RowsAreComposite = vl.RowsAreComposite;
@@ -1627,8 +1730,8 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         {
             if (index < items.Count && comparer.Equals(row.Item, items[index]))
             {
-                // The same item: kept, or made again in its other selected state.
-                if (row.Selected != RowSelected(index)) _dropping.Add(index);
+                // The same item: kept, or made again in its other state.
+                if (row.State != StateOf(index)) _dropping.Add(index);
                 continue;
             }
             _dropping.Add(index);

@@ -1,5 +1,6 @@
 using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using Xunit;
 
@@ -661,5 +662,73 @@ public class VirtualListAccessibilityTests
         Assert.Equal(AccessibilityRole.List, tree.Role);
         Assert.True(tree.IsVirtualItemContainer);
         Assert.Empty(tree.Children);
+    }
+
+    // ── The current item (the list's cursor): the item a reader's focus is on ──
+
+    private AccessibilityNode BuildFocused(VirtualListElement<string> list, Element? focused)
+    {
+        _layout.PerformLayout(list, 200, 100);
+        list.UpdateContentSize();
+        var focusManager = new FocusManager();
+        focusManager.SetFocus(focused);
+        return AccessibilityTreeBuilder.Build(list, focusManager);
+    }
+
+    [Fact]
+    public void CurrentItem_IsTheCursor_NotTheSelection()
+    {
+        var list = MakeList(50);
+        list.IsFocusable = true;
+        list.SelectedIndex = 7;
+        list.CurrentIndex = 3;
+
+        var tree = BuildFocused(list, list);
+
+        Assert.True(tree.IsFocused);
+        Assert.Equal(3, tree.CurrentItem);
+        Assert.True(tree.Children[7].IsSelected);
+        Assert.False(tree.Children[3].IsSelected);
+    }
+
+    [Fact]
+    public void WithoutACursor_TheCurrentItemIsTheSelection()
+    {
+        var list = MakeList(50);
+        list.IsFocusable = true;
+        list.SelectedIndex = 7;
+
+        var tree = BuildFocused(list, list);
+
+        Assert.Equal(-1, list.CurrentIndex);
+        Assert.Equal(7, tree.CurrentItem);
+    }
+
+    [Fact]
+    public void ACursorPastTheItems_IsNoCurrentItem()
+    {
+        var list = MakeList(50);
+        list.IsFocusable = true;
+        list.SelectedIndex = 7;
+        list.CurrentIndex = 50;
+
+        var tree = BuildFocused(list, list);
+
+        Assert.Equal(-1, tree.CurrentItem);
+    }
+
+    [Fact]
+    public void OnDemandList_CarriesTheCursorOnItsNode()
+    {
+        var list = MakeList(2_001);
+        list.IsFocusable = true;
+        list.CurrentIndex = 1_500;
+
+        var tree = BuildFocused(list, list);
+
+        Assert.True(tree.IsVirtualItemContainer);
+        Assert.True(tree.IsFocused);
+        Assert.Empty(tree.Children);
+        Assert.Equal(1_500, tree.CurrentItem);
     }
 }

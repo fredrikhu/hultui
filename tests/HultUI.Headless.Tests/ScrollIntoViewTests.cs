@@ -7,7 +7,7 @@ namespace HultUI.Headless.Tests;
 
 /// <summary>
 /// Regression coverage for <see cref="ScrollViewElement.ScrollIntoView"/> and
-/// <see cref="ScrollViewElement.ScrollRangeIntoView"/>. The subtle case is
+/// <see cref="ScrollViewElement.ScrollRangeIntoView(float, float)"/>. The subtle case is
 /// scrolling *up* to reveal a row above the viewport: layout positions are
 /// unscrolled (the renderer applies ScrollOffsetY as a render-time translate),
 /// so the reveal math must not add the current offset — doing so collapses the

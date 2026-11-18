@@ -152,6 +152,17 @@ static partial class Scenarios
                     keyEvery: GridReaderKeys, clear: bridge.ClearDiffs);
             }) { Width = 1440, Height = 900 };
 
+        yield return new Scenario("a11y/cursor walk 1,000 state rows, bridge on",
+            "virtual/cursor walk over 1,000 items with an accessibility client listening: the list holds the reader's focus, and each move marks the cursor as its node's current item on the applied tree and tells the bridge, building no tree",
+            ctx =>
+            {
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                return CursorWalk(ctx, 1_000, (list, current) =>
+                    bridge.FocusedNode?.ElementId != list.Id ? $"the reader's focus is on {bridge.FocusedNode?.ElementId}, not the list"
+                    : bridge.FocusedNode.CurrentItem != current ? $"the list's current item is {bridge.FocusedNode.CurrentItem}, not {current}"
+                    : null);
+            });
+
         yield return new Scenario("a11y/selection walk beside details, keys 60 ms apart, real loop, bridge on",
             "Down every 60 ms through a 1,000-commit list on item rows beside a details pane the same Build makes again, in Application.Run's own loop on the virtual clock, an accessibility client listening: the trees a key builds (all under build)",
             ctx =>

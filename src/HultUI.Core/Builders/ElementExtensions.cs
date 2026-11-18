@@ -402,8 +402,15 @@ public static class ElementExtensions
     /// so what only that row shows moves with the selection and no row is made for it; see
     /// <see cref="VirtualListElement{T}.SelectionOverlay"/>.</summary>
     public static VirtualListElement<T> SelectionOverlay<T>(this VirtualListElement<T> el, Element? overlay) { el.SelectionOverlay = overlay; return el; }
+    /// <summary>Sets <see cref="VirtualListElement{T}.CurrentIndex"/>: the item the keyboard is on, apart from the selection.</summary>
+    public static VirtualListElement<T> CurrentIndex<T>(this VirtualListElement<T> el, int index) { el.CurrentIndex = index; return el; }
+
+    /// <summary>Sets <see cref="VirtualListElement{T}.ItemStateTemplate"/>: rows made from their item and whether it is
+    /// selected and current, and from nothing else, so the list keeps them and a cursor move makes two.</summary>
+    public static VirtualListElement<T> RenderWithState<T>(this VirtualListElement<T> el, Func<T, ListItemState, Element> template) { el.ItemStateTemplate = template; return el; }
     public static VirtualListElement<T> CanSelectMultiple<T>(this VirtualListElement<T> el, bool value = true) { el.CanSelectMultiple = value; return el; }
-    /// <summary>A reader is told the focus is on the selected item while the nearest focusable element
+    /// <summary>A reader is told the focus is on the current item (<see cref="VirtualListElement{T}.CurrentIndex"/>,
+    /// else the selected one) while the nearest focusable element
     /// above the list holds it (a pane that walks the list's cursor); see
     /// <see cref="VirtualListElement{T}.TakesAncestorFocus"/>.</summary>
     public static VirtualListElement<T> TakesAncestorFocus<T>(this VirtualListElement<T> el, bool value = true) { el.TakesAncestorFocus = value; return el; }

@@ -82,6 +82,10 @@ static partial class Scenarios
                 return new Op { Run = step => list.Items = step % 2 == 0 ? b : a };
             });
 
+        yield return new Scenario("virtual/cursor walk 100k state rows",
+            "Move the cursor of a 100,000-item list on state rows down a row, on the mounted list with no rebuild of its owner: the row it left and the row it reached are made again, and the one scrolled in",
+            ctx => CursorWalk(ctx, 100_000, null));
+
         yield return new Scenario("virtual/selection walk 1,000 rows",
             "Press Down in a 1,000-row list of two-line rows whose selection the owning component's Build reads: the owner rebuilds, the rows are realized again in the render pass",
             ctx => SelectionWalk(ctx, null));
@@ -202,6 +206,45 @@ static partial class Scenarios
 
     private static VirtualListElement<RowItem> VirtualRows(Random rng, int count)
         => VirtualListElement<RowItem>.New().ItemHeight(30).RenderWith(RenderVirtualRow).Items(Models(rng, count));
+
+    /// <summary>
+    /// A cursor walk down a list on state rows (<c>.RenderWithState</c>), as a file manager's
+    /// panel walks: the list has the keyboard, and each step sets <c>CurrentIndex</c> on the
+    /// mounted list and reveals it, no owner rebuild. The row reports the rows made per step,
+    /// which must stay at most three. <paramref name="check"/> adds what the step must also have
+    /// done, given the list and the cursor.
+    /// </summary>
+    internal static Op CursorWalk(Ctx ctx, int count, Func<VirtualListElement<RowItem>, int, string?>? check)
+    {
+        int made = 0;
+        var list = VirtualListElement<RowItem>.New().ItemHeight(30)
+            .Items(Models(ctx.Rng, count))
+            .AccessibleItemLabel(m => m.Label)
+            .CurrentIndex(0)
+            .RenderWithState((m, state) =>
+            {
+                made++;
+                return Flex.Row().Background(state.IsCurrent ? Ui.Selected : Color.Transparent).Children(RenderVirtualRow(m));
+            });
+        list.IsFocusable = true;
+        ctx.Mount(list.FlexGrow(1));
+        list.Focus();
+        ctx.Session.PumpFrame();
+        int madeBefore = 0;
+        return new Op
+        {
+            Run = _ =>
+            {
+                madeBefore = made;
+                int next = (list.CurrentIndex + 1) % count;
+                list.CurrentIndex = next;
+                list.ScrollIndexIntoView(next);
+            },
+            Figure = () => made - madeBefore,
+            FigureUnit = "rows made",
+            Check = _ => made - madeBefore > 3 ? $"a step made {made - madeBefore} rows" : check?.Invoke(list, list.CurrentIndex),
+        };
+    }
 
     private static VirtualListElement<RowItem> SyntheticVirtualRows(Random rng, int count)
         => VirtualListElement<RowItem>.New().ItemHeight(30).RenderWith(RenderVirtualRow).Items(new SyntheticRows(rng, count));
