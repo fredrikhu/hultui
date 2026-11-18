@@ -84,7 +84,70 @@ public class OptimisticStagingTests
         });
     }
 
+    /// <summary>A stage that comes back after the same file was unstaged does not take the row
+    /// back. Every successful command settled each file still pending, whichever move had put
+    /// it there, so the reload behind the stage retired the unstage too: the row sprang back to
+    /// Staged while <c>git reset</c> was still waiting its turn. On a busy machine the same race
+    /// let a test unstage files that a late reload then showed staged again. The two commands
+    /// are held on gates here, so the window stays open for as long as the test needs.</summary>
+    [Fact]
+    public void AStageThatComesBackAfterAnUnstage_DoesNotTakeTheRowBack()
+    {
+        Hosted((session, app, repo) =>
+        {
+            using var stageGate = new ManualResetEventSlim();
+            using var unstageGate = new ManualResetEventSlim();
+            try
+            {
+                RunStaging(app, "work.txt", toStaged: true, () =>
+                {
+                    stageGate.Wait();
+                    return GitProcess.Run(repo.Path, "add", "--", "work.txt").Success;
+                });
+                RunStaging(app, "work.txt", toStaged: false, () =>
+                {
+                    unstageGate.Wait();
+                    return GitProcess.Run(repo.Path, "reset", "-q", "--", "work.txt").Success;
+                });
+                Assert.Contains("work.txt", Unstaged(app));
+
+                // The stage comes back and the reload behind it reads the file staged in git;
+                // the unstage is still waiting on its gate.
+                stageGate.Set();
+                session.PumpUntil(() => Section(Raw(app), "Staged").Contains("work.txt"), TimeSpan.FromSeconds(30));
+                session.PumpFrames(4);
+                Assert.Contains("work.txt", Unstaged(app));
+                Assert.DoesNotContain("work.txt", Staged(app));
+                Assert.Single(Pending(app));
+
+                // The unstage comes back: git agrees, and the reload retires the move.
+                unstageGate.Set();
+                session.PumpUntil(() => Pending(app).Count == 0, TimeSpan.FromSeconds(30));
+                Assert.False(IsStagedInGit(repo, "work.txt"));
+                Assert.Contains("work.txt", Unstaged(app));
+            }
+            finally
+            {
+                stageGate.Set();
+                unstageGate.Set();
+            }
+        });
+    }
+
     // ── Reaching the app's state ─────────────────────────────────────────
+
+    /// <summary>A staging move whose git command is <paramref name="command"/>, the way the app
+    /// asks for one (optimistic overlay first, the command on the staging chain).</summary>
+    private static void RunStaging(JunctionApp app, string path, bool toStaged, Func<bool> command) =>
+        typeof(JunctionApp).GetMethod("RunStaging", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(app, [(IReadOnlyList<string>)[path], toStaged, command, null, "failed"]);
+
+    /// <summary>What git last said, without the moves still in flight.</summary>
+    private static object Raw(JunctionApp app)
+    {
+        var loader = typeof(JunctionApp).GetProperty("_changes", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
+        return loader.GetType().GetProperty("Value")!.GetValue(loader)!;
+    }
 
     private static void Stage(JunctionApp app, params string[] paths) =>
         typeof(JunctionApp).GetMethod("StagePaths", BindingFlags.NonPublic | BindingFlags.Instance)!
@@ -104,9 +167,10 @@ public class OptimisticStagingTests
         typeof(JunctionApp).GetProperty("ChangesView", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(app)!;
 
-    private static List<string> Section(JunctionApp app, string name)
+    private static List<string> Section(JunctionApp app, string name) => Section(View(app), name);
+
+    private static List<string> Section(object data, string name)
     {
-        var data = View(app);
         var files = (System.Collections.IEnumerable)data.GetType()
             .GetProperty(name, BindingFlags.Public | BindingFlags.Instance)!.GetValue(data)!;
         var paths = new List<string>();

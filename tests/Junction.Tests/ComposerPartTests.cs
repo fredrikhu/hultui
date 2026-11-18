@@ -248,16 +248,36 @@ public class ComposerPartTests
 
     private static int _lastBuilds = -1, _quiet;
 
-    /// <summary>True once the window has gone twenty frames without building.</summary>
+    /// <summary>
+    /// True once git has done what the app asked of it and the window has then gone twenty
+    /// frames without building: the staging chain has finished, no move is still waiting for
+    /// git's word, and no working-tree load is in flight.
+    ///
+    /// <para>Twenty quiet frames alone were not enough. On CI's 2-core runner the <c>git add</c>
+    /// behind StageAll could still be running when they were up, and a reload whose
+    /// <c>diff --cached</c> ran before the add and whose status ran after it landed as no files
+    /// at all: UnstageAll then had nothing to unstage, and the button read "Commit 0 staged files"
+    /// (2026-11-18). A <c>git reset</c> still running was also how the test's own
+    /// <c>commit --amend</c> met the index lock (2026-11-09).</para>
+    /// </summary>
     private static bool Settled(HeadlessSession session, JunctionApp app)
     {
         session.PumpFrame();
         Thread.Sleep(5);
-        _quiet = app.Builds == _lastBuilds ? _quiet + 1 : 0;
+        bool gitBusy = !Get<Task>(app, "_stagingChain").IsCompleted
+            || Get<System.Collections.ICollection>(app, "_pendingStage").Count > 0
+            || ChangesLoading(app);
+        _quiet = !gitBusy && app.Builds == _lastBuilds ? _quiet + 1 : 0;
         _lastBuilds = app.Builds;
         if (_quiet < 20) return false;
         _quiet = 0;
         return true;
+    }
+
+    private static bool ChangesLoading(JunctionApp app)
+    {
+        var loader = typeof(JunctionApp).GetProperty("_changes", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
+        return (bool)loader.GetType().GetProperty("IsLoading")!.GetValue(loader)!;
     }
 
     private static Element Composer(HeadlessSession session)
