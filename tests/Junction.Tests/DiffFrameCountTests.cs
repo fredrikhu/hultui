@@ -231,6 +231,56 @@ public class DiffFrameCountTests
         });
     }
 
+    /// <summary>
+    /// The first wrapped Commit view of a session measures its rows once, at the code width the list
+    /// is laid out at, in the frame that lays it out (the list's layout hook), and builds nothing after
+    /// a frame. Its first build had no list box to read and measured every row at the window's
+    /// width; the frame drew the rows at those heights and a check after it built and measured them
+    /// again (plan 17 round 16: 401 line measures at 1,318 and 808 px, 7 builds and 3 frames against
+    /// 201, 3 and 2). A later visit keeps the rows' heights. Then the Changes view, from the Commit
+    /// view: its first build found the Commit view's list, laid out somewhere else, and measured at
+    /// its width.
+    /// </summary>
+    [Fact]
+    public void AFirstWrappedCommitView_MeasuresItsRowsOnce_AtTheLaidOutWidth_AndBuildsNothingAfterAFrame()
+    {
+        Hosted((session, app) =>
+        {
+            OpenMeasuredOnce(session, app, KeyCode.Digit3, "the first Commit view");
+
+            session.Window.PressKey(KeyCode.Digit2);
+            DiffScrollTests.Quiet(session, app);
+            int passes = app.DiffHeightPasses;
+            session.Window.PressKey(KeyCode.Digit3);
+            DiffScrollTests.Quiet(session, app);
+            Assert.Equal(0, app.DiffHeightPasses - passes);
+            AssertMeasuredAtTheLaidOutWidth(app, "the Commit view again");
+
+            OpenMeasuredOnce(session, app, KeyCode.Digit4, "the Changes view after the Commit view");
+        }, wrap: true);
+    }
+
+    /// <summary>A view key from the view's first build until nothing draws: the rows on screen were
+    /// measured once, at the laid-out width, and no build came after a frame with rows.</summary>
+    private static void OpenMeasuredOnce(HeadlessSession session, JunctionApp app, KeyCode key, string what)
+    {
+        int passes = app.DiffHeightPasses, builtAfter = 0, framesWithRows = 0;
+        session.Window.PressKey(key);
+        var until = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        for (int quiet = 0; quiet < 20 && DateTime.UtcNow < until;)
+        {
+            int b0 = app.Builds;
+            bool drew = session.PumpFrame(TimeSpan.FromMilliseconds(16));
+            if (app.Builds != b0 && framesWithRows > 0) builtAfter++;
+            if (drew && ListOrNull(app) is { IsHosted: true } l && l.Children.Count > 1) framesWithRows++;
+            quiet = drew || app.Builds != b0 || framesWithRows == 0 ? 0 : quiet + 1;
+            Thread.Sleep(2);
+        }
+        Assert.True(app.DiffHeightPasses - passes == 1 && builtAfter == 0 && framesWithRows == 1,
+            $"{what}: {app.DiffHeightPasses - passes} measures of the rows, {framesWithRows} frames with rows, {builtAfter} builds after one");
+        AssertMeasuredAtTheLaidOutWidth(app, what);
+    }
+
     // ── harness ──────────────────────────────────────────────────────────
 
     /// <summary>Counts what the window's layout engine measures, by wrapping its measure context: lines
@@ -331,8 +381,10 @@ public class DiffFrameCountTests
 
     /// <summary>The Commit view on a commit that changes six files in many places, every line far
     /// too long for the pane. Not a language the app colours: a tokenize landing would be a frame
-    /// of its own, and a legitimate one.</summary>
-    private static void Hosted(Action<HeadlessSession, JunctionApp> body)
+    /// of its own, and a legitimate one. With <paramref name="wrap"/> the app starts wrapped and
+    /// stays on History, the newest commit selected; the working tree then has a change of its
+    /// own for the Changes view.</summary>
+    private static void Hosted(Action<HeadlessSession, JunctionApp> body, bool wrap = false)
     {
         using var repo = TempRepo.CreateWithInitialCommit();
         static string Line(int file, int i, string tag) =>
@@ -346,6 +398,7 @@ public class DiffFrameCountTests
         for (int f = 0; f < 6; f++) repo.Write($"notes/file{f}.notes", Content(f, i => i % 50 < 4 ? "two" : "one"));
         repo.Git("add", "-A");
         repo.Git("commit", "-m", "change the notes");
+        if (wrap) repo.Write("notes/file0.notes", Content(0, i => i % 50 < 4 ? "three" : "one"));
 
         using var session = HeadlessSession.Create(1440, 900);
         JunctionApp? app = null;
@@ -357,14 +410,20 @@ public class DiffFrameCountTests
                 ActiveRepoPath = repo.Path,
                 Workspaces = [new WorkspaceData { Id = "w1", Name = "Tests", RepoPaths = [repo.Path] }],
                 ActiveWorkspaceId = "w1",
+                DiffWrap = wrap,
             });
             session.Application.SetRoot(app.Mount());
             session.PumpFrames(3);
             session.Window.PressKey(KeyCode.Digit2);   // History selects the newest commit
             session.PumpUntil(() => Get<string?>(app, "_selectedCommitHash") != null, TimeSpan.FromSeconds(30));
-            session.Window.PressKey(KeyCode.Digit3);   // Commit, on its first file
-            session.PumpUntil(() => ListOrNull(app) is { } l && l.Children.Count > 1, TimeSpan.FromSeconds(30));
-            DiffScrollTests.Quiet(session, app);
+            if (wrap)
+                DiffScrollTests.Quiet(session, app);
+            else
+            {
+                session.Window.PressKey(KeyCode.Digit3);   // Commit, on its first file
+                session.PumpUntil(() => ListOrNull(app) is { } l && l.Children.Count > 1, TimeSpan.FromSeconds(30));
+                DiffScrollTests.Quiet(session, app);
+            }
 
             body(session, app);
         }

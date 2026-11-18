@@ -1154,9 +1154,10 @@ public partial class JunctionApp : Component, IDisposable
     protected override void OnAfterBuild()
     {
         // A lead is for the build that asked for it, which is done: from here on the diff's
-        // laid-out width is the one to read, the check after the frame first.
+        // laid-out width is the one to read. The list's layout hook fits measured rows to it
+        // before the frame is drawn (OnDiffListLaidOut); the pan follows it after the frame.
         _diffWrapLead = float.NaN;
-        SettleDiffScrollbar();
+        FollowDiffWidthAfterFrame();
         ServiceReviewAfterBuild();
         ServiceBranchFromIssue();
         ServiceSpinner();

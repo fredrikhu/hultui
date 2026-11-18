@@ -736,13 +736,29 @@ the width either, measure the heights in the `Window.Resized` handler at the led
 nothing: a height-only step then measures nothing at all. Vesper Commander's wrapped reader and
 compare view built the whole window and made every row on screen again on each step until plan
 17 round 15 (`FitWrappedRowsInPlace`): 281 → 24 KB a 4 px step of the reader over a
-1,000-line file, 62 → 2 KB a height-only step, with byte-identical frames. Keep the check after
-the frame: a wrong lead still builds once, and that build keeps the rows too. A row that carries
+1,000-line file, 62 → 2 KB a height-only step, with byte-identical frames. Check the lead in the
+list's `.OnLayoutChanged`, not after the frame: the handler hears the width the frame laid the
+list out at, measures again when the lead was wrong and calls `InvalidateHeights`, and that frame
+draws the right heights. A check after the frame drew the wrong ones and built again. A row that carries
 the width it was made at must be given the new one, or a kept row lays out unlike a new one:
 Junction's wrapped code labels have the code width as their flex basis, and with the old basis a
 shrinking label stops at its min-content width, so a line of one unbreakable token stayed as wide
 as the old column (`RebaseCodeLabels`, plan 17 round 15: 279 → 153 KB a 4 px step of a Commit
 view).
+
+**Measure at a width once the element has one.** A build that makes a new list cannot read the
+list's width: it has no box yet, and what is at hand is a guess, the window's width or the box an
+earlier list had somewhere else. Rows measured at a guess are measured again at the width laid out,
+and the frame between draws the guessed heights. Leave them unmeasured in that build and measure
+them in the list's `.OnLayoutChanged`, which hears the first box after the frame's layout and
+before it is drawn: a virtual list makes its rows when it is drawn, so none is made at a wrong
+height. Hold a reveal asked for meanwhile (a row's top needs the heights above it) until the
+handler has measured. A list that replaces one in the same place (the next file of a commit) can
+read the width of the one it replaces. Junction's first wrapped Commit view measured its rows at
+the window's 1,318 px, drew them, then built and measured again at the 808 px laid out (plan 17
+round 16: 7 builds, 3 frames, 401 line measures → 3, 2 and 201). Add the handler only where a
+width is measured: the first listener turns the framework's layout watching on for the rest of the
+process, a check for each box a layout writes and each element a build removes.
 
 ---
 
