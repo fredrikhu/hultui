@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 16
-- **Phase:** build — round 16, step 5 next (step 1 landed 40cadb57, step 2 ec57c4ee + 5766a137, step 3 41ecec65, step 4 0d96e805 + b02b46d6 + 32fffce7 — the user's Narrator check of `r16b4ive` is open and the release waits for it; the survey merged 2026-11-18; 10 steps in "Round 16 build order"; questions
+- **Phase:** build — round 16, step 5 next (step 1 landed 40cadb57, step 2 ec57c4ee + 5766a137, step 3 41ecec65, step 4 0d96e805 + b02b46d6 + 32fffce7 — the user's Narrator check of `r16b4\live\` (this session's scratchpad) is open and the release waits for it; the survey merged 2026-11-18; 10 steps in "Round 16 build order"; questions
   66 and 67 answered 2026-11-18 with the recommendations (66 (a), 67 (b) with images first); build briefs `brief-r16b<N>.md` in this session's
   scratchpad, agent ids in `r16-agents.txt`). Survey: started 2026-11-18 in a fresh context (session b6ef64d9). Main had moved by 59 commits
   outside plan 17 (to 3038f82b: SkiaSharp 4.156 with HarfBuzzSharp 14.4 and the CPU surface in BGRA, SDL 3.5.0, the
