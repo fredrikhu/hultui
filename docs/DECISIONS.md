@@ -1125,6 +1125,47 @@ growth a cycle went from +0.22 MB to 0 with a backend that writes a 320×180 fra
 pixel ring, and from +0.02 MB to 0 with mpv, Open's timings unchanged (videos 2–8, Open → first
 window frame 51.6–63.9 ms before, 48.2–76.8 ms after).
 
+### A GL window's first bursts of frames fill a pool in NVIDIA's driver, which then stays level: measured, not ours (round 16)
+
+Plan 17's round 16 survey saw each scrollbar hover on GL add 2–6 MB of resident write-combined
+memory (DXGI non-local, the process's GPU-visible system memory, 16.0 → 28.5 MB over five visits in
+Vesper; +0 on Vulkan) and asked whether it keeps growing. Step 10 ran fifty visits in real windows
+(NativeAOT at 666202b1, a 2560×1440 monitor at 100 %, 200 Hz; a sample after every five and after a
+30 s rest; every app and renderer with its own warmed NVIDIA shader cache, and no cache file written
+in any measured run). DXGI non-local, MB:
+
+| Fifty of them | Before | 5 | 10 | 20 | 50 | 30 s later |
+|---|---|---|---|---|---|---|
+| Vesper GL, scrollbar hover (28 frames each) | 11.6 | 23.6 | 23.6 | 23.6 | 23.6 | 23.6 |
+| the same with `HULTUI_A11Y=0` | 11.6 | 23.6 | 23.6 | 23.6 | 23.6 | 23.6 |
+| Junction GL, History's scrollbar | 15.1 | 23.1 | 23.1 | 23.1 | 23.1 | 23.1 |
+| Junction GL, palette open and close | 15.1 | 23.1 | 25.1 | 25.1 | 25.1 | 25.1 |
+| Junction GL, a toolbar button's hover (2 frames each) | 16.1 | 16.1 | 15.1 | 19.1 | 23.1 | 23.1 |
+| Vesper Vulkan, scrollbar hover | 17.3 | 17.3 | 17.3 | 19.8 | 19.8 | 19.8 |
+| Junction Vulkan, History's scrollbar | 18.3 | 18.3 | 20.3 | 20.8 | 20.8 | 20.8 |
+| Junction Vulkan, palette | 18.3 | 18.3 | 18.3 | 20.8 | 20.8 | 20.8 |
+
+It levels off, in steps of 2–4 MB, and stays for the process's life. On GL all of it is resident
+write-combined private memory (Vesper 3.3 → 15.8 MB at visit 5, 14.8 from visit 10 on), so the
+working set rises the same +7 to +14 MB once (Vesper 86.1 → 100.2 MB) and then by +1 MB from
+visit 10 to 50, which is the managed heap's first allocation budget being touched (no collection
+ran; 5.4 → 6.4 MB allocated). It is not ours nor Skia's:
+
+- Skia's resource cache stays at 33 resources and 8.2 MB in Vesper, 53 and 9.3 MB in Junction (65
+  and 11.3 after the first palette) through all fifty; its buffers stay at 0.33 MB.
+- `glFinish` after every presented frame, so no frame is in flight when the next starts, fills the
+  same pool (Vesper +11.0 MB, Junction +8.0 to +8.5), and so does waiting for the previous frame's
+  fence (+12.0). It is not frames queued ahead of the GPU.
+- One-frame changes fill it too, only later, and to the same ceiling (the button row above).
+- It is one pool, not one per kind of burst: fifty scrollbar visits and then fifty palette cycles
+  in one launch end at 25.1 MB, the palette's own ceiling.
+
+The survey's windows (the 4K at 150 %, about twice the pixels) grew from higher starting points by
+about the same amounts (Vesper +12.5, Junction +9.0 MB). Nothing in HultUI makes it or can give it
+back. A GL window whose write-combined memory or DXGI non-local grows over its first bursts should
+be run for fifty or more before it is called a leak. Not tried: swap interval 1 during tweens (the
+interval stays 0 by design; see THREADING.md).
+
 ### A ref's lock file alone is a working-tree event, not dropped (round 13)
 
 Plan 17's round 13, step 1 stopped Junction's repository watcher from reading a ref transaction
