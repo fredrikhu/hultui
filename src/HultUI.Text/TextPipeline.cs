@@ -152,24 +152,61 @@ public sealed class TextPipeline
         return 16 * glyphs;
     }
 
-    // Digit fast path. All-digit segments (row ids, counters) are each unique,
-    // so they miss every string-level cache forever and pay a full shaper call.
-    // For fonts that provably shape digits context-free, compose them from a
-    // per-(font,size) advance table instead — and skip the word cache entirely,
-    // so unique ids stop churning its LRU.
-    // Prove-then-enable: at first use the font+size shapes every digit and all
-    // 100 digit pairs once; any multi-glyph result, nonzero Y, kerning
-    // adjustment, or contextual substitution disqualifies it (entry = null) and
-    // digits take the normal shaper path. Never enabled on assumption.
+    // Digit fast path. Number segments (row ids, counters, sizes, times, signed values) are each
+    // unique, so they miss every string-level cache forever and pay a full shaper call. For fonts
+    // that provably shape them context-free, compose them from a per-(font,size) advance table
+    // instead — and skip the word cache entirely, so unique numbers stop churning its LRU.
+    // Prove-then-enable: at the first digits a font+size meets, it shapes every digit and all 100
+    // digit pairs once; any multi-glyph result, nonzero offset, kerning adjustment or contextual
+    // substitution disqualifies it (entry = null) and numbers take the normal shaper path. The
+    // number punctuation (NumberMarks) is proven one mark at a time, the first time a segment has
+    // it (ProveMark, docs/plans/19-run-shaping.md): alone, in pairs, and in every digit–mark–digit
+    // triple, because a contextual alternate that needs a digit on each side (a colon raised
+    // between figures) passes every pair. A mark that fails is refused alone; the digits and the
+    // other marks keep composing. Never enabled on assumption.
     private readonly Dictionary<DigitKey, DigitTable?> _digitTables = new();
 
     private readonly record struct DigitKey(IResolvedFont Font, float FontSize);
 
+    /// <summary>The number punctuation a digit table composes once proven, after the ten digits:
+    /// slot 10 + i is <c>NumberMarks[i]</c> (<see cref="Slot"/>).</summary>
+    internal const string NumberMarks = "-+.,:/%\u2212";
+
     private sealed class DigitTable
     {
-        public readonly uint[] GlyphIds = new uint[10];
-        public readonly float[] Advances = new float[10];
+        public readonly uint[] GlyphIds = new uint[10 + NumberMarks.Length];
+        public readonly float[] Advances = new float[10 + NumberMarks.Length];
+
+        // Bit i: NumberMarks[i] passed its proof (Proven) or failed it (Refused); in neither, the
+        // mark has not been met yet.
+        public int Proven, Refused;
     }
+
+    /// <summary>
+    /// When false, only all-digit segments are composed from the digit table: the reference. When
+    /// true (the default), so is a number with punctuation from <see cref="NumberMarks"/> in it
+    /// (<c>-38913</c>, <c>1,234.56</c>, <c>12:30</c>, <c>50%</c>), once each of its marks has passed
+    /// its proof. Tests hold the two to the same glyphs, within the digit proof's tolerance.
+    /// </summary>
+    internal bool ComposesNumberPunctuation { get; init; } = true;
+
+    /// <summary>A character's slot in a digit table: 0–9 for a digit, 10 + its place in
+    /// <see cref="NumberMarks"/> for a mark, -1 for anything else.</summary>
+    internal static int Slot(char c) => c switch
+    {
+        >= '0' and <= '9' => c - '0',
+        '-' => 10,
+        '+' => 11,
+        '.' => 12,
+        ',' => 13,
+        ':' => 14,
+        '/' => 15,
+        '%' => 16,
+        '\u2212' => 17,
+        _ => -1,
+    };
+
+    private static char SlotChar(int slot) => slot < 10 ? (char)('0' + slot) : NumberMarks[slot - 10];
 
     public IFontCollection Fonts => _fonts;
     public ITextShaper Shaper => _shaper;
@@ -3214,8 +3251,8 @@ public sealed class TextPipeline
     internal bool ComposeGlyphsWhenRead { get; init; } = true;
 
     /// <summary>
-    /// A space or non-space segment of a run, shaped: the word cache's run for it, or, for an
-    /// all-digit segment in a font that passed the digit proof, the font's digit table — whose
+    /// A space or non-space segment of a run, shaped: the word cache's run for it, or, for a
+    /// number segment the font's digit table composes (DigitTableFor), that table — whose
     /// glyphs are composed only where glyphs are wanted. <see cref="Width"/> and
     /// <see cref="Glyphs"/> (the glyph count) are the segment's either way.
     /// </summary>
@@ -3252,7 +3289,7 @@ public sealed class TextPipeline
     {
         float x = 0;
         foreach (char c in segment)
-            x += digits.Advances[c - '0'];
+            x += digits.Advances[Slot(c)];
         return new WordShape(null, digits, start, x, segment.Length);
     }
 
@@ -3269,15 +3306,27 @@ public sealed class TextPipeline
         return run;
     }
 
-    // The proven digit table for an all-digit segment, or null when the segment isn't pure
-    // digits / the font+size failed the proof (which runs at the first digits it meets).
+    // The proven digit table for a number segment: digits only, or (ComposesNumberPunctuation)
+    // digits with marks from NumberMarks, at least one digit. Null for any other segment, when the
+    // font+size failed the digit proof (which runs at the first digits it meets), or when a mark in
+    // the segment failed its own (which runs the first time a segment has the mark). A segment of
+    // marks alone ("-", "...") is a word like any other: it proves nothing.
     private DigitTable? DigitTableFor(ReadOnlySpan<char> segment, IResolvedFont font, float fontSize)
     {
         if (segment.Length == 0)
             return null;
+        int marks = 0;
+        bool digit = false;
         foreach (char c in segment)
-            if (c is < '0' or > '9')
+        {
+            int slot = Slot(c);
+            if (slot < 0)
                 return null;
+            if (slot < 10) digit = true;
+            else marks |= 1 << (slot - 10);
+        }
+        if (!digit || (marks != 0 && !ComposesNumberPunctuation))
+            return null;
 
         var key = new DigitKey(font, fontSize);
         if (!_digitTables.TryGetValue(key, out var table))
@@ -3285,10 +3334,14 @@ public sealed class TextPipeline
             table = ProveDigitsContextFree(font, fontSize);
             _digitTables[key] = table;
         }
-        return table;
+        if (table is null || (marks & ~table.Proven) == 0)
+            return table;
+        for (int untried = marks & ~(table.Proven | table.Refused); untried != 0; untried &= untried - 1)
+            ProveMark(table, System.Numerics.BitOperations.TrailingZeroCount(untried), font, fontSize);
+        return (marks & table.Refused) == 0 ? table : null;
     }
 
-    // Writes the glyphs of the all-digit text[start..start + length] into glyphs from index at,
+    // Writes the glyphs of the number text[start..start + length] into glyphs from index at,
     // each at the advances before it in the segment plus x (the segment's place in its run), and
     // returns the index after them.
     private static int ComposeDigits(string text, int start, int length, DigitTable table, float x,
@@ -3297,12 +3350,15 @@ public sealed class TextPipeline
         float advanced = 0;
         for (int i = start; i < start + length; i++)
         {
-            int d = text[i] - '0';
+            int d = Slot(text[i]);
             glyphs[at++] = new GlyphPosition(table.GlyphIds[d], advanced + x, 0, table.Advances[d]);
             advanced += table.Advances[d];
         }
         return at;
     }
+
+    // How far a shaped glyph may sit from where the table composes it, in pixels.
+    private const float DigitTolerance = 0.01f;
 
     // One-time proof per font+size (110 shaper calls): every digit must shape
     // to exactly one zero-offset glyph, and every digit pair must shape to the
@@ -3311,41 +3367,87 @@ public sealed class TextPipeline
     // kerning is all a GPOS table can apply to a digit run).
     private DigitTable? ProveDigitsContextFree(IResolvedFont font, float fontSize)
     {
-        const float Tol = 0.01f;
         var table = new DigitTable();
 
         for (int d = 0; d < 10; d++)
-        {
-            var run = _shaper.Shape(((char)('0' + d)).ToString(), font, fontSize);
-            if (run.Glyphs.Length != 1)
+            if (!AloneComposes(table, d, font, fontSize))
                 return null;
-            var g = run.Glyphs[0];
-            if (Math.Abs(g.X) > Tol || Math.Abs(g.Y) > Tol)
-                return null;
-            table.GlyphIds[d] = g.GlyphId;
-            table.Advances[d] = run.Width;
-        }
 
         for (int a = 0; a < 10; a++)
-        {
             for (int b = 0; b < 10; b++)
-            {
-                var run = _shaper.Shape($"{(char)('0' + a)}{(char)('0' + b)}", font, fontSize);
-                if (run.Glyphs.Length != 2
-                    || run.Glyphs[0].GlyphId != table.GlyphIds[a]
-                    || run.Glyphs[1].GlyphId != table.GlyphIds[b]
-                    || Math.Abs(run.Glyphs[0].X) > Tol
-                    || Math.Abs(run.Glyphs[0].Y) > Tol
-                    || Math.Abs(run.Glyphs[1].Y) > Tol
-                    || Math.Abs(run.Glyphs[1].X - table.Advances[a]) > Tol
-                    || Math.Abs(run.Width - (table.Advances[a] + table.Advances[b])) > Tol)
-                {
+                if (!PairComposes(table, a, b, font, fontSize))
                     return null;
-                }
-            }
-        }
 
         return table;
+    }
+
+    // The proof of NumberMarks[m] in a table whose digits passed theirs (122 shaper calls, and two
+    // more for each mark proven before it): the mark alone one glyph at no offset; beside itself,
+    // each digit and each mark proven before it, both ways round, at the summed advances; and
+    // between every two digits, the three glyphs at the summed advances. Pairs among the proven
+    // marks are each checked when the later of the two is proven.
+    private void ProveMark(DigitTable table, int m, IResolvedFont font, float fontSize)
+    {
+        int slot = 10 + m;
+        bool ok = AloneComposes(table, slot, font, fontSize) && PairComposes(table, slot, slot, font, fontSize);
+        for (int d = 0; ok && d < 10; d++)
+            ok = PairComposes(table, d, slot, font, fontSize) && PairComposes(table, slot, d, font, fontSize);
+        for (int p = 0; ok && p < NumberMarks.Length; p++)
+            if ((table.Proven & (1 << p)) != 0)
+                ok = PairComposes(table, 10 + p, slot, font, fontSize) && PairComposes(table, slot, 10 + p, font, fontSize);
+        for (int a = 0; ok && a < 10; a++)
+            for (int b = 0; ok && b < 10; b++)
+                ok = TripleComposes(table, a, slot, b, font, fontSize);
+        if (ok) table.Proven |= 1 << m;
+        else table.Refused |= 1 << m;
+    }
+
+    // The character in `slot` shaped alone: one glyph at no offset, whose id and advance go into
+    // the table.
+    private bool AloneComposes(DigitTable table, int slot, IResolvedFont font, float fontSize)
+    {
+        var run = _shaper.Shape(SlotChar(slot).ToString(), font, fontSize);
+        if (run.Glyphs.Length != 1)
+            return false;
+        var g = run.Glyphs[0];
+        if (Math.Abs(g.X) > DigitTolerance || Math.Abs(g.Y) > DigitTolerance)
+            return false;
+        table.GlyphIds[slot] = g.GlyphId;
+        table.Advances[slot] = run.Width;
+        return true;
+    }
+
+    // The characters in slots a and b shaped together: their own glyphs, the second at the first's
+    // advance, the width the two advances.
+    private bool PairComposes(DigitTable table, int a, int b, IResolvedFont font, float fontSize)
+    {
+        var run = _shaper.Shape(new string([SlotChar(a), SlotChar(b)]), font, fontSize);
+        return run.Glyphs.Length == 2
+            && run.Glyphs[0].GlyphId == table.GlyphIds[a]
+            && run.Glyphs[1].GlyphId == table.GlyphIds[b]
+            && Math.Abs(run.Glyphs[0].X) <= DigitTolerance
+            && Math.Abs(run.Glyphs[0].Y) <= DigitTolerance
+            && Math.Abs(run.Glyphs[1].Y) <= DigitTolerance
+            && Math.Abs(run.Glyphs[1].X - table.Advances[a]) <= DigitTolerance
+            && Math.Abs(run.Width - (table.Advances[a] + table.Advances[b])) <= DigitTolerance;
+    }
+
+    // The characters in slots a, m and b shaped together: their own glyphs at the summed advances.
+    private bool TripleComposes(DigitTable table, int a, int m, int b, IResolvedFont font, float fontSize)
+    {
+        var run = _shaper.Shape(new string([SlotChar(a), SlotChar(m), SlotChar(b)]), font, fontSize);
+        if (run.Glyphs.Length != 3)
+            return false;
+        float x = 0;
+        int[] slots = [a, m, b];
+        for (int i = 0; i < 3; i++)
+        {
+            var g = run.Glyphs[i];
+            if (g.GlyphId != table.GlyphIds[slots[i]] || Math.Abs(g.X - x) > DigitTolerance || Math.Abs(g.Y) > DigitTolerance)
+                return false;
+            x += table.Advances[slots[i]];
+        }
+        return Math.Abs(run.Width - x) <= DigitTolerance;
     }
 
     // Adjusts a line's ascent/leading so its total height equals an explicit

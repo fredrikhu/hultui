@@ -65,7 +65,9 @@ public class CacheBoundTests
         // more in each cache it lands in, or a document could fill memory under the bound.
         var pipeline = new TextPipeline(new StubFontCollection(), new StubTextShaper());
         string line = string.Concat(Enumerable.Repeat("word ", 199)) + "words";
-        string csv = string.Join(',', Enumerable.Range(0, 250).Select(i => i.ToString("000")));
+        // A word, not a number: numbers with commas are composed from the digit table and
+        // never reach the word cache.
+        string csv = string.Join(',', Enumerable.Range(0, 250).Select(i => "x" + i.ToString("00")));
 
         pipeline.Layout(line, Style, float.PositiveInfinity, 1);
         Assert.InRange(pipeline.ShapeCacheUse.Bytes, 16 * line.Length, 24 * line.Length + 1_000);
