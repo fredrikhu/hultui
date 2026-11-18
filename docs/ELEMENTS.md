@@ -396,6 +396,12 @@ same share of its alpha, as an element at that opacity shows it) and give `Opaci
 boxes and images. What overlaps then blends part by part: text over a faded fill is a level or
 two off at glyph edges, and a faded part shows what is under it, which the group hid.
 
+Never fade a window-sized element by its `Opacity`, such as a backdrop with a panel on it: each
+frame draws the whole window through a layer, and on GL Skia keeps that layer's texture for the
+window's life (18 MB at 2160×1350, 32 MB maximized on a 4K screen). Fade the backdrop's colour and
+the panel's own opacity instead, as `Dialog.Show` does (plan 17 round 16: the first command
+palette's video memory +18 → +8 MB).
+
 `PaintBounds` is the border box unless the element says otherwise. `BoxElement` adds its
 shadows and outline, `TextElement` the ink of text longer than its box. **A custom element
 whose `Render` paints outside its border box must override `PaintBounds`** — whatever falls

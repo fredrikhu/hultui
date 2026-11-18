@@ -95,11 +95,39 @@ public static class Dialog
             (first ?? panel).Focus();
         }
 
-        // Subtle fade-in of the whole dialog.
-        scrim.Opacity = 0f;
-        Animate.Opacity(scrim, 0f, 1f).Duration(0.12f).Start();
+        FadeIn(scrim, panel, options.ShowScrim ? options.ScrimColor ?? DefaultScrim : null);
 
         return tcs.Task;
+    }
+
+    private const float FadeSeconds = 0.12f;
+
+    /// <summary>
+    /// A subtle fade-in: the scrim's colour from clear, and the panel at its own opacity. Not the
+    /// scrim's opacity, which faded the whole window as one group: every fade frame drew it through
+    /// a window-sized offscreen layer, and on GL Skia kept that texture for the window's life
+    /// (18 MB at 2160×1350, 32 MB maximized on a 4K screen). The panel's group is its own size.
+    /// The first and last frames are the same as the whole-window fade's; between them the inside
+    /// of the panel is a little darker, since the half-faded scrim now shows through the half-faded
+    /// panel.
+    /// </summary>
+    private static void FadeIn(BoxElement scrim, Element panel, Color? scrimColor)
+    {
+        if (scrimColor is { } color)
+        {
+            var clear = color with { A = 0 };
+            scrim.BackgroundColor = clear;
+            Animate.Background(scrim, clear, color).Duration(FadeSeconds).Start();
+        }
+
+        // Through Restyle, as the panel is the app's: its hover, press and focus styles keep its
+        // own opacity as the look to return to. Set directly, a hover that began mid-fade would keep
+        // the half-faded value as that look, and the panel would stay half faded once it ended.
+        float shown = panel.Opacity, now = 0f;
+        Action<Element> apply = e => e.Opacity = now;
+        panel.Restyle(apply);
+        Animate.Value(0f, shown, v => { now = v; panel.Restyle(apply); })
+            .MarkDirty(panel.MarkPaintDirty).Duration(FadeSeconds).Start();
     }
 
     private static bool Contains(Element root, Element? element)
