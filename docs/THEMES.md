@@ -118,6 +118,8 @@ string instances, the same lines shown and the same clock, and the walk goes on 
 stopped, with the spans one uncancelled call gives (`LinesWalked` counts this call's lines). A
 theme change, other lines or other strings, even of the same characters, start from line 1. The
 walk is kept only as long as its texts: read the file again for each call and nothing is kept.
+Junction keeps the texts of the files a key cancelled, up to 16 MB, so a reader who pages
+through big files and comes back finds the walk part done and reads nothing again.
 
 ## The framework's own controls
 
