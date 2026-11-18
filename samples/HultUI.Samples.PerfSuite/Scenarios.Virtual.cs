@@ -49,6 +49,39 @@ static partial class Scenarios
                 return new Op { Run = step => list.Items = step % 2 == 0 ? b : a };
             });
 
+        yield return new Scenario("virtual/list 1M wheel",
+            "The 100k wheel over 1,000,000 items made as they are read: what a million rows cost beyond a hundred thousand",
+            ctx =>
+            {
+                var list = SyntheticVirtualRows(ctx.Rng, 1_000_000);
+                ctx.Mount(list.FlexGrow(1));
+                return new Op
+                {
+                    Run = step => ctx.Window.Wheel(500, 380, 0, WheelDirection(step) * 3),
+                    Check = ScrolledTo(() => list.ScrollOffsetY),
+                };
+            });
+
+        yield return new Scenario("virtual/list 1M jump",
+            "The 100k jump over 1,000,000 items: a whole viewport of new rows, far down a list whose offsets pass float precision",
+            ctx =>
+            {
+                var list = SyntheticVirtualRows(ctx.Rng, 1_000_000);
+                ctx.Mount(list.FlexGrow(1));
+                return new Op { Run = step => list.ScrollOffsetY = (step * 7_919 % 990_000) * 30f };
+            });
+
+        yield return new Scenario("virtual/list 1M replace items",
+            "The 100k refresh over 1,000,000 items: a new list assigned, visible rows re-realized",
+            ctx =>
+            {
+                var a = new SyntheticRows(ctx.Rng, 1_000_000);
+                var b = new SyntheticRows(ctx.Rng, 1_000_000);
+                var list = VirtualListElement<RowItem>.New().ItemHeight(30).RenderWith(RenderVirtualRow).Items(a);
+                ctx.Mount(list.FlexGrow(1));
+                return new Op { Run = step => list.Items = step % 2 == 0 ? b : a };
+            });
+
         yield return new Scenario("virtual/selection walk 1,000 rows",
             "Press Down in a 1,000-row list of two-line rows whose selection the owning component's Build reads: the owner rebuilds, the rows are realized again in the render pass",
             ctx => SelectionWalk(ctx, null));
@@ -141,6 +174,15 @@ static partial class Scenarios
                 return new Op { Run = step => ctx.Window.Wheel(500, 400, 0, WheelDirection(step) * 3) };
             });
 
+        yield return new Scenario("table/TableView 1M wheel, unsorted",
+            "Wheel through a 1,000,000-row TableView the app sorted itself (Body with sort: false), as an app with a million rows sorts off the UI thread",
+            ctx =>
+            {
+                var table = new TableBench(new SyntheticRows(ctx.Rng, 1_000_000), sort: false);
+                ctx.Mount(table.Mount());
+                return new Op { Run = step => ctx.Window.Wheel(500, 400, 0, WheelDirection(step) * 3) };
+            });
+
         yield return new Scenario("table/TableView 10k resize column",
             "Drag-resize a TableView column: every visible row re-laid out on the new tracks",
             ctx =>
@@ -160,6 +202,9 @@ static partial class Scenarios
 
     private static VirtualListElement<RowItem> VirtualRows(Random rng, int count)
         => VirtualListElement<RowItem>.New().ItemHeight(30).RenderWith(RenderVirtualRow).Items(Models(rng, count));
+
+    private static VirtualListElement<RowItem> SyntheticVirtualRows(Random rng, int count)
+        => VirtualListElement<RowItem>.New().ItemHeight(30).RenderWith(RenderVirtualRow).Items(new SyntheticRows(rng, count));
 
     private static Element RenderVirtualRow(RowItem m) => Ui.Row(m.Id, m.Label);
 
@@ -722,15 +767,53 @@ sealed class PartnerPane(List<WalkItem> items, bool oneRow) : Component
     }
 }
 
+/// <summary>
+/// A list of any length that holds no rows: each one is made when it is read, from its index and
+/// one of 997 labels made up front, so a million of them cost nothing to set up. What an app's
+/// model of a huge folder looks like to the list: an indexer, not a million objects.
+/// </summary>
+sealed class SyntheticRows : IReadOnlyList<RowItem>
+{
+    private readonly string[] _labels = new string[997];
+
+    public SyntheticRows(Random rng, int count)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        Count = count;
+        for (int i = 0; i < _labels.Length; i++) _labels[i] = Ui.Label(rng);
+    }
+
+    public int Count { get; }
+
+    public RowItem this[int index]
+    {
+        get
+        {
+            if ((uint)index >= (uint)Count) throw new ArgumentOutOfRangeException(nameof(index));
+            return new RowItem(index + 1, _labels[index % _labels.Length]);
+        }
+    }
+
+    public IEnumerator<RowItem> GetEnumerator()
+    {
+        for (int i = 0; i < Count; i++) yield return this[i];
+    }
+
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+}
+
 sealed class TableBench : Component
 {
-    private readonly List<RowItem> _items;
+    private readonly IReadOnlyList<RowItem> _items;
+    private readonly bool _sort;
 
     public TableView<RowItem> Table { get; }
 
-    public TableBench(List<RowItem> items)
+    /// <param name="sort">False builds the body with <c>Body(items, sort: false)</c>: rows in the order given.</param>
+    public TableBench(IReadOnlyList<RowItem> items, bool sort = true)
     {
         _items = items;
+        _sort = sort;
         Table = new TableView<RowItem>(
         [
             new TableColumn<RowItem> { Id = "id", Header = "Id", Width = 80, Text = r => r.Id.ToString(),
@@ -744,5 +827,5 @@ sealed class TableBench : Component
     }
 
     public override Element Build()
-        => Flex.Column(gap: 0).FlexGrow(1).Children(Table.Header(), Table.Body(_items).FlexGrow(1));
+        => Flex.Column(gap: 0).FlexGrow(1).Children(Table.Header(), Table.Body(_items, _sort).FlexGrow(1));
 }

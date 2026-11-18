@@ -1849,6 +1849,16 @@ layout, because the virtual list clamps against the rows it holds *now* rather t
 extent the last layout left behind; a request made in the same frame the list grew is
 honoured, not clamped back to 0.
 
+**Very long lists.** A list of a million items costs the rows on screen: give it an
+`IReadOnlyList<T>` that makes each item when it is read, and mounting it allocates well under
+a megabyte (`VirtualListMillionTests`). Its end is reachable and drawn where the list ends.
+What does not survive the length is precision. Positions are `float`, which holds every whole
+pixel only up to 2^24, about 16.7 million logical px: 700,000 rows of 24 px. Past that, at
+1.0 the rows still tile exactly, but at a fractional scale they do not (at 1.25, rows of
+24 px come out 28 and 32 device px tall instead of 30; at 1.5, 32 and 40 instead of 36), and
+a 1 px line inside a row, such as a border, is not drawn at all, at any scale. A list whose
+rows draw thin lines has to stay under that length.
+
 **Accessibility.** The list is announced as a `List`; `AccessibleItemLabel` names each
 row without realizing it, so a reader can walk 20,000 items that were never built.
 
