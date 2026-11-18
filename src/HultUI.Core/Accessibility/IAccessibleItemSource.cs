@@ -136,6 +136,18 @@ public interface IAccessibleItemSource
     string? GetItemLabel(int index);
 
     /// <summary>
+    /// The label <see cref="GetItemLabel"/> gives item <paramref name="index"/>, read on the UI thread
+    /// without keeping it: a kept one when there is one, else made for the call. For the UI
+    /// Automation bridge's read of the reader's focus at the end of each accessibility phase that
+    /// applied something, an item served on demand whose rename no diff tells. A list that keeps its
+    /// labels (<see cref="Elements.VirtualListElement{T}"/> on item rows) sizes what it keeps to the
+    /// items' number at the first label kept: an array as long as the list, 24 KB for Junction's
+    /// History of 1,000 commits, made again with every new list, for a list served on demand that
+    /// no walk asks the labels of. By default <see cref="GetItemLabel"/>.
+    /// </summary>
+    internal string? PeekItemLabel(int index) => GetItemLabel(index);
+
+    /// <summary>
     /// Performs the item's primary action (as a click would) when assistive tech
     /// invokes it — the container routes this to the item at <paramref name="index"/>,
     /// so even off-screen, unrealized items can be activated. A no-op if the

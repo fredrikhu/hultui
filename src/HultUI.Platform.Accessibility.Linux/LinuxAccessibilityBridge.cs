@@ -47,8 +47,19 @@ namespace HultUI.Platform.Accessibility.Linux;
 /// </para>
 /// </remarks>
 [SupportedOSPlatform("linux")]
-public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBorrower, IAtSpiTree, IDisposable
+public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBorrower, IEagerItemsLimit, IAtSpiTree, IDisposable
 {
+    /// <summary>
+    /// The most items a list has as item nodes in this bridge's trees; past it they are served on
+    /// demand (<see cref="IEagerItemsLimit"/>). 2,000, where UI Automation's is 200: an AT-SPI client
+    /// keeps a copy of each item it read (libatspi's cache), so a change in an item has to be told, and a
+    /// served item's rename is not; and Orca has not been checked with lists served on demand. Kept until
+    /// it is.
+    /// </summary>
+    internal const int MaxEagerVirtualItems = 2000;
+
+    int IEagerItemsLimit.MaxEagerVirtualItems => MaxEagerVirtualItems;
+
     // The published objects, by element: one for every node of the applied tree but the root. Written
     // on the UI thread, read on the bus thread. One lock: the UI thread is the only writer, reads take
     // none, and Count, which every apply reads, takes them all. A default map grows its locks with its

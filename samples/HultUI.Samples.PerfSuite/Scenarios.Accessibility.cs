@@ -579,6 +579,15 @@ static partial class Scenarios
             "Change one row's label in 1,000 rows with the UIA bridge: one name event over 2,001 nodes",
             ctx => EditOneLabel(ctx, UiaRig.Install(ctx.Window)));
 
+        yield return new Scenario("a11y/insert above 1,000 item rows, UIA",
+            "Put an item above a list of 1,000 item rows with the UIA bridge, as a commit lands in Junction's History (taken out again between steps, untimed): with item nodes every place's item changed, 1,000 Name changes; served on demand past 200 items (plan 17 round 16), the list's number. Checks 3 Name changes a step at most",
+            ctx =>
+            {
+                var rig = UiaRig.Install(ctx.Window);
+                rig.CountNames();
+                return InsertAboveItems(ctx, 1_000, rig, () => rig.NameRaises, least: 0, most: 3);
+            });
+
         yield return new Scenario("a11y/tab through 300 fields, UIA",
             "Press Tab in a 300-field form with the UIA bridge: the focus moves, no rebuild",
             ctx => TabThroughFields(ctx, UiaRig.Install(ctx.Window)));
@@ -835,6 +844,49 @@ static partial class Scenarios
         {
             Run = step => labels[step * 37 % labels.Count].Content += " !",
             Check = Applied(rig),
+        };
+    }
+
+    /// <summary>
+    /// An item put above a list of <paramref name="count"/> item rows, as a commit lands at the top of
+    /// Junction's History, and taken out again between steps (untimed). An item's id is its place, so each
+    /// place has another item: a list of item nodes tells each one renamed, a list served on demand tells
+    /// its number. Checks that the bridge told between <paramref name="least"/> and <paramref name="most"/>
+    /// Name changes a step (<paramref name="names"/>, counted since the step began), and reports them.
+    /// </summary>
+    private static Op InsertAboveItems(Ctx ctx, int count, IBridgeRig rig, Func<int> names, int least, int most)
+    {
+        var items = Enumerable.Range(0, count).Select(i => $"commit {i}").ToList();
+        var list = VirtualListElement<string>.New().ItemHeight(22)
+            .Items(items)
+            .AccessibleItemLabel(s => s)
+            .RenderWith(s => Flex.Row().Padding(new Thickness(2, 8)).Children(Text.New(s).FontSize(12f)))
+            .FlexGrow(1);
+        list.AccessibleName = "History";
+        ctx.Mount(Flex.Column().FlexGrow(1).Children(list));
+        int before = 0;
+        var applied = Applied(rig);
+        return new Op
+        {
+            Reset = _ => { if (list.Items.Count != count) list.Items = items; },
+            Run = step =>
+            {
+                before = names();
+                list.Items = [$"new commit {step}", .. items];
+            },
+            // The rows are made again as the frame draws, after its accessibility phase: the next frame
+            // walks them, 120 ms on, past the 100 ms a layout refresh waits, so all of it is told.
+            Frames = 2,
+            FrameDelta = TimeSpan.FromMilliseconds(120),
+            Figure = () => names() - before,
+            FigureUnit = "names/step",
+            Check = step =>
+            {
+                int told = names() - before;
+                if (list.Items.Count != count + 1) return $"the list has {list.Items.Count} items";
+                if (told < least || told > most) return $"the {rig.Name} bridge told {told} Name changes, not {least}–{most}";
+                return applied(step);
+            },
         };
     }
 

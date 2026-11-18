@@ -419,6 +419,19 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         return label;
     }
 
+    /// <summary>The label kept for item <paramref name="index"/> when there is one for the item there now,
+    /// else made and not kept (<see cref="IAccessibleItemSource.PeekItemLabel"/>): keeping one would size
+    /// the labels kept to the items' number.</summary>
+    string? IAccessibleItemSource.PeekItemLabel(int index)
+    {
+        if (index < 0 || index >= _items.Count) return null;
+        var item = _items[index];
+        if (_labels is { } labels && (uint)index < (uint)labels.Length && labels[index] is { Made: true } kept
+            && EqualityComparer<T>.Default.Equals(kept.Item, item))
+            return kept.Label;
+        return LabelOf(item);
+    }
+
     private string? LabelOf(T item) => _accessibleLabel is { } label ? label(item) : item?.ToString();
 
     int IAccessibleItemSource.ItemOfRow(Element row)

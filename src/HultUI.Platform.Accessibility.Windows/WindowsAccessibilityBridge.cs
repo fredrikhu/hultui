@@ -30,10 +30,29 @@ namespace HultUI.Platform.Accessibility.Windows;
 /// nothing of it is kept (<see cref="ITreeDiffBorrower"/>): the window lends the bridge one diff
 /// for its patches, emptied after each call.
 /// </para>
+/// <para>
+/// A list over <see cref="MaxEagerVirtualItems"/> items has them served on demand
+/// (<see cref="IEagerItemsLimit"/>): the window builds no item nodes for it, and an item's provider
+/// reads the list when a client asks.
+/// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]
-public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ITreeDiffBorrower, IDisposable
+public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ITreeDiffBorrower, IEagerItemsLimit, IDisposable
 {
+    /// <summary>
+    /// The most items a list has as item nodes in this bridge's trees; past it they are served on
+    /// demand (2,000 for any other bridge, <see cref="AccessibilityTreeBuilder.MaxEagerVirtualItems"/>).
+    /// A UI Automation client asks for an item when it reads it, so an item nobody asks for costs
+    /// nothing; an item node is built, diffed and told on every change. With 2,000, a list of 1,000
+    /// items whose contents changed in place told 1,000 Name changes, and the desktop's listener made
+    /// about 13,000 provider calls for them (plan 17 round 16 step 3, real windows on NativeAOT, a ref
+    /// move in Junction with History shown: 1,314.7 → 598.8 KB on the UI thread, 1,002 → 3 raises,
+    /// 13,186 → 199 calls; Vesper's move between two folders of 1,000 files 504.7 → 293.7 KB).
+    /// </summary>
+    internal const int MaxEagerVirtualItems = 200;
+
+    int IEagerItemsLimit.MaxEagerVirtualItems => MaxEagerVirtualItems;
+
     private readonly IntPtr _hwnd;
     private readonly IUiaHostBridge _host;
     private readonly UiaFragmentRoot _fragmentRoot;
@@ -1015,7 +1034,12 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     {
         long told = Volatile.Read(ref _targetIdRaw);
         long target = ResolveFocusTarget();
-        if (target == told && !holderMoved) return;
+        bool renamed = TrackServedTargetName(target, stays: target == told && !holderMoved);
+        if (target == told && !holderMoved)
+        {
+            if (renamed) RaiseServedTargetName(target);
+            return;
+        }
         Volatile.Write(ref _targetIdRaw, target);
         if (!RaiseEvents) return;
         if (told != target)
@@ -1024,6 +1048,71 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
             if (target != 0) RaiseFocusState(target, focused: true);
         }
         if (target != 0) RaiseFocusEvent(target);
+    }
+
+    // The reader's focus while it is a list's item, the name a reader was told it has (with the focus
+    // event, by a diff's Name change, or by the last one raised here) and whether the list served it on
+    // demand then. 0 and null otherwise. UI thread.
+    private long _namedTarget;
+    private string? _namedTargetName;
+    private bool _namedTargetServed;
+
+    /// <summary>
+    /// Keeps the name of the reader's focus <paramref name="target"/> while it is a list's item, and says
+    /// whether a reader has to be told it has another one, when the focus <paramref name="stays"/> on it.
+    /// An item node's rename is told by the diff, or the refresh made in place, that finds it; an item
+    /// served on demand has no node, and its name is read when a client asks for it. A list's contents
+    /// changed under the reader's focus (Junction's History, where a commit lands on row 0 under it;
+    /// Vesper's list, relabelled in place as a folder is entered) told a reader nothing, where an item
+    /// node told the Name change. So it is told here when the item is served on demand now or was then
+    /// (a list that crossed the number its items are served from has new nodes, or none: no diff tells
+    /// the rename). One label read a frame that applied something, while the focus is on such an item,
+    /// kept by the list or made for the read (about 0.1 KB a key move in a list of files), never an
+    /// array as long as the list.
+    /// </summary>
+    private bool TrackServedTargetName(long target, bool stays)
+    {
+        var id = new ElementId(unchecked((ulong)target));
+        bool served = ServedItem(id, out var listId, out int index);
+        string? name;
+        if (served)
+        {
+            // Not GetItemLabel: on the UI thread a list on item rows keeps the label it gives, in an array as
+            // long as the list, which no walk asks for when its items are served on demand (IAccessibleItemSource.PeekItemLabel).
+            try { name = ItemsOf(listId)?.PeekItemLabel(index); }
+            catch { name = null; }
+        }
+        else if (target != 0 && VirtualItemId.TryDecode(id, out listId, out index) && listId != default
+            && NodeOf(listId) is { IsVirtualItemContainer: false } list && (uint)index < (uint)list.Children.Count)
+            name = list.Children[index].Name;
+        else
+        {
+            _namedTarget = 0;
+            _namedTargetName = null;
+            _namedTargetServed = false;
+            return false;
+        }
+        bool renamed = stays && _namedTarget == target && (served || _namedTargetServed)
+            && !string.Equals(name, _namedTargetName, StringComparison.Ordinal);
+        _namedTarget = target;
+        _namedTargetName = name;
+        _namedTargetServed = served;
+        return renamed;
+    }
+
+    /// <summary>A Name property change on the reader's focus, a list's item, with the name it has now
+    /// (<see cref="TrackServedTargetName"/>): on a provider of the item made for it when the list serves it
+    /// on demand, else on its node's wrapper.</summary>
+    private void RaiseServedTargetName(long target)
+    {
+        if (!RaiseEvents) return;
+        var id = new ElementId(unchecked((ulong)target));
+        var name = _namedTargetName is { } n ? UiaVariant.FromBStr(n) : UiaVariant.Empty;
+        if (ServedItem(id, out var listId, out int index))
+            RaiseItemProperty(listId, index, UiaInterop.UIA_NamePropertyId, name);
+        else if (TryWrapper(id, out var wrapper))
+            RaiseProperty(wrapper, UiaInterop.UIA_NamePropertyId, name);
+        else name.Free();
     }
 
     private long ResolveFocusTarget()

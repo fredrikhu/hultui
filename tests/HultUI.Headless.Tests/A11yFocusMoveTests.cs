@@ -28,8 +28,10 @@ public class A11yFocusMoveTests
     private const int FocusChanged = UiaInterop.UIA_AutomationFocusChangedEventId;
 
     /// <summary>Forwards to a real bridge, records the diffs, and can stay deaf until told.</summary>
-    private sealed class Forwarding(IAccessibilityBridge inner) : IAccessibilityBridge
+    private sealed class Forwarding(IAccessibilityBridge inner) : IAccessibilityBridge, IEagerItemsLimit
     {
+        // The real bridge's number of items past which a list's are served on demand (UIA 200, AT-SPI 2,000).
+        public int MaxEagerVirtualItems => AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(inner);
         public bool Active = true;
         public readonly List<TreeDiff> Diffs = [];
         public bool IsActive => Active;

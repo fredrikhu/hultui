@@ -30,8 +30,10 @@ public class A11yLayoutRefreshInPlaceTests
     /// <summary>Counts patches and keeps the applied tree; a real bridge behind it, or the recording
     /// one. It keeps nothing of a diff past the call, as they do not, so the window lends it its diff
     /// for each refresh made in place, as it lends the real bridges (<see cref="ITreeDiffBorrower"/>).</summary>
-    private sealed class Counting(IAccessibilityBridge inner) : IAccessibilityBridge, ITreeDiffBorrower
+    private sealed class Counting(IAccessibilityBridge inner) : IAccessibilityBridge, IEagerItemsLimit, ITreeDiffBorrower
     {
+        // The real bridge's number of items past which a list's are served on demand (UIA 200, AT-SPI 2,000).
+        public int MaxEagerVirtualItems => AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(inner);
         public int Patches;
         public AccessibilityNode? Tree;
         public bool IsActive => true;

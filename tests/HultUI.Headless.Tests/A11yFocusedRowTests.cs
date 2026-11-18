@@ -492,8 +492,10 @@ public sealed class A11yFocusedRowTests : IDisposable
     // ── UIA ──
 
     /// <summary>A real bridge, reported active whether or not a client listens.</summary>
-    private sealed class Active(IAccessibilityBridge inner) : IAccessibilityBridge
+    private sealed class Active(IAccessibilityBridge inner) : IAccessibilityBridge, IEagerItemsLimit
     {
+        // The real bridge's number of items past which a list's are served on demand (UIA 200, AT-SPI 2,000).
+        public int MaxEagerVirtualItems => AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(inner);
         public bool IsActive => true;
         public void ApplyChanges(TreeDiff diff, AccessibilityNode root) => inner.ApplyChanges(diff, root);
         public void ApplyPatchedProperties(TreeDiff patch, AccessibilityNode root) => inner.ApplyPatchedProperties(patch, root);
@@ -605,6 +607,45 @@ public sealed class A11yFocusedRowTests : IDisposable
         // A client's thread reads what was typed and where the caret is.
         var text = OtherThread.Run(() => rig.Bridge.GetText(editor))!;
         Assert.Equal(("x", 1), (text.Text, text.Caret));
+    }
+
+    /// <summary>
+    /// A list over UI Automation's number of items (200) is served on demand, and has item nodes while a
+    /// row holds the focus: its tree is built whole as the row opens and again as it closes (a rename in
+    /// Junction's inline editor). The focus is on the editor while it is open, and on what has it after.
+    /// </summary>
+    [WindowsFact]
+    [SupportedOSPlatform("windows")]
+    public void UIA_AListOverUiasNumber_HasItemNodesWhileARowIsOpen_AndIsServedAgainAfter()
+    {
+        using var rig = new UiaRig();
+        int count = WindowsAccessibilityBridge.MaxEagerVirtualItems + 100;
+        var row = Mount(rig.Session, count);
+        Assert.True(Find(rig.Bridge.RootNode, row.List.Id)!.IsVirtualItemContainer);
+
+        int trees = rig.Session.Window.AccessibilityTreesBuilt;
+        rig.Session.Window.Click(row.EditorElement);
+        Settle(rig.Session);
+        Assert.True(rig.Session.Window.AccessibilityTreesBuilt > trees);
+        var list = Find(rig.Bridge.RootNode, row.List.Id)!;
+        Assert.False(list.IsVirtualItemContainer);
+        Assert.Equal(count, list.Children.Count);
+        var editor = row.EditorElement.Id;
+        Assert.Equal(editor, rig.GetFocus());
+        Assert.Equal(VirtualItemId.For(row.List.Id, CardRow), rig.Parent(editor));
+        Assert.Contains(new UiaRaised(UiaRaisedKind.Event, UiaInterop.UIA_AutomationFocusChangedEventId, editor), rig.Raised);
+        AssertFresh(rig.Session, rig.Bridge.RootNode!);
+
+        rig.Raised.Clear();
+        row.Above.Focus();
+        Settle(rig.Session);
+        list = Find(rig.Bridge.RootNode, row.List.Id)!;
+        Assert.True(list.IsVirtualItemContainer);
+        Assert.Empty(list.Children);
+        Assert.Equal(row.Above.Id, rig.GetFocus());
+        Assert.Equal([row.Above.Id], rig.Raised.Where(r => r.Kind == UiaRaisedKind.Event
+            && r.Id == UiaInterop.UIA_AutomationFocusChangedEventId).Select(r => r.Element));
+        AssertFresh(rig.Session, rig.Bridge.RootNode!);
     }
 
     [WindowsFact]

@@ -25,6 +25,14 @@ static partial class Scenarios
             "Change one row's label in 1,000 rows with the AT-SPI bridge: one name signal over 2,001 nodes",
             ctx => EditOneLabel(ctx, AtSpiRig.Install(ctx.Window)));
 
+        yield return new Scenario("a11y/insert above 1,999 item rows, AT-SPI",
+            "Put an item above a list of 1,999 item rows with the AT-SPI bridge, as a commit lands at the top of a history (taken out again between steps, untimed): 2,000 items, AT-SPI's item nodes still (served on demand past 2,000, where UIA's are past 200), so every place's item renamed is told, as an AT-SPI client keeps a copy of each item it read. Checks 1,999 name signals a step",
+            ctx =>
+            {
+                var rig = AtSpiRig.Install(ctx.Window);
+                return InsertAboveItems(ctx, 1_999, rig, () => rig.NameChanges, least: 1_999, most: 1_999);
+            });
+
         yield return new Scenario("a11y/tab through 300 fields, AT-SPI",
             "Press Tab in a 300-field form with the AT-SPI bridge: the focus moves, no rebuild",
             ctx => TabThroughFields(ctx, AtSpiRig.Install(ctx.Window)));

@@ -448,7 +448,7 @@ virtual items instead, which every bridge read as a List of ListItems until roun
 A context menu and a menu bar's menu are a Menu of MenuItems (round 7, step 13; the user approved
 it on 2026-11-02, question 2). `ContextMenuElement` has the role `Menu`, and the items it publishes
 take their role from it (`AccessibilityTreeBuilder.ItemRoleOf`): UIA Menu (50009) and MenuItem
-(50011), AT-SPI menu (33) and menu item (35), served on demand past 2,000 items as well. A
+(50011), AT-SPI menu (33) and menu item (35), served on demand past 200 items on UIA and 2,000 on AT-SPI as well. A
 dropdown's popup sets `List` again, as a combo box's list is a list, and is read as before. Only
 the roles changed: each item keeps Invoke and SelectionItem on UIA (and Toggle for a choice in
 force), the click action and the selectable state on AT-SPI, and the menu keeps the list's
@@ -636,8 +636,8 @@ built the tree: in MiddleClickAutoScrollTests, rows given a click handler after 
 reader at the scroll's layout refresh five frames on, and the frame a hover move drew before round 13
 step 2 only hid that from the staleness audit (it walked nothing).
 Where a build would make other nodes than a walk can, it builds the tree, as before: a described
-node or a list's item with children whose own properties changed, a list whose items cross the 2,000
-served on demand, described content in another number,
+node or a list's item with children whose own properties changed, a list whose items cross the number
+they are served on demand from (the bridge's: 200 on UIA, 2,000 on AT-SPI), described content in another number,
 the root's own node, or a change no diff tells (whether a node is focusable, another text source). An
 overlay opened or closed in the walk's frame is no such change since plan 17 round 14 step 7: its part
 is put in under the root node or taken out first, and the walk takes the tree with the parts there are
@@ -843,7 +843,7 @@ navigate, and act on the whole list at any size. Built in increments, all done:
 - **Increment 2 (done):** activation — a `ListItem` exposes the UIA Invoke
   pattern; its synthetic id routes back through `IAccessibleItemSource.ActivateItem(index)`.
 - **Increment 3 (done):** on-demand provisioning for large lists. Above
-  `AccessibilityTreeBuilder.MaxEagerVirtualItems` a list is marked
+  the bridge's number of items (below) a list is marked
   `IsVirtualItemContainer` and emits no child nodes; the bridge synthesizes a
   fresh `UiaVirtualItem` per navigation result (identity via the stable
   `VirtualItemId` runtime id, so no caching), resolving name/count/selection
@@ -865,6 +865,47 @@ navigate, and act on the whole list at any size. Built in increments, all done:
   change's previous node. Both are patched in place like an item node's `IsSelected` (no tree
   is built for a move: 0 trees per 40 moves, as before), told by the layout refresh made in
   place, or reported by the differ between two trees.
+- **Increment 5 (done, plan 17 round 16 step 3; the user's question 64 (a), Windows only): the number
+  is the bridge's.** UI Automation serves a list over **200** items on demand
+  (`WindowsAccessibilityBridge.MaxEagerVirtualItems`); AT-SPI keeps **2,000**
+  (`LinuxAccessibilityBridge.MaxEagerVirtualItems`) until Orca is checked with lists served on demand;
+  any other bridge has the builder's 2,000 (`AccessibilityTreeBuilder.MaxEagerVirtualItems`). A bridge
+  says its number through the internal `IEagerItemsLimit` (no API: `IAccessibilityBridge` is public); the
+  window reads it as the bridge is put in (`AccessibilityTreeBuilder.MaxEagerVirtualItemsOf`) and builds,
+  patches and refreshes in place by it, overlays' parts (menus, a dropdown's popup) too. A bridge that
+  wraps another one (`HeadlessUiaReader`, the perf suite's rigs, the tests' `Active` wrappers) says the
+  other one's. Why UIA: a client asks for an item when it reads it, so an item nobody asks for costs
+  nothing, where an item node is built, diffed and told on every change; and a list keyed by index whose
+  contents change in place renamed every item to the desktop's listener, each Name change about 13
+  provider calls. Real windows, NativeAOT, with this desk's listener (0e8bb81a → the change, UI-thread
+  bytes): Junction's start 2,212.3 → 1,835.7 KB; Commit → History 600.0 → 270.2 KB; a ref move with
+  History shown 1,314.7 → 598.8 KB, 1,002 → 3 Name raises, 13,186 → 199 provider calls, 1,086 → 86
+  wrappers kept; Vesper's start in a 1,000-file folder 951.5 → 603.5 KB, a move between two 1,000-file
+  folders 504.7 → 293.7 KB (the first 1,029.0 → 334.6), 1,003 → 3 raises, 13,052 → 52 calls; its viewer
+  opened 1,664.1 → 1,041.4 KB. A key move in Vesper's list of 1,000 files costs 1.2 KB more (17.4 → 29.7
+  KB for 10): each of its events gets a provider made for it. AT-SPI stays: its clients keep a copy of each item they read, so a rename has to
+  be told, and a served item's is not (below).
+
+What a reader hears of a list served on demand that a list of item nodes told otherwise (UIA):
+
+- **A rename of the item the reader's focus is on** (History's row 0 when a commit lands under it,
+  Vesper's list relabelled in place as a folder is entered): one Name property change on the item, with
+  its new name, and no focus event, as an item node's rename told. The bridge keeps the name of the
+  reader's focus while it is a list's item and reads it again at the end of each accessibility phase
+  that applied something (`NotifyChangesApplied`): one label read a frame, while the focus is on such an
+  item, without keeping it (`IAccessibleItemSource.PeekItemLabel`, internal: on the UI thread a list on
+  item rows keeps the labels it gives, in an array as long as the list, 24 KB at every switch back to
+  Junction's History, 480 KB for 20,000 items). It tells it when the item is served now or was then: a list that crossed 200 has new item nodes,
+  or none, and no diff tells the rename. A move tells no rename of the item it leaves: the focus event
+  carries the new item's name. Checked by a real client: `ReaderFocusTests` (a property handler hears it
+  once; the focus handler hears no move).
+- **A rename of any other item** is not told; a client reads its name when it asks, as before.
+- **A list crossing 200 items** builds its tree whole once (item nodes on one side, none on the other);
+  the reader's focus stays on its current item by the same id, with no focus event.
+- **A row that holds the focus** (an inline editor) gives a list over 200 item nodes while it is open:
+  a crossing as the row opens and as it closes.
+- Menus and a dropdown's popup over 200 entries are served on demand too, and read as before (the
+  focus event on the highlighted entry, no SelectionItem on a menu's).
 
 What a screen reader gets for a list of 3,000 items:
 
@@ -876,15 +917,15 @@ What a screen reader gets for a list of 3,000 items:
 | An item's box, offscreen | from the list's viewport and scroll (`AccessibilityNode.TryGetServedItemBox`), where its node would be | the same, in device pixels |
 | A move of the selection | `SelectionItem.IsSelected` on the item that had it and the one that has it, in item order: the same 80 events on the same items as 1,500 items | `state-changed:selected` on the two items, in item order: the same 80 signals as 1,500 items |
 | Items added or removed | `ChildrenBulkAdded` / `ChildrenBulkRemoved` on the list, as for item nodes | one `children-changed` for the first item that came or went, a `cache-remove` for each item object a client may hold past the new end (made for it, named in a signal, or every one after `GetChildren`), and the list's `cache-add` again, which sizes a caching client's list of its children (libatspi's rule, seen live in round 3) |
-| An item a client holds after it went | `UIA_E_ELEMENTNOTAVAILABLE`; after the list shrank to 2,000 items or fewer, it answers from its item's node (the same runtime id) | disposed by the `cache-remove`; its path is unknown |
-| Crossing 2,000 items either way | item nodes added or removed under the list, as before | the items keep their paths and objects: no `cache-remove` for an item that is still there |
+| An item a client holds after it went | `UIA_E_ELEMENTNOTAVAILABLE`; after the list shrank to 200 items or fewer, it answers from its item's node (the same runtime id) | disposed by the `cache-remove`; its path is unknown |
+| Crossing the bridge's number either way (UIA 200, AT-SPI 2,000) | item nodes added or removed under the list, as before; the reader's focus stays on its item | the items keep their paths and objects: no `cache-remove` for an item that is still there |
 
 Where it differs from a list of item nodes:
 
-- **A relabelled item is not told.** Its name is read when asked. A UIA client reads it
-  live anyway; an AT-SPI client that already fetched it keeps its copy until it asks again
-  (an item node's change sends `accessible-name`). Telling it would mean keeping a label
-  per item a client holds and comparing them on every refresh.
+- **A relabelled item is not told**, but for the one the reader's focus is on, on UIA (above). Its
+  name is read when asked. A UIA client reads it live anyway; an AT-SPI client that already fetched
+  it keeps its copy until it asks again (an item node's change sends `accessible-name`). Telling it
+  would mean keeping a label per item a client holds and comparing them on every refresh.
 - **UIA raises no `ElementSelected` / `ElementAddedToSelection` events**, and neither does the
   item-node path: both raise the `IsSelected` property changes only.
 - **No `manages-descendants` state** on the list's AT-SPI object. With it, libatspi would
