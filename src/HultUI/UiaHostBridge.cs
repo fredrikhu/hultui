@@ -149,6 +149,13 @@ internal sealed class UiaHostBridge : IUiaHostBridge, IDisposable
             if (GetElementOrNull(listId) is not ScrollViewElement sv || sv is not IAccessibleItemSource src)
                 return true;
             if (index < 0 || index >= src.ItemCount) return true;
+            if (src.ItemRect(index) is { } r)
+            {
+                // Placed on both axes: off-screen when it misses the viewport on either.
+                var viewport = sv.Layout.AbsoluteContentBox;
+                float x = r.X - sv.ScrollOffsetX, y = r.Y - sv.ScrollOffsetY;
+                return x + r.Width <= 0f || x >= viewport.Width || y + r.Height <= 0f || y >= viewport.Height;
+            }
             // The item is offscreen when it sits above or below the list's own
             // viewport (its dominant clip), given the current scroll.
             float itemTop = index * src.ItemHeight - sv.ScrollOffsetY;
@@ -242,6 +249,11 @@ internal sealed class UiaHostBridge : IUiaHostBridge, IDisposable
             // by the list's own scroll and by every ancestor scroll view — the same
             // adjustment AccessibilityTreeBuilder bakes into materialized nodes.
             var content = sv.ScreenContentBox;
+            if (src.ItemRect(index) is { } r)
+            {
+                layoutRect = new Rect(content.X - sv.ScrollOffsetX + r.X, content.Y - sv.ScrollOffsetY + r.Y, r.Width, r.Height);
+                return true;
+            }
             float top = content.Y - sv.ScrollOffsetY + index * src.ItemHeight;
             float left = content.X - sv.ScrollOffsetX;
             layoutRect = new Rect(left, top, content.Width, src.ItemHeight);

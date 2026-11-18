@@ -195,8 +195,18 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
             if (FindElement(listId) is ScrollViewElement list and IAccessibleItemSource source
                 && index >= 0 && index < source.ItemCount)
             {
-                var (top, height) = source.ItemBounds(index) ?? (index * source.ItemHeight, source.ItemHeight);
-                list.ScrollRangeIntoView(top, height);
+                if (source.ItemRect(index) is { } cell)
+                {
+                    // Placed on both axes (a list in columns, rows wider than the list): its column,
+                    // as the list reveals an index, and its row.
+                    list.ScrollRangeIntoViewHorizontal(cell.X, cell.Width);
+                    list.ScrollRangeIntoView(cell.Y, cell.Height);
+                }
+                else
+                {
+                    var (top, height) = source.ItemBounds(index) ?? (index * source.ItemHeight, source.ItemHeight);
+                    list.ScrollRangeIntoView(top, height);
+                }
             }
             id = listId;
         }

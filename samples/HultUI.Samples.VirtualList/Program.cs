@@ -65,6 +65,9 @@ var root = Flex.Column(gap: 0).Children(
         Button.New("Scroll to top").OnClick(_ => ScrollTo(0)),
         Button.New("Scroll to middle").OnClick(_ => ScrollTo(items.Count / 2)),
         Button.New("Scroll to bottom").OnClick(_ => ScrollTo(items.Count - 1)),
+        // Rows, or columns that scroll sideways (a file manager's Brief view).
+        Button.New("Columns").OnClick(_ =>
+            virtualList.Flow(virtualList.Flow == ListFlow.Rows ? ListFlow.Columns : ListFlow.Rows, 220f)),
         Box.New().FlexGrow(1),
         selectedText.FontSize(13f).TextColor(Color.FromHex("#64748B"))
     ),
@@ -134,7 +137,12 @@ Element MakeRow(ItemData item)
 
 void ScrollTo(int index)
 {
-    virtualList.ScrollIndexIntoView(index, ScrollAlignment.Start);
+    // Where the item is, in either flow: its column in columns, its row in rows.
+    var cell = virtualList.ItemRect(index);
+    if (virtualList.Flow == ListFlow.Columns)
+        virtualList.ScrollRangeIntoViewHorizontal(cell.X, cell.Width);
+    else
+        virtualList.ScrollRangeIntoView(cell.Y, cell.Height, ScrollAlignment.Start);
     statusText.Content = $"Scrolled to item #{index:N0}";
 }
 

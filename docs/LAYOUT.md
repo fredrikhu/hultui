@@ -664,14 +664,13 @@ Don't set `StopPropagation` on a wheel event: in this framework it also ends the
 remaining handlers, which is what used to keep an app's own wheel handler on a scroll view
 from ever running.
 
-One constraint still decides how a wide *virtualized* list has to be built:
+A `VirtualListElement` scrolls sideways itself in two cases: rows wider than the viewport
+(`.RowWidth(w)`), and items laid out in columns (`.Flow(ListFlow.Columns, width)`, a file
+manager's Brief view); see [ELEMENTS.md — Sideways: columns and wide rows](ELEMENTS.md). What
+it cannot do on its own is pan one cell of a row while fixed gutters beside it stay put.
 
-- **A `VirtualListElement` cannot scroll sideways at all.** Its content width is pinned
-  to the viewport, so `ScrollOffsetX` is permanently 0. A plain `ScrollView` measures its
-  children and can.
-
-The pattern that works, used by every wide list in the apps (a side-by-side diff, a
-file viewer): keep **one vertical scroll view**, hold the horizontal offset as app state
+The pattern for that, used by the wide lists in the apps that pan beside gutters (a
+side-by-side diff, a file viewer): keep **one vertical scroll view**, hold the horizontal offset as app state
 in a `HorizontalPan`, and apply it as a **negative left margin on the content inside a
 cell with `OverflowX(Overflow.Hidden)`** — which is what `HorizontalPan.Cell(content)`
 builds. The margin both shifts the content left and widens it by the same amount

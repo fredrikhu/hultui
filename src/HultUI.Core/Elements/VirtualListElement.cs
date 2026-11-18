@@ -10,7 +10,8 @@ namespace HultUI.Core.Elements;
 
 /// <summary>
 /// Virtualized list element that only materializes elements for visible items.
-/// Uses a fixed item height for efficient offset calculation and element recycling.
+/// Uses a fixed item height for efficient offset calculation and element recycling, in rows,
+/// or in columns (<see cref="Flow"/>).
 /// Extends ScrollViewElement to reuse scroll rendering, hit testing, and scrollbar UI.
 /// </summary>
 public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSource
@@ -26,6 +27,22 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     private Func<T, ListItemState, Element>? _itemStateTemplate;
     // The current item: the keyboard's cursor, apart from the selection. -1 for none.
     private int _currentIndex = -1;
+
+    // Column flow (Flow): items fill a column of _rowsPerColumn cells, ColumnWidth wide, then the
+    // next column; worked out from the viewport's height in UpdateScrollExtent.
+    private ListFlow _flow;
+    private float _columnWidth = 200f;
+    private int _rowsPerColumn = 1;
+    // Row flow only: rows at least this wide, scrolled sideways by the list itself; 0 is the viewport's.
+    private float _rowWidth;
+    // A reveal by index in column flow, asked before the list knew its rows per column; -1 for none.
+    // Held here, not in ScrollViewElement: only the list knows the column an index lands in.
+    private int _pendingColumnReveal = -1;
+
+    private const string ColumnsHaveOneHeight =
+        "A list in ListFlow.Columns has one ItemHeight; ItemHeightFor is not supported there.";
+    private const string ColumnsHoldNoRow =
+        "A list in ListFlow.Columns holds no sticky rows; StickyRowFor is not supported there.";
 
     /// <summary>Whether realized rows are kept across rebuilds: with <see cref="ItemRowTemplate"/>
     /// or <see cref="ItemStateTemplate"/>, which promise a row shows only its item and state.</summary>
@@ -419,6 +436,22 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     bool IAccessibleItemSource.TakesAncestorFocus => TakesAncestorFocus;
     bool IAccessibleItemSource.CanSelectMultiple => CanSelectMultiple;
 
+    /// <summary>
+    /// Where an item sits, for assistive technology, on both axes: its cell in column flow, and in
+    /// rows wider than the list (<see cref="RowWidth"/>) its row across the content it scrolls
+    /// sideways through, at <see cref="IAccessibleItemSource.ItemBounds"/>' place (its sticky shift
+    /// included). Null in other rows, which ItemBounds places, and out of range. Read as it is, on
+    /// any thread: the last layout pass's rows per column.
+    /// </summary>
+    Rect? IAccessibleItemSource.ItemRect(int index)
+    {
+        if ((uint)index >= (uint)_items.Count) return null;
+        if (_flow == ListFlow.Columns) return CellRect(index, Math.Max(1, _rowsPerColumn));
+        if (_rowWidth <= 0) return null;
+        var (top, height) = ((IAccessibleItemSource)this).ItemBounds(index) ?? (index * _itemHeight, _itemHeight);
+        return new Rect(0, top, Math.Max(Layout.AbsoluteContentBox.Width, _rowWidth), height);
+    }
+
     IReadOnlyList<int> IAccessibleItemSource.SelectedIndices =>
         CanSelectMultiple ? SelectedIndices
                           : (SelectedIndex >= 0 ? new[] { SelectedIndex } : []);
@@ -563,11 +596,30 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         if (!KeyboardScrollEnabled) return;
         if ((e.Modifiers & ChordModifiers) != 0) return;   // someone else's shortcut
 
+        float beforeX = _scrollOffsetX, beforeY = _scrollOffsetY;
+        if (_flow == ListFlow.Columns)
+        {
+            // Sideways: a column per arrow, a viewport less a column per page; Up and Down are not ours.
+            float pageX = Math.Max(_columnWidth, Layout.AbsoluteContentBox.Width - _columnWidth);
+            switch (e.Key)
+            {
+                case KeyCode.Right: MoveOffsetX(beforeX + _columnWidth); break;
+                case KeyCode.Left: MoveOffsetX(beforeX - _columnWidth); break;
+                case KeyCode.PageDown: MoveOffsetX(beforeX + pageX); break;
+                case KeyCode.PageUp: MoveOffsetX(beforeX - pageX); break;
+                case KeyCode.Home: MoveOffsetX(0); break;
+                case KeyCode.End: MoveOffsetX(float.MaxValue); break;   // it clamps
+                default: return;
+            }
+            e.StopPropagation = true;
+            NotifyUserScrolled(beforeX, beforeY);
+            return;
+        }
+
         // A page keeps one row of context, matching how editors page. With unequal rows the
         // step follows whichever row is at the top, so a line-at-a-time key moves a line.
         float step = _offsets is null ? _itemHeight : HeightOf(IndexAt(_scrollOffsetY));
         float page = Math.Max(step, Layout.AbsoluteContentBox.Height - step);
-        float beforeX = _scrollOffsetX, beforeY = _scrollOffsetY;
         // The user's, so the list moves now (MoveOffsetY), as the wheel moves it.
         switch (e.Key)
         {
@@ -742,7 +794,177 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     public Func<T, int, float>? ItemHeightFor
     {
         get => _itemHeightFor;
-        set { _itemHeightFor = value; InvalidateItems(); }
+        set
+        {
+            if (value is not null && _flow == ListFlow.Columns)
+                throw new InvalidOperationException(ColumnsHaveOneHeight);
+            _itemHeightFor = value;
+            InvalidateItems();
+        }
+    }
+
+    /// <summary>
+    /// How the items are placed: <see cref="ListFlow.Rows"/> (the default), or
+    /// <see cref="ListFlow.Columns"/>, where every item is <see cref="ItemHeight"/> tall and
+    /// <see cref="ColumnWidth"/> wide, a column holds <see cref="RowsPerColumn"/> of them, and the
+    /// list scrolls sideways only. A change goes back to the start. Columns refuse
+    /// <see cref="ItemHeightFor"/>: unequal heights in columns have no stable geometry.
+    /// </summary>
+    public ListFlow Flow
+    {
+        get => _flow;
+        set
+        {
+            if (_flow == value) return;
+            if (value == ListFlow.Columns && _itemHeightFor is not null)
+                throw new InvalidOperationException(ColumnsHaveOneHeight);
+            if (value == ListFlow.Columns && _stickyRowFor is not null)
+                throw new InvalidOperationException(ColumnsHoldNoRow);
+            _flow = value;
+            _scrollOffsetX = 0;
+            _scrollOffsetY = 0;
+            _pendingColumnReveal = -1;
+            InvalidateItems(keepLabels: true);
+        }
+    }
+
+    /// <summary>The width of a column in <see cref="ListFlow.Columns"/>, at least 1; default 200.
+    /// Read in columns only.</summary>
+    public float ColumnWidth
+    {
+        get => _columnWidth;
+        set
+        {
+            value = Math.Max(1f, value);
+            if (_columnWidth == value) return;
+            _columnWidth = value;
+            InvalidateItems(keepLabels: true);
+        }
+    }
+
+    /// <summary>
+    /// In <see cref="ListFlow.Rows"/>, the least width a row is laid out at; wider than the
+    /// viewport, the list scrolls sideways itself (<see cref="ScrollViewElement.ScrollOffsetX"/>)
+    /// and its rows are stretched to the viewport when it is wider. 0, the default, is the
+    /// viewport's width. Not read in columns.
+    /// </summary>
+    public float RowWidth
+    {
+        get => _rowWidth;
+        set
+        {
+            value = Math.Max(0f, value);
+            if (_rowWidth == value) return;
+            _rowWidth = value;
+            InvalidateItems(keepLabels: true);
+        }
+    }
+
+    /// <summary>In <see cref="ListFlow.Columns"/>, how many items a column holds (at least 1),
+    /// from the viewport's height; in rows, every item.</summary>
+    public int RowsPerColumn => _flow == ListFlow.Columns ? CurrentRowsPerColumn : _items.Count;
+
+    /// <summary>
+    /// The rows per column the next layout pass gives the items the list holds now. Everything
+    /// asked between passes reads this, not <see cref="_rowsPerColumn"/>: Reconcile assigns new
+    /// items before OnAfterBuild, and when they make the columns overflow the bar's room can take
+    /// a row, so the last pass's count would put a reveal or a cursor move in the wrong column.
+    /// </summary>
+    private int CurrentRowsPerColumn
+    {
+        get
+        {
+            var box = Layout.AbsoluteContentBox;
+            return RowsFor(box.Height, box.Width);
+        }
+    }
+
+    /// <summary>Columns needed for <paramref name="count"/> items at <paramref name="rows"/> a column.</summary>
+    private static int ColumnsFor(int count, int rows) => count == 0 ? 0 : (count + rows - 1) / rows;
+
+    /// <summary>
+    /// Rows per column for a viewport of this size: as many whole items as fit, at least one; and
+    /// when the columns then overflow the width with the horizontal bar on, as many as fit above
+    /// the bar, so it never covers the last row (fewer rows only make more columns, so the overflow
+    /// still holds). One while the viewport has no height.
+    /// </summary>
+    private int RowsFor(float height, float width)
+    {
+        if (height <= 0) return 1;
+        int rows = Math.Max(1, (int)(height / _itemHeight));
+        if (ShowScrollbarX && ColumnsFor(_items.Count, rows) * _columnWidth > width)
+            rows = Math.Max(1, (int)((height - ScrollbarWidth) / _itemHeight));
+        return rows;
+    }
+
+    /// <summary>
+    /// Where item <paramref name="index"/> sits in content space, as
+    /// <see cref="ScrollViewElement.ScrollRangeIntoView(float, float)"/> takes it: its column and
+    /// row in <see cref="ListFlow.Columns"/>, its row's offset and height in rows. UI thread.
+    /// </summary>
+    public Rect ItemRect(int index)
+    {
+        if ((uint)index >= (uint)_items.Count) throw new ArgumentOutOfRangeException(nameof(index));
+        if (_flow == ListFlow.Columns) return CellRect(index, CurrentRowsPerColumn);
+        EnsureOffsets();
+        return new Rect(0, OffsetOf(index), Math.Max(_contentWidth, _rowWidth), HeightOf(index));
+    }
+
+    private Rect CellRect(int index, int rows) =>
+        new(index / rows * _columnWidth, index % rows * _itemHeight, _columnWidth, _itemHeight);
+
+    /// <summary>
+    /// The index a cursor move from <paramref name="index"/> lands on, for this list's flow and
+    /// size, clamped to the items; -1 for an empty list. In columns Left and Right move a column
+    /// (so Left in the first goes to the first item and Right in the last to the last), and a page
+    /// is every whole column the viewport shows; in rows Left and Right stay, and a page is the
+    /// rows a viewport shows less one. Up, Down, Home and End are the same in both. An index
+    /// outside the items, -1 for no current item included, is first taken as the nearest end, so
+    /// Down from -1 lands on item 1.
+    /// </summary>
+    public int IndexAfter(int index, ListMove move)
+    {
+        int count = _items.Count;
+        if (count == 0) return -1;
+        index = Math.Clamp(index, 0, count - 1);
+        int rows = CurrentRowsPerColumn;
+        int target;
+        switch (move)
+        {
+            case ListMove.Up: target = index - 1; break;
+            case ListMove.Down: target = index + 1; break;
+            case ListMove.Home: target = 0; break;
+            case ListMove.End: target = count - 1; break;
+            case ListMove.Left or ListMove.Right when _flow == ListFlow.Columns:
+                target = move == ListMove.Left ? index - rows : index + rows;
+                break;
+            case ListMove.Left or ListMove.Right: target = index; break;
+            case ListMove.PageUp or ListMove.PageDown when _flow == ListFlow.Columns:
+            {
+                int columns = Math.Max(1, (int)(Layout.AbsoluteContentBox.Width / _columnWidth));
+                int page = rows * columns;
+                target = move == ListMove.PageUp ? index - page : index + page;
+                break;
+            }
+            default: target = PageInRows(index, move == ListMove.PageDown); break;
+        }
+        return Math.Clamp(target, 0, count - 1);
+    }
+
+    /// <summary>A page in row flow: the rows a viewport shows less one, at least one row.</summary>
+    private int PageInRows(int index, bool down)
+    {
+        float viewportHeight = Layout.AbsoluteContentBox.Height;
+        EnsureOffsets();
+        if (_offsets is null)
+        {
+            int step = Math.Max(1, (int)(viewportHeight / _itemHeight) - 1);
+            return down ? index + step : index - step;
+        }
+        float reach = viewportHeight - HeightOf(index);
+        int landed = IndexAt(Math.Max(0, OffsetOf(index) + (down ? reach : -reach)));
+        if (landed == index) landed = down ? index + 1 : index - 1;
+        return landed;
     }
 
     /// <summary>
@@ -772,7 +994,13 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     public Func<T, int, bool>? StickyRowFor
     {
         get => _stickyRowFor;
-        set { _stickyRowFor = value; InvalidateItems(); }
+        set
+        {
+            if (value is not null && _flow == ListFlow.Columns)
+                throw new InvalidOperationException(ColumnsHoldNoRow);
+            _stickyRowFor = value;
+            InvalidateItems();
+        }
     }
 
     /// <summary>
@@ -811,18 +1039,35 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     public void InvalidateRows() => InvalidateItems(keepLabels: true);
 
     /// <summary>
-    /// Scrolls the row of item <paramref name="index"/> into view, left where
-    /// <paramref name="alignment"/> says (by default the least scroll that shows it whole). An
-    /// index out of range is taken as the nearest end; an empty list does nothing. Works from
-    /// <c>OnAfterBuild</c>, before layout, as <see cref="ScrollViewElement.ScrollRangeIntoView(float, float)"/>
-    /// does; call it after <see cref="Items"/> is set, since it measures the rows the list holds.
+    /// Scrolls item <paramref name="index"/> into view: in rows, its row, left where
+    /// <paramref name="alignment"/> says (by default the least scroll that shows it whole); in
+    /// <see cref="ListFlow.Columns"/>, its column, by the least scroll sideways, whatever the
+    /// alignment. An index out of range is taken as the nearest end; an empty list does nothing.
+    /// Works from <c>OnAfterBuild</c>, before layout, as
+    /// <see cref="ScrollViewElement.ScrollRangeIntoView(float, float)"/> does; call it after
+    /// <see cref="Items"/> is set, since it measures the items the list holds.
     /// </summary>
     public void ScrollIndexIntoView(int index, ScrollAlignment alignment = ScrollAlignment.Nearest)
     {
         if (_items.Count == 0) return;
         index = Math.Clamp(index, 0, _items.Count - 1);
-        EnsureOffsets();
-        ScrollRangeIntoView(OffsetOf(index), HeightOf(index), alignment);
+        _pendingColumnReveal = -1;   // a later reveal replaces a held one
+        if (_flow == ListFlow.Columns)
+        {
+            // The column comes from the rows per column, which the layout pass works out: before
+            // it, the reveal waits for it. In columns the reveal is the least scroll sideways.
+            var box = Layout.AbsoluteContentBox;
+            if (box.Width <= 0 || box.Height <= 0)
+            {
+                _pendingColumnReveal = index;
+                return;
+            }
+            var cell = ItemRect(index);
+            ScrollRangeIntoViewHorizontal(cell.X, cell.Width);
+            return;
+        }
+        var row = ItemRect(index);
+        ScrollRangeIntoView(row.Y, row.Height, alignment);
     }
 
     /// <summary>
@@ -972,6 +1217,20 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     private float TotalHeight =>
         _offsets is { } o ? o[^1] : _items.Count * _itemHeight;
 
+    /// <summary>A wheel notch moves a column in column flow.</summary>
+    protected override float SidewaysWheelStep => _flow == ListFlow.Columns ? _columnWidth : ScrollSpeed;
+
+    /// <summary>Clamped against the items the list holds now, as <see cref="ClampY"/> is: the
+    /// columns they need, or the row width.</summary>
+    protected override float ClampX(float value)
+    {
+        float viewportWidth = Layout.AbsoluteContentBox.Width;
+        float width = _flow == ListFlow.Columns
+            ? ColumnsFor(_items.Count, CurrentRowsPerColumn) * _columnWidth
+            : Math.Max(viewportWidth, _rowWidth);
+        return Math.Clamp(value, 0, Math.Max(0, width - viewportWidth));
+    }
+
     /// <summary>
     /// How far this list can scroll comes from the rows it holds <i>now</i>, not from the
     /// extent the last layout pass left behind. Reconcile assigns the new items before a
@@ -983,6 +1242,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// </summary>
     protected override float ClampY(float value)
     {
+        if (_flow == ListFlow.Columns) return 0;
         EnsureOffsets();
         float viewportHeight = Layout.AbsoluteContentBox.Height;
         return Math.Clamp(value, 0, Math.Max(0, TotalHeight - viewportHeight));
@@ -1108,9 +1368,43 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// layout pass: it measures and clamps, and touches no children.</summary>
     internal override void UpdateScrollExtent()
     {
+        var box = Layout.AbsoluteContentBox;
+        if (_flow == ListFlow.Columns)
+        {
+            int rows = RowsFor(box.Height, box.Width);
+            if (rows != _rowsPerColumn)
+            {
+                // Every cell moves: the window is realized again, the cells kept are re-placed.
+                _rowsPerColumn = rows;
+                _visibleStart = -1;
+                _visibleEnd = -1;
+            }
+            _contentHeight = box.Height;
+            _contentWidth = ColumnsFor(_items.Count, rows) * _columnWidth;
+            SetOffsets(ClampX(_scrollOffsetX), 0);
+            ApplyHeldOffsets();
+            ApplyPendingReveal();
+            // A reveal by index held for the rows per column (ScrollIndexIntoView): its column, by
+            // the least scroll sideways.
+            if (_pendingColumnReveal >= 0 && box.Width > 0 && box.Height > 0)
+            {
+                int index = _pendingColumnReveal;
+                _pendingColumnReveal = -1;
+                if (_items.Count > 0)
+                {
+                    var cell = CellRect(Math.Min(index, _items.Count - 1), rows);
+                    float target = cell.X < _scrollOffsetX ? cell.X
+                        : cell.Right > _scrollOffsetX + box.Width ? cell.Right - box.Width
+                        : _scrollOffsetX;
+                    SetOffsets(ClampX(target), 0);
+                }
+            }
+            return;
+        }
+
         EnsureOffsets();
         _contentHeight = TotalHeight;
-        _contentWidth = Layout.AbsoluteContentBox.Width;
+        _contentWidth = Math.Max(box.Width, _rowWidth);
 
         SetOffsets(ClampX(_scrollOffsetX), ClampY(_scrollOffsetY));
         ApplyHeldOffsets();
@@ -1162,11 +1456,27 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             host.Box.Height = height;
             host.MarkLayoutDirty();
         }
+        // In columns, over the selected cell: one column wide; in rows, as wide as a row: the host's
+        // own width, or the rows' when they are wider than the list (RowWidth).
+        bool columns = _flow == ListFlow.Columns;
+        var contentBox = Layout.AbsoluteContentBox;
+        float across = columns ? _columnWidth : Math.Max(contentBox.Width, _rowWidth);
+        var width = columns || _rowWidth > 0 ? Dimension.Px(across) : Dimension.Percent(100);
+        if (host.Box.Width != width)
+        {
+            host.Box.Width = width;
+            host.MarkLayoutDirty();
+        }
         if ((host.DirtyFlags & DirtyFlags.Style) != 0)
             StyleResolver.ResolveUnder(host, ResolvedInherited, _activeTheme);
-        var contentBox = Layout.AbsoluteContentBox;
         if ((host.DirtyFlags & DirtyFlags.Layout) != 0)
-            _childLayoutEngine.PerformLayout(host, contentBox.Width, height);
+            _childLayoutEngine.PerformLayout(host, across, height);
+        if (columns)
+        {
+            var cell = CellRect(_selectedIndex, _rowsPerColumn);
+            SetAbsolutePosition(host, contentBox.X + cell.X, contentBox.Y + cell.Y);
+            return;
+        }
         float y = OffsetOf(_selectedIndex);
         if (_stickyRowFor is not null)
         {
@@ -1263,6 +1573,9 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
         var contentBox = Layout.AbsoluteContentBox;
         var viewportWidth = contentBox.Width;
+        bool columns = _flow == ListFlow.Columns;
+        // A row is laid out at least RowWidth wide; a cell at its column's width.
+        float rowWidth = Math.Max(viewportWidth, _rowWidth);
 
         // Style-resolve and layout only newly created children (those still dirty).
         // Reused elements already have valid internal layout from a prior frame.
@@ -1285,9 +1598,33 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             if ((child.DirtyFlags & DirtyFlags.Layout) != 0)
             {
                 var margin = child.BoxRead.Margin;
-                _childLayoutEngine.PerformLayout(child, viewportWidth - margin.Horizontal,
-                    (child == _spacer || child == _heldGap ? _itemHeight : HeightOf(RowOfChild(i))) - margin.Vertical);
+                if (!columns)
+                    _childLayoutEngine.PerformLayout(child, rowWidth - margin.Horizontal,
+                        (child == _spacer || child == _heldGap ? _itemHeight : HeightOf(RowOfChild(i))) - margin.Vertical);
+                else if (child == _spacer)
+                    _childLayoutEngine.PerformLayout(child, 0, 0);
+                else
+                    _childLayoutEngine.PerformLayout(child, _columnWidth - margin.Horizontal, _itemHeight - margin.Vertical);
             }
+        }
+
+        if (columns)
+        {
+            // Every cell at its column and row, in content space, its margins inside its place.
+            for (int i = 0; i < Children.Count; i++)
+            {
+                var child = Children[i];
+                if (child == _overlayHost) continue;   // PlaceSelectionOverlay
+                if (child == _spacer)
+                {
+                    SetAbsolutePosition(child, contentBox.X, contentBox.Y);
+                    continue;
+                }
+                var cell = CellRect(RowOfChild(i), _rowsPerColumn);
+                var margin = child.BoxRead.Margin;
+                SetAbsolutePosition(child, contentBox.X + cell.X + margin.Left, contentBox.Y + cell.Y + margin.Top);
+            }
+            return;
         }
 
         // Position every child at its exact virtual Y coordinate.
@@ -1361,10 +1698,22 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
         var viewport = Layout.AbsoluteContentBox;
         if (viewport.Height <= 0) return;
+        bool columns = _flow == ListFlow.Columns;
+        if (columns && viewport.Width <= 0) return;
 
         // Calculate visible range with 1-item overscan on each side
         int newStart, newEnd;
-        if (_offsets is null)
+        if (columns)
+        {
+            // The columns the viewport shows, partly shown ones included, and no more: they are
+            // realized in the same render pass that moved the offset.
+            int rows = _rowsPerColumn;
+            int firstColumn = (int)(_scrollOffsetX / _columnWidth);
+            int lastColumn = (int)((_scrollOffsetX + viewport.Width) / _columnWidth);
+            newStart = Math.Min(_items.Count, firstColumn * rows);
+            newEnd = Math.Min(_items.Count, (lastColumn + 1) * rows);
+        }
+        else if (_offsets is null)
         {
             newStart = Math.Max(0, (int)(_scrollOffsetY / _itemHeight) - 1);
             int maxVisible = (int)Math.Ceiling(viewport.Height / _itemHeight) + 3;
@@ -1419,8 +1768,10 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         _movingNext = 0;
         _rowsToldByPlace = false;
 
-        // Update spacer height to push items to correct virtual positions
-        _spacer.Box.Height = OffsetOf(held >= 0 ? held : newStart);
+        // Update spacer height to push items to correct virtual positions; in columns the cells
+        // are placed absolutely and it takes no room.
+        _spacer.Box.Height = columns ? 0 : OffsetOf(held >= 0 ? held : newStart);
+        _spacer.Box.Width = columns ? Dimension.Px(0) : Dimension.Auto;
         _spacer.Flex.FlexShrink = 0;
         _spacer.BackgroundColor = Color.Transparent;
         if (held >= 0)
@@ -1469,6 +1820,13 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     {
         if (_activeElements.TryGetValue(index, out var live))
         {
+            // A kept cell moves to another column and row when the rows per column change.
+            if (_flow == ListFlow.Columns)
+            {
+                if (PlaceCell(live.Element, index)) live.Element.MarkLayoutDirty();
+                TellSelected(live.Element, index);
+                return;
+            }
             // A kept row's height can move without its item changing (a height function
             // rebuilt with the owner); it is forced again, the way a new row is below.
             if (KeepsRows && live.Element.Box.Height != Dimension.Px(RowHeight(live.Element, index)))
@@ -1491,7 +1849,11 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         // A row the patch moved off this item's old index comes back unmade.
         if (_moving is { Count: > 0 } && TakeMovingRow(item, state) is { } moved)
         {
-            if (moved.Box.Height != Dimension.Px(RowHeight(moved, index)))
+            if (_flow == ListFlow.Columns)
+            {
+                if (PlaceCell(moved, index)) moved.MarkLayoutDirty();
+            }
+            else if (moved.Box.Height != Dimension.Px(RowHeight(moved, index)))
             {
                 moved.Box.Height = RowHeight(moved, index);
                 moved.MarkLayoutDirty();
@@ -1520,10 +1882,25 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
                     if (ReferenceEquals(moving[m].Element, kept)) { moving.RemoveAt(m); break; }
         }
 
-        // Force item to its row height, full width: its place's, less its margins, which are laid
-        // out inside the place (LayoutVisibleChildren).
-        element.Box.Height = RowHeight(element, index);
-        element.Flex.FlexShrink = 0;
+        if (_flow == ListFlow.Columns)
+        {
+            // A cell: one column wide and one item tall, less its margins, placed at its column and row.
+            var margin = element.BoxRead.Margin;
+            element.Box.Width = Math.Max(0f, _columnWidth - margin.Horizontal);
+            element.Box.Height = Math.Max(0f, _itemHeight - margin.Vertical);
+            element.Flex.FlexShrink = 0;
+            element.Position.Type = PositionType.Absolute;
+            PlaceCell(element, index);
+        }
+        else
+        {
+            // Force item to its row height, full width (at least RowWidth): its place's, less its
+            // margins, which are laid out inside the place (LayoutVisibleChildren).
+            element.Box.Height = RowHeight(element, index);
+            element.Flex.FlexShrink = 0;
+            if (_rowWidth > 0)
+                element.Box.MinWidth = Dimension.Px(Math.Max(0f, _rowWidth - element.BoxRead.Margin.Horizontal));
+        }
         if (_stickyRowFor is not null) MarkSticky(element, index);
         TellSelected(element, index);
 
@@ -1592,6 +1969,21 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         if (type == PositionType.Sticky) row.Position.Top = Dimension.Px(0);
     }
 
+    /// <summary>Puts a cell of column flow at its column and row, in content space, its margins
+    /// inside its place as <see cref="LayoutVisibleChildren"/> puts it (the layout pass places an
+    /// absolute child by Left and Top alone). True when it moved.</summary>
+    private bool PlaceCell(Element cell, int index)
+    {
+        var margin = cell.BoxRead.Margin;
+        var left = Dimension.Px(index / _rowsPerColumn * _columnWidth + margin.Left);
+        var top = Dimension.Px(index % _rowsPerColumn * _itemHeight + margin.Top);
+        var position = cell.Position;
+        if (position.Left == left && position.Top == top) return false;
+        position.Left = left;
+        position.Top = top;
+        return true;
+    }
+
     /// <summary>Whether the children are already the spacer, the row held above the window and its gap
     /// when there is one, and rows <paramref name="start"/> to <paramref name="end"/> as realized, in
     /// order, and the overlay's box when it is shown.</summary>
@@ -1627,7 +2019,15 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             // same height; anything else makes them another way, and they are all made again.
             bool keepRows = ((_itemRowTemplate is not null && vl._itemRowTemplate is not null)
                     || (_itemStateTemplate is not null && vl._itemStateTemplate is not null))
-                && _itemHeight == vl._itemHeight;
+                && _itemHeight == vl._itemHeight
+                && _flow == vl._flow && _columnWidth == vl._columnWidth && _rowWidth == vl._rowWidth;
+            // The fields, not the setters: a flow arrived at by a rebuild keeps the offset it has
+            // (clamped to the new geometry), and every row is made again below. A column reveal
+            // held for the old flow is dropped, as the setter drops it.
+            if (_flow != vl._flow) _pendingColumnReveal = -1;
+            _flow = vl._flow;
+            _columnWidth = vl._columnWidth;
+            _rowWidth = vl._rowWidth;
             bool heightsFromFunction = _itemHeightFor is not null || vl._itemHeightFor is not null;
             _itemTemplate = vl._itemTemplate;
             _itemRowTemplate = vl._itemRowTemplate;

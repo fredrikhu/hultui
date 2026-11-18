@@ -592,8 +592,7 @@ public static partial class AccessibilityTreeBuilder
         {
             var node = nodes[i];
             if (node.ElementId != VirtualItemId.ForSlot(slot, i)) return refresh.Fail("a list's items");
-            var (localTop, height) = source.ItemBounds(i) ?? (i * itemHeight, itemHeight);
-            var box = new Rect(content.X, content.Y + localTop, content.Width, height);
+            var box = ItemBox(source, i, content, itemHeight);
             var unscrolled = place.Unscrolled(box);
             bool offscreen = !RectsIntersect(clip, place.OnScreen(box));
             // Kept labels on item rows are the same string; a label made on each ask is compared.
@@ -629,8 +628,7 @@ public static partial class AccessibilityTreeBuilder
         for (int i = 0; i < kept; i++) pending.Add(nodes[i]);
         for (int i = kept; i < count; i++)
         {
-            var (localTop, height) = source.ItemBounds(i) ?? (i * itemHeight, itemHeight);
-            var box = new Rect(content.X, content.Y + localTop, content.Width, height);
+            var box = ItemBox(source, i, content, itemHeight);
             var item = MakeItemNode(slot, i, role, source.GetItemLabel(i), place.Unscrolled(box), source.ItemIsToggled(i),
                 source.ItemIsExpanded(i), source.IsItemSelected(i), source.ItemIsEnabled(i),
                 !RectsIntersect(clip, place.OnScreen(box)));

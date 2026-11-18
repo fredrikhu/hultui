@@ -241,7 +241,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     private void OnScroll(ScrollEvent evt)
     {
         if (!evt.IsFor(this)) return;
-        float dx = evt.RemainingDeltaX * ScrollSpeed;
+        float dx = evt.RemainingDeltaX * SidewaysWheelStep;
         float dy = evt.RemainingDeltaY * ScrollSpeed;
         if (dx == 0 && dy == 0) return;
 
@@ -254,7 +254,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         // the vertical one, so that is the axis reported used.
         if (dy != 0 && !movedY && dx == 0 && VerticalWheelScrollsSideways && !AncestorCanScrollVertically(dy))
         {
-            movedY = ScrollSideways(dy);
+            movedY = ScrollSideways(evt.RemainingDeltaY * SidewaysWheelStep);
             dy = 0;
         }
 
@@ -365,7 +365,12 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     internal virtual Rect StickyRoom(in Rect box, in Rect view) =>
         new(view.X, view.Y, MathF.Max(view.Width, ContentWidth), MathF.Max(view.Height, ContentHeight));
 
-    protected float ClampX(float value)
+    /// <summary>How far one wheel notch moves the content sideways, the vertical wheel turned
+    /// sideways included. <see cref="ScrollSpeed"/> unless a view has a step of its own (a list
+    /// in columns moves a column).</summary>
+    protected virtual float SidewaysWheelStep => ScrollSpeed;
+
+    protected virtual float ClampX(float value)
     {
         var viewportWidth = Layout.AbsoluteContentBox.Width;
         float maxScroll = Math.Max(0, _contentWidth - viewportWidth);

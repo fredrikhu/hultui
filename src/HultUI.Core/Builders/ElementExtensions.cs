@@ -351,6 +351,23 @@ public static class ElementExtensions
     /// the next pushes it off; see <see cref="VirtualListElement{T}.StickyRowFor"/>.</summary>
     public static VirtualListElement<T> StickyRows<T>(this VirtualListElement<T> el, Func<T, int, bool>? sticky) { el.StickyRowFor = sticky; return el; }
     public static VirtualListElement<T> Items<T>(this VirtualListElement<T> el, IReadOnlyList<T> items) { el.Items = items; return el; }
+
+    /// <summary>Sets <see cref="VirtualListElement{T}.Flow"/> and <see cref="VirtualListElement{T}.ColumnWidth"/>. In
+    /// columns it also shows the horizontal bar, hides the vertical one and turns the vertical wheel sideways, as
+    /// <c>ScrollView.Horizontal()</c> does; in rows it sets those back. Size the list from its parent: its cells never size it.</summary>
+    public static VirtualListElement<T> Flow<T>(this VirtualListElement<T> el, ListFlow flow, float columnWidth = 200f)
+    {
+        el.Flow = flow;
+        el.ColumnWidth = columnWidth;
+        bool columns = flow == ListFlow.Columns;
+        el.ShowScrollbarX = columns;
+        el.ShowScrollbarY = !columns;
+        el.VerticalWheelScrollsSideways = columns;
+        return el;
+    }
+
+    /// <summary>Sets <see cref="VirtualListElement{T}.RowWidth"/>, and shows the horizontal bar when it is above 0.</summary>
+    public static VirtualListElement<T> RowWidth<T>(this VirtualListElement<T> el, float width) { el.RowWidth = width; el.ShowScrollbarX = width > 0; return el; }
     public static VirtualListElement<T> RenderWith<T>(this VirtualListElement<T> el, Func<T, Element> template) { el.ItemTemplate = template; return el; }
 
     /// <summary>Rows made from their item and whether it is selected, and from nothing else: a

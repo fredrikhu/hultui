@@ -1,6 +1,23 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Virtual lists that flow into columns** — `VirtualListElement.Flow = ListFlow.Columns` (with
+  `ColumnWidth`) lays items out in columns that scroll sideways, a file manager's Brief view:
+  rows per column follow the height (less the horizontal bar's room when the columns overflow),
+  only the columns shown are realized, a wheel notch (the vertical one too) moves a column, and
+  middle-click autoscroll moves sideways. `RowWidth` lets rows be wider than the viewport, scrolled
+  by the list's own `ScrollOffsetX`. `ItemRect(i)` and `IndexAfter(i, ListMove)` give the
+  geometry and where a cursor move lands; the keys stay the app's. `ScrollIndexIntoView` asked
+  before the list has a size is held until layout gives it one, in the list (a view's own
+  `ScrollRangeIntoViewHorizontal` before layout is still not held). `IAccessibleItemSource.ItemRect`
+  gives assistive technology each item's cell in columns, and its whole row when rows are wider than
+  the list, asked before `ItemBounds` by the tree
+  builder, its in-place refresh, a list served on demand, the action router's scroll-into-view and
+  the UIA host. `ScrollViewElement` gained a virtual `ClampX` and a `SidewaysWheelStep`. Tests: 42
+  Core (column flow, `IndexAfter`, `RowWidth`), 2 scroll-view, 3 accessibility bounds, 14 headless,
+  1 Windows UI test;
+  perf rows `virtual/columns 1M wheel / jump / replace items`, `virtual/columns cursor walk 100k item rows`,
+  `a11y/columns 2,000 wheel, bridge on`. The VirtualList sample toggles to columns.
 - **The app id** — `Application.SetAppMetadata(name, version, identifier)` names the app to SDL
   (`SDL_SetAppMetadata`), so on Linux every window's Wayland `app_id` and the class of its X11
   `WM_CLASS` are the identifier, which is how the desktop finds the app's `identifier.desktop`

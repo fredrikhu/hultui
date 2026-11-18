@@ -86,6 +86,60 @@ static partial class Scenarios
             "Move the cursor of a 100,000-item list on state rows down a row, on the mounted list with no rebuild of its owner: the row it left and the row it reached are made again, and the one scrolled in",
             ctx => CursorWalk(ctx, 100_000, null));
 
+        yield return new Scenario("virtual/columns 1M wheel",
+            "Wheel 3 notches through 1,000,000 items in columns 220 px wide: a notch is a column, the columns scrolled in are realized",
+            ctx =>
+            {
+                var list = SyntheticColumns(ctx.Rng, 1_000_000);
+                ctx.Mount(list.FlexGrow(1));
+                return new Op
+                {
+                    Run = step => ctx.Window.Wheel(500, 380, 0, WheelDirection(step) * 3),
+                    Check = MovedColumns(list, 3),
+                };
+            });
+
+        yield return new Scenario("virtual/columns 1M jump",
+            "Jump 1,000,000 items in columns to a far column: a whole viewport of new cells",
+            ctx =>
+            {
+                var list = SyntheticColumns(ctx.Rng, 1_000_000);
+                ctx.Mount(list.FlexGrow(1));
+                return new Op { Run = step => list.ScrollOffsetX = (step * 7_919 % 30_000) * 220f };
+            });
+
+        yield return new Scenario("virtual/columns 1M replace items",
+            "Assign a new 1,000,000-item list to a list in columns: the visible cells re-realized",
+            ctx =>
+            {
+                var a = new SyntheticRows(ctx.Rng, 1_000_000);
+                var b = new SyntheticRows(ctx.Rng, 1_000_000);
+                var list = VirtualListElement<RowItem>.New().ItemHeight(24).RenderWith(RenderVirtualRow)
+                    .Flow(ListFlow.Columns, 220f).Items(a);
+                ctx.Mount(list.FlexGrow(1));
+                return new Op { Run = step => list.Items = step % 2 == 0 ? b : a };
+            });
+
+        yield return new Scenario("virtual/columns cursor walk 100k item rows",
+            "Press Right through 100,000 items in columns: the owner moves the selection a column with IndexAfter and reveals it after its build; item rows keep every cell but the two",
+            ctx =>
+            {
+                var pane = new ColumnsWalk(Models(ctx.Rng, 100_000));
+                ctx.Mount(pane.Mount());
+                int madeBefore = 0;
+                return new Op
+                {
+                    Run = _ =>
+                    {
+                        madeBefore = pane.RowsMade;
+                        ctx.Window.PressKey(KeyCode.Right);
+                    },
+                    Figure = () => pane.RowsMade - madeBefore,
+                    FigureUnit = "rows made",
+                    Check = step => pane.Verify(),
+                };
+            });
+
         yield return new Scenario("virtual/selection walk 1,000 rows",
             "Press Down in a 1,000-row list of two-line rows whose selection the owning component's Build reads: the owner rebuilds, the rows are realized again in the render pass",
             ctx => SelectionWalk(ctx, null));
@@ -243,6 +297,26 @@ static partial class Scenarios
             Figure = () => made - madeBefore,
             FigureUnit = "rows made",
             Check = _ => made - madeBefore > 3 ? $"a step made {made - madeBefore} rows" : check?.Invoke(list, list.CurrentIndex),
+        };
+    }
+
+    private static VirtualListElement<RowItem> SyntheticColumns(Random rng, int count) =>
+        VirtualListElement<RowItem>.New().ItemHeight(24).RenderWith(RenderVirtualRow)
+            .Flow(ListFlow.Columns, 220f).Items(new SyntheticRows(rng, count));
+
+    /// <summary>A wheel step moved the list by <paramref name="columns"/> columns, or it was
+    /// stopped by an end.</summary>
+    internal static Func<int, string?> MovedColumns(VirtualListElement<RowItem> list, int columns)
+    {
+        float last = list.ScrollOffsetX;
+        return _ =>
+        {
+            float now = list.ScrollOffsetX, moved = Math.Abs(now - last);
+            float end = Math.Max(0, list.ContentWidth - list.Layout.AbsoluteContentBox.Width);
+            bool atAnEnd = now == 0 || Math.Abs(now - end) < 0.5f;
+            last = now;
+            return Math.Abs(moved - columns * list.ColumnWidth) < 0.5f || (atAnEnd && moved > 0) ? null
+                : $"a step moved the list {moved} px, not {columns} columns";
         };
     }
 
@@ -843,6 +917,57 @@ sealed class SyntheticRows : IReadOnlyList<RowItem>
     }
 
     System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+}
+
+/// <summary>
+/// A Brief view's shape: a list in columns on item rows, its cursor the selection the owner's
+/// Build gives it. Right moves the cursor a column with <see cref="VirtualListElement{T}.IndexAfter"/>,
+/// the owner rebuilds, and the reveal runs after the build.
+/// </summary>
+sealed class ColumnsWalk(List<RowItem> items) : Component
+{
+    private readonly Signal<int> _cursor = new(0);
+    private readonly Ref<VirtualListElement<RowItem>> _list = new();
+
+    /// <summary>Cells the template has made.</summary>
+    public int RowsMade { get; private set; }
+
+    public override Element Build()
+    {
+        var list = VirtualListElement<RowItem>.New().ItemHeight(24)
+            .Items(items)
+            .SelectedIndex(_cursor.Value)
+            .RenderWith((m, selected) => Cell(m, selected))
+            .Flow(ListFlow.Columns, 220f)
+            .FlexGrow(1);
+        list.On<KeyDownEvent>(e =>
+        {
+            if (e.Key != KeyCode.Right || _list.Current is not { } mounted) return;
+            _cursor.Value = Math.Max(0, mounted.IndexAfter(_cursor.Value, ListMove.Right));
+            e.StopPropagation = true;
+        });
+        list.IsFocusable = true;
+        return Flex.Column().FlexGrow(1).Children(list.WithRef(_list));
+    }
+
+    protected internal override void OnAfterBuild() => _list.Current?.ScrollIndexIntoView(_cursor.Value);
+
+    private Element Cell(RowItem m, bool selected)
+    {
+        RowsMade++;
+        return Flex.Row().Background(selected ? Ui.Selected : Color.Transparent).Children(Ui.Row(m.Id, m.Label));
+    }
+
+    /// <summary>Null when the cursor's cell is selected and its column shown whole.</summary>
+    public string? Verify()
+    {
+        if (_list.Current is not { } list) return "the list is not mounted";
+        if (list.SelectedIndex != _cursor.Value) return $"the list's selection is {list.SelectedIndex}, not {_cursor.Value}";
+        var cell = list.ItemRect(_cursor.Value);
+        float left = cell.X - list.ScrollOffsetX;
+        return left >= -0.5f && left + cell.Width <= list.Layout.AbsoluteContentBox.Width + 0.5f ? null
+            : $"item {_cursor.Value}'s column is not shown whole";
+    }
 }
 
 sealed class TableBench : Component

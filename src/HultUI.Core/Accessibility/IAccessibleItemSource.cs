@@ -1,5 +1,6 @@
 using System.Linq;
 using HultUI.Core.Elements;
+using HultUI.Core.Primitives;
 
 namespace HultUI.Core.Accessibility;
 
@@ -71,6 +72,14 @@ public interface IAccessibleItemSource
     /// are computed from when this returns nothing.
     /// </summary>
     (float Top, float Height)? ItemBounds(int index) => null;
+
+    /// <summary>
+    /// Where item <paramref name="index"/> sits in the container's content space, both axes: for
+    /// a container that lays its items out in columns as well as rows. Wins over
+    /// <see cref="ItemBounds"/>; null (the default) falls back to it. Must be cheap, and must not
+    /// realize the item: it may be asked for every item, and off the UI thread.
+    /// </summary>
+    Rect? ItemRect(int index) => null;
 
     /// <summary>
     /// Whether the item at <paramref name="index"/> is a choice that is on or off, or
