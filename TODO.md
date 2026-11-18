@@ -1,6 +1,14 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **The app id** — `Application.SetAppMetadata(name, version, identifier)` names the app to SDL
+  (`SDL_SetAppMetadata`), so on Linux every window's Wayland `app_id` and the class of its X11
+  `WM_CLASS` are the identifier, which is how the desktop finds the app's `identifier.desktop`
+  (`StartupWMClass=identifier`) for its icon and launcher. It may follow `BeginGraphicsPreload` but
+  not a window: a window keeps the id it was created with, so a later call throws. The `SDL_APP_ID`
+  variable still overrides it, for packagers. The checks live in `AppMetadata` (the id's form:
+  letters, digits, `.`, `_`, `-`, no empty part, at most 255). Tests: 16 in
+  `HultUI.Platform.SDL3.Tests` (`AppMetadataTests`; one reads the metadata back from SDL).
 - **Super is not Ctrl off the Mac** — `KeyChord` folds Super into Ctrl only on macOS,
   where ⌘ is the command key (`KeyChord.SuperIsCtrl`, true there and settable for tests); on Linux
   and Windows Super is a modifier of its own, so Super+F5 is not Ctrl+F5 and an app can bind it apart.

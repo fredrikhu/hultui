@@ -113,6 +113,23 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     internal static void RequestDisplayColorEvents(bool enabled) => _requestedDisplayColorEvents = enabled;
 
     /// <summary>
+    /// Gives SDL the app's name, version and id, which its Wayland and X11 backends read when each
+    /// window is created (the <c>app_id</c>, and the class of <c>WM_CLASS</c>). Called by
+    /// <c>Application.SetAppMetadata</c>; throws once a window exists.
+    /// </summary>
+    internal static void SetAppMetadata(string name, string? version, string identifier)
+    {
+        AppMetadata.Validate(name, identifier, _anyWindowCreated);
+        var nameBytes = MarshalUtf8(name);
+        var versionBytes = version is null ? null : MarshalUtf8(version);
+        var identifierBytes = MarshalUtf8(identifier);
+        fixed (byte* n = nameBytes)
+        fixed (byte* v = versionBytes)
+        fixed (byte* i = identifierBytes)
+            SDL_SetAppMetadata(n, v, i);
+    }
+
+    /// <summary>
     /// Whether a Vulkan window subscribes to WinRT's <c>AdvancedColorInfoChanged</c> (Windows 11
     /// 22H2 and later) instead of polling the display configuration every 100 ms. The event
     /// follows a dragged SDR brightness slider immediately where the poll trails it; it is off
