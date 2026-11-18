@@ -158,9 +158,11 @@ public partial class CommanderApp
         var member = _viewerMember;
         string? password = _viewerPassword;
         int generation = ++_viewerGen;
+        var gate = ViewerLoadGate;
 
-        Task.Run(() =>
+        Task.Run(async () =>
         {
+            if (gate is not null) await gate().ConfigureAwait(false);
             var (state, lines) = member is null ? ReadViewerFile(path) : ReadViewerMember(member, password);
             HultUI.Application.InvokeOnMainThread(() =>
             {
@@ -170,6 +172,14 @@ public partial class CommanderApp
             });
         });
     }
+
+    /// <summary>Awaited on the worker before it reads the file, so a test can hold the view on
+    /// "Loading…" until that view has been drawn and then let the text land, as
+    /// <see cref="DiffCompareGate"/> does for the compare view. Without it the read races the
+    /// first frame: on Linux a small file can be read and posted before the frame after the key
+    /// drains the queue, and its text is in the frame that would have drawn "Loading…". Null in
+    /// every shipped path.</summary>
+    internal Func<Task>? ViewerLoadGate;
 
     /// <summary>The diff's reader, unchanged: it keeps the 4MB ceiling and the NUL scan that
     /// tells text from binary, and it is the one that decided how the compared files were

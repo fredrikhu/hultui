@@ -146,7 +146,9 @@ public class WrapResizeFrameTests
     /// body is laid out at, by the body's layout hook before that frame is drawn. A check after
     /// the frame used to build the whole window again, asked from the Loading view (whose code
     /// width counts no lines), and drew another frame (plan 17 round 16: 14 builds and 4 frames
-    /// against a later open's 11 and 3). The reader, then the compare view.
+    /// against a later open's 11 and 3). The reader, then the compare view, each held at its
+    /// waiting view for a few frames, as a big file or a long comparison is: the check after the
+    /// frame built the whole window again from there.
     /// </summary>
     [Fact]
     public void AFirstWrappedOpen_BuildsOnceForItsText_AndMeasuresEachLineOnce_AtTheLaidOutWidth()
@@ -158,15 +160,14 @@ public class WrapResizeFrameTests
         t.Open(wrap: true);
         t.PutCursorOn('L', "a.txt");
 
+        var read = t.HoldViewerLoad();
         FirstOpen(t, () => t.Session.Window.PressKey(KeyCode.F3, KeyModifiers.Shift), "_viewerState", "Loading",
-            "_viewerScrollRef", "ViewerCodeWidth", "_viewerHeightsWidth", "_viewerTops", "the reader");
+            "_viewerScrollRef", "ViewerCodeWidth", "_viewerHeightsWidth", "_viewerTops", "the reader", read);
         t.Press(KeyCode.Escape);
         t.Session.PumpFrames(3);
-        // The comparison held at "Comparing…" for a few frames, as a long one is: the check after
-        // the frame built the whole window again from there.
-        var release = t.HoldComparison();
+        var compare = t.HoldComparison();
         FirstOpen(t, () => t.Session.Window.PressKey(KeyCode.F3), "_diffState", "Comparing",
-            "_diffScrollRef", "DiffCodeWidth", "_diffHeightsWidth", "_diffTops", "the compare view", release);
+            "_diffScrollRef", "DiffCodeWidth", "_diffHeightsWidth", "_diffTops", "the compare view", compare);
     }
 
     /// <summary>
@@ -191,19 +192,27 @@ public class WrapResizeFrameTests
         t.Session.PumpFrames(3);
 
         t.PutCursorOn('L', "a.txt");
+        var read = t.HoldViewerLoad();
         FirstOpen(t, () => t.Session.Window.PressKey(KeyCode.F3, KeyModifiers.Shift), "_viewerState", "Loading",
-            "_viewerScrollRef", "ViewerCodeWidth", "_viewerHeightsWidth", "_viewerTops", "the reader after a resize");
+            "_viewerScrollRef", "ViewerCodeWidth", "_viewerHeightsWidth", "_viewerTops", "the reader after a resize", read);
     }
 
     /// <summary>One open from the key press until nothing draws: two frames, the Loading or
     /// Comparing view's and the text's, the second showing the rows; nothing built after either;
     /// one measure of each line, at the width laid out; and the rows on screen drawing as rows
-    /// made at a measure from scratch do.</summary>
+    /// made at a measure from scratch do.
+    /// <para>The load is held (<paramref name="release"/>) until the waiting view has been drawn
+    /// and some frames have gone by. Unheld, a small file's read can land before the first frame
+    /// is drawn (on Fedora it is read and posted before the frame after the key drains the queue):
+    /// that frame shows the text, the waiting view is never drawn, and the open is one frame, which is
+    /// right too (each line measured once, at the width laid out, nothing built after it) but
+    /// not the open these tests count, the one whose waiting view's frame the check after the
+    /// frame built again from.</para></summary>
     private static void FirstOpen(DiffViewTests.Fixture t, System.Action press, string state, string loading,
-        string scrollRef, string codeWidth, string heightsWidth, string tops, string what, System.Action? release = null)
+        string scrollRef, string codeWidth, string heightsWidth, string tops, string what, System.Action release)
     {
         int frames = 0, builtAfterAFrame = 0, measures;
-        bool textDrawn = false;
+        bool waitingDrawn = false, textDrawn = false;
         var trace = new System.Text.StringBuilder();
         using (var spy = new WrapSpy())
         {
@@ -211,8 +220,8 @@ public class WrapResizeFrameTests
             int builds = Builds(t);
             for (int quiet = 0, i = 0; i < 2000 && quiet < 16; i++)
             {
-                // A held load lands once the waiting view has been drawn and some frames have gone by.
-                if (i == 12) release?.Invoke();
+                // The held load lands once the waiting view has been drawn and some frames have gone by.
+                if (i == 12) release();
                 int b0 = Builds(t);
                 bool drew = t.Session.PumpFrame(System.TimeSpan.FromMilliseconds(16));
                 string now = t.Field<object>(state).ToString()!;
@@ -220,12 +229,14 @@ public class WrapResizeFrameTests
                 // Built again while still loading, after the Loading view was drawn, or after the
                 // text was: a check after a frame, not the text landing.
                 if (Builds(t) != b0 && (textDrawn || (frames > 0 && now == loading))) builtAfterAFrame++;
+                if (drew && frames == 0 && now == loading) waitingDrawn = true;
                 if (drew) frames++;
                 if (drew && now == "Ok") textDrawn = true;
                 quiet = drew || now == loading ? 0 : quiet + 1;
                 System.Threading.Thread.Sleep(2);
             }
-            Assert.True(frames == 2 && builtAfterAFrame == 0, $"{what}: {frames} frames, {builtAfterAFrame} builds after a frame: {trace}");
+            Assert.True(waitingDrawn && frames == 2 && builtAfterAFrame == 0,
+                $"{what}: {(waitingDrawn ? "" : "no waiting view first, ")}{frames} frames, {builtAfterAFrame} builds after a frame: {trace}");
             Assert.Equal("Ok", t.Field<object>(state).ToString());
             float laidOut = (float)typeof(CommanderApp).GetMethod(codeWidth, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(t.App, null)!;
             Assert.Equal(laidOut, t.Field<float>(heightsWidth));
