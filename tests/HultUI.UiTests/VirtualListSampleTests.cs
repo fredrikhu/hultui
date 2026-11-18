@@ -128,6 +128,29 @@ public sealed class VirtualListSampleTests : IDisposable
         Assert.Equal(ControlType.ListItem, found.ControlType);
     }
 
+    [UiFact]
+    public void Columns_ItemsReportColumnBounds()
+    {
+        var toggle = _window.FindFirstDescendant(cf => cf.ByControlType(ControlType.Button).And(cf.ByName("Columns")))
+            ?? throw new InvalidOperationException("no Columns button found");
+        toggle.Patterns.Invoke.Pattern.Invoke();
+
+        // Item 300 is several columns along, so in columns its box is to the right of the first's.
+        Retry.WhileFalse(
+            () =>
+            {
+                var container = List().Patterns.ItemContainer.Pattern;
+                var name = _automation.PropertyLibrary.Element.Name;
+                var first = container.FindItemByProperty(null, name, "Item #0");
+                var later = container.FindItemByProperty(null, name, "Item #300");
+                return first is not null && later is not null
+                    && later.BoundingRectangle.Left > first.BoundingRectangle.Right;
+            },
+            timeout: TimeSpan.FromSeconds(5),
+            throwOnTimeout: true,
+            timeoutMessage: "item 300 is not in a column to the right of item 0");
+    }
+
     public void Dispose()
     {
         _automation.Dispose();

@@ -3222,7 +3222,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 // The text comes from the group's model, so it spans lines that were never
                 // realized — copying 900 lines does not need 900 live labels.
                 if (key.IsDown && key.KeyCode == KeyCode.C
-                    && (key.Modifiers.HasFlag(KeyModifiers.Ctrl) || key.Modifiers.HasFlag(KeyModifiers.Super))
+                    && KeyChord.IsPrimaryHeld(key.Modifiers)
                     && _activeTextGroup is { HasSelection: true } copyGroup)
                 {
                     var text = copyGroup.SelectedText;
@@ -5569,11 +5569,12 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     or AccessibilityProperties.IsExpanded
                 && element.Children.Count != 0 && element.AccessibleTextSource is null)
                 window._a11yWalkDue = true;
-            // A list's selection moved: two items' selected state, which the frame marks on the
-            // applied tree and tells without a rebuild (TryPatchA11y). A rebuild for it
+            // A list's selection moved, or its current item (VirtualListElement.CurrentIndex): two
+            // items' selected state or the reader's focus, which the frame marks on the applied tree
+            // and tells without a rebuild (TryPatchA11y). A rebuild for it
             // built and diffed the whole tree on every key of a walk: Junction's History list, a
             // key every 60 ms, 25 rebuilds per 40 keys became 41, its a11y share 7 % became 30 %.
-            else if (propertyName == AccessibilityProperties.IsSelected
+            else if ((propertyName == AccessibilityProperties.IsSelected || propertyName == AccessibilityProperties.CurrentItem)
                 && element is IAccessibleItemSource { PublishesItemNodes: true })
             {
                 if (!window._a11ySelectionMoved.Contains(element)) window._a11ySelectionMoved.Add(element);

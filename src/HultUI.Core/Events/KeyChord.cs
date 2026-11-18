@@ -8,10 +8,7 @@ namespace HultUI.Core.Events;
 /// spell a shortcut.
 /// </summary>
 /// <remarks>
-/// <para><b>The modifiers must be exactly the chord's.</b> Ctrl+C is not C: a view that switched
-/// on the bare key, as several did, checked out a branch on Ctrl+C. Super counts as Ctrl, so the
-/// Mac's ⌘ works wherever the PC's Ctrl does; AltGr is not Alt (the platform already reports it
-/// apart), and CapsLock and NumLock never count.</para>
+/// <para><b>The modifiers must be exactly the chord's.</b> Ctrl+C is not C: a view that switched on the bare key, as several did, checked out a branch on Ctrl+C. On macOS Super counts as Ctrl, so the Mac's ⌘ works wherever the PC's Ctrl does (<see cref="SuperIsCtrl"/>); on Linux and Windows Super is a modifier of its own, and Super+F5 is not Ctrl+F5. AltGr is not Alt (the platform already reports it apart), and CapsLock and NumLock never count.</para>
 /// <para><b>A letter is the letter printed on the key</b>, on whatever layout: Ctrl+Z is where
 /// the Z is on a German keyboard — <see cref="KeyDownEvent.LayoutKey"/>, the same rule the
 /// framework's text fields use. <b>Any other key is a position</b>: <see cref="KeyCode.Slash"/>
@@ -24,7 +21,23 @@ namespace HultUI.Core.Events;
 /// </remarks>
 public readonly record struct KeyChord
 {
-    private const KeyModifiers Compared = KeyModifiers.Ctrl | KeyModifiers.Alt | KeyModifiers.Shift;
+    private const KeyModifiers Compared = KeyModifiers.Ctrl | KeyModifiers.Alt | KeyModifiers.Shift | KeyModifiers.Super;
+
+    /// <summary>
+    /// Whether <see cref="KeyModifiers.Super"/> counts as Ctrl: true on macOS, so ⌘ works
+    /// wherever the PC's Ctrl does; false elsewhere, where Super is a modifier of its own and
+    /// Super+F5 is not Ctrl+F5. Set it, if at all, at startup before any chord is made: a chord
+    /// keeps the rule it was made under. Tests set it to try the other platform's rule.
+    /// </summary>
+    public static bool SuperIsCtrl { get; set; } = OperatingSystem.IsMacOS();
+
+    /// <summary>
+    /// Whether the platform's command modifier is held: Ctrl, or ⌘ on a Mac
+    /// (<see cref="SuperIsCtrl"/>). For a handler that reads the modifier itself rather than
+    /// through a chord (Ctrl-click, Ctrl with an arrow), so that it agrees with
+    /// <see cref="Matches"/>. Other modifiers held as well do not change the answer.
+    /// </summary>
+    public static bool IsPrimaryHeld(KeyModifiers modifiers) => (Normalize(modifiers) & KeyModifiers.Ctrl) != 0;
 
     /// <summary>The key, or <see cref="KeyCode.Unknown"/> for a character chord.</summary>
     public KeyCode Key { get; }
@@ -32,10 +45,10 @@ public readonly record struct KeyChord
     /// <summary>The character, for a character chord; '\0' for a key.</summary>
     public char Char { get; }
 
-    /// <summary>Ctrl, Alt and Shift; nothing else is kept.</summary>
+    /// <summary>Ctrl, Alt, Shift and Super (Super only where it is not taken as Ctrl); nothing else is kept.</summary>
     public KeyModifiers Modifiers { get; }
 
-    /// <summary>A key with modifiers. <see cref="KeyModifiers.Super"/> is taken as Ctrl.</summary>
+    /// <summary>A key with modifiers. On macOS <see cref="KeyModifiers.Super"/> is taken as Ctrl (<see cref="SuperIsCtrl"/>).</summary>
     public KeyChord(KeyCode key, KeyModifiers modifiers = KeyModifiers.None)
     {
         if (key == KeyCode.Unknown) throw new ArgumentOutOfRangeException(nameof(key), "A chord needs a key.");
@@ -66,22 +79,22 @@ public readonly record struct KeyChord
     /// <summary>True for a chord that names a character rather than a key.</summary>
     public bool IsCharacter => Char != '\0';
 
-    // A chord whose key types a character when no Ctrl or Alt is held: a letter, a digit, Space,
+    // A chord whose key types a character when no Ctrl, Alt or Super is held: a letter, a digit, Space,
     // a character chord.
     private bool IsTypedChord =>
         IsCharacter || Key is (>= KeyCode.A and <= KeyCode.Z) or (>= KeyCode.Digit0 and <= KeyCode.Digit9) or KeyCode.Space;
 
     private static KeyModifiers Normalize(KeyModifiers m) =>
-        ((m & KeyModifiers.Super) != 0 ? m | KeyModifiers.Ctrl : m) & Compared;
+        (SuperIsCtrl && (m & KeyModifiers.Super) != 0 ? (m | KeyModifiers.Ctrl) & ~KeyModifiers.Super : m) & Compared;
 
     /// <summary>Whether <paramref name="e"/> is this chord.</summary>
     public bool Matches(KeyDownEvent e)
     {
         var held = Normalize(e.Modifiers);
-        // Typing, not a shortcut: a character typed (no Ctrl or Alt) into an element that types
+        // Typing, not a shortcut: a character typed (no Ctrl, Alt or Super) into an element that types
         // text (KeyDownEvent.TargetTakesText). A one-letter shortcut of the window fired as the
         // user typed it into a field. A key the platform says types nothing ("") is no typing.
-        if (e.TargetTakesText && (held & (KeyModifiers.Ctrl | KeyModifiers.Alt)) == 0
+        if (e.TargetTakesText && (held & (KeyModifiers.Ctrl | KeyModifiers.Alt | KeyModifiers.Super)) == 0
             && IsTypedChord && e.Text is not "")
             return false;
         if (IsCharacter)
@@ -120,11 +133,12 @@ public readonly record struct KeyChord
 
     /// <summary>
     /// The chord as people read it and as settings store it: <c>Ctrl+Shift+P</c>, <c>Alt+↑</c>,
-    /// <c>Ctrl+,</c>, and a bare letter as typed, <c>m</c>. <see cref="Parse"/> reads it back.
+    /// <c>Ctrl+,</c>, <c>Super+F5</c>, and a bare letter as typed, <c>m</c>. <see cref="Parse"/> reads it back.
     /// </summary>
     public override string ToString()
     {
         var sb = new StringBuilder();
+        if ((Modifiers & KeyModifiers.Super) != 0) sb.Append("Super+");
         if ((Modifiers & KeyModifiers.Ctrl) != 0) sb.Append("Ctrl+");
         if ((Modifiers & KeyModifiers.Alt) != 0) sb.Append("Alt+");
         if ((Modifiers & KeyModifiers.Shift) != 0) sb.Append("Shift+");
@@ -139,7 +153,7 @@ public readonly record struct KeyChord
 
     /// <summary>
     /// Reads a chord written by <see cref="ToString"/>, and the older spellings settings files
-    /// hold: modifier names in any case and with <c>Cmd</c>, <c>Super</c> or <c>Control</c>, key
+    /// hold: modifier names in any case, <c>Control</c>, <c>Cmd</c> or <c>⌘</c> for Ctrl (the Mac's command key is the PC's Ctrl), and <c>Win</c> or <c>Meta</c> for Super, key
     /// names as <see cref="KeyCode"/> spells them (<c>Digit1</c>, <c>PageUp</c>), and
     /// <c>PgUp</c>/<c>PgDn</c>. A single character that is a US key's unshifted symbol is that
     /// key; any other is a character chord. Null for anything else.
@@ -156,7 +170,8 @@ public readonly record struct KeyChord
             var name = rest[..plus].Trim();
             var m = name.ToLowerInvariant() switch
             {
-                "ctrl" or "control" or "cmd" or "super" or "⌘" => KeyModifiers.Ctrl,
+                "ctrl" or "control" or "cmd" or "⌘" => KeyModifiers.Ctrl,
+                "super" or "win" or "meta" => KeyModifiers.Super,
                 "alt" or "option" or "⌥" => KeyModifiers.Alt,
                 "shift" or "⇧" => KeyModifiers.Shift,
                 _ => KeyModifiers.None,

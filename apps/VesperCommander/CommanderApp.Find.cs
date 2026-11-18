@@ -205,7 +205,7 @@ public partial class CommanderApp
                 if (_findResults.Count > 0)
                 {
                     // Ctrl+Enter opens the hit in the other pane.
-                    char target = (e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super))
+                    char target = KeyChord.IsPrimaryHeld(e.Modifiers)
                         ? (_findSide == 'L' ? 'R' : 'L') : _findSide;
                     JumpFindResult(target);
                 }

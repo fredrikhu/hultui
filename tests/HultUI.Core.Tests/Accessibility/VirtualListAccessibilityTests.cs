@@ -1,6 +1,9 @@
 using HultUI.Core.Accessibility;
+using HultUI.Core.Builders;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
 using HultUI.Core.Layout;
+using HultUI.Core.Primitives;
 using Xunit;
 
 namespace HultUI.Core.Tests.Accessibility;
@@ -717,5 +720,112 @@ public class VirtualListAccessibilityTests
         refresh.Clear();
         Assert.False(AccessibilityTreeBuilder.TryRefreshInPlace(over, list, [], null, refresh));
         Assert.Equal("a list's items", refresh.Mismatch);
+    }
+
+    // ── The current item (the list's cursor): the item a reader's focus is on ──
+
+    private AccessibilityNode BuildFocused(VirtualListElement<string> list, Element? focused)
+    {
+        _layout.PerformLayout(list, 200, 100);
+        list.UpdateContentSize();
+        var focusManager = new FocusManager();
+        focusManager.SetFocus(focused);
+        return AccessibilityTreeBuilder.Build(list, focusManager);
+    }
+
+    [Fact]
+    public void CurrentItem_IsTheCursor_NotTheSelection()
+    {
+        var list = MakeList(50);
+        list.IsFocusable = true;
+        list.SelectedIndex = 7;
+        list.CurrentIndex = 3;
+
+        var tree = BuildFocused(list, list);
+
+        Assert.True(tree.IsFocused);
+        Assert.Equal(3, tree.CurrentItem);
+        Assert.True(tree.Children[7].IsSelected);
+        Assert.False(tree.Children[3].IsSelected);
+    }
+
+    [Fact]
+    public void WithoutACursor_TheCurrentItemIsTheSelection()
+    {
+        var list = MakeList(50);
+        list.IsFocusable = true;
+        list.SelectedIndex = 7;
+
+        var tree = BuildFocused(list, list);
+
+        Assert.Equal(-1, list.CurrentIndex);
+        Assert.Equal(7, tree.CurrentItem);
+    }
+
+    [Fact]
+    public void ACursorPastTheItems_IsNoCurrentItem()
+    {
+        var list = MakeList(50);
+        list.IsFocusable = true;
+        list.SelectedIndex = 7;
+        list.CurrentIndex = 50;
+
+        var tree = BuildFocused(list, list);
+
+        Assert.Equal(-1, tree.CurrentItem);
+    }
+
+    [Fact]
+    public void OnDemandList_CarriesTheCursorOnItsNode()
+    {
+        var list = MakeList(2_001);
+        list.IsFocusable = true;
+        list.CurrentIndex = 1_500;
+
+        var tree = BuildFocused(list, list);
+
+        Assert.True(tree.IsVirtualItemContainer);
+        Assert.True(tree.IsFocused);
+        Assert.Empty(tree.Children);
+        Assert.Equal(1_500, tree.CurrentItem);
+    }
+
+    // ── Item bounds in both flows ──
+
+    [Fact]
+    public void ItemsInColumns_CarryTheirColumnsBounds_AndOffscreenState()
+    {
+        var list = MakeList(40);   // 100 px tall, 20 px rows: five a column
+        list.Flow(ListFlow.Columns, columnWidth: 80f);
+        list.ShowScrollbarX = false;
+
+        var tree = BuildLaidOut(list);
+
+        var item7 = tree.Children[7];   // column 1, row 2
+        Assert.Equal(new Rect(80, 40, 80, 20), item7.BoundingRect);
+        Assert.False(item7.IsOffscreen);
+        Assert.True(tree.Children[15].IsOffscreen);   // column 3, past the 200 px viewport
+    }
+
+    [Fact]
+    public void UniformRowBounds_AreTheNumbersTheyWere()
+    {
+        var tree = BuildLaidOut(MakeList(50));
+
+        Assert.Equal(new Rect(0, 0, 200, 20), tree.Children[0].BoundingRect);
+        Assert.Equal(new Rect(0, 60, 200, 20), tree.Children[3].BoundingRect);
+        Assert.True(tree.Children[10].IsOffscreen);
+    }
+
+    [Fact]
+    public void UnequalRowBounds_FollowTheRowHeights()
+    {
+        var list = MakeList(20);
+        list.ItemHeightFor = (_, i) => i % 2 == 0 ? 10f : 30f;   // 10, 30, 10, 30, …
+
+        var tree = BuildLaidOut(list);
+
+        Assert.Equal(new Rect(0, 40, 200, 10), tree.Children[2].BoundingRect);
+        Assert.Equal(new Rect(0, 50, 200, 30), tree.Children[3].BoundingRect);
     }
 }

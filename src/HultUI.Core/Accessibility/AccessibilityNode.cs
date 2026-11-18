@@ -246,10 +246,12 @@ public sealed class AccessibilityNode
         if (_extras?.Scroll is not { IsScrollView: true, Items: { } source } s || (uint)index >= (uint)s.ItemCount)
             return false;
         float top, height;
+        Rect? placed;
         try
         {
             float itemHeight = source.ItemHeight;
-            (top, height) = source.ItemBounds(index) ?? (index * itemHeight, itemHeight);
+            placed = source.ItemRect(index);
+            (top, height) = placed is { } r ? (r.Y, r.Height) : source.ItemBounds(index) ?? (index * itemHeight, itemHeight);
         }
         catch
         {
@@ -258,6 +260,14 @@ public sealed class AccessibilityNode
         var above = ScrollAbove();
         var viewport = s.Viewport;
         float scrolled = top - s.Offset.Y;
+        if (placed is { } cell)
+        {
+            // Placed on both axes (a list in columns): out of the viewport when it misses it on either.
+            float across = cell.X - s.Offset.X;
+            box = new Rect(viewport.X - above.X + across, viewport.Y - above.Y + scrolled, cell.Width, height);
+            offscreen = across + cell.Width <= 0f || across >= viewport.Width || scrolled + height <= 0f || scrolled >= viewport.Height;
+            return true;
+        }
         box = new Rect(viewport.X - above.X - s.Offset.X, viewport.Y - above.Y + scrolled, viewport.Width, height);
         offscreen = scrolled + height <= 0f || scrolled >= viewport.Height;
         return true;

@@ -112,7 +112,7 @@ public sealed class FindBar
     /// before the layout pass, so a reveal that reads a viewport height there reads the last
     /// frame's — or zero, on the frame the text first appears — and scrolls to the wrong place or
     /// not at all. False for a reveal that defers itself, such as
-    /// <see cref="ScrollViewElement.ScrollRangeIntoView"/>, which then lands on the same frame.
+    /// <see cref="ScrollViewElement.ScrollRangeIntoView(float, float)"/>, which then lands on the same frame.
     /// </summary>
     public bool RevealAfterLayout { get; set; } = true;
 
@@ -239,11 +239,12 @@ public sealed class FindBar
     /// </summary>
     public bool HandleKey(KeyDownEvent e)
     {
-        bool ctrl = (e.Modifiers & (KeyModifiers.Ctrl | KeyModifiers.Super)) != 0;
+        bool primary = KeyChord.IsPrimaryHeld(e.Modifiers);
+        bool chorded = (e.Modifiers & (KeyModifiers.Ctrl | KeyModifiers.Super)) != 0;
         bool alt = (e.Modifiers & KeyModifiers.Alt) != 0;
         char letter = e.ShortcutLetter;
 
-        if (ctrl && !alt && letter == 'f') { Open(); return true; }
+        if (primary && !alt && letter == 'f') { Open(); return true; }
         if (!IsOpen) return false;
 
         switch (e.Key)
@@ -251,11 +252,11 @@ public sealed class FindBar
             case KeyCode.Escape: Close(); return true;
             case KeyCode.Enter: Move((e.Modifiers & KeyModifiers.Shift) != 0 ? -1 : 1); return true;
         }
-        if (alt && !ctrl && letter == 'c') { ToggleMatchCase(); return true; }
-        if (alt && !ctrl && letter == 'r') { ToggleRegex(); return true; }
+        if (alt && !chorded && letter == 'c') { ToggleMatchCase(); return true; }
+        if (alt && !chorded && letter == 'r') { ToggleRegex(); return true; }
 
         // In a text field — the query, or a commit message beside the text — n and p are letters.
-        if (LetterKeys && !ctrl && !alt && e.Target is not (TextInputElement or TextAreaElement { ReadOnly: false } or RichTextEditorElement { ReadOnly: false }))
+        if (LetterKeys && !chorded && !alt && e.Target is not (TextInputElement or TextAreaElement { ReadOnly: false } or RichTextEditorElement { ReadOnly: false }))
         {
             if (letter == 'n') { Next(); return true; }
             if (letter == 'p') { Previous(); return true; }

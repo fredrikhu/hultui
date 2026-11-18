@@ -752,7 +752,7 @@ public partial class MeridianApp : Component, IDisposable
 
     private void HandleKeyDown(KeyDownEvent e)
     {
-        var ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
+        var chorded = (e.Modifiers & (KeyModifiers.Ctrl | KeyModifiers.Super)) != 0;
         var typing = e.Target is TextInputElement or TextAreaElement;
 
         if (_optionsOpen && e.Key == KeyCode.Escape)
@@ -790,7 +790,7 @@ public partial class MeridianApp : Component, IDisposable
         // Ctrl combos work everywhere, including while typing in an input. Matched through
         // Shortcuts, which the hints read too: three keys they named did nothing here.
         if (CtrlShortcut(e)) { e.StopPropagation = true; return; }
-        if (ctrl) return;
+        if (chorded) return;
 
         if (e.Key == KeyCode.Escape && RunnerRunning)
         {

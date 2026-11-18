@@ -159,7 +159,7 @@ public partial class JunctionApp
         {
             case KeyCode.Down: _issueSel = Math.Min(_issueSel + 1, items.Count - 1); _composerRevision.Value++; return true;
             case KeyCode.Up: _issueSel = Math.Max(_issueSel - 1, 0); _composerRevision.Value++; return true;
-            case KeyCode.Enter when !e.Modifiers.HasFlag(KeyModifiers.Ctrl) && !e.Modifiers.HasFlag(KeyModifiers.Super):
+            case KeyCode.Enter when (e.Modifiers & (KeyModifiers.Ctrl | KeyModifiers.Super)) == 0:
                 InsertIssue(items[Math.Clamp(_issueSel, 0, items.Count - 1)]); return true;
             case KeyCode.Escape: _issueCaret = -1; _composerRevision.Value++; return true;
         }

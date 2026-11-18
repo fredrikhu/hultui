@@ -1,7 +1,9 @@
+using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Styling;
 using Xunit;
 
 namespace HultUI.Core.Tests.Elements;
@@ -467,5 +469,55 @@ public class ScrollViewElementTests
         // Band left of the viewport → scroll left to its left edge.
         sv.ScrollRangeIntoViewHorizontal(50, 10);
         Assert.Equal(50, sv.ScrollOffsetX);
+    }
+
+    // ── Sideways: the wheel step, a clamp against what a list holds now ──
+
+    private ScrollViewElement Wide()
+    {
+        var sv = ScrollViewElement.New();
+        sv.Box.Width = 100;
+        sv.Box.Height = 100;
+        sv.VerticalWheelScrollsSideways = true;
+        var child = BoxElement.New();
+        child.Box.Width = 500;
+        child.Box.Height = 100;
+        sv.AddChild(child);
+        return sv;
+    }
+
+    [Fact]
+    public void APlainHorizontalView_StillMovesFortyPixelsANotch()
+    {
+        var sv = Wide();
+        _layout.PerformLayout(sv, 100, 100);
+        sv.UpdateContentSize();
+
+        EventDispatcher.Dispatch(new ScrollEvent { Position = new Point(50, 50), DeltaY = -1 }, sv);
+        Assert.Equal(40, sv.ScrollOffsetX);
+        EventDispatcher.Dispatch(new ScrollEvent { Position = new Point(50, 50), DeltaX = -1 }, sv);
+        Assert.Equal(80, sv.ScrollOffsetX);
+    }
+
+    [Fact]
+    public void AList_ClampsXAgainstTheItemsItGainedInTheSameFrame()
+    {
+        var list = VirtualListElement<string>.New().ItemHeight(40)
+            .Items(Enumerable.Range(0, 10).Select(i => $"Item {i}").ToList())
+            .RenderWith(item => TextElement.New(item))
+            .Flow(ListFlow.Columns, columnWidth: 100f);
+        list.ShowScrollbarX = false;
+        list.Box.Width = 300;
+        list.Box.Height = 200;
+        _layout.PerformLayout(list, 300, 200);
+        StyleResolver.Resolve(list);
+        list.UpdateContentSize();
+        Assert.Equal(200, list.ContentWidth);   // two columns of five: nothing to scroll
+
+        // Twenty columns now, and a reveal before the layout that measures them.
+        list.Items = Enumerable.Range(0, 100).Select(i => $"Item {i}").ToList();
+        list.ScrollOffsetX = 500;
+
+        Assert.Equal(500, list.ScrollOffsetX);
     }
 }

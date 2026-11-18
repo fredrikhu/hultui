@@ -742,7 +742,7 @@ public partial class JunctionApp
     private void OnBranchRowClick(GitBranch b, int index, KeyModifiers mods)
     {
         _branchSel = index;
-        if (mods.HasFlag(KeyModifiers.Ctrl) || mods.HasFlag(KeyModifiers.Super))
+        if (KeyChord.IsPrimaryHeld(mods))
             BranchToggle(b);
         else
             BranchSelectSingle(b);

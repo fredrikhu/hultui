@@ -1037,6 +1037,12 @@ public partial class JunctionApp
                 MarkDirty();
                 e.StopPropagation = true;
                 break;
+            // Sideways is the pane's, whatever the pan makes of the key: Super+← off the Mac is
+            // no pan key, and bubbling on it would step the Changes tree behind the diff.
+            case KeyCode.Left or KeyCode.Right:
+                _diffPan.HandleKey(e);
+                e.StopPropagation = true;
+                break;
             default:
                 if (_diffPan.HandleKey(e)) e.StopPropagation = true;
                 break;

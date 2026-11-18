@@ -203,4 +203,15 @@ public class VirtualListVariableHeightTests
 
         Assert.Equal(400, vl.ContentHeight);
     }
+
+    [Fact]
+    public void ScrollIndexIntoView_UsesTheRowsOwnOffsetAndHeight()
+    {
+        var vl = CreateList(30, viewportHeight: 200);   // rows 20, 40, 60, 20, 40, 60, …
+
+        vl.ScrollIndexIntoView(5, ScrollAlignment.Start);   // row 5 is 180–240
+        Assert.Equal(180, vl.ScrollOffsetY);
+        vl.ScrollIndexIntoView(5, ScrollAlignment.End);
+        Assert.Equal(40, vl.ScrollOffsetY);
+    }
 }

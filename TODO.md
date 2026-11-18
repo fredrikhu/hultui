@@ -1,6 +1,42 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Virtual lists that flow into columns** — `VirtualListElement.Flow = ListFlow.Columns` (with
+  `ColumnWidth`) lays items out in columns that scroll sideways, a file manager's Brief view:
+  rows per column follow the height (less the horizontal bar's room when the columns overflow),
+  only the columns shown are realized, a wheel notch (the vertical one too) moves a column, and
+  middle-click autoscroll moves sideways. `RowWidth` lets rows be wider than the viewport, scrolled
+  by the list's own `ScrollOffsetX`. `ItemRect(i)` and `IndexAfter(i, ListMove)` give the
+  geometry and where a cursor move lands; the keys stay the app's. `ScrollIndexIntoView` asked
+  before the list has a size is held until layout gives it one, in the list (a view's own
+  `ScrollRangeIntoViewHorizontal` before layout is still not held). `IAccessibleItemSource.ItemRect`
+  gives assistive technology each item's cell in columns, and its whole row when rows are wider than
+  the list, asked before `ItemBounds` by the tree
+  builder, its in-place refresh, a list served on demand, the action router's scroll-into-view and
+  the UIA host. `ScrollViewElement` gained a virtual `ClampX` and a `SidewaysWheelStep`. Tests: 42
+  Core (column flow, `IndexAfter`, `RowWidth`), 2 scroll-view, 3 accessibility bounds, 14 headless,
+  1 Windows UI test;
+  perf rows `virtual/columns 1M wheel / jump / replace items`, `virtual/columns cursor walk 100k item rows`,
+  `a11y/columns 2,000 wheel, bridge on`. The VirtualList sample toggles to columns.
+- **The app id** — `Application.SetAppMetadata(name, version, identifier)` names the app to SDL
+  (`SDL_SetAppMetadata`), so on Linux every window's Wayland `app_id` and the class of its X11
+  `WM_CLASS` are the identifier, which is how the desktop finds the app's `identifier.desktop`
+  (`StartupWMClass=identifier`) for its icon and launcher. It may follow `BeginGraphicsPreload` but
+  not a window: a window keeps the id it was created with, so a later call throws. The `SDL_APP_ID`
+  variable still overrides it, for packagers. The checks live in `AppMetadata` (the id's form:
+  letters, digits, `.`, `_`, `-`, no empty part, at most 255). Tests: 16 in
+  `HultUI.Platform.SDL3.Tests` (`AppMetadataTests`; one reads the metadata back from SDL).
+- **Super is not Ctrl off the Mac** — `KeyChord` folds Super into Ctrl only on macOS,
+  where ⌘ is the command key (`KeyChord.SuperIsCtrl`, true there and settable for tests); on Linux
+  and Windows Super is a modifier of its own, so Super+F5 is not Ctrl+F5 and an app can bind it apart.
+  Super chords round-trip as `Super+…` (`Parse` also reads `Win` and `Meta`; `Cmd` and `⌘` stay
+  Ctrl). The ten `Ctrl || Super` checks (3 framework: FindBar, HorizontalPan, the window's group
+  copy; 7 apps) were split into `KeyChord.IsPrimaryHeld` where the value enables a command chord and
+  a Super-inclusive mask where it means "not a plain key", which keeps those unchanged everywhere.
+  A Super+letter typed into a text field is a shortcut, not typing, as a Ctrl+letter is.
+  Tests: 30 Core (`SuperModifierTests`, both rules on every platform, in a non-parallel
+  `KeyboardPlatform` collection), 2 headless (Super+C copies a group selection only on the Mac);
+  two assertions of the old fold removed.
 - **Rich text editor: export as HTML and RTF** (docs/plans/16-rich-text-editor.md, Export) — in Core.
   `RichHtml.WriteDocument(doc, RichExportOptions)` is a UTF-8 HTML5 page with a small stylesheet of
   the editor's proportions in dark text on white; lists nest inside their items, a continuing
@@ -885,6 +921,20 @@
   HarfBuzz 14.4's per-call shaping cost on words not cached yet (shaping whole runs), and Graphite.
 
 ## Deferred
+- **Replace Onigwrap** — `HultUI.Syntax` tokenizes through TextMateSharp 2.0.5, whose regex engine is
+  Onigwrap 1.0.11 (`libonigwrap.so`, a native build of Oniguruma). Oniguruma's upstream ended on
+  2025-04-24, so the engine that runs grammar regexes over arbitrary file content gets no more security
+  fixes. Until it is replaced, callers keep highlighting to files under a size cap, with a per-file
+  time budget, off the UI thread. The ways out, cheapest first: (1) `HultUI.Icons` references
+  `HultUI.Syntax` only for its code-file classification (`FileIcons` calls
+  `SyntaxHighlighter.CanHighlight`) — moving that extension table
+  into Icons drops Syntax, TextMateSharp and Onigwrap from every app that needs icons but no
+  highlighting; (2) follow TextMateSharp if it moves to a maintained engine (ask upstream; its public API
+  shows `IOnigCaptureIndex` and `IOnigNextMatchResult` but no way to plug an engine in); (3) a maintained
+  Oniguruma fork, rebuilt and shipped as HultUI's own native, which then needs the same glibc floor
+  checks as the other natives; (4) a tokenizer that does not run TextMate regexes (tree-sitter, or a
+  translation to .NET `Regex`, which lacks some Oniguruma constructs the bundled grammars use). Decide
+  between (2)–(4) when (1) is done and the remaining users of highlighting are known.
 - **The card fill is probably too dark, but the measurements disagree** — on one capture of the
   Gallery's All page the pane is #272727 and a tile is #343434, while ours is #2D2D2D; real
   Settings gives a clean 5.1% white for a card over its page (#000000 -> #0D0D0D, exactly

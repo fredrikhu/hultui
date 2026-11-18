@@ -595,10 +595,7 @@ public static partial class AccessibilityTreeBuilder
         var items = new AccessibilityNode[count];
         for (int i = 0; i < count; i++)
         {
-            // A container with uneven items (a menu with separators in it) places them
-            // itself; everything else stacks at one height.
-            var (localTop, height) = source.ItemBounds(i) ?? (i * itemHeight, itemHeight);
-            var box = new Rect(content.X, content.Y + localTop, content.Width, height);
+            var box = ItemBox(source, i, content, itemHeight);
             items[i] = MakeItemNode(slot, i, role, source.GetItemLabel(i), place.Unscrolled(box), source.ItemIsToggled(i),
                 source.ItemIsExpanded(i), source.IsItemSelected(i), source.ItemIsEnabled(i),
                 !RectsIntersect(clip, place.OnScreen(box)));
@@ -611,6 +608,19 @@ public static partial class AccessibilityTreeBuilder
             TakePending(items[open.Item], pending, start);
         }
         listNode.SetChildren(items);
+    }
+
+    /// <summary>
+    /// Item <paramref name="index"/>'s box in the list's <paramref name="content"/>, unscrolled: where
+    /// the list places it on both axes (<see cref="IAccessibleItemSource.ItemRect"/>, a list in
+    /// columns), else a row as wide as the content, at its place when the items are uneven (a menu
+    /// with separators in it, rows of unequal heights) and stacked at one height otherwise.
+    /// </summary>
+    private static Rect ItemBox(IAccessibleItemSource source, int index, Rect content, float itemHeight)
+    {
+        if (source.ItemRect(index) is { } r) return new Rect(content.X + r.X, content.Y + r.Y, r.Width, r.Height);
+        var (localTop, height) = source.ItemBounds(index) ?? (index * itemHeight, itemHeight);
+        return new Rect(content.X, content.Y + localTop, content.Width, height);
     }
 
     /// <summary>

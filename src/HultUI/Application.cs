@@ -373,6 +373,30 @@ public sealed class Application : IDisposable
     }
 
     /// <summary>
+    /// Names the application to the desktop. On Linux <paramref name="identifier"/> becomes the
+    /// Wayland <c>app_id</c> and the class of the X11 <c>WM_CLASS</c> of every window, which is how
+    /// the desktop finds the app's <c>.desktop</c> file: name that file <c>identifier.desktop</c>
+    /// and give it <c>StartupWMClass=identifier</c>. <paramref name="name"/> is what the system
+    /// shows where it names the app apart from a window title.
+    /// <para>Call it once, before the first <see cref="Application"/> is created; before or after
+    /// <see cref="BeginGraphicsPreload()"/> both work. A window keeps the id it was created with,
+    /// so a call once a window exists throws. The <c>SDL_APP_ID</c> environment variable, when
+    /// set, still wins over <paramref name="identifier"/>: it is a packager's override.</para>
+    /// <para>Windows and macOS do not use the identifier for windows at the SDL version HultUI
+    /// pins; the call is harmless there.</para>
+    /// </summary>
+    /// <param name="name">The app's name for people, such as "Example".</param>
+    /// <param name="version">The app's version, or null.</param>
+    /// <param name="identifier">A reverse-domain id such as <c>org.example.App</c>: letters,
+    /// digits, <c>.</c>, <c>_</c> and <c>-</c>, no empty part between dots, at most 255
+    /// characters.</param>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or
+    /// <paramref name="identifier"/> is not an id of that form.</exception>
+    /// <exception cref="InvalidOperationException">A window already exists.</exception>
+    public static void SetAppMetadata(string name, string? version, string identifier) =>
+        SDL3Window.SetAppMetadata(name, version, identifier);
+
+    /// <summary>
     /// Creates an application with a primary window on the default (SDL3)
     /// windowing platform.
     /// </summary>

@@ -152,6 +152,36 @@ static partial class Scenarios
                     keyEvery: GridReaderKeys, clear: bridge.ClearDiffs);
             }) { Width = 1440, Height = 900 };
 
+        yield return new Scenario("a11y/cursor walk 1,000 state rows, bridge on",
+            "virtual/cursor walk over 1,000 items with an accessibility client listening: the list holds the reader's focus, and each move marks the cursor as its node's current item on the applied tree and tells the bridge, building no tree",
+            ctx =>
+            {
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                return CursorWalk(ctx, 1_000, (list, current) =>
+                    bridge.FocusedNode?.ElementId != list.Id ? $"the reader's focus is on {bridge.FocusedNode?.ElementId}, not the list"
+                    : bridge.FocusedNode.CurrentItem != current ? $"the list's current item is {bridge.FocusedNode.CurrentItem}, not {current}"
+                    : null);
+            });
+
+        yield return new Scenario("a11y/columns 2,000 wheel, bridge on",
+            "Wheel 3 notches through 2,000 items in columns, the recording bridge listening, frames 120 ms apart so each rebuilds: 2,000 item nodes with column bounds",
+            ctx =>
+            {
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                var list = VirtualListElement<RowItem>.New().ItemHeight(24)
+                    .RenderWith(RenderVirtualRow).AccessibleItemLabel(m => m.Label)
+                    .Flow(ListFlow.Columns, 220f).Items(Models(ctx.Rng, 2_000));
+                ctx.Mount(list.FlexGrow(1));
+                var moved = MovedColumns(list, 3);
+                return new Op
+                {
+                    Run = step => ctx.Window.Wheel(500, 380, 0, ((step / 20) % 2 == 0 ? -1 : 1) * 3),
+                    FrameDelta = TimeSpan.FromMilliseconds(120),
+                    Check = step => moved(step) ?? (HoldsItems(bridge.CurrentTree, 2_000) ? null
+                        : "the tree does not hold the list's 2,000 items"),
+                };
+            });
+
         yield return new Scenario("a11y/selection walk beside details, keys 60 ms apart, real loop, bridge on",
             "Down every 60 ms through a 1,000-commit list on item rows beside a details pane the same Build makes again, in Application.Run's own loop on the virtual clock, an accessibility client listening: the trees a key builds (all under build)",
             ctx =>

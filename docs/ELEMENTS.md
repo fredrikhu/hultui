@@ -1473,9 +1473,15 @@ var list = VirtualListElement<FileEntry>.New()
 | `.RowHeights(Func<T,int,float>)` | `ItemHeightFor` | per-row heights (the extension is not called `ItemHeightFor`: that name would bind to invoking the delegate) |
 | `.RenderWith(Func<T,Element>)` | `ItemTemplate` | builds a row; called for every realized row on every pass |
 | `.RenderWith(Func<T,bool,Element>)` | `ItemRowTemplate` | builds a row from its item and whether it is selected, and nothing else; the list keeps a realized row until one of those changes — see **Rows that show only their item** below |
-| `.SelectedIndex(i)`, `.CanSelectMultiple()`, `.OnSelectionChanged(h)` | `SelectedIndex`, `CanSelectMultiple`, `SelectedIndices` | built-in selection, keyboard included |
+| `.RenderWithState(Func<T,ListItemState,Element>)` | `ItemStateTemplate` | builds a row from its item and its `ListItemState` (selected, current), and nothing else; kept like item rows, and a cursor move makes only the two rows it moved between — see **Cursor** below |
+| `.SelectedIndex(i)`, `.CanSelectMultiple()`, `.OnSelectionChanged(h)` | `SelectedIndex`, `CanSelectMultiple`, `SelectedIndices` | built-in selection, set by the app or by assistive technology |
+| `.CurrentIndex(i)` | `CurrentIndex` | the current item, the keyboard's cursor (-1 for none); not the selection, and the list never moves it — see **Cursor** below |
+| — | `ScrollIndexIntoView(i, alignment)` | scrolls an item into view by its index: in rows, `Nearest` (the least scroll) by default, or with its top, middle or bottom at the viewport's (`ScrollAlignment`); in columns, its column by the least scroll sideways, whatever the alignment |
 | `.OnActivateItem(h)` | `OnItemActivate` | called when assistive technology invokes or selects a row through the accessibility bridge; pointer and keyboard activation are the row template's own `OnClick` / `On<KeyDownEvent>` handlers |
-| `.KeyboardScroll(bool)` | `KeyboardScrollEnabled` | arrows / PageUp / PageDown / Home / End |
+| `.KeyboardScroll(bool)` | `KeyboardScrollEnabled` | arrows / PageUp / PageDown / Home / End (in columns: Left / Right a column, pages sideways) |
+| `.Flow(ListFlow.Columns, width)` | `Flow`, `ColumnWidth`, `RowsPerColumn` | items in columns that scroll sideways — see **Sideways: columns and wide rows** below |
+| `.RowWidth(w)` | `RowWidth` | rows at least `w` wide, scrolled sideways by the list itself |
+| — | `ItemRect(i)`, `IndexAfter(i, move)` | where an item sits, in either flow; where a cursor move (`ListMove`) lands |
 | — | `RowsAreComposite` | one item is a row of controls (a wrap grid), so the realized rows answer to assistive tech rather than one node per item — see **A row that is not one thing** below |
 | — | `InvalidateHeights()`, `InvalidateRows()` | after a change the list cannot see; with `ItemRowTemplate`, whenever anything a row shows besides its item and selected state changes (the items' accessible labels stay: a label that reads other state is a new delegate, see **Item labels a list keeps** below) |
 | — | `InvalidateRow(index)` | `InvalidateRows()` for one item: its row (if realized) and, unlike `InvalidateRows()`, its kept label are made again, every other row is kept — for something only a row or two show that moves (see **State that only some rows show** below) |
@@ -1845,16 +1851,79 @@ Two things change for good. A wheel notch makes the rows it brings in (Meridian:
 takes its hover in the scroll's own frame in both (see "Hover follows a scroll under a still
 pointer" above).
 
-**No sideways scroll.** The content width is pinned to the viewport, so `ScrollOffsetX`
-is always 0 and a wide row simply clips. A virtual list that has to pan sideways uses a
-`HorizontalPan` and a negative-margin cell — see
-[LAYOUT.md — Nesting scroll views](LAYOUT.md#nesting-scroll-views) — and wires the pan
-with `.ScrollSidewaysWith(pan)` so middle-click autoscroll follows it.
+**Sideways: columns and wide rows.** By default the content width is the viewport's and a
+wide row clips. Two settings make a list scroll sideways with its own `ScrollOffsetX`:
+
+- `.Flow(ListFlow.Columns, columnWidth)` lays the items out in columns, a file manager's Brief
+  view: every item is `ItemHeight` tall and `ColumnWidth` wide, a column holds `RowsPerColumn`
+  of them (as many as fit the height, less the horizontal bar's room when the columns overflow),
+  and the next column follows to the right. The list never scrolls vertically; a wheel notch,
+  the vertical one included, moves a column, and middle-click autoscroll moves it sideways. Only
+  the columns the viewport shows are realized. Give the list its size from its parent (a
+  `.FlexGrow(1)` in a column, a fixed height): its cells never size it. Columns refuse
+  `RowHeights`, whose unequal heights have no stable place in a column.
+- `.RowWidth(w)` keeps row flow and lays every row out at least `w` wide (and at the viewport's
+  width when that is wider); the content is `max(viewport, w)` wide.
+
+The keys stay the app's: `IndexAfter(index, ListMove.Right)` says where a move lands for the
+flow and size (in columns Left and Right move a column, a page is every whole column shown), and
+`ItemRect(index)` where an item sits, for a reveal (`ScrollIndexIntoView` uses it) or a hit test.
+Assistive technology gets each item's own bounds: its cell in columns, its row in rows, across the whole row
+when rows are wider than the list. A list that pans a cell
+beside fixed gutters (a diff's line numbers) still uses a `HorizontalPan` and a negative-margin
+cell — see [LAYOUT.md — Nesting scroll views](LAYOUT.md#nesting-scroll-views).
 
 **Revealing a row.** `ScrollRangeIntoView(top, height)` works from `OnAfterBuild`, before
 layout, because the virtual list clamps against the rows it holds *now* rather than the
 extent the last layout left behind; a request made in the same frame the list grew is
-honoured, not clamped back to 0.
+honoured, not clamped back to 0. `ScrollIndexIntoView(index)` does the same by the row's
+index, from its own offset and height (with `RowHeights` too); call it after `Items` is set.
+In columns it reveals the item's column by the least scroll sideways and ignores the alignment;
+it counts the rows per column the new items make, so a reveal in the frame the columns start to
+overflow (and the bar takes a row) still lands on the item's column. Asked before the list has a
+size, the reveal is held until layout gives it one.
+
+**Cursor.** A file manager walks a list with a cursor and selects, or marks, apart from it.
+`CurrentIndex` is that cursor: the row a cursor is drawn on, and, while the list has the
+keyboard, the item a screen reader's focus is on. The list never moves it; the app does, with
+its own keys, on the mounted list:
+
+```csharp
+var list = VirtualListElement<Entry>.New()
+    .Items(tab.Rows)
+    .ItemHeight(RowHeight)
+    .CurrentIndex(tab.Cursor)
+    .RenderWithState((e, s) => FileRow(e, s.IsCurrent, s.IsSelected))
+    .AccessibleItemLabel(FileLabel)
+    .WithRef(_listRef);
+list.IsFocusable = true;    // the list itself takes keyboard focus; key handlers above it still get keys by bubbling
+
+// A key that only moves the cursor needs no rebuild: the list makes the two rows again and moves
+// the reader's focus to the new row. Keep the app's own cursor too: the build's value wins on
+// every rebuild.
+tab.Cursor = next;
+_listRef.Current!.CurrentIndex = next;
+_listRef.Current!.ScrollIndexIntoView(next);
+```
+
+Rows show the cursor only with `.RenderWithState`; rows from the other templates show it when
+the owner rebuilds them. A reader follows the cursor while the list holds keyboard focus, or
+its focusable ancestor does and `.TakesAncestorFocus()` is set: the cursor is the list node's
+current item, as the selection is when no cursor is set (`CurrentIndex` -1). Setting
+`CurrentIndex` allocates nothing, and a move builds no accessibility tree: the window marks the
+list's current item on the tree it last built and tells the reader, as for a selection move.
+Composite rows (`RowsAreComposite`) have no item nodes, so a reader is told nothing of their
+cursor.
+
+**Very long lists.** A list of a million items costs the rows on screen: give it an
+`IReadOnlyList<T>` that makes each item when it is read, and mounting it allocates well under
+a megabyte (`VirtualListMillionTests`). Its end is reachable and drawn where the list ends.
+What does not survive the length is precision. Positions are `float`, which holds every whole
+pixel only up to 2^24, about 16.7 million logical px: 700,000 rows of 24 px. Past that, at
+1.0 the rows still tile exactly, but at a fractional scale they do not (at 1.25, rows of
+24 px come out 28 and 32 device px tall instead of 30; at 1.5, 32 and 40 instead of 36), and
+a 1 px line inside a row, such as a border, is not drawn at all, at any scale. A list whose
+rows draw thin lines has to stay under that length.
 
 **Accessibility.** The list is announced as a `List`; `AccessibleItemLabel` names each
 row without realizing it, so a reader can walk 20,000 items that were never built.
