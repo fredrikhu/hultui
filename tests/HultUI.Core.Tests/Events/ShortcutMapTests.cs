@@ -33,7 +33,6 @@ public sealed class ShortcutMapTests
         Assert.Null(map.Find(Press(KeyCode.F6, KeyModifiers.Ctrl)));
         Assert.Equal("Close", map.Find(Press(KeyCode.Escape), "Viewer")?.Id);
         Assert.Null(map.Find(Press(KeyCode.Escape), "Commands"));
-        Assert.True(map.Matches("ClipCopy", Press(KeyCode.C, KeyModifiers.Super)));
     }
 
     [Fact]

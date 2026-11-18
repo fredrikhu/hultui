@@ -1534,7 +1534,7 @@ public partial class JunctionApp : Component, IDisposable
 
     private void HandleKeyDown(KeyDownEvent e)
     {
-        var ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
+        var ctrl = KeyChord.IsPrimaryHeld(e.Modifiers);
         var alt = e.Modifiers.HasFlag(KeyModifiers.Alt);
         var typing = e.Target is TextInputElement or TextAreaElement or RichTextEditorElement;
 

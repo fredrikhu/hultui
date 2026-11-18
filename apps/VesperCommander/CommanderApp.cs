@@ -3281,7 +3281,7 @@ public partial class CommanderApp : Component, IDisposable
     // ── Keyboard ─────────────────────────────────────────────────────────
     private void HandleKeyDown(KeyDownEvent e)
     {
-        var ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
+        var chorded = (e.Modifiers & (KeyModifiers.Ctrl | KeyModifiers.Super)) != 0;
         var alt = e.Modifiers.HasFlag(KeyModifiers.Alt);
         // Transient — clears on the next key. Only the command line shows it (compared).
         if (_notice != null) { _notice = null; MarkViewDirty(); }
@@ -3500,7 +3500,7 @@ public partial class CommanderApp : Component, IDisposable
 
         // Type-to-find: a plain word character starts / extends the incremental
         // search (no Ctrl/Alt, so it doesn't swallow shortcuts added later).
-        if (!ctrl && !alt)
+        if (!chorded && !alt)
         {
             char ch = SearchChar(e.Key, e.Modifiers.HasFlag(KeyModifiers.Shift));
             if (ch != '\0') { ExtendSearch(side, ch); e.StopPropagation = true; }

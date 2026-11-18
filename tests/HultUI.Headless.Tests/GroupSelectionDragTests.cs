@@ -15,6 +15,7 @@ namespace HultUI.Headless.Tests;
 /// screen points, not compare raw layout Y — and the drag must not "stick" so a plain
 /// hover afterwards keeps extending it.
 /// </summary>
+[Collection("KeyboardPlatform")]
 public class GroupSelectionDragTests
 {
     private const float RowH = 20f;
@@ -198,6 +199,35 @@ public class GroupSelectionDragTests
         var copied = session.Window.Clipboard.GetText() ?? "";
         Assert.Contains("line number 1", copied);
         Assert.Contains("line number 3", copied);
+    }
+
+    // Super+C is the Mac's ⌘+C and copies there; on Linux and Windows Super is not Ctrl.
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public void SuperCCopiesTheGroupOnlyWhereSuperIsCtrl(bool superIsCtrl, bool copies)
+    {
+        bool was = KeyChord.SuperIsCtrl;
+        KeyChord.SuperIsCtrl = superIsCtrl;
+        try
+        {
+            using var session = HeadlessSession.Create(width: 200, height: 200);
+            var (scroll, rows, group) = Build(session);
+
+            session.Window.MouseDown(40f, ScreenMidY(scroll, rows[0]));
+            session.Window.MoveMouse(40f, ScreenMidY(scroll, rows[4]));
+            session.Window.MouseUp(40f, ScreenMidY(scroll, rows[4]));
+            Assert.True(group.HasSelection, "drag should have produced a selection");
+
+            session.Window.KeyDown(KeyCode.C, KeyModifiers.Super);
+
+            var copied = session.Window.Clipboard.GetText() ?? "";
+            Assert.Equal(copies, copied.Contains("line number 1"));
+        }
+        finally
+        {
+            KeyChord.SuperIsCtrl = was;
+        }
     }
 
     // ── Word/line select and shift-extend inside a group ─────────────────

@@ -1350,7 +1350,7 @@ public partial class JunctionApp
         // a newline.
         box.On<KeyDownEvent>(EventPhase.Capture, e =>
         {
-            var mod = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
+            var mod = KeyChord.IsPrimaryHeld(e.Modifiers);
             if (mod && e.Key == KeyCode.Enter)
             {
                 e.StopPropagation = true;

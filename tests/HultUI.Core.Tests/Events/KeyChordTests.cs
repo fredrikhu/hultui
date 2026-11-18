@@ -27,12 +27,10 @@ public sealed class KeyChordTests
     }
 
     [Fact]
-    public void SuperIsCtrl_AndTheLocksNeverCount()
+    public void TheLocksNeverCount()
     {
         var palette = new KeyChord(KeyCode.P, KeyModifiers.Ctrl);
-        Assert.True(palette.Matches(Press(KeyCode.P, KeyModifiers.Super)));
         Assert.True(palette.Matches(Press(KeyCode.P, KeyModifiers.Ctrl | KeyModifiers.CapsLock | KeyModifiers.NumLock)));
-        Assert.Equal(palette, new KeyChord(KeyCode.P, KeyModifiers.Super));
     }
 
     [Fact]

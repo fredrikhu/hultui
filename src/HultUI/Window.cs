@@ -3208,7 +3208,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 // The text comes from the group's model, so it spans lines that were never
                 // realized — copying 900 lines does not need 900 live labels.
                 if (key.IsDown && key.KeyCode == KeyCode.C
-                    && (key.Modifiers.HasFlag(KeyModifiers.Ctrl) || key.Modifiers.HasFlag(KeyModifiers.Super))
+                    && KeyChord.IsPrimaryHeld(key.Modifiers)
                     && _activeTextGroup is { HasSelection: true } copyGroup)
                 {
                     var text = copyGroup.SelectedText;

@@ -83,9 +83,9 @@ Down drive its list that way. Two things say what the field did with one:
 
 - `KeyDownEvent.TargetTakesText` is true when the key went to an element that types text
   (an editable text field, area or rich text editor, a number field, a terminal; not a
-  read-only viewer). A key there that types a character (no Ctrl or Alt) matches no
-  `KeyChord`, so a one-letter window shortcut does not fire while the user types; Ctrl and
-  Alt chords, function keys, Escape and Enter still do.
+  read-only viewer). A key there that types a character (no Ctrl, Alt or Super) matches no
+  `KeyChord`, so a one-letter window shortcut does not fire while the user types; Ctrl, Alt
+  and Super chords, function keys, Escape and Enter still do.
 - `Handled` is set on the keys a text field or area acted on: its caret's moves,
   Backspace, Delete, Enter in an area, Ctrl+A, the clipboard and undo. They bubble on; a
   handler that would act on the same key checks `e.Handled` and leaves it.
@@ -123,14 +123,15 @@ rules above so a handler does not have to:
 
 - **The modifiers must be exactly the chord's.** `new KeyChord(KeyCode.C)` is c, not Ctrl+C.
   Switching on `e.Key` alone is the trap this replaces: a view whose `c` checked out a branch
-  checked it out on Ctrl+C too. Super counts as Ctrl (⌘ on a Mac); CapsLock and NumLock never
-  count; AltGr is not Alt.
+  checked it out on Ctrl+C too. On macOS Super counts as Ctrl, so ⌘ works wherever Ctrl does; on
+  Linux and Windows Super is a modifier of its own and Super+F5 is not Ctrl+F5
+  (`KeyChord.SuperIsCtrl`). CapsLock and NumLock never count; AltGr is not Alt.
 - **A letter is the letter printed on the key** (`LayoutKey`, falling back to the US position).
   **Any other key is a position.** **A digit** is the number row or, with NumLock, the keypad.
 - **A character chord**, `KeyChord.Of('+', KeyModifiers.Ctrl)`, is the symbol the layout
   types, Shift ignored — for keys that mean their symbol, as zoom means +. On a Swedish keyboard
   `+` has a key of its own, at the US `-` position: matched by position, Ctrl and + zoomed out.
-- **Typing is no shortcut.** A letter, digit, Space or character chord without Ctrl or Alt
+- **Typing is no shortcut.** A letter, digit, Space or character chord without Ctrl, Alt or Super
   does not match a key typed into an element that types text (`e.TargetTakesText`): the
   user is typing it. The same chord matches when the keyboard is anywhere else.
 
@@ -150,6 +151,14 @@ keys.Add("view", "Global", "Views", digits).Shown("1 – 7");
 if (keys.Matches("palette", e)) { TogglePalette(); e.StopPropagation = true; }
 button.Tooltip($"Search & commands ({keys.Keys("palette")})");
 ```
+
+**Checking the command key by hand.** A handler that reads the modifiers itself asks two
+different questions. *Is the command key held?* (Ctrl-click, Ctrl with an arrow):
+`KeyChord.IsPrimaryHeld(e.Modifiers)`, which is Ctrl, or ⌘ on a Mac. *Is this a plain key?*
+(type-to-find, n for next): a mask that keeps Super in it,
+`(e.Modifiers & (KeyModifiers.Ctrl | KeyModifiers.Super)) == 0`, with Alt added where Alt also
+disqualifies. Do not answer both with `Ctrl || Super`: it makes Super act as Ctrl on Linux and
+Windows. Do not answer both with `IsPrimaryHeld` either: Super+N would then act as N.
 
 The map answers questions; the app still walks its overlays and views in its own order and
 asks where it used to compare `e.Key`. `Find(e, group)` returns the first match in table order.

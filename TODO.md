@@ -1,6 +1,17 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Super is not Ctrl off the Mac** — `KeyChord` folds Super into Ctrl only on macOS,
+  where ⌘ is the command key (`KeyChord.SuperIsCtrl`, true there and settable for tests); on Linux
+  and Windows Super is a modifier of its own, so Super+F5 is not Ctrl+F5 and an app can bind it apart.
+  Super chords round-trip as `Super+…` (`Parse` also reads `Win` and `Meta`; `Cmd` and `⌘` stay
+  Ctrl). The ten `Ctrl || Super` checks (3 framework: FindBar, HorizontalPan, the window's group
+  copy; 7 apps) were split into `KeyChord.IsPrimaryHeld` where the value enables a command chord and
+  a Super-inclusive mask where it means "not a plain key", which keeps those unchanged everywhere.
+  A Super+letter typed into a text field is a shortcut, not typing, as a Ctrl+letter is.
+  Tests: 30 Core (`SuperModifierTests`, both rules on every platform, in a non-parallel
+  `KeyboardPlatform` collection), 2 headless (Super+C copies a group selection only on the Mac);
+  two assertions of the old fold removed.
 - **Rich text editor: export as HTML and RTF** (docs/plans/16-rich-text-editor.md, Export) — in Core.
   `RichHtml.WriteDocument(doc, RichExportOptions)` is a UTF-8 HTML5 page with a small stylesheet of
   the editor's proportions in dark text on white; lists nest inside their items, a continuing
