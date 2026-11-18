@@ -921,6 +921,20 @@
   HarfBuzz 14.4's per-call shaping cost on words not cached yet (shaping whole runs), and Graphite.
 
 ## Deferred
+- **Replace Onigwrap** — `HultUI.Syntax` tokenizes through TextMateSharp 2.0.5, whose regex engine is
+  Onigwrap 1.0.11 (`libonigwrap.so`, a native build of Oniguruma). Oniguruma's upstream ended on
+  2025-04-24, so the engine that runs grammar regexes over arbitrary file content gets no more security
+  fixes. Until it is replaced, callers keep highlighting to files under a size cap, with a per-file
+  time budget, off the UI thread. The ways out, cheapest first: (1) `HultUI.Icons` references
+  `HultUI.Syntax` only for its code-file classification (`FileIcons` calls
+  `SyntaxHighlighter.CanHighlight`) — moving that extension table
+  into Icons drops Syntax, TextMateSharp and Onigwrap from every app that needs icons but no
+  highlighting; (2) follow TextMateSharp if it moves to a maintained engine (ask upstream; its public API
+  shows `IOnigCaptureIndex` and `IOnigNextMatchResult` but no way to plug an engine in); (3) a maintained
+  Oniguruma fork, rebuilt and shipped as HultUI's own native, which then needs the same glibc floor
+  checks as the other natives; (4) a tokenizer that does not run TextMate regexes (tree-sitter, or a
+  translation to .NET `Regex`, which lacks some Oniguruma constructs the bundled grammars use). Decide
+  between (2)–(4) when (1) is done and the remaining users of highlighting are known.
 - **The card fill is probably too dark, but the measurements disagree** — on one capture of the
   Gallery's All page the pane is #272727 and a tile is #343434, while ours is #2D2D2D; real
   Settings gives a clean 5.1% white for a card over its page (#000000 -> #0D0D0D, exactly
