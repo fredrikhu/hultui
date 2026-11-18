@@ -736,7 +736,10 @@ the width either, measure the heights in the `Window.Resized` handler at the led
 nothing: a height-only step then measures nothing at all. Vesper Commander's wrapped reader and
 compare view built the whole window and made every row on screen again on each step until plan
 17 round 15 (`FitWrappedRowsInPlace`): 281 → 24 KB a 4 px step of the reader over a
-1,000-line file, 62 → 2 KB a height-only step, with byte-identical frames. Check the lead in the
+1,000-line file, 62 → 2 KB a height-only step, with byte-identical frames. Junction's wrapped diff
+and a review's cards built the view on each step of a resize, and of a drag of the file list's
+splitter beside them, until plan 17 round 16 (`FitWrappedDiffInPlace`): 105 → 48 KB a 6 px step of
+a Commit view, 164 → 126 KB of a Changes view. Check the lead in the
 list's `.OnLayoutChanged`, not after the frame: the handler hears the width the frame laid the
 list out at, measures again when the lead was wrong and calls `InvalidateHeights`, and that frame
 draws the right heights. A check after the frame drew the wrong ones and built again. A row that carries

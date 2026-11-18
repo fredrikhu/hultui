@@ -95,28 +95,42 @@ public class DiffFrameCountTests
         });
     }
 
-    /// <summary>A wrapped diff measures its rows' heights in the build, at the list's width, and a
-    /// build reads the width of the frame before. A size change built twice and drew twice, the
-    /// chrome with it: the first frame drew the rows at the old width's heights and the check after
-    /// it built at the new one (plan 17 round 14). The resize hands the build the width it leads
-    /// to and builds only the view; the widths here cross no breakpoint.</summary>
+    /// <summary>A wrapped diff's rows are as tall as their lines wrap at the list's width. A size
+    /// change built twice and drew twice, the chrome with it: the first frame drew the rows at the
+    /// old width's heights and the check after it built at the new one (plan 17 round 14); then it
+    /// built the view once a step for the heights (round 16: 156–164 KB a step in a real window).
+    /// The resize measures the rows at the width it leads the list to and fits them in place: one
+    /// frame, no build, and the heights and pixels a build that measures every row afresh makes.
+    /// Unified and split, in the Commit and the Changes view; the widths cross no breakpoint.</summary>
     [Fact]
-    public void AWrappedDiffsSizeChange_DrawsOneFrame_AndBuildsTheViewAlone()
+    public void AWrappedDiffsSizeChange_DrawsOneFrame_BuildsNothing_AndIsWhatAFreshBuildDraws()
     {
         Hosted((session, app) =>
         {
-            WrapOn(session, app);
             session.Window.SetClientSize(1380, 900);   // under the compact chrome's 1,406: crossed here, not below
             DiffScrollTests.Quiet(session, app);
-            foreach (int width in new[] { 1376, 1372, 1368, 1364, 1300, 1240, 1376 })
+            foreach (var view in new[] { KeyCode.Digit3, KeyCode.Digit4 })
             {
-                int builds = app.Builds, chrome = app.ChromeBuilds;
-                session.Window.SetClientSize(width, 900);
-                Assert.Equal(1, FramesDrawn(session));
-                Assert.Equal((1, 0), (app.Builds - builds, app.ChromeBuilds - chrome));
-                AssertMeasuredAtTheLaidOutWidth(app, $"at {width} px");
+                session.Window.PressKey(view);
+                DiffScrollTests.Quiet(session, app);
+                foreach (bool split in new[] { false, true })
+                {
+                    Split(session, app, split);
+                    foreach (int width in new[] { 1376, 1372, 1368, 1364, 1300, 1240, 1380 })
+                    {
+                        string when = $"{view} {(split ? "split" : "unified")} at {width} px";
+                        int builds = app.Builds, chrome = app.ChromeBuilds, passes = app.DiffHeightPasses;
+                        session.Window.SetClientSize(width, 900);
+                        Assert.Equal(1, FramesDrawn(session));
+                        Assert.True((app.Builds - builds, app.ChromeBuilds - chrome, app.DiffHeightPasses - passes) == (0, 0, 1),
+                            $"{when}: {app.Builds - builds} builds, {app.ChromeBuilds - chrome} chrome part builds, {app.DiffHeightPasses - passes} measures of the rows");
+                        AssertMeasuredAtTheLaidOutWidth(app, when);
+                        AssertWhatAFreshBuildDraws(session, app, when);
+                    }
+                }
+                Split(session, app, false);
             }
-        });
+        }, wrap: true);
     }
 
     /// <summary>A height alone leaves every wrapped row as tall as it was: nothing builds.</summary>
@@ -156,12 +170,13 @@ public class DiffFrameCountTests
         });
     }
 
-    /// <summary>A drag of the file list's splitter beside a wrapped diff builds the view for the
+    /// <summary>A drag of the file list's splitter beside a wrapped diff built the view for the
     /// rows' heights. That build read the width of the frame before, so each step built twice and
     /// drew twice, the second time the chrome too, the same pixels as the first (plan 17 round 14).
-    /// The step hands the build the width the list gave up.</summary>
+    /// A step measures the rows at the width the list gives up and fits them in place, with no
+    /// build (round 16), and draws what a build that measures them afresh draws.</summary>
     [Fact]
-    public void AFileListDragBesideAWrappedDiff_DrawsOneFrameAStep_AndBuildsTheViewAlone()
+    public void AFileListDragBesideAWrappedDiff_DrawsOneFrameAStep_AndBuildsNothing()
     {
         Hosted((session, app) =>
         {
@@ -184,8 +199,9 @@ public class DiffFrameCountTests
                 session.Window.MoveMouse(x, y);
                 Assert.Equal(1, FramesDrawn(session));
                 Assert.Equal(width + step, Get<Ref<ScrollViewElement>>(app, "_fileScrollRef").Current!.Layout.Width, 0.5f);
-                Assert.Equal((1, 0), (app.Builds - builds, app.ChromeBuilds - chrome));
+                Assert.Equal((0, 0), (app.Builds - builds, app.ChromeBuilds - chrome));
                 AssertMeasuredAtTheLaidOutWidth(app, $"a step of {step} px");
+                AssertWhatAFreshBuildDraws(session, app, $"a step of {step} px");
                 files = Get<Ref<ScrollViewElement>>(app, "_fileScrollRef").Current!;
             }
             session.Window.MouseUp(x, y);
@@ -347,6 +363,46 @@ public class DiffFrameCountTests
         DiffScrollTests.Quiet(session, app);
         Assert.True(Get<bool>(app, "_diffWrap"), "w did not wrap the diff");
         AssertMeasuredAtTheLaidOutWidth(app, "after wrapping");
+    }
+
+    /// <summary>The diff split or unified, from the app's own toggle, and settled.</summary>
+    private static void Split(HeadlessSession session, JunctionApp app, bool split)
+    {
+        if (Get<bool>(app, "_diffSplit") == split) return;
+        typeof(JunctionApp).GetMethod("SetDiffSplit", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(app, [split]);
+        DiffScrollTests.Quiet(session, app);
+        Assert.Equal(split, Get<bool>(app, "_diffSplit"));
+        AssertMeasuredAtTheLaidOutWidth(app, split ? "after splitting" : "after unsplitting");
+    }
+
+    /// <summary>
+    /// The rows' heights, and the pixels, are those a build that measures every row afresh at the
+    /// list's width and makes every row again gives: the measured shape is forgotten, the rows on
+    /// screen are thrown away and the app is built.
+    /// </summary>
+    private static void AssertWhatAFreshBuildDraws(HeadlessSession session, JunctionApp app, string when)
+    {
+        var fitted = (float[])Get<float[]>(app, "_diffHeights").Clone();
+        var kept = Pixels(session);
+        typeof(JunctionApp).GetField("_diffHeightShape", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .SetValue(app, (false, false, -1f, -1, -1));
+        var list = List(app);
+        list.GetType().GetMethod("InvalidateRows")!.Invoke(list, null);
+        int passes = app.DiffHeightPasses;
+        Rebuild(app);
+        FramesDrawn(session);
+        Assert.True(app.DiffHeightPasses - passes >= 1, $"{when}: the fresh build measured no rows");
+        var fresh = Get<float[]>(app, "_diffHeights");
+        Assert.True(fitted.AsSpan().SequenceEqual(fresh), $"{when}: {fitted.Length} heights fitted in place, {fresh.Length} measured afresh, "
+            + $"{fitted.Zip(fresh).Count(p => p.First != p.Second)} different");
+        Assert.True(kept.AsSpan().SequenceEqual(Pixels(session)), $"{when}: the rows fitted in place draw other pixels than a fresh build's");
+    }
+
+    private static byte[] Pixels(HeadlessSession session)
+    {
+        using var image = session.Window.CapturePixels();
+        using var pixmap = image.PeekPixels();
+        return pixmap.GetPixelSpan().ToArray();
     }
 
     /// <summary>The wrapped rows on screen were measured at the code width the list is laid out at.</summary>

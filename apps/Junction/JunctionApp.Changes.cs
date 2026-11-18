@@ -535,17 +535,19 @@ public partial class JunctionApp
     /// beside it takes what is left, and its pan reads that after the frame (FollowDiffWidth). A
     /// move built the view, 42 KB with Changes' diff (plan 17 round 10 step 13). The press, which
     /// lights the handle, the release, which remembers the width, and the arrow keys build the
-    /// view, which reads the width; so does a move while the diff's rows are measured at its
-    /// width (wrapped, or a review's cards), where the rows have to be measured again. A wrapped
-    /// diff's build is handed the width the move leaves it (LeadWrappedDiffSplit), so it measures
-    /// the rows once, at the width they are drawn at.
+    /// view, which reads the width; a wrapped diff's build is handed the width the move leaves it
+    /// (LeadWrappedDiffSplit), so it measures the rows once, at the width they are drawn at. A
+    /// move beside a diff whose rows are measured at its width (wrapped, or a review's cards)
+    /// measures them at that width and fits them in place, with no build (FitWrappedDiffInPlace;
+    /// it built the view until plan 17 round 16).
     /// </summary>
     private void FileListSplitMoved(PaneSplitter split, Element? list)
     {
-        if (split.IsDragging && !_diffWrap && !ReviewRowsActive
+        if (split.IsDragging
             && list is { IsHosted: true, Box.Width.Unit: DimensionUnit.Pixels }
             && list.Box.Width != Dimension.Px(split.Size))   // the press moves nothing
         {
+            if (_diffWrap || ReviewRowsActive) LeadWrappedDiffRows(split, list);
             list.Width(split.Size);
             list.MarkLayoutDirty();
             FollowDiffWidthAfterFrame();
