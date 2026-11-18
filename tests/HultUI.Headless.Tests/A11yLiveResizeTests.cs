@@ -112,6 +112,7 @@ public class A11yLiveResizeTests
         var raised = new List<UiaRaised>();
         uia.Raised = raised.Add;
         session.Window.InstallAccessibilityBridge(uia);
+        hwnd.AskForRoot();   // as a reader does: the bridge builds and raises nothing before
         var (root, footer) = Scene();
         session.Window.SetRoot(root);
         session.PumpFrames(2);

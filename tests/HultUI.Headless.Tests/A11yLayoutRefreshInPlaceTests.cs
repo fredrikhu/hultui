@@ -928,6 +928,7 @@ public class A11yLayoutRefreshInPlaceTests
         var raised = new List<string>();
         uia.Raised = r => raised.Add($"{r.Kind} {r.Id} {(r.Element is { } e ? e.Value.ToString() : "root")}");
         session.Window.InstallAccessibilityBridge(uia);
+        hwnd.AskForRoot();   // as a reader does: the bridge builds and raises nothing before
         var group = Flex.Column(gap: 2).AccessibleRole(AccessibilityRole.Group).AccessibleName("Left pane, docs").Children(Rows(20));
         session.Window.SetRoot(Flex.Column(gap: 4).Padding(8).Children(TextB.New("Header"), group));
         session.PumpFrames(2);

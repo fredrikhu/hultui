@@ -44,6 +44,7 @@ public sealed class ReaderFocusTests(ITestOutputHelper output)
         var heard = new ConcurrentQueue<(string Name, bool HasFocus)>();
         automation.RegisterFocusChangedEvent(element =>
         {
+            if (!Ours(element)) return;
             try { heard.Enqueue((element.Name, element.Properties.HasKeyboardFocus.ValueOrDefault)); }
             catch (Exception ex) { heard.Enqueue(($"<{ex.GetType().Name}>", false)); }
         });
@@ -99,6 +100,7 @@ public sealed class ReaderFocusTests(ITestOutputHelper output)
         var senders = new ConcurrentQueue<(string Name, bool HasFocus)>();
         automation.RegisterFocusChangedEvent(element =>
         {
+            if (!Ours(element)) return;
             try { focus.Enqueue(element.Name); }
             catch (Exception ex) { focus.Enqueue($"<{ex.GetType().Name}>"); }
         });
@@ -191,6 +193,7 @@ public sealed class ReaderFocusTests(ITestOutputHelper output)
         var heard = new ConcurrentQueue<string>();
         automation.RegisterFocusChangedEvent(element =>
         {
+            if (!Ours(element)) return;
             try
             {
                 var selected = element.Patterns.SelectionItem.PatternOrDefault?.IsSelected.ValueOrDefault;
@@ -299,5 +302,13 @@ public sealed class ReaderFocusTests(ITestOutputHelper output)
             Thread.Sleep(10);
         }
         return until?.Invoke() ?? true;
+    }
+
+    /// <summary>Whether a focus event came from this process. A focus handler hears the whole desktop's
+    /// focus moves, and another process's elements are not a test's to read, not even their names.</summary>
+    private static bool Ours(FlaUI.Core.AutomationElements.AutomationElement element)
+    {
+        try { return element.Properties.ProcessId.ValueOrDefault == Environment.ProcessId; }
+        catch { return false; }
     }
 }

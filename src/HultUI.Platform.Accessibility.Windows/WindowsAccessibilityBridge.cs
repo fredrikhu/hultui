@@ -102,6 +102,18 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
         _originalWndProc = UiaInterop.SetWindowLongPtr(hwnd, UiaInterop.GWLP_WNDPROC, (IntPtr)proc);
     }
 
+    /// <summary>
+    /// Whether the window builds its tree and raises events: a client listens, and one has asked for
+    /// this window's root (<see cref="RootAsked"/>).
+    /// </summary>
+    /// <remarks>
+    /// <c>UiaClientsAreListening</c> alone said yes on every desktop with any UI Automation client, and
+    /// this desk always has one that never asks for a window's root: 0 root asks in 16 launches of
+    /// Junction and Vesper (plan 17 round 16). For it each window built its tree, kept it up to date
+    /// and raised every change, and the client made about 13 provider calls a raised event. A reader
+    /// asks for the root of the window it reads (the foreground's, as it comes to the front, or one it
+    /// is pointed at), and then the tree is built at once (<see cref="IUiaHostBridge.RootRequested"/>).
+    /// </remarks>
     public bool IsActive
     {
         get
@@ -115,11 +127,22 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
                 _reportedListening = listening;
                 AccessibilityClients.Report(listening);
             }
-            return listening;
+            return listening && _rootAsked;
         }
     }
 
     private bool _reportedListening;
+
+    /// <summary>
+    /// The window's gate: whether a UI Automation client has asked for this window's root
+    /// (<c>WM_GETOBJECT</c> with <c>UiaRootObjectId</c>). Until one has, the window builds no tree and
+    /// the bridge raises nothing, however many clients listen; from the first ask on it is as if there
+    /// were no gate. Each window has its own, and it never closes. Set on the UI thread (the window
+    /// procedure); read on any.
+    /// </summary>
+    internal bool RootAsked => _rootAsked;
+
+    private volatile bool _rootAsked;
 
     // Raise UIA events (structure/property/focus changed) so an assistive tech
     // refreshes live as the tree changes. This used to fast-fail on the
@@ -1313,10 +1336,13 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
 
             if (msg == UiaInterop.WM_GETOBJECT && (int)lParam == UiaInterop.UiaRootObjectId)
             {
+                // The first ask opens the window's gate (RootAsked). The host builds the tree before
+                // the answer when it can, so the client's first reads find it; otherwise the next frame.
+                self._rootAsked = true;
+                self._host.RootRequested();
                 IntPtr root = self.NativeRootSimple(); // UiaReturnRawElementProvider wants IRawElementProviderSimple*
                 IntPtr lresult = UiaInterop.UiaReturnRawElementProvider(hwnd, wParam, lParam, root);
                 if (root != IntPtr.Zero) Marshal.Release(root); // UIA took its own reference
-                self._host.RootRequested();
                 return lresult;
             }
 

@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using HultUI.Core.Accessibility;
+using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Primitives;
@@ -49,11 +50,23 @@ internal sealed class UiaHostBridge : IUiaHostBridge, IDisposable
     public void ExpandCollapseElement(ElementId id, bool expand) => _router.ExpandCollapseElement(id, expand);
     public void ScrollElementIntoView(ElementId id) => _router.ScrollElementIntoView(id);
 
-    /// <summary>A client asked for the root. If the window has not built a tree for a listening
-    /// client yet (one has just attached), the loop wakes and its next frame builds it.</summary>
+    /// <summary>
+    /// A client asked for the root, and the bridge answers after this. If the window has no tree for
+    /// it yet (the first ask: the bridge's gate opened; or a client that attached after the last had
+    /// gone), it is built now, by a frame that has nothing to draw: it runs to the accessibility phase
+    /// and stops, so the client's first reads find the tree. Not inside a frame of this window, nor
+    /// while one would draw (a resize, dirt) or a reconcile runs, which a wait inside them can let
+    /// this message in on: then the loop wakes and its next frame builds it.
+    /// </summary>
     public void RootRequested()
     {
-        if (!_window.AccessibilityTreeBuilt) _router.ActiveChanged();
+        if (_window.AccessibilityTreeBuilt) return;
+        if (!_window.IsDrawingFrame && !_window.NeedsDraw && !TreeDiffer.IsReconciling)
+        {
+            _window.RenderFrame();
+            if (_window.AccessibilityTreeBuilt) return;
+        }
+        _router.ActiveChanged();
     }
 
     // ──── Reads — the bridge no longer calls these (plan 17, round 4): each found the
