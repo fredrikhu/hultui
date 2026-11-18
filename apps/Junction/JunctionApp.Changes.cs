@@ -1524,8 +1524,17 @@ public partial class JunctionApp
     /// same path exists in more than one open repository.</summary>
     private readonly record struct StageKey(string Repo, string Path);
 
-    /// <summary>True: on its way into the staged list; false: on its way out of it.</summary>
-    private readonly Dictionary<StageKey, bool> _pendingStage = new();
+    /// <summary>Where a file is on its way: into the staged list or out of it, and the move that
+    /// sent it, which only that move's command may settle or take back. A file staged and then
+    /// unstaged before git answered the stage is the unstage's: the stage coming back settled it,
+    /// the reload behind the stage retired it, and the row sprang back to Staged while
+    /// <c>git reset</c> was still waiting its turn.</summary>
+    private readonly Dictionary<StageKey, PendingMove> _pendingStage = new();
+
+    private readonly record struct PendingMove(bool ToStaged, int Move);
+
+    /// <summary>Counts the moves asked for; each one's number is in <see cref="_pendingStage"/>.</summary>
+    private int _stageMoves;
 
     /// <summary>Moves whose git command has come back successfully. They stay on screen
     /// until the reload behind them lands, or the row would flick back to where it started
@@ -1578,7 +1587,7 @@ public partial class JunctionApp
         var stagedDiffs = new Dictionary<string, GitFileDiff>(data.StagedDiffs, StringComparer.Ordinal);
         var unstagedDiffs = new Dictionary<string, GitFileDiff>(data.UnstagedDiffs, StringComparer.Ordinal);
 
-        foreach (var (key, toStaged) in mine)
+        foreach (var (key, (toStaged, _)) in mine)
         {
             var from = toStaged ? unstaged : staged;
             var to = toStaged ? staged : unstaged;
@@ -1670,13 +1679,22 @@ public partial class JunctionApp
     {
         var repoPath = _activeRepoPath;
         var keys = paths.Select(p => new StageKey(repoPath, p)).ToList();
-        foreach (var key in keys) _pendingStage[key] = toStaged;
+        int move = ++_stageMoves;
+        foreach (var key in keys)
+        {
+            _pendingStage[key] = new PendingMove(toStaged, move);
+            // Settled by an earlier move whose reload has not landed: that reload is not this
+            // move's, and must not retire it.
+            _settledStage.Remove(key);
+        }
         _pendingStageGen++;
         MarkDirty();
-        _stagingChain = RunStagingAsync(keys, command, ok, fail, repoPath);
+        _stagingChain = RunStagingAsync(keys, move, command, ok, fail, repoPath);
     }
 
-    private async Task RunStagingAsync(List<StageKey> keys, Func<bool> command,
+    /// <param name="move">The move this command is for: it settles, or on failure takes back,
+    /// only the files still on their way by it (see <see cref="_pendingStage"/>).</param>
+    private async Task RunStagingAsync(List<StageKey> keys, int move, Func<bool> command,
         string? ok, string fail, string repoPath)
     {
         // Read before the first await, so this is the chain as it stood when the click
@@ -1695,12 +1713,14 @@ public partial class JunctionApp
             if (success)
             {
                 foreach (var key in keys)
-                    if (_pendingStage.ContainsKey(key)) _settledStage.Add(key);
+                    if (IsMoveOf(key, move)) _settledStage.Add(key);
                 if (ok != null) Flash(ok);
             }
             else
             {
-                foreach (var key in keys) { _pendingStage.Remove(key); _settledStage.Remove(key); }
+                // A later move of the same file runs its own command after this one.
+                foreach (var key in keys)
+                    if (IsMoveOf(key, move)) { _pendingStage.Remove(key); _settledStage.Remove(key); }
                 _pendingStageGen++;
                 Flash(error is null ? fail : FirstLine(error, fail));
             }
@@ -1708,6 +1728,10 @@ public partial class JunctionApp
             else MarkDirty();
         });
     }
+
+    /// <summary>Whether <paramref name="key"/> is still on its way by <paramref name="move"/>.</summary>
+    private bool IsMoveOf(StageKey key, int move) =>
+        _pendingStage.TryGetValue(key, out var pending) && pending.Move == move;
 
     /// <summary>
     /// Runs a git command off the UI thread and applies its result on the main thread once
