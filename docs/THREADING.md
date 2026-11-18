@@ -170,7 +170,10 @@ watcher.Changed += (_, e) => Application.InvokeOnMainThread(() => Files = Reload
 One thread must not post: a thread the UI thread waits for during a frame. On
 Windows a frame can render inside SDL's event watcher (that is how the window
 repaints during a live resize, and `Maximize`/`Restore` resize synchronously,
-so the watcher fires under whoever called them). SDL holds its watcher lock for
+so the watcher fires under whoever called them; such a frame sets aside the batch
+of the posted action or handler that made the call, so it shows what that wrote
+and what `Resized` handlers write, [REACTIVITY.md](REACTIVITY.md#automatic-batching-of-event-handlers)).
+SDL holds its watcher lock for
 the duration, and `Wake` is an `SDL_PushEvent`, which waits for that lock. If the
 frame then waits for a thread that is inside `InvokeOnMainThread`, both wait
 forever. A native decoder whose render call waits for its own callback thread is

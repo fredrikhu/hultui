@@ -552,6 +552,18 @@ public sealed class Application : IDisposable
     /// <para>Never inside a frame of the same window: a wait on the UI thread in a draw can pump
     /// the size loop's messages, and the frame drawn from there drew the same elements again
     /// inside the first. That request waits for the next event, the resize still pending.</para>
+    ///
+    /// <para>Outside the batches open around it, as a nested pass of the loop is
+    /// (<see cref="RunFrameCore"/>). A resize the app makes itself — <c>SetWindowPos</c> or a
+    /// fullscreen toggle from posted work or an event's handler — sends the size inside the call,
+    /// so this frame ran inside that action's batch, which held what the Resized handlers wrote: it
+    /// drew the new size with the old build, and the batch's flush then built and drew the same
+    /// size again (Junction's wrapped diff resized by posted steps: 1.90 frames a step, a user's
+    /// drag 0.95; plan 17 round 16). Now what the batches held is flushed first, the handlers'
+    /// writes build at once, and the frame shows them. A user's own drag reaches here from the
+    /// pump, with no batch open, and is unchanged. A build that throws in that flush leaves this
+    /// frame undrawn and the resize pending, as one that throws in a Resized handler does; the
+    /// platform's caller (SDL's event watch) logs it, and the action's batch closes as before.</para>
     /// </summary>
     private void RenderLiveResizeFrame(Window window)
     {
@@ -569,8 +581,12 @@ public sealed class Application : IDisposable
             _parked = false;
             UIThread.Unpark();
         }
+        // Inside an open batch (see above): set aside for the frame, what it held so far flushed
+        // first. Given back in the finally, so a build that throws in the flush cannot lose it.
+        int outer = ReactiveRuntime.SetAsideBatches();
         try
         {
+            if (outer > 0) ReactiveRuntime.FlushNow();
             var platform = window.PlatformWindow;
             // Taken whichever frame draws: any frame takes the newest picture.
             bool requested = LiveFrameRequests.TakeWaiting();
@@ -611,6 +627,7 @@ public sealed class Application : IDisposable
         }
         finally
         {
+            ReactiveRuntime.RestoreBatches(outer);
             if (parked)
             {
                 _parked = true;
