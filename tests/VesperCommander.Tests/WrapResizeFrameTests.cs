@@ -1,7 +1,11 @@
 using System.Reflection;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
+using HultUI.Core.Layout;
+using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
+using HultUI.Core.Rendering;
+using HultUI.Core.Styling;
 using HultUI.Headless;
 using Xunit;
 
@@ -16,12 +20,14 @@ namespace VesperCommander.Tests;
 /// body. It used to be measured in a build, which ran before the frame's layout and read the
 /// width the body had a frame ago: the frame drew every row at the old width's height, and the
 /// check after it (SettleWrappedRowWidths) built and drew a second frame at the new one. The
-/// resize now leads the width by what the window gained or lost (LeadWrappedBodyWidth), and the
-/// check stays to correct a lead that was wrong — the wrong-lead test makes one on purpose.
-/// Plan 17 round 15 took the build out: a wrapped row reads neither the window nor the width,
-/// so the resize measures the heights itself and hands them to the list (FitWrappedRowsInPlace).
-/// The build made every row on screen again and patched the whole window, ~290 KB a 4 px step
-/// of the reader over a 1,000-line file, and 64 KB a height-only step that changed nothing.</para>
+/// resize now leads the width by what the window gained or lost (LeadWrappedBodyWidth), and a
+/// check corrects a lead that was wrong — the wrong-lead test makes one on purpose. Plan 17
+/// round 15 took the build out: a wrapped row reads neither the window nor the width, so the
+/// resize measures the heights itself and hands them to the list (FitWrappedRowsInPlace). The
+/// build made every row on screen again and patched the whole window, ~290 KB a 4 px step of
+/// the reader over a 1,000-line file, and 64 KB a height-only step that changed nothing. Round
+/// 16 moved the check into the body's layout hook (WrappedBodyLaidOut), before the frame is
+/// drawn, which is also where a view's first open measures its rows.</para>
 /// </summary>
 public class WrapResizeFrameTests
 {
@@ -97,13 +103,15 @@ public class WrapResizeFrameTests
 
     /// <summary>
     /// The lead is the body's last laid-out width plus what the window gained or lost since the
-    /// check read it. Here the check is told the window was 60 px wider then than it was, so
-    /// the lead comes out 60 px short, as it would wherever the body did not take all of the
-    /// window's change: the frame draws rows measured at the wrong width, and the check after it
-    /// builds and draws a second frame at the width on screen, keeping the rows.
+    /// body's layout hook read it. Here the hook is told the window was 60 px wider then than it
+    /// was, so the lead comes out 60 px short, as it would wherever the body did not take all of
+    /// the window's change: the resize measures the rows at the wrong width, and the hook
+    /// measures them again at the width laid out, in the same frame, before it is drawn. Until
+    /// plan 17 round 16 that frame drew the rows at the wrong heights, and a check after it built
+    /// and drew a second frame.
     /// </summary>
     [Fact]
-    public void AWrongLead_IsCorrectedByTheCheckAfterTheFrame()
+    public void AWrongLead_IsCorrectedInTheFrameItLaysOut()
     {
         using var t = new DiffViewTests.Fixture();
         t.WriteLeft("a.txt", LongLines(80));
@@ -119,8 +127,8 @@ public class WrapResizeFrameTests
         int builds = Builds(t);
         var before = RowsOnScreen(t, "_viewerScrollRef");
         t.Session.Window.SetClientSize(1200, 820);
-        Assert.Equal(2, FramesDrawn(t.Session));
-        Assert.Equal(1, Builds(t) - builds);
+        Assert.Equal(1, FramesDrawn(t.Session));
+        Assert.Equal(0, Builds(t) - builds);
         AssertKept(before, RowsOnScreen(t, "_viewerScrollRef"), "after the corrected lead");
         AssertMeasuredAtTheLaidOutWidth(t, "ViewerCodeWidth", "_viewerHeightsWidth", "_viewerTops", 1200);
 
@@ -130,6 +138,162 @@ public class WrapResizeFrameTests
         Assert.Equal(1, FramesDrawn(t.Session));
         Assert.Equal(0, Builds(t) - builds);
         AssertMeasuredAtTheLaidOutWidth(t, "ViewerCodeWidth", "_viewerHeightsWidth", "_viewerTops", 1180);
+    }
+
+    /// <summary>
+    /// A wrapped view's first open builds for its text once and draws its rows at their heights
+    /// from the first frame that shows them: every line is measured once, at the code width the
+    /// body is laid out at, by the body's layout hook before that frame is drawn. A check after
+    /// the frame used to build the whole window again, asked from the Loading view (whose code
+    /// width counts no lines), and drew another frame (plan 17 round 16: 14 builds and 4 frames
+    /// against a later open's 11 and 3). The reader, then the compare view.
+    /// </summary>
+    [Fact]
+    public void AFirstWrappedOpen_BuildsOnceForItsText_AndMeasuresEachLineOnce_AtTheLaidOutWidth()
+    {
+        using var t = new DiffViewTests.Fixture();
+        string text = LongLines(80);
+        t.WriteLeft("a.txt", text);
+        t.WriteRight("a.txt", text.Replace("word1 ", "WORD1 "));
+        t.Open(wrap: true);
+        t.PutCursorOn('L', "a.txt");
+
+        FirstOpen(t, () => t.Session.Window.PressKey(KeyCode.F3, KeyModifiers.Shift), "_viewerState", "Loading",
+            "_viewerScrollRef", "ViewerCodeWidth", "_viewerHeightsWidth", "_viewerTops", "the reader");
+        t.Press(KeyCode.Escape);
+        t.Session.PumpFrames(3);
+        // The comparison held at "Comparing…" for a few frames, as a long one is: the check after
+        // the frame built the whole window again from there.
+        var release = t.HoldComparison();
+        FirstOpen(t, () => t.Session.Window.PressKey(KeyCode.F3), "_diffState", "Comparing",
+            "_diffScrollRef", "DiffCodeWidth", "_diffHeightsWidth", "_diffTops", "the compare view", release);
+    }
+
+    /// <summary>
+    /// An open after the window was resized while the view was closed measures every line once, at
+    /// the width the body is laid out at. The build read the box the list of the open before had
+    /// left behind, measured every line at that width and drew them at it, and the check after the
+    /// frame measured them all again (plan 17 round 16: the 602k-character archive 3,040 line
+    /// measures against 1,520).
+    /// </summary>
+    [Fact]
+    public void AnOpenAfterTheWindowWasResized_MeasuresEachLineOnce_AtTheNewWidth()
+    {
+        using var t = new DiffViewTests.Fixture();
+        string text = LongLines(80);
+        t.WriteLeft("a.txt", text);
+        t.WriteRight("a.txt", text.Replace("word1 ", "WORD1 "));
+        t.Open(wrap: true);
+        OpenViewer(t, "a.txt");
+        t.Press(KeyCode.Escape);
+        t.Session.PumpFrames(3);
+        t.Session.Window.SetClientSize(1180, 820);
+        t.Session.PumpFrames(3);
+
+        t.PutCursorOn('L', "a.txt");
+        FirstOpen(t, () => t.Session.Window.PressKey(KeyCode.F3, KeyModifiers.Shift), "_viewerState", "Loading",
+            "_viewerScrollRef", "ViewerCodeWidth", "_viewerHeightsWidth", "_viewerTops", "the reader after a resize");
+    }
+
+    /// <summary>One open from the key press until nothing draws: two frames, the Loading or
+    /// Comparing view's and the text's, the second showing the rows; nothing built after either;
+    /// one measure of each line, at the width laid out; and the rows on screen drawing as rows
+    /// made at a measure from scratch do.</summary>
+    private static void FirstOpen(DiffViewTests.Fixture t, System.Action press, string state, string loading,
+        string scrollRef, string codeWidth, string heightsWidth, string tops, string what, System.Action? release = null)
+    {
+        int frames = 0, builtAfterAFrame = 0, measures;
+        bool textDrawn = false;
+        var trace = new System.Text.StringBuilder();
+        using (var spy = new WrapSpy())
+        {
+            press();
+            int builds = Builds(t);
+            for (int quiet = 0, i = 0; i < 2000 && quiet < 16; i++)
+            {
+                // A held load lands once the waiting view has been drawn and some frames have gone by.
+                if (i == 12) release?.Invoke();
+                int b0 = Builds(t);
+                bool drew = t.Session.PumpFrame(System.TimeSpan.FromMilliseconds(16));
+                string now = t.Field<object>(state).ToString()!;
+                if (drew || Builds(t) != b0) trace.Append($"[{i} drew={drew} builds={Builds(t) - builds} {now} measures={spy.Widths.Count}] ");
+                // Built again while still loading, after the Loading view was drawn, or after the
+                // text was: a check after a frame, not the text landing.
+                if (Builds(t) != b0 && (textDrawn || (frames > 0 && now == loading))) builtAfterAFrame++;
+                if (drew) frames++;
+                if (drew && now == "Ok") textDrawn = true;
+                quiet = drew || now == loading ? 0 : quiet + 1;
+                System.Threading.Thread.Sleep(2);
+            }
+            Assert.True(frames == 2 && builtAfterAFrame == 0, $"{what}: {frames} frames, {builtAfterAFrame} builds after a frame: {trace}");
+            Assert.Equal("Ok", t.Field<object>(state).ToString());
+            float laidOut = (float)typeof(CommanderApp).GetMethod(codeWidth, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(t.App, null)!;
+            Assert.Equal(laidOut, t.Field<float>(heightsWidth));
+            Assert.True(spy.Widths.Count > 20, $"{what}: only {spy.Widths.Count} long lines measured: not a wrap test");
+            Assert.True(spy.Widths.All(w => w == laidOut),
+                $"{what}: lines measured at {string.Join(", ", spy.Widths.Distinct())}, the body laid out at {laidOut}");
+            measures = spy.Widths.Count;
+        }
+
+        // What it drew is what rows made again at a measure from scratch draw, and the open
+        // measured as much as that one measure does.
+        var drawn = t.Field<float[]>(tops);
+        var kept = Pixels(t.Session);
+        typeof(CommanderApp).GetField(heightsWidth, BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(t.App, -1f);
+        typeof(CommanderApp).GetField(tops, BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(t.App, System.Array.Empty<float>());
+        using (var once = new WrapSpy())
+        {
+            Rebuild(t);
+            t.Session.PumpFrames(3);
+            Assert.True(measures == once.Widths.Count, $"{what}: the open measured {measures} long lines, one measure is {once.Widths.Count}");
+        }
+        Assert.True(drawn.AsSpan().SequenceEqual(t.Field<float[]>(tops)), $"{what}: a measure from scratch gives other heights");
+        Assert.True(kept.AsSpan().SequenceEqual(Pixels(t.Session)), $"{what}: the rows drawn differ from rows made again");
+    }
+
+    /// <summary>Counts the measures the app makes through <see cref="TextMeasure"/> of the long
+    /// lines (the wrapped rows' heights), by width. The layout engine measures through its own
+    /// reference to the context, so it is not counted. The tests in this assembly run one at a
+    /// time, so the context can be swapped for one.</summary>
+    private sealed class WrapSpy : IMeasureContext, System.IDisposable
+    {
+        private readonly IMeasureContext _inner = TextMeasure.Context!;
+        private readonly HashSet<(string, float)> _seen = [];
+        public readonly List<float> Widths = [];
+        public int Distinct => _seen.Count;
+
+        public WrapSpy() => TextMeasure.Context = this;
+        public void Dispose() => TextMeasure.Context = _inner;
+
+        private void Note(string text, float maxWidth)
+        {
+            if (text.Length <= 100 || !(maxWidth > 0) || maxWidth > 1e30f) return;
+            Widths.Add(maxWidth);
+            _seen.Add((text, maxWidth));
+        }
+
+        public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+            TextOverflow overflow = TextOverflow.Clip)
+        { Note(text, maxWidth); return _inner.MeasureText(text, style, maxWidth, maxLines, overflow); }
+
+        public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+            TextOverflow overflow, IReadOnlyList<TextSpan>? spans)
+        { Note(text, maxWidth); return _inner.MeasureText(text, style, maxWidth, maxLines, overflow, spans); }
+
+        public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+            TextOverflow overflow, IReadOnlyList<TextSpan>? spans, out float sameFromWidth)
+        { Note(text, maxWidth); return _inner.MeasureText(text, style, maxWidth, maxLines, overflow, spans, out sameFromWidth); }
+
+        public float MinContentTextWidth(string text, ResolvedInheritedStyle style, IReadOnlyList<TextSpan>? spans = null) =>
+            _inner.MinContentTextWidth(text, style, spans);
+
+        public FontMetrics MeasureFont(ResolvedInheritedStyle style) => _inner.MeasureFont(style);
+
+        public bool HasGlyph(ResolvedInheritedStyle style, int codePoint) => _inner.HasGlyph(style, codePoint);
+
+        public float MeasureFirstBaseline(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+            TextOverflow overflow = TextOverflow.Clip, IReadOnlyList<TextSpan>? spans = null) =>
+            _inner.MeasureFirstBaseline(text, style, maxWidth, maxLines, overflow, spans);
     }
 
     /// <summary>With a Brief grid behind the full-shell view the resize builds as it did. The
@@ -173,8 +337,8 @@ public class WrapResizeFrameTests
 
     // ── harness ──────────────────────────────────────────────────────────
 
-    /// <summary>A size change first, so the check after the frame has read the body's width: a
-    /// resize leads only from a width it saw (the open's own build guesses from the window).</summary>
+    /// <summary>A size change first, so the steps start from a body the layout hook has read at a
+    /// width a resize gave it: a resize leads only from a width the hook saw.</summary>
     private static void Settle(DiffViewTests.Fixture t)
     {
         t.Session.Window.SetClientSize(1236, 820);

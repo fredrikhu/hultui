@@ -355,17 +355,20 @@ public partial class CommanderApp
 
     /// <summary>Width of the code column. Measured from the laid-out body when there is one
     /// and from the window before that — the first Build after opening runs before any
-    /// layout, and it still has to decide how tall a wrapped row is. A resize's build takes
-    /// the width the resize leads the body to (<see cref="BodyWidth"/>).</summary>
-    private float ViewerCodeWidth() => Math.Max(0, BodyWidth(_viewerScrollRef.Current) - ViewerGutterW());
+    /// layout; wrapped, it leaves the rows to the body's layout to measure
+    /// (<see cref="WaitsForTheBody"/>). A resize's build takes the width the resize leads the
+    /// body to (<see cref="BodyWidth"/>).</summary>
+    private float ViewerCodeWidth() => ViewerCodeWidthFor(BodyWidth(_viewerScrollRef.Current));
 
-    /// <summary>Measures every row once, at the current column width. Unwrapped every row is
-    /// one line tall and the whole thing is arithmetic; wrapped, each is as tall as its line
-    /// laid out into the column. Called when the file, the wrap mode or the width changes —
-    /// not per frame, and never per row per frame.</summary>
-    private void RebuildViewerHeights()
+    /// <summary>The code column of a body <paramref name="body"/> wide: what the gutter leaves.</summary>
+    private float ViewerCodeWidthFor(float body) => Math.Max(0, body - ViewerGutterW());
+
+    /// <summary>Measures every row once, at the column width <paramref name="width"/>. Unwrapped
+    /// every row is one line tall and the whole thing is arithmetic; wrapped, each is as tall as
+    /// its line laid out into the column. Called when the file, the wrap mode or the width
+    /// changes — not per frame, and never per row per frame.</summary>
+    private void RebuildViewerHeights(float width)
     {
-        float width = ViewerCodeWidth();
         _viewerHeightsWidth = width;
         var tops = new float[_viewerLines.Length + 1];
         float y = 0f;
@@ -541,9 +544,12 @@ public partial class CommanderApp
         if (_viewerTops.Length != _viewerLines.Length + 1 || _viewerRowShape != shape)
         {
             bool widthOnly = WrappedWidthOnly(_viewerRowShape, shape, _viewerTops.Length == _viewerLines.Length + 1);
-            if (_viewerRowShape.Item1 != shape.Item1 || _viewerHeightsWidth != shape.Item3
+            // Wrapped, a body with no box yet measures nothing here: its first layout does, at the
+            // width it is laid out at, before the frame is drawn (WrappedBodyLaidOut).
+            if ((_viewerRowShape.Item1 != shape.Item1 || _viewerHeightsWidth != shape.Item3
                 || _viewerTops.Length != _viewerLines.Length + 1)
-                RebuildViewerHeights();
+                && !(ViewerWrap && WaitsForTheBody(_viewerScrollRef.Current)))
+                RebuildViewerHeights(shape.Item3);
             if (!widthOnly) remake = true;
             _viewerRowShape = shape;
         }
@@ -566,6 +572,10 @@ public partial class CommanderApp
         // Keyed by file so opening another one starts at the top instead of inheriting the
         // previous one's offset, and so toggling wrap reconciles rather than rebuilding.
         list.Key = $"view:{ViewerTextKey}|{_viewerGen}";
+        // Wrapped, the rows are fitted to the width the body is laid out at, in the frame that lays
+        // it out. Only wrapped: the first listener turns the framework's layout watching on for
+        // the rest of the process.
+        if (ViewerWrap) list.OnLayoutChanged(_wrappedBodyLaidOut ??= WrappedBodyLaidOut);
         list.WithRef(_viewerScrollRef);
         // Focusable so that closing the find bar has somewhere in the tree to put the
         // keyboard. Out of the Tab cycle: the view has one thing to focus, so traversal
