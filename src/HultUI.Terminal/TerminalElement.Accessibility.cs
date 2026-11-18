@@ -2,6 +2,7 @@ using System.Text;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Animation;
 using HultUI.Core.Primitives;
+using HultUI.Core.Threading;
 using HultUI.Terminal.Emulation;
 
 namespace HultUI.Terminal;
@@ -241,6 +242,26 @@ public sealed partial class TerminalElement
     /// <summary>The user sent keys or text since the last announcement: what comes back up to
     /// the first line break is their echo.</summary>
     private bool _typedSinceAnnounce;
+
+    /// <summary>
+    /// A reader came (on Windows, as it first asks for one of the app's windows; on Linux, as the
+    /// bus says one runs): the place output is announced from is taken now, at the screen as it is,
+    /// so the next output is read out, not taken as the place by its own settle. No settle ran while
+    /// nobody listened, and what came then is not read out.
+    /// </summary>
+    private void OnAccessibilityClients(bool active)
+    {
+        if (!active) return;
+        if (UIThread.IsCurrent) TakeAnnouncedPlace();
+        else Application.InvokeOnMainThread(TakeAnnouncedPlace);
+    }
+
+    private void TakeAnnouncedPlace()
+    {
+        if (!IsHosted || _controller is null || !AccessibilityClients.Active) return;
+        _announcedTo = null;
+        AnnounceNewOutput();
+    }
 
     private void AnnounceNewOutput()
     {

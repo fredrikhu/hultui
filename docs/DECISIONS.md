@@ -1274,6 +1274,27 @@ Two are open in a smaller form than proposed: a cross-window drag (16) starts wi
 order and Wayland gives no positions; image seams (18) want a per-draw antialiasing switch,
 left on by default, plus an antialiased clip.
 
+### The Windows bridge waits for a client to ask for a window's root (round 16)
+
+Plan 17's questions 50 and 66, decided by the user on 2026-11-16 and 2026-11-18 after two live
+listening runs with Narrator and NVDA. `UiaClientsAreListening()` says yes on any desktop with a UI
+Automation client, and this desk always has one that takes events and never asks for a window's
+root (0 root asks in 16 launches). For it every window built its accessibility tree, kept it up to
+date and raised every change, and the client made about 13 provider calls an event.
+
+- **Built:** a window builds its tree and raises events only once a client has asked for its root
+  (`WM_GETOBJECT` with `UiaRootObjectId`). Each window has its own gate; it never closes. The tree is
+  built inside the ask when the window has nothing to draw, so the client's first reads find it.
+- **"A client listens" (`AccessibilityClients`) waits for the same ask, for the whole process**
+  (question 66 (a)): a terminal's settle timers and announcements, text versions and a CEF page's
+  tree start at the first ask. The terminal takes the place it announces from at that moment.
+- **What it gives up:** a client that only listens for events and never asks for a root hears
+  nothing from a window nobody has asked for. Readers ask for the window they read. The cost and the
+  checks are in `docs/ACCESSIBILITY-PLAN.md`, "The gate on Windows".
+- **No switch.** `HULTUI_A11Y=0` and `HULTUI_UIA_EVENTS=0` stay; the prototype's `HULTUI_UIA_GATE=0`
+  was not kept.
+- **Linux is unchanged:** AT-SPI's `org.a11y.Status` already says whether a reader runs.
+
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
 BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction

@@ -38,9 +38,11 @@ public class A11yGateOnClientTests
 
         public int Trees => Window.AccessibilityTreesBuilt;
 
-        // The window disposes its bridge; the bridge gives the window procedure back before the window goes.
+        // The window closes, and disposes its bridge, which gives the window procedure back before the
+        // test window goes.
         public void Dispose()
         {
+            Window.Window.Dispose();
             Bridge.Dispose();
             Hwnd.Dispose();
         }
@@ -189,6 +191,56 @@ public class A11yGateOnClientTests
         b.Hwnd.AskForRoot();
         Assert.Equal(1, b.Trees);
         Assert.Equal("b", Find(b.Bridge.RootNode!, labelB.Id)?.Name);
+    }
+
+    /// <summary>
+    /// What reads <see cref="AccessibilityClients"/> (a web page's tree, a terminal's settle timers and
+    /// announcements, a text's versions) waits for the same ask (the user's question 66 (a)): for the
+    /// process, from the first ask for any of its windows' roots, told as the ask builds the tree; and
+    /// nobody once the last window asked for has closed.
+    /// </summary>
+    [WindowsFact]
+    public void AClientIsSaidToListen_FromTheFirstRootAsk_UntilTheLastWindowAskedForCloses()
+    {
+        ClientsListen();
+        var forced = AccessibilityClients.Force;
+        var heard = new List<bool>();
+        AccessibilityClients.Force = null;
+        AccessibilityClients.Report(false);
+        AccessibilityClients.ActiveChanged += heard.Add;
+        try
+        {
+            using var session = HeadlessSession.Create(400, 300);
+            var (rootA, _, _, _) = Scene();
+            var (rootB, _, _, _) = Scene();
+            var a = new Gated(session.Window, rootA);
+            var b = new Gated(session.CreateWindow("second", 400, 300), rootB);
+            session.PumpFrames(3);
+            Assert.False(AccessibilityClients.Active);
+            Assert.Empty(heard);
+
+            b.Hwnd.AskForRoot();
+            Assert.True(AccessibilityClients.Active);
+            Assert.Equal([true], heard);
+            session.PumpFrames(2);
+            a.Hwnd.AskForRoot();
+            session.PumpFrames(2);
+            Assert.Equal([true], heard);
+
+            // A window asked for closes; another is still open to clients.
+            b.Dispose();
+            session.PumpFrames(2);
+            Assert.True(AccessibilityClients.Active);
+            a.Dispose();
+            Assert.False(AccessibilityClients.Active);
+            Assert.Equal([true, false], heard);
+        }
+        finally
+        {
+            AccessibilityClients.ActiveChanged -= heard.Add;
+            AccessibilityClients.Force = forced;
+            AccessibilityClients.Report(false);
+        }
     }
 
     private static AccessibilityNode? Find(AccessibilityNode node, ElementId id)

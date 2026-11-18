@@ -142,7 +142,8 @@ Files:
   - `IsEnabled` → `UIA_IsEnabledPropertyId`
   - `GetPatternProvider(patternId)` dispatches to pattern impls based on role.
 - **`WindowsAccessibilityBridge.cs`** — the `IAccessibilityBridge` impl.
-  - Polls `UiaClientsAreListening()` for `IsActive`.
+  - Polls `UiaClientsAreListening()` for `IsActive`, behind the window's gate since plan 17 round 16:
+    nothing is built or raised until a client asks for the window's root (see "The gate on Windows").
   - Subclasses the window procedure (`SetWindowLongPtrW(GWLP_WNDPROC)`) and, on
     `WM_GETOBJECT` with `lParam == UiaRootObjectId`, returns
     `UiaReturnRawElementProvider(hwnd, wParam, lParam, nativeRoot)`'s LRESULT.
@@ -1147,10 +1148,57 @@ providers), a UIA `ItemContainer` on virtualized lists.
   assertively); the terminal announces new output.
 - **Found on the way:** the Windows bridge never told `AccessibilityClients` that a reader
   listened (only the Linux bridge did), so content that describes itself only while one
-  listens never did on Windows; it reports from `UiaClientsAreListening` now. The Linux
+  listens never did on Windows; it reports from `UiaClientsAreListening` now (since plan 17
+  round 16, once a client has asked for the root of one of the app's windows). The Linux
   bridge advertised `org.a11y.atspi.Value` for every string value, with no handler behind
   it; AT-SPI's Value is a number, and it is no longer advertised. (Since 2026-10-10 it is, for a
   range, with its properties answered: see RangeValue above.)
+
+## The gate on Windows (plan 17 round 16, built 2026-11-18)
+
+`UiaClientsAreListening()` says yes on any desktop with a UI Automation client, and this desk always
+has one that takes events and never asks for a window's root (0 root asks in 16 launches of
+Junction and Vesper). For it every window built its tree, kept it up to date and raised every
+change, about 13 provider calls an event: a ref move in Junction with History shown was 55 % bridge
+bytes. The user decided to gate it (plan 17 questions 50 and 66).
+
+- **A window's gate.** The bridge builds nothing and raises nothing until a client asks for the
+  window's root (`WM_GETOBJECT` with `UiaRootObjectId`), however many clients listen. Each window has
+  its own; it opens at the first ask and never closes (`WindowsAccessibilityBridge.RootAsked`).
+- **The tree is built inside the ask** (`UiaHostBridge.RootRequested`), before the bridge answers, by
+  a frame that has nothing to draw: it runs to the accessibility phase and stops, so the client's
+  first reads find the tree. Not inside a frame of the window (a wait in a draw can let the message
+  in), nor while the window has something to draw (a resize step, dirt) or a reconcile runs: then
+  the loop wakes and the next frame builds it. The focus the tree marks is taken as the client takes
+  the tree, with no focus event.
+- **"A client listens" waits for it too** (question 66 (a)). `AccessibilityClients` is told a client
+  listens while UI Automation says one does and the root of one of the process's windows has been
+  asked for; it is told nobody listens when the last such window closes. What reads it starts at that
+  ask:
+  - the terminal arms its settle timers on the next screen change, and takes the place it announces
+    output from at once, at the screen as it is (`TerminalElement.OnAccessibilityClients`): the next
+    output is read out, nothing from before;
+  - a text area's and the rich text editor's caret and text-version tells;
+  - a web view's page tree (`WebViewController`: CEF on Linux; WebView2 has no switch, and Chromium
+    builds its own tree when UI Automation asks its windows, which it does as a client walks into the
+    web view's node, joined under ours by provider repositioning). The page is not loaded again.
+- **Who asks.** A reader asks for the root of the window it reads: the foreground's as it comes to
+  the front, or one it is pointed at. A client that registers only a focus-changed handler (as
+  Magnifier's follow-focus, the touch keyboard's text-field check and Voice Access do, all through
+  UI Automation's focus events and the foreground window's tree) makes UI Automation ask for the
+  root on its behalf: 3 asks as it registers while the window exists, 4 as the window appears when
+  it registered first (real window, our own out-of-process FlaUI client, 2026-11-18). It heard the
+  same focus events before and after the gate. What gets nothing is a client that never makes UI
+  Automation ask, as this desk's own listener: 0 asks in every launch.
+- **Tests.** `A11yGateOnClientTests` (Headless): nothing before the ask; the tree built inside it;
+  an ask inside a frame or with a frame to draw built by the next frame; a gate per window that never
+  closes; `AccessibilityClients` from the first ask until the last window asked for closes. A test
+  that puts a bare `WindowsAccessibilityBridge` in a window asks first (`TestHwnd.AskForRoot`,
+  `tests/Shared/UiaGateWindow.cs` for the WebView and Terminal tests). `HeadlessUiaReader` and the
+  perf suite's `UiaRig` answer `IsActive` themselves, so the gate is not in their way: the suite's
+  UIA rows still measure the bridge.
+- **Kill switches** as before: `HULTUI_A11Y=0` (no bridge), `HULTUI_UIA_EVENTS=0` (no events). The
+  gate has none.
 
 ## Out of scope (follow-ups)
 

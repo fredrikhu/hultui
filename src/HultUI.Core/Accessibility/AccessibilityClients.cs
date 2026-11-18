@@ -2,9 +2,10 @@ namespace HultUI.Core.Accessibility;
 
 /// <summary>
 /// Whether assistive technology is listening: a screen reader, or a tool such as accerciser.
-/// Reported by the platform bridge (on Linux, from <c>org.a11y.Status</c>); read by content
-/// that is costly to describe, such as a web page, which keeps its tree off while nobody
-/// would hear it.
+/// Reported by the platform bridge (on Linux, from <c>org.a11y.Status</c>; on Windows, while UI
+/// Automation clients listen and one has asked for the root of one of the app's windows, the
+/// moment the bridge starts building that window's tree); read by content that is costly to
+/// describe, such as a web page, which keeps its tree off while nobody would hear it.
 /// </summary>
 public static class AccessibilityClients
 {

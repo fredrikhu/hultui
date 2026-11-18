@@ -118,10 +118,13 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     {
         get
         {
-            bool listening = UiaInterop.UiaClientsAreListening();
+            // Not even UI Automation is asked while no window of this process has been asked for its root.
+            bool listening = Volatile.Read(ref s_openGates) > 0 && UiaInterop.UiaClientsAreListening();
             // Content that describes itself only while something listens (a terminal's screen
-            // notices, a web page's tree) reads AccessibilityClients; the Linux bridge reports
-            // there from the bus, and this one from UIA. Polled every frame, told on change.
+            // notices, a web page's tree, a text's versions) reads AccessibilityClients; the Linux
+            // bridge reports there from the bus, and this one from UIA, once a client has asked for
+            // the root of one of this process's windows: the same gate, for the whole process, so
+            // that work waits for a reader too. Polled every frame, told on change.
             if (listening != _reportedListening)
             {
                 _reportedListening = listening;
@@ -132,6 +135,11 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     }
 
     private bool _reportedListening;
+
+    /// <summary>How many of this process's windows have their gate open (<see cref="RootAsked"/>): while
+    /// any has, and a client listens, <see cref="AccessibilityClients"/> is told a client listens. A
+    /// window's goes as its bridge is disposed.</summary>
+    private static int s_openGates;
 
     /// <summary>
     /// The window's gate: whether a UI Automation client has asked for this window's root
@@ -1338,7 +1346,11 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
             {
                 // The first ask opens the window's gate (RootAsked). The host builds the tree before
                 // the answer when it can, so the client's first reads find it; otherwise the next frame.
-                self._rootAsked = true;
+                if (!self._rootAsked)
+                {
+                    self._rootAsked = true;
+                    Interlocked.Increment(ref s_openGates);
+                }
                 self._host.RootRequested();
                 IntPtr root = self.NativeRootSimple(); // UiaReturnRawElementProvider wants IRawElementProviderSimple*
                 IntPtr lresult = UiaInterop.UiaReturnRawElementProvider(hwnd, wParam, lParam, root);
@@ -1443,6 +1455,13 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
         // After the window procedure is restored, so no WM_GETOBJECT hands out a provider being
         // torn down; the window itself is destroyed after its bridge, so it still exists here.
         ReleaseProviders();
+
+        // The last window a client asked for: what reads AccessibilityClients hears nobody listens.
+        if (_rootAsked && Interlocked.Decrement(ref s_openGates) == 0 && _reportedListening)
+        {
+            _reportedListening = false;
+            AccessibilityClients.Report(false);
+        }
 
         lock (_applyLock) _wrappers.Clear();
 
