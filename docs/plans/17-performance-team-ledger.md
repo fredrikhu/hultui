@@ -6,7 +6,7 @@ file after every step and commits it with the step's work. Full survey reports a
 
 - **Round:** 16
 - **Phase:** build — round 16, step 3 next (step 1 landed 40cadb57, step 2 ec57c4ee + 5766a137; the survey merged 2026-11-18; 10 steps in "Round 16 build order"; questions
-  66 (step 4's `AccessibilityClients` part) and 67 (step 5) open; build briefs `brief-r16b<N>.md` in this session's
+  66 and 67 answered 2026-11-18 with the recommendations (66 (a), 67 (b) with images first); build briefs `brief-r16b<N>.md` in this session's
   scratchpad, agent ids in `r16-agents.txt`). Survey: started 2026-11-18 in a fresh context (session b6ef64d9). Main had moved by 59 commits
   outside plan 17 (to 3038f82b: SkiaSharp 4.156 with HarfBuzzSharp 14.4 and the CPU surface in BGRA, SDL 3.5.0, the
   app team's fixes, `Element.OnLayoutChanged`, the software renderer); merged into the branch as cd699003 (clean).
@@ -877,7 +877,8 @@ Round 16 questions (from the survey, 2026-11-18). Recommendations in brackets.
     timers, and text versions are kept for readers — all for nobody. (a) "A client listens" also waits for the first
     root ask: that work stops on desktops with no reader; web content is described only from the first root ask on.
     (b) Keep it as today: the gate covers our tree only. [(a), with a live Narrator check of Meridian's preview (open
-    the preview, then start Narrator; the page should be read).]
+    the preview, then start Narrator; the page should be read).] → **(a)**, with the live Narrator check of Meridian's
+    preview (2026-11-18, the user: "I'll go with your recommendations"; step 4).
 67. **How a dialog fades in** (r16-2, r16-3; step 5): `Dialog.Show` fades the whole window's scrim through a window-sized
     layer, and on GL Skia keeps its texture for the window's life: the first palette or dialog open costs 12–18 MB of
     GPU memory (32 MB maximized on the 4K) and 30–55 MB of process memory, kept until the window closes; Vulkan +19 MB.
@@ -889,7 +890,9 @@ Round 16 questions (from the survey, 2026-11-18). Recommendations in brackets.
     renderer change (an element with opacity that paints only a uniform fill and has smaller children draws the fill
     at α outside and a children-sized layer inside): the same memory as (b), medium, every app's similar overlays gain.
     [(b), after before/after images of the fade at frames 2, 5 and 8 (headless, `PAINT_DUMPDIR`), shown to the user
-    before the commit; (e) if the images show a visible difference.]
+    before the commit; (e) if the images show a visible difference.] → **(b)**, images of the fade at frames 2, 5 and 8
+    to the user before the commit; (e) if they show a visible difference (2026-11-18, the user: "I'll go with your
+    recommendations"; step 5).
 
 Reminder (expert 8): Aperture signed in to jellyfin.home as device "aperture-survey" in earlier rounds, as "aperture-r13" in round 13 (and twice in round 15), and once in
 round 12 as "aperture-r12" (again in round 15); the user should remove those devices and revoke the API key when the work is done.
@@ -1119,3 +1122,7 @@ From 2026-11-14 (round 15's survey); earlier entries are in the archive ([to 202
   toggle fullscreen on the desktop were not run (they belong to the full suite's opt-in set, if at all). For
   PERFORMANCE.md: write what the new frame shows before any call that resizes the window; harnesses that post
   `SetWindowPos` now count the frames a user gets. Next: step 3.
+- 2026-11-18: the user answered questions 66 and 67 with the recommendations: "a client listens" follows the gate
+  (66 (a), with a live Narrator check of Meridian's preview; step 4), and a dialog fades its scrim's colour and its panel
+  separately (67 (b); before/after images of the fade at frames 2, 5 and 8 to the user before the commit, (e) if they
+  show a visible difference; step 5).
