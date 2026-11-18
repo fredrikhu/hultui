@@ -42,11 +42,59 @@ public class WrapRangeTests
 
         // With its shaping let go of (a document's worth of other text after it), the kept wrap is asked
         // before the text is shaped again, and must not answer at a width the text fits one line in.
-        for (int i = 0; i < 600; i++)
-            pipeline.Layout(new string((char)('a' + i % 26), 1_000) + i, Style, float.PositiveInfinity, 1);
+        LetShapingsGo(pipeline);
         var oneLine = pipeline.Layout(Ideographs, Style, natural, null);
         Assert.Single(oneLine.Lines);
         LayoutAssert.Same(reference.Layout(Ideographs, Style, natural, null), oneLine, "76 px");
+    }
+
+    [Fact]
+    public void AKeptWrap_LeavesTheWidthsAFloatErrorShort_ToTheOneLine()
+    {
+        // The application team's label (TextPipeline.OneLineFitTolerance): sized to its text, its width can
+        // come back a float error short of its own, and one line holds it whole there. Wrapped once a little
+        // narrower (a resize), its wrap is kept up to the text's own width; with its shaping let go of, that
+        // wrap is asked first and must leave those widths to the one line, as a fresh layout does.
+        const string label = "SAME DAY";
+        var style = Style with { FontSize = 11f, LetterSpacing = 0.4f };
+        var fonts = new StubFontCollection(charWidth: 6.5f);
+        var pipeline = new TextPipeline(fonts, new StubTextShaper());
+        var reference = new TextPipeline(fonts, new StubTextShaper()) { KeepsWrapRanges = false };
+        float own = pipeline.Layout(label, style, float.PositiveInfinity, null).Size.Width;
+        Assert.Equal(2, pipeline.Layout(label, style, own - 2 * TextPipeline.OneLineFitTolerance, null).Lines.Count);
+        Assert.True(pipeline.KeptWrapRange(label, style, null, out float from, out float below));
+        Assert.Equal(own, below);
+
+        // The narrowest width the one-line fit holds, by its own test.
+        float edge = own - TextPipeline.OneLineFitTolerance;
+        while (own <= MathF.BitDecrement(edge) + TextPipeline.OneLineFitTolerance) edge = MathF.BitDecrement(edge);
+        while (!(own <= edge + TextPipeline.OneLineFitTolerance)) edge = MathF.BitIncrement(edge);
+        Assert.True(from < edge);
+
+        // What a 12 px padding added and taken off again gives back for it, a few ulps short, and the edge.
+        foreach (float width in new[] { (own + 12f) - 12f, MathF.BitDecrement(own), own - 0.001f, edge })
+        {
+            LetShapingsGo(pipeline);
+            var oneLine = pipeline.Layout(label, style, width, null);
+            Assert.Single(oneLine.Lines);
+            LayoutAssert.Same(reference.Layout(label, style, width, null), oneLine, $"{width:R} px");
+        }
+
+        // A float past the edge the kept wrap answers, the reference's two lines.
+        LetShapingsGo(pipeline);
+        float past = MathF.BitDecrement(edge);
+        int hits = pipeline.WrapRangeHits;
+        var wrapped = pipeline.Layout(label, style, past, null);
+        Assert.Equal(hits + 1, pipeline.WrapRangeHits);
+        Assert.Equal(2, wrapped.Lines.Count);
+        LayoutAssert.Same(reference.Layout(label, style, past, null), wrapped, $"{past:R} px");
+    }
+
+    // A document's worth of other text, after which the shape cache has let go of what was shaped before.
+    private static void LetShapingsGo(TextPipeline pipeline)
+    {
+        for (int i = 0; i < 600; i++)
+            pipeline.Layout(new string((char)('a' + i % 26), 1_000) + i, Style, float.PositiveInfinity, 1);
     }
 
     [Fact]
