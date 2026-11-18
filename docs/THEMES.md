@@ -113,6 +113,12 @@ null when the extension has no grammar. A version's array ends at its last shown
 spans only for the lines shown. Junction's diff runs on this:
 `apps/Junction/JunctionApp.Highlight.cs`.
 
+A call cancelled part-way is not wasted when you keep the two texts. Call again with the same
+string instances, the same lines shown and the same clock, and the walk goes on from where it
+stopped, with the spans one uncancelled call gives (`LinesWalked` counts this call's lines). A
+theme change, other lines or other strings, even of the same characters, start from line 1. The
+walk is kept only as long as its texts: read the file again for each call and nothing is kept.
+
 ## The framework's own controls
 
 Each built-in control reads its knobs from a `Theme` extension (`Theme.Button`,
