@@ -1287,7 +1287,9 @@ date and raised every change, and the client made about 13 provider calls an eve
   built inside the ask when the window has nothing to draw, so the client's first reads find it.
 - **"A client listens" (`AccessibilityClients`) waits for the same ask, for the whole process**
   (question 66 (a)): a terminal's settle timers and announcements, text versions and a CEF page's
-  tree start at the first ask. The terminal takes the place it announces from at that moment.
+  tree start at the first ask. The terminal takes the place it announces from as that ask's tree takes
+  it; a subscription to `AccessibilityClients.ActiveChanged` was measured and dropped (a static event
+  holds every terminal whose window was disposed without an unmount).
 - **What it gives up:** a client that only listens for events and never asks for a root hears
   nothing from a window nobody has asked for. Readers ask for the window they read. The cost and the
   checks are in `docs/ACCESSIBILITY-PLAN.md`, "The gate on Windows".

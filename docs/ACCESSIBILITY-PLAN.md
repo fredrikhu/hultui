@@ -1176,8 +1176,11 @@ bytes. The user decided to gate it (plan 17 questions 50 and 66).
   asked for; it is told nobody listens when the last such window closes. What reads it starts at that
   ask:
   - the terminal arms its settle timers on the next screen change, and takes the place it announces
-    output from at once, at the screen as it is (`TerminalElement.OnAccessibilityClients`): the next
-    output is read out, nothing from before;
+    output from as the ask's tree takes it, at the screen as it is (`TerminalElement.AccessibleTextSource`):
+    the next output is read out, nothing from before. Not from `AccessibilityClients.ActiveChanged`: a
+    static event holds the element after its window has gone (`Window.Dispose` does not unmount, so
+    `IsHosted` stays true), and in the perf suite every terminal a scenario left behind read its screen
+    at each change of `Force`, 33 KB an op on the rich-text and text-area caret rows;
   - a text area's and the rich text editor's caret and text-version tells;
   - a web view's page tree (`WebViewController`: CEF on Linux; WebView2 has no switch, and Chromium
     builds its own tree when UI Automation asks its windows, which it does as a client walks into the

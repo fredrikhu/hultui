@@ -114,7 +114,6 @@ public sealed partial class TerminalElement : Element
         _controller.ScreenSwitched += OnScreenSwitched;
         _controller.ClipboardWrite += OnClipboardWrite;
         _controller.TitleChanged += ApplyTitle;
-        AccessibilityClients.ActiveChanged += OnAccessibilityClients;
         _listening = true;
         // A title set before this element listened (a program's first output, read while the
         // window was still being built) is only in the controller's signal now.
@@ -129,7 +128,6 @@ public sealed partial class TerminalElement : Element
         c.ScreenSwitched -= OnScreenSwitched;
         c.ClipboardWrite -= OnClipboardWrite;
         c.TitleChanged -= ApplyTitle;
-        AccessibilityClients.ActiveChanged -= OnAccessibilityClients;
         _listening = false;
     }
 
