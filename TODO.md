@@ -882,7 +882,12 @@
   SkiaSharp 4.156 with HarfBuzzSharp 14.4 (its CPU surface now draws in BGRA). ppy.SDL3-CS 2026.1002.1
   (SDL 3.5.0-ea7a2da, in place of fredrikhu/hultui#8) is merged too, after a real-window check on Windows
   and WSLg; KDE on Wayland with HDR was not checked. Left by SkiaSharp 4 for plans of their own:
-  HarfBuzz 14.4's per-call shaping cost on words not cached yet (shaping whole runs), and Graphite.
+  HarfBuzz 14.4's per-call shaping cost on words not cached yet (plan 19, below), and Graphite.
+- **Shaping cold words** — docs/plans/19-run-shaping.md (2026-11-18). Shaping whole runs: measured,
+  no-go (flat to 8 % slower on real text; the regressed row has one cold word per label). Waiting for
+  a yes: widen the digit table to `- + . , : / % −` (cold labels −58 % Windows, −35 % Fedora), give
+  `text/create 2,000 unique labels` a deliberate cold word (its `-38913` is an `int` overflow), then a
+  memo of right-to-left runs for the BiDi rows. Prototype on `claude/run-shaping-prototype` (14b29b66).
 
 ## Deferred
 - **The card fill is probably too dark, but the measurements disagree** — on one capture of the
