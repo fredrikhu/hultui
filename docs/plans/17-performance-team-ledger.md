@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 16
-- **Phase:** build — round 16, step 7 next (step 1 landed 40cadb57, step 2 ec57c4ee + 5766a137, step 3 41ecec65, step 4 0d96e805 + b02b46d6 + 32fffce7, step 5 96d00ab3, step 6 89732bec (question 68 open); the user does the Narrator check after step 10, before the full suite — the user's Narrator check of `r16b4\live\` (this session's scratchpad) is open and the release waits for it; the survey merged 2026-11-18; 10 steps in "Round 16 build order"; questions
+- **Phase:** build — round 16, step 7 next (step 1 landed 40cadb57, step 2 ec57c4ee + 5766a137, step 3 41ecec65, step 4 0d96e805 + b02b46d6 + 32fffce7, step 5 96d00ab3, step 6 89732bec (question 68: keep); the user does the Narrator check after step 10, before the full suite — the user's Narrator check of `r16b4\live\` (this session's scratchpad) is open and the release waits for it; the survey merged 2026-11-18; 10 steps in "Round 16 build order"; questions
   66 and 67 answered 2026-11-18 with the recommendations (66 (a), 67 (b) with images first); build briefs `brief-r16b<N>.md` in this session's
   scratchpad, agent ids in `r16-agents.txt`). Survey: started 2026-11-18 in a fresh context (session b6ef64d9). Main had moved by 59 commits
   outside plan 17 (to 3038f82b: SkiaSharp 4.156 with HarfBuzzSharp 14.4 and the CPU surface in BGRA, SDL 3.5.0, the
@@ -907,7 +907,7 @@ Round 16 questions (from the survey, 2026-11-18). Recommendations in brackets.
     with the canvas moved by the difference. Every History, Aperture and Meridian frame checked is byte-identical but
     Meridian's 1 px welcome rule at scale 1.0 at two window sizes: 25 and 14 pixels one level off (1 of 255), in 4 of 12
     frames. (a) Keep it (History's key frames 0 B in the render phase, 20 → 3 shaders made). (b) Revert 89732bec.
-    [(a): one level on a 1 px rule is not visible.]
+    [(a): one level on a 1 px rule is not visible.] → **(a) keep** (2026-11-18, the user: "Q68: keep it").
 
 Reminder (expert 8): Aperture signed in to jellyfin.home as device "aperture-survey" in earlier rounds, as "aperture-r13" in round 13 (and twice in round 15), and once in
 round 12 as "aperture-r12" (again in round 15); the user should remove those devices and revoke the API key when the work is done.
