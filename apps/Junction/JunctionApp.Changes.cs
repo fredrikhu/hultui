@@ -87,23 +87,63 @@ public partial class JunctionApp
     /// generation it was read at (see <see cref="EnsureChangesLoaded"/>).</summary>
     private readonly Dictionary<string, (int RefsGen, string? Message)> _changesHeadRead = new(PathComparer);
 
-    // Runs off the UI thread. <paramref name="shared"/>: the status the summary of this generation
-    // reads too. <paramref name="head"/>: HEAD's message, when one read at this refs generation is
-    // known.
+    /// <summary>How many times one load reads the working tree while the index keeps moving under
+    /// it, before it gives up and keeps what is on screen (see <see cref="LoadChanges"/>).</summary>
+    private const int MaxChangesReads = 3;
+
+    /// <summary>
+    /// Runs off the UI thread. <paramref name="shared"/>: the status the summary of this generation
+    /// reads too. <paramref name="head"/>: HEAD's message, when one read at this refs generation is
+    /// known.
+    ///
+    /// <para>The lists are several git commands read one after another, and a <c>git add</c> that
+    /// lands between them tears them apart: the staged list read before it and the working tree
+    /// after said the file was in neither, and the row vanished. It takes no bad luck: a staging
+    /// click runs its command while the reload of the click before is still reading. The load that
+    /// landed then pruned the selection against the torn lists, the optimistic move had no row to
+    /// carry (it moves rows, and there was none), and "Unstage all" over the gap did nothing. So
+    /// the index is read before and after (only its entries: the file times a status refreshes are
+    /// left out), and a read it moved under is read again. One it keeps moving under throws: the
+    /// loader keeps what is on screen and asks again shortly, and whatever moved the index reloads
+    /// in any case (this app's own command when it is done, anyone else's through the watcher).
+    /// A change undone within one read (staged and unstaged again) goes unseen.</para>
+    /// </summary>
     private ChangesData LoadChanges(string path, bool ignoreWhitespace, SharedStatus? shared = null,
         (int RefsGen, string? Message)? head = null)
     {
         var repo = RepoFor(path);
+        for (int read = 1; ; read++)
+        {
+            var before = repo.IndexPrint();
+            var data = ReadChanges(repo, path, ignoreWhitespace, shared, before, head);
+            if (repo.IndexPrint() == before) return data;
+            if (read == MaxChangesReads)
+                throw new InvalidOperationException($"The index of {path} moved under {read} reads in a row.");
+            shared = null;   // spent on the read it tore
+        }
+    }
+
+    /// <summary>One read of the working tree for <see cref="LoadChanges"/>, begun when the index
+    /// held <paramref name="before"/>.</summary>
+    private ChangesData ReadChanges(GitRepository repo, string path, bool ignoreWhitespace,
+        SharedStatus? shared, ulong? before, (int RefsGen, string? Message)? head)
+    {
         var staged = repo.GetStagedChanges();
         // One status for the files only it lists and, mid-operation, the conflicts: read after
-        // the diff, as before, from the summary's run when there is one.
+        // the diff, as before, from the summary's run when there is one. The summary may have run
+        // it before this read began: when the index has moved since, it is not this read's (a file
+        // staged in between was in the staged list and, by the status, still untracked).
         GitResult? statusRead = null;
         GitResult Status()
         {
             if (statusRead is not null) return statusRead;
-            statusRead = shared?.Result ?? repo.RunStatus();
-            if (shared is not null) _sharedStatus.TryRemove(new KeyValuePair<string, SharedStatus>(path, shared));
-            return statusRead;
+            if (shared is not null)
+            {
+                var result = shared.Result;
+                _sharedStatus.TryRemove(new KeyValuePair<string, SharedStatus>(path, shared));
+                if (shared.Print == before) return statusRead = result;
+            }
+            return statusRead = repo.RunStatus();
         }
         var unstaged = repo.GetUnstagedChanges(Status);
 
