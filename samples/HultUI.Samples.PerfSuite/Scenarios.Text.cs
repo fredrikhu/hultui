@@ -116,6 +116,34 @@ static partial class Scenarios
                 return new Op { Run = step => ctx.Window.SetClientSize(Ui.DragWidth(step), 760) };
             });
 
+        yield return new Scenario("text/rtl wrap 150 Hebrew paragraphs resize",
+            "text/bidi wrap in Hebrew alone: every line one right-to-left run, which changes where the line's breaks do",
+            ctx =>
+            {
+                var column = Flex.Column(gap: 10).FlexShrink(0).Padding(16);
+                var paragraphs = new Element[150];
+                for (int i = 0; i < paragraphs.Length; i++)
+                    paragraphs[i] = Text.New(Ui.HebrewParagraph(ctx.Rng, 60)).FontSize(13f).LineHeight(19f);
+                column.ReplaceChildren(paragraphs);
+                ctx.Mount(ScrollView.New().FlexGrow(1).Children(column));
+                return new Op { Run = step => ctx.Window.SetClientSize(Ui.DragWidth(step), 760) };
+            });
+
+        yield return new Scenario("text/rtl ellipsis 1,000 Hebrew labels resize",
+            "text/bidi ellipsis in Hebrew alone: 1,000 labels, each one right-to-left run, truncated again at each width",
+            ctx =>
+            {
+                var rows = new Element[1_000];
+                for (int i = 0; i < rows.Length; i++)
+                    rows[i] = Flex.Row(gap: 8).FlexShrink(0).Padding(new Thickness(2, 8)).Children(
+                        Text.New(Ui.HebrewParagraph(ctx.Rng, 14)).FontSize(13f).MaxLines(1)
+                            .TextOverflow(TextOverflow.Ellipsis).FlexGrow(1).FlexShrink(1),
+                        Text.New($"{i}").FontSize(12f).TextColor(Ui.Muted).FlexShrink(0));
+                var pane = Flex.Column().Width(Dimension.Percent(50)).FlexShrink(0).Children(rows);
+                ctx.Mount(ScrollView.New().FlexGrow(1).Children(pane));
+                return new Op { Run = step => ctx.Window.SetClientSize(Ui.DragWidth(step), 760) };
+            });
+
         yield return new Scenario("text/styled wrap 150 paragraphs resize",
             "text/wrap with every third word bold and larger: 150 paragraphs on the styled path broken into lines again",
             ctx =>
