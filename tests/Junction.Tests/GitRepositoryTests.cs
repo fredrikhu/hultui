@@ -544,4 +544,46 @@ public class ConflictWorkflowTests
         Assert.Equal((2, 0), stats[two.Hash]);
         Assert.Empty(t.Repo.GetStatsFor([]));
     }
+
+    /// <summary>The index print a Changes load checks itself against is of the index git uses,
+    /// read with the repository's object id length. A linked worktree keeps its own index in its
+    /// own git directory and the main repository's config, which is where a SHA-256 repository
+    /// says so: read with 20-byte ids there, the print would take in the file times a status
+    /// refreshes, and every load of the worktree's Changes would read again.</summary>
+    [Theory]
+    [InlineData("sha1", 20)]
+    [InlineData("sha256", 32)]
+    public void TheIndexPrint_IsOfALinkedWorktreesOwnIndex(string format, int oidLength)
+    {
+        var path = Path.Combine(Path.GetTempPath(), "junction-git-print-" + Guid.NewGuid().ToString("N"));
+        var linked = path + "-wt";
+        try
+        {
+            Directory.CreateDirectory(path);
+            void Git(string dir, params string[] args) =>
+                Assert.True(GitProcess.Run(dir, args).Success, "git " + string.Join(' ', args));
+            Git(path, "init", "-q", "-b", "main", "--object-format=" + format);
+            File.WriteAllText(Path.Combine(path, "a.txt"), "a\n");
+            Git(path, "add", "a.txt");
+            Git(path, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "one");
+            Git(path, "worktree", "add", "-q", "-b", "side", linked);
+            var gitDir = GitProcess.Run(linked, "rev-parse", "--absolute-git-dir").Stdout.Trim();
+
+            var first = new GitRepository(linked).IndexPrint();
+            Assert.NotNull(first);
+            Assert.Equal(GitWatcher.IndexPrint(Path.Combine(gitDir, "index"), oidLength), first);
+            var main = new GitRepository(path).IndexPrint();
+
+            File.WriteAllText(Path.Combine(linked, "a.txt"), "side\n");
+            Git(linked, "add", "a.txt");
+
+            Assert.NotEqual(first, new GitRepository(linked).IndexPrint());
+            Assert.Equal(main, new GitRepository(path).IndexPrint());
+        }
+        finally
+        {
+            TempRepo.ForceDelete(linked);
+            TempRepo.ForceDelete(path);
+        }
+    }
 }

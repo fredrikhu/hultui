@@ -698,12 +698,17 @@ public partial class JunctionApp : Component, IDisposable
     /// </summary>
     private sealed class SharedStatus(GitRepository repo, int gen)
     {
-        private readonly Lazy<GitResult> _result = new(repo.RunStatus);
+        // The print first: the index the status reads is at least as new as it.
+        private readonly Lazy<(ulong? Print, GitResult Result)> _read = new(() => (repo.IndexPrint(), repo.RunStatus()));
 
         public int Gen { get; } = gen;
 
         /// <summary>The status, run on the first read; off the UI thread only.</summary>
-        public GitResult Result => _result.Value;
+        public GitResult Result => _read.Value.Result;
+
+        /// <summary>What the index held as the status began (<see cref="GitRepository.IndexPrint"/>):
+        /// the Changes load uses the status only when its own read begins on the same index.</summary>
+        public ulong? Print => _read.Value.Print;
     }
 
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, SharedStatus> _sharedStatus = new(PathComparer);
