@@ -215,6 +215,10 @@ public class SliderElement : Element, IRangeValueElement
     /// <summary>Unbounded: the thumb and its focus ring reach past the ends of the track.</summary>
     public override Rect? PaintBounds(IRenderContext ctx) => null;
 
+    /// <summary>The track and the thumb are drawn from the value and keep nothing. Not a
+    /// subclass: its <see cref="Render"/> may do more.</summary>
+    internal override bool RenderOnlyPaints => GetType() == typeof(SliderElement);
+
     public override void Render(IRenderContext ctx)
     {
         var box = Layout.AbsoluteContentBox;

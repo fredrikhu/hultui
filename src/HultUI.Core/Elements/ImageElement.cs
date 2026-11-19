@@ -145,6 +145,11 @@ public class ImageElement : Element
         else ctx.DrawImage(Source, Layout.AbsoluteContentBox, Fit);
     }
 
+    /// <summary>A plain image of a picture only paints. A GPU or frame-stream source is left drawn:
+    /// drawing it is what takes its frames. Not a subclass: its <see cref="Render"/> may do more.</summary>
+    internal override bool RenderOnlyPaints =>
+        GetType() == typeof(ImageElement) && Source is not (IGpuImageSource or IPixelImageSource);
+
     /// <summary>A plain image paints one picture, so it fades by drawing it with that much less
     /// alpha, as a plain box fills in a fainter colour: a cut file's icon in a list was an
     /// offscreen group of its own on every frame. A crop (<see cref="SourceRect"/>), and a GPU or

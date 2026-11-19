@@ -5,9 +5,10 @@ namespace HultUI.Core.Elements;
 
 public class CanvasElement : BoxElement
 {
-    /// <summary>Draws the canvas. It runs only in a frame that draws, and only while the canvas's
-    /// box meets the visible area of a clipping ancestor (a box of no size meets nothing), so it is
-    /// no after-layout hook: use <c>.OnLayoutChanged</c> for work that follows the canvas's size.</summary>
+    /// <summary>Draws the canvas. It runs only in a frame that draws, only while the canvas's box
+    /// meets the visible area of a clipping ancestor (a box of no size meets nothing), and not while
+    /// it or an ancestor is at opacity 0, so it is no after-layout hook: use <c>.OnLayoutChanged</c>
+    /// for work that follows the canvas's size.</summary>
     public Action<ICanvasDrawingContext>? Draw { get; set; }
 
     public static CanvasElement New(Action<ICanvasDrawingContext>? draw = null, [OriginFile] string? file = null, [OriginLine] int line = 0) =>
@@ -15,6 +16,10 @@ public class CanvasElement : BoxElement
 
     /// <summary>Unbounded: the callback draws wherever it likes, unclipped.</summary>
     public override Rect? PaintBounds(IRenderContext ctx) => null;
+
+    /// <summary>The callback draws (<see cref="Draw"/> is no hook). Not a subclass: its
+    /// <see cref="Render"/> may do more.</summary>
+    internal override bool RenderOnlyPaints => GetType() == typeof(CanvasElement);
 
     public override void Render(IRenderContext ctx)
     {

@@ -333,6 +333,88 @@ public sealed class OpacityLayerTests
         public override Rect? PaintBounds(IRenderContext ctx) => null;
     }
 
+    // ── At opacity 0 a subtree that only paints is not drawn ──
+
+    /// <summary>A box at opacity 0 holding a box, a label, a canvas, a slider and an image: none of
+    /// it is drawn, not even the group, and the canvas's callback does not run; brought back to 0.5
+    /// it all is. The window's pixels are those of the same scene without the faded box.</summary>
+    [Fact]
+    public void ASubtreeAtOpacityZeroThatOnlyPaintsIsNotDrawn()
+    {
+        using var session = Recording();
+        using var picture = Picture();
+        int draws = 0;
+        var faded = Box.New().Width(200).Height(60).Background(Panel).Opacity(0f).Children(
+            Box.New().Width(20).Height(20).Background(Red),
+            Text.New("Hidden").FontSize(14f),
+            Canvas.New(_ => draws++).Width(16).Height(16),
+            Slider.New(40).Width(80),
+            Image.New(picture).Width(24).Height(16));
+        var page = Box.New().Width(300).Height(200).Background(Indigo);
+        session.Window.SetRoot(page.Children(Absolute(faded, 20, 20)));
+        session.PumpFrame();
+
+        var log = session.Window.RenderLog.ToString();
+        Assert.Equal(0, draws);
+        Assert.DoesNotContain("PushOpacity", log);
+        Assert.DoesNotContain("Hidden", log);
+        using (var hidden = session.Window.CapturePixels())
+        using (var without = PixelsWithout(page, faded, session))
+            Assert.True(SamePixels(hidden, without), "a subtree at opacity 0 changed the window's pixels");
+
+        faded.Opacity = 0.5f;
+        session.Window.RenderLog.Clear();
+        session.PumpFrame();
+        Assert.Equal(1, draws);
+        Assert.Contains("PushOpacity 0.5", session.Window.RenderLog.ToString());
+    }
+
+    /// <summary>Anything in the subtree that does more in Render than paint keeps the whole subtree
+    /// drawn at opacity 0: a scroll view (its extent is worked out there, a list's rows made), a
+    /// text field (the context its clicks are measured with), a label that can be selected (the
+    /// lines a click reads), and an element no type vouches for.</summary>
+    [Theory]
+    [InlineData("scroll")]
+    [InlineData("field")]
+    [InlineData("selectable")]
+    [InlineData("custom")]
+    public void ASubtreeAtOpacityZeroThatDoesMoreThanPaintIsDrawn(string kind)
+    {
+        using var session = Recording();
+        int draws = 0;
+        Element other = kind switch
+        {
+            "scroll" => ScrollView.New().Height(Dimension.Px(40)).Children(Box.New().Height(200)),
+            "field" => TextInput.New("text").Width(80),
+            "selectable" => Text.New("Selectable").Selectable(),
+            _ => new UnboundedElement().Width(10).Height(10),
+        };
+        var faded = Flex.Row().Opacity(0f).Children(Canvas.New(_ => draws++).Width(16).Height(16), other);
+        session.Window.SetRoot(Box.New().Padding(new Thickness(20)).Children(faded));
+        session.PumpFrame();
+
+        Assert.Equal(1, draws);
+        Assert.Contains("PushOpacity 0", session.Window.RenderLog.ToString());
+        if (other is ScrollViewElement scroll) Assert.Equal(200f, scroll.ContentHeight);
+    }
+
+    private static SKImage PixelsWithout(Element page, Element faded, HeadlessSession session)
+    {
+        page.RemoveChild(faded);
+        session.PumpFrame();
+        var image = session.Window.CapturePixels();
+        page.AddChild(faded);
+        session.PumpFrame();
+        return image;
+    }
+
+    private static bool SamePixels(SKImage a, SKImage b)
+    {
+        using var pa = a.PeekPixels() ?? throw new InvalidOperationException("no pixels");
+        using var pb = b.PeekPixels() ?? throw new InvalidOperationException("no pixels");
+        return pa.GetPixelSpan().SequenceEqual(pb.GetPixelSpan());
+    }
+
     private static Rect OpacityBounds(HeadlessSession session)
     {
         var line = session.Window.RenderLog.ToString().Split('\n')

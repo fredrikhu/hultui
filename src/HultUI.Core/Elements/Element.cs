@@ -1964,6 +1964,17 @@ public abstract class Element
     /// </summary>
     internal virtual bool RenderWithOpacity(IRenderContext ctx, float opacity) => false;
 
+    /// <summary>
+    /// Whether <see cref="Render"/> does nothing but paint: nothing it keeps, starts or schedules
+    /// is read by layout, hit-testing, accessibility or a later frame. A subtree in which every
+    /// element says so is not drawn at all while its <see cref="RenderOpacity"/> is 0, as it would
+    /// show nothing (ElementRenderer): a video player's hidden bar was drawn on every video frame.
+    /// False unless a type says so of itself — a subclass's <see cref="Render"/> may do more — so a
+    /// scroll view (its extent, a list's rows), a text field (the context it hit-tests with), a
+    /// video or a web view (listening, placement) is always drawn.
+    /// </summary>
+    internal virtual bool RenderOnlyPaints => false;
+
     public virtual bool HitTest(Point point) =>
         Layout.AbsoluteBorderBox.Contains(point);
 
