@@ -222,6 +222,40 @@ public class CursorNoBuildTests
         AssertIsAFullBuild(t, "on a folder");
     }
 
+    /// <summary>Both panes on one folder: the same-named row over there is the cursor's own file,
+    /// which F3 never pairs with, so the other pane's cursor on a file stays the partner while the
+    /// cursor moves — no build, the ring kept on it, also when the cursor reaches that very file.
+    /// With the other cursor on "..", F3 pairs the cursor's file with itself over there, so the
+    /// ring follows each key, which builds.</summary>
+    [Fact]
+    public void WithBothPanesOnOneFolder_TheOtherCursorsFileStaysThePartner_AndAKeyBuildsNothing()
+    {
+        using var t = Open();
+        t.Invoke("NavigateTo", 'R', t.Left, null, false);
+        t.Session.PumpUntil(() => t.Rows('R').Count == t.Rows('L').Count);
+        t.Session.PumpFrames(2);
+        t.PutCursorOn('R', Name(5));
+        t.PutCursorOn('L', Name(2));
+        Assert.Equal(Nocturne.Accent700, PartnerBorder(t, Name(5)));
+        int builds = Builds(t), parts = t.App.PartBuilds;
+        Press(t, KeyCode.Down, KeyCode.Down, KeyCode.Up, KeyCode.Down, KeyCode.Down);   // onto f05 itself
+        Assert.Equal(Name(5), t.Rows('L')[t.Cursor('L')].Name);
+        Assert.Equal(0, Builds(t) - builds);
+        Assert.Equal(0, t.App.PartBuilds - parts);
+        Assert.Equal(Nocturne.Accent700, PartnerBorder(t, Name(5)));
+        AssertIsAFullBuild(t, "with both panes on one folder");
+
+        t.PutCursorOn('R', "..");
+        t.PutCursorOn('L', Name(2));
+        Assert.Equal(Nocturne.Accent700, PartnerBorder(t, Name(2)));
+        builds = Builds(t);
+        Press(t, KeyCode.Down);
+        Assert.Equal(1, Builds(t) - builds);
+        Assert.Equal(Nocturne.Accent700, PartnerBorder(t, Name(3)));
+        Assert.Equal(Color.Transparent, PartnerBorder(t, Name(2)));
+        AssertIsAFullBuild(t, "with the other cursor on ..");
+    }
+
     private static Color PartnerBorder(DiffViewTests.Fixture t, string name)
     {
         foreach (var row in List(t, 'R').Children.Skip(1))

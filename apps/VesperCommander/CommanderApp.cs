@@ -1509,6 +1509,10 @@ public partial class CommanderApp : Component, IDisposable
     /// names first, which costs nothing: a folder has no partner, and a same-named row over there is
     /// the partner and moves with each key, so that builds. Otherwise only the other pane's cursor
     /// can pair, and then the rule F3 uses decides, as the build does.
+    /// <para>With both panes on one folder the same-named row over there is the cursor's own file,
+    /// which F3 never pairs with (<see cref="DiffPartner"/>), so it is passed over and the rule
+    /// decides: the other pane's cursor on a file stays the partner, and a key builds nothing
+    /// (a key built the window every time: 17.5 KB against 2.2).</para>
     /// </summary>
     private bool PartnerStays(char side)
     {
@@ -1520,7 +1524,8 @@ public partial class CommanderApp : Component, IDisposable
         if (e.IsParent || e.IsDir) return shown is null;
         var there = Rows(other);
         for (int i = 0; i < there.Count; i++)
-            if (string.Equals(there[i].Name, e.Name, StringComparison.OrdinalIgnoreCase)) return false;
+            if (string.Equals(there[i].Name, e.Name, StringComparison.OrdinalIgnoreCase) && !PathEquals(there[i].FullPath, e.FullPath))
+                return false;
         int oc = Cursor(other);
         if (oc < 0 || oc >= there.Count || there[oc] is not { IsParent: false, IsDir: false } pair) return shown is null;
         // No row over there has the name, so F3's answer is the other cursor's row or names no row.
