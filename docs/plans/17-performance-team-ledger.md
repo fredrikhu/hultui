@@ -1226,3 +1226,6 @@ From 2026-11-14 (round 15's survey); earlier entries are in the archive ([to 202
   releases: junction-v1.29.0, vesper-v1.29.0, meridian-v1.12.0, aperture-v1.27.0, reel-v1.13.0 on b131ae85 (99 commits
   since the 1.28.0 set: SkiaSharp 4, SDL 3.5.0, Jellyfin.Sdk 2026.10.12, round 16), pushed 3 + 2, all five installer runs
   started. Round → 17, Phase survey, in a fresh context.
+- 2026-11-19: all five app releases published: Vesper, Meridian, Aperture and Reel green on the first attempt; Junction
+  green on attempt 2 (attempt 1 red on Vesper's `KeptRowTests.AFolderMeasuredWithSpace_ShowsItsTotal`, the known flake
+  plan 18 saw: a 10 s wait for a background folder size under load; it passed in Vesper's own run).
