@@ -1185,6 +1185,19 @@ their first layout, render 119.5 → 2.2 KB. A 4 px resize step went 32.1 → 20
 reader tree and focus are the same at every step of a walk through widths, the pan scrolled and
 clamped, split, wrap, a split drag and a review.
 
+A colour is paint, and the same holds for it: recolour the rows on screen in place, don't make a row
+again for a colour. `TextElement.Spans` compares the spans it is given and, when they only colour,
+marks the label for paint alone, so new spans on a kept label make nothing and measure nothing.
+Junction's diff asks for a file's syntax colours as its rows are first drawn and gets them a frame or
+more later; the file's colours are in the rows' shape, so the landing made every row on screen again.
+A build in which only the colours moved now sets the new spans on the code labels the rows on screen
+hold (round 17 step 4; headless JIT, the Commit view at 1,440×900, the first visit of a C# file): the
+landing 335–347 → 80–94 KB, rows made 34 → 0, text measures 249 → 0, a first visit 747–825 →
+492–570 KB (−31…−34 %), still 2 frames; the Changes view's first open 1,792 → 1,473 KB; a review's
+landing 436–438 → 216 KB, and a control focused in its rows keeps the focus (the landing used to weave
+again and make the row it was in). Pixels are byte-identical to the rows made afresh in colour. A span
+that sets a weight, slant, size or family moves where a line breaks: make that row again.
+
 ---
 
 ## Component Model

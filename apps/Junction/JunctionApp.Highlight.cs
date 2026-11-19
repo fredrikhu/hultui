@@ -598,8 +598,13 @@ public partial class JunctionApp
             // and rebuilding the whole window for it doubled the cost of every move a
             // reader made through the log (two builds a key instead of one). The view's
             // alone: colours are nothing the chrome shows (it built 0.45 times a key in the
-            // Commit view's file walk).
-            if (ask.Key == _highlightShown) MarkViewDirty();
+            // Commit view's file walk). The rows on screen are kept and recoloured; so is a
+            // review's weave, which reads no colour (ReviewRowsFor).
+            if (ask.Key == _highlightShown)
+            {
+                _reviewColoursLanded = true;
+                MarkViewDirty();
+            }
         }
 
         if (_highlightNext is { } next)

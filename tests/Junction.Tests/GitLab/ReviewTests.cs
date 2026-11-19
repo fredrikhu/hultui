@@ -864,6 +864,61 @@ public class ReviewTests
         });
     }
 
+    /// <summary>A control Tab reached in a review's row keeps the focus when the diff's colours land
+    /// after the rows' first frame: the woven rows are kept and recoloured where they are (plan 17
+    /// round 17). The landing used to weave again and make every row on screen again, and the focus
+    /// went with its row (found by a32c8b9f's diagnosis: the control Tab had just focused was in a
+    /// remade row).</summary>
+    [Fact]
+    public void AControlFocusedInARow_KeepsTheFocus_WhenTheColoursLand()
+    {
+        var colours = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Hosted((repo, _, session, app) =>
+        {
+            app.HighlightHold = colours.Task;
+            app.StartReview(repo.Path, 412);
+            session.PumpUntil(() => ById(session, "review-plus") is not null, TimeSpan.FromSeconds(20));
+            DiffScrollTests.Quiet(session, app);
+            Assert.True(app.HighlightsPending > 0, "the colours were not held");
+            Assert.False(Coloured(session), "the rows were coloured before the colours were let land");
+
+            // Tab from the diff into its rows, to a control in a row with no key (a keyed card is
+            // kept by its key whatever the landing does).
+            Element list = ById(session, "review-plus")!;
+            while (list is not ScrollViewElement { IsFocusable: true }) list = list.Parent!;
+            list.Focus();
+            session.PumpFrames(2);
+            Element? focused = null;
+            for (int i = 0; i < 20 && focused is null; i++)
+            {
+                session.Window.PressKey(KeyCode.Tab);
+                session.PumpFrames(2);
+                if (RowOf(list, Focused(session)) is { Key: null }) focused = Focused(session);
+            }
+            Assert.NotNull(focused);
+            int made = app.DiffRowsMade;
+
+            colours.SetResult();
+            session.PumpUntil(() => app.HighlightsPending == 0 && Coloured(session), TimeSpan.FromSeconds(20));
+            DiffScrollTests.Quiet(session, app);
+
+            Assert.Same(focused, Focused(session));
+            Assert.True(focused!.IsHosted, "the focused control left the window");
+            Assert.True(app.DiffRowsMade == made, $"{app.DiffRowsMade - made} rows made by the colours");
+        });
+
+        static Element? RowOf(Element list, Element? e)
+        {
+            for (; e?.Parent is { } parent; e = parent)
+                if (ReferenceEquals(parent, list)) return e;
+            return null;
+        }
+
+        static bool Coloured(HeadlessSession session) =>
+            Root(session) is { } root && LayoutProbe.Descendants<TextElement>(root,
+                t => t.Selectable && t.Content.StartsWith("changed ", StringComparison.Ordinal) && t.Spans is { Count: > 0 } s && s.Any(x => x.Color.A > 0)).Count > 0;
+    }
+
     /// <summary>A reply is read the same way, in its thread's item.</summary>
     [Fact]
     public void AReaderReachesAReply_InItsThreadsItem()

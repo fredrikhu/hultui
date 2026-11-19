@@ -412,6 +412,66 @@ public partial class JunctionApp
         var children = e.Children;
         for (int i = 0; i < children.Count; i++) RebaseCodeLabels(children[i], was, now);
     }
+
+    /// <summary>
+    /// The file's colours moved and nothing else a row shows did (they landed after the rows' first
+    /// frame, or a working-tree event brought others): the code labels of the rows on screen take the
+    /// spans a row made now would give them, and the list keeps its rows. A label knows its row and
+    /// lane by its selection group and index (<see cref="UnifiedRow"/>, <see cref="SplitHalf"/>).
+    /// </summary>
+    /// <remarks>
+    /// Colours are paint: a label given spans that only colour marks itself for paint, so nothing is
+    /// made or measured. Until plan 17 round 17 the landing made every row on screen again: a Commit
+    /// view file's first visit (headless, 1,440×900) made 68 rows and 499 text measures in two
+    /// frames, the landing's frame alone 34 rows, 249 measures and 335–347 KB; now 34 rows, 250
+    /// measures, and 80–94 KB for the landing. A label whose old or new spans change its face
+    /// (weight, slant, size, family) would break its lines elsewhere: its row is made again, as
+    /// before. Kept rows also keep what is focused in them, a review row's control.
+    /// </remarks>
+    private void RecolourKeptRows(VirtualListElement<DiffRow> list, IReadOnlyList<DiffRow> rows)
+    {
+        List<int>? remake = null;
+        var onScreen = list.Children;
+        for (int i = 0; i < onScreen.Count; i++) RecolourCodeLabels(onScreen[i], rows, ref remake);
+        if (remake is null) return;
+        foreach (var row in remake) list.InvalidateRow(row);
+    }
+
+    private void RecolourCodeLabels(Element e, IReadOnlyList<DiffRow> rows, ref List<int>? remake)
+    {
+        if (e is TextElement label)
+        {
+            if (!label.Selectable || label.SelectionGroup is not { } group) return;
+            int lane = ReferenceEquals(group, _diffGroupRight) ? 1 : 0;
+            if (lane == 0 && !ReferenceEquals(group, _diffGroupUnified) && !ReferenceEquals(group, _diffGroupLeft)) return;
+            int index = label.SelectionIndex;
+            if ((uint)index >= (uint)rows.Count) return;
+            var r = rows[index];
+            var line = r.Type switch
+            {
+                DiffRowType.Unified => r.Line,
+                DiffRowType.Split => lane == 0 ? r.Left : r.Right,
+                _ => null,
+            };
+            // A blank split half draws no spans, whatever the colours.
+            if (line is null) return;
+            var spans = RemapSpans(FoundIn(_diffRows!.SpansOf(r, line), r.Index, lane, line.Content), line.Content);
+            if (ChangesFace(label.Spans) || ChangesFace(spans)) (remake ??= []).Add(index);
+            else label.Spans = spans;
+            return;
+        }
+        var children = e.Children;
+        for (int i = 0; i < children.Count; i++) RecolourCodeLabels(children[i], rows, ref remake);
+    }
+
+    private static bool ChangesFace(IReadOnlyList<HultUI.Core.Rendering.TextSpan>? spans)
+    {
+        if (spans is null) return false;
+        for (int i = 0; i < spans.Count; i++)
+            if (spans[i].IsMetricAffecting) return true;
+        return false;
+    }
+
     /// <summary>Times every row's height was measured (<see cref="RebuildDiffHeights"/>), for tests.</summary>
     internal int DiffHeightPasses { get; private set; }
 
@@ -625,14 +685,22 @@ public partial class JunctionApp
         // again; a caret or range move only changes the marks of the line rows it moved
         // between, which their items carry. Typing in a comment makes no row; a move of its
         // formatting bar's buttons changes the one card holding its editor, made again alone. A
-        // find step changes the row the current match left and the row it reached.
+        // find step changes the row the current match left and the row it reached. The file's
+        // colours landing changes what the code labels draw and nothing else: the rows on screen
+        // are kept and their labels take the new spans (RecolourKeptRows).
         var rowShape = new DiffRowShape(rows, hl, interact, _diffWrap, _diffPan.Offset, CodeFont, DiffCodeSize, TabWidth,
             Nocturne.Theme, DiffFindShape(), Ui.DisplayScale);
         // Only the list this build patches: another file's list is replaced, rows and all.
         var mountedList = _diffBodyRef.Current is VirtualListElement<DiffRow> { Key: { } k } m && k == listKey ? m : null;
-        // `|`, not `||`: the staging snapshot is brought up to date either way.
         var hit = DiffFindHit();
-        if (DiffStageSelectionChanged() | rowShape != _diffRowShape || (review is not null && !reviewMarksOnly))
+        // First: the staging snapshot is brought up to date on every build, whatever else moved.
+        bool remakeAll = DiffStageSelectionChanged() || (review is not null && !reviewMarksOnly);
+        if (!remakeAll && rowShape != _diffRowShape && rowShape with { Highlight = _diffRowShape.Highlight } == _diffRowShape)
+        {
+            if (mountedList is not null) RecolourKeptRows(mountedList, rows);
+            _diffRowShape = rowShape;
+        }
+        if (remakeAll || rowShape != _diffRowShape)
         {
             mountedList?.InvalidateRows();
             _diffRowShape = rowShape;

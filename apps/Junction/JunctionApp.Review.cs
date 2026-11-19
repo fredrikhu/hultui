@@ -471,6 +471,7 @@ public partial class JunctionApp
     private WovenReviewRows? _woven;
     private bool _reviewCaretMove;
     private ReviewDraft? _reviewDraftEdited;
+    private bool _reviewColoursLanded;
 
     /// <summary>
     /// The rows the diff shows while reviewing. A caret or range move (ReviewCaretMoved) keeps
@@ -478,7 +479,10 @@ public partial class JunctionApp
     /// a 400-line file — and only moves the marks, when everything the weave read is as it was:
     /// the flattened rows, the session, its file and composer, the threads and drafts as loaded,
     /// the cards' heights and pictures. So does typing in a comment (DraftEdited), which also
-    /// names the one row to make again. Any other build weaves again.
+    /// names the one row to make again, and the file's colours landing (HighlightLanded): the
+    /// weave reads no colour, and the rows on screen are recoloured where they are, with the focus
+    /// a card's editor or button holds (it was lost with the row the landing made again). Any
+    /// other build weaves again.
     /// </summary>
     /// <param name="marksOnly">True when the rows were kept: only marks moved, and the list's
     /// rows need no making again beyond the ones whose marks did.</param>
@@ -487,13 +491,14 @@ public partial class JunctionApp
     private List<DiffRow> ReviewRowsFor(GitFileDiff diff, List<DiffRow> flat, ReviewSession rv, out bool marksOnly,
         out int remakeRow)
     {
-        bool caretMove = _reviewCaretMove;
+        bool caretMove = _reviewCaretMove, coloursLanded = _reviewColoursLanded;
         var draftEdited = _reviewDraftEdited;
         _reviewCaretMove = false;
         _reviewDraftEdited = null;
+        _reviewColoursLanded = false;
         remakeRow = -1;
         var key = WeaveKey(diff, flat, rv);
-        if ((caretMove || draftEdited is not null) && _woven is { } kept && kept.Key.Equals(key))
+        if ((caretMove || coloursLanded || draftEdited is not null) && _woven is { } kept && kept.Key.Equals(key))
         {
             MarkReviewRows(kept, rv);
             marksOnly = true;
