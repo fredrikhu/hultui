@@ -103,6 +103,7 @@ sealed class Samples
     public string? FigureUnit;
     public string? Detail;
     public long AllocatedBytes;
+    public long ShaperCalls;
     public int Count;
     public int Elements;
     public int UnrenderedSteps;
@@ -112,7 +113,7 @@ sealed record Result(
     string Name, string Description, int Elements, int N,
     double MinMs, double MedianMs, double BuildMs, double StyleMs, double LayoutMs,
     double RenderMs, double OtherMs, double AllocKB, int UnrenderedSteps,
-    double? Figure = null, string? FigureUnit = null, string? Detail = null);
+    double? Figure = null, string? FigureUnit = null, string? Detail = null, double? Shaped = null);
 
 sealed record Options
 {
@@ -226,6 +227,7 @@ static class Runner
         }
 
         long alloc0 = GC.GetAllocatedBytesForCurrentThread();
+        long shaped0 = ctx.Window.TextShaperCalls;
         int gc0 = GC.CollectionCount(0);
         long t0 = Stopwatch.GetTimestamp();
         op.Run(step);
@@ -246,6 +248,7 @@ static class Runner
         }
         long t2 = Stopwatch.GetTimestamp();
         long alloc1 = GC.GetAllocatedBytesForCurrentThread();
+        long shaped1 = ctx.Window.TextShaperCalls;
 
         if (into is null) return;
         double build = Ms(t1 - t0), total = Ms(t2 - t0);
@@ -256,6 +259,7 @@ static class Runner
         into.Render.Add(render);
         into.Other.Add(Math.Max(0, total - build - style - layout - render));
         into.AllocatedBytes += alloc1 - alloc0;
+        into.ShaperCalls += shaped1 - shaped0;
         into.Gcs.Add(GC.CollectionCount(0) - gc0);
         if (op.Figure is not null)
         {
@@ -287,6 +291,7 @@ static class Runner
             x.Total.Count == 0 ? 0 : x.Total.Min(), Median(x.Total),
             Median(x.Build), Median(x.Style), Median(x.Layout), Median(x.Render), Median(x.Other),
             x.Count == 0 ? 0 : x.AllocatedBytes / 1024.0 / x.Count, x.UnrenderedSteps,
-            x.Figures.Count == 0 ? null : x.Figures.Average(), x.FigureUnit, x.Detail);
+            x.Figures.Count == 0 ? null : x.Figures.Average(), x.FigureUnit, x.Detail,
+            x.Count == 0 ? 0 : (double)x.ShaperCalls / x.Count);
     }
 }

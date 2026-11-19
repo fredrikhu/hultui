@@ -241,6 +241,22 @@ public sealed class TextPipeline
     private readonly IShapesWithCuts? _cutShaper;
 
     /// <summary>
+    /// How many strings this pipeline has handed its shaper: with <c>SkiaTextShaper</c>, one
+    /// HarfBuzz call each. It only counts up; read it before and after what is measured, on the
+    /// thread that lays text out. An instrument (docs/plans/19-run-shaping.md, item 4): it says at
+    /// once whether text came out of the caches or was shaped, and where the shaping went.
+    /// </summary>
+    public long ShaperCalls { get; private set; }
+
+    // Every string the pipeline shapes goes through here, or through the cut shaper beside it
+    // (ShapeNewWord), so that ShaperCalls counts each.
+    private ShapedRun CallShaper(string text, IResolvedFont font, float fontSize, bool rtl = false)
+    {
+        ShaperCalls++;
+        return _shaper.Shape(text, font, fontSize, rtl);
+    }
+
+    /// <summary>
     /// When false, a prefix of a word that a prefix table cuts short is shaped as a string of its
     /// own, always: the reference. When true (the default), it is read off the whole word's run
     /// where the shaper said a cut there is safe (<see cref="RunCuts"/>), the same width and glyph
@@ -2953,7 +2969,7 @@ public sealed class TextPipeline
         float advance = 0f;
         for (int c = ' '; c <= '~'; c++)
         {
-            var alone = _shaper.Shape(AsciiChars[c - ' '], font, fontSize);
+            var alone = CallShaper(AsciiChars[c - ' '], font, fontSize);
             if (alone.Glyphs.Length != 1 || alone.Glyphs[0].Advance != alone.Width
                 || (c > ' ' && alone.Width != advance))
                 return 0f;
@@ -2969,7 +2985,7 @@ public sealed class TextPipeline
         float tolerance = advance * AsciiAdvanceTolerance;
         foreach (var piece in AsciiPairPieces)
         {
-            var run = _shaper.Shape(piece, font, fontSize);
+            var run = CallShaper(piece, font, fontSize);
             if (run.Glyphs.Length != piece.Length)
                 return 0f;
             foreach (var glyph in run.Glyphs)
@@ -3321,7 +3337,7 @@ public sealed class TextPipeline
     {
         ShapedRun run;
         if (!MemoizesRtlRuns)
-            run = _shaper.Shape(text.Substring(start, length), font, fontSize, rtl: true);
+            run = CallShaper(text.Substring(start, length), font, fontSize, rtl: true);
         else
         {
             int fontHash = WordCache.FontHash(font, fontSize);
@@ -3338,7 +3354,7 @@ public sealed class TextPipeline
     private ShapedRun RtlRun(string text, int start, int length, IResolvedFont font, float fontSize)
     {
         if (!MemoizesRtlRuns)
-            return _shaper.Shape(text.Substring(start, length), font, fontSize, rtl: true);
+            return CallShaper(text.Substring(start, length), font, fontSize, rtl: true);
         int fontHash = WordCache.FontHash(font, fontSize);
         if (!_rtlRunCache.TryGet(text.AsSpan(start, length), font, fontSize, fontHash, out var run))
             run = NewRtlRun(text.Substring(start, length), font, fontSize, fontHash);
@@ -3347,7 +3363,7 @@ public sealed class TextPipeline
 
     private ShapedRun NewRtlRun(string text, IResolvedFont font, float fontSize, int fontHash)
     {
-        var run = _shaper.Shape(text, font, fontSize, rtl: true);
+        var run = CallShaper(text, font, fontSize, rtl: true);
         _rtlRunCache.Put(text, font, fontSize, fontHash, run, WordBytes(text, run));
         return run;
     }
@@ -3356,11 +3372,12 @@ public sealed class TextPipeline
     {
         if (withCuts && _cutShaper is not null && word.Length >= MinCutWord && PrefixesFromCuts)
         {
+            ShaperCalls++;
             var cutRun = _cutShaper.Shape(word, font, fontSize, out var cuts);
             _wordShapeCache.Put(word, font, fontSize, fontHash, cutRun, WordBytes(word, cutRun) + (cuts?.Bytes ?? 0), cuts);
             return cutRun;
         }
-        var run = _shaper.Shape(word, font, fontSize);
+        var run = CallShaper(word, font, fontSize);
         _wordShapeCache.Put(word, font, fontSize, fontHash, run, WordBytes(word, run));
         return run;
     }
@@ -3465,7 +3482,7 @@ public sealed class TextPipeline
     // the table.
     private bool AloneComposes(DigitTable table, int slot, IResolvedFont font, float fontSize)
     {
-        var run = _shaper.Shape(SlotChar(slot).ToString(), font, fontSize);
+        var run = CallShaper(SlotChar(slot).ToString(), font, fontSize);
         if (run.Glyphs.Length != 1)
             return false;
         var g = run.Glyphs[0];
@@ -3480,7 +3497,7 @@ public sealed class TextPipeline
     // advance, the width the two advances.
     private bool PairComposes(DigitTable table, int a, int b, IResolvedFont font, float fontSize)
     {
-        var run = _shaper.Shape(new string([SlotChar(a), SlotChar(b)]), font, fontSize);
+        var run = CallShaper(new string([SlotChar(a), SlotChar(b)]), font, fontSize);
         return run.Glyphs.Length == 2
             && run.Glyphs[0].GlyphId == table.GlyphIds[a]
             && run.Glyphs[1].GlyphId == table.GlyphIds[b]
@@ -3494,7 +3511,7 @@ public sealed class TextPipeline
     // The characters in slots a, m and b shaped together: their own glyphs at the summed advances.
     private bool TripleComposes(DigitTable table, int a, int m, int b, IResolvedFont font, float fontSize)
     {
-        var run = _shaper.Shape(new string([SlotChar(a), SlotChar(m), SlotChar(b)]), font, fontSize);
+        var run = CallShaper(new string([SlotChar(a), SlotChar(m), SlotChar(b)]), font, fontSize);
         if (run.Glyphs.Length != 3)
             return false;
         float x = 0;
