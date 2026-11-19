@@ -96,10 +96,13 @@ public class BidiProbeWidthsTests
         // The loop shaped each segment between ICU's breaks to measure it, then the line: measured
         // on Windows, 671 shaper calls against the loop's 2,854; on Fedora (Noto faces, more font
         // runs) 3,699 against 7,272. With the loop run here too, the two are the same.
+        // Neither keeps right-to-left runs (plan 19 item 3): the memo takes most of the shaping
+        // away from both, and this counts what the two ways of measuring ask the shaper for (on
+        // Fedora, with it, 406 calls against the loop's 504).
         var shaper = new CountingShaper(new SkiaTextShaper());
         var loopShaper = new CountingShaper(new SkiaTextShaper());
-        var pipeline = new TextPipeline(new SkiaFontCollection(), shaper);
-        var reference = new TextPipeline(new SkiaFontCollection(), loopShaper);
+        var pipeline = new TextPipeline(new SkiaFontCollection(), shaper) { MemoizesRtlRuns = false };
+        var reference = new TextPipeline(new SkiaFontCollection(), loopShaper) { MemoizesRtlRuns = false };
         foreach (string text in Paragraphs)
         foreach (float wrapWidth in WrapWidths)
         {
