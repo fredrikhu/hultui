@@ -624,6 +624,23 @@ scroll.ScrollbarThumbColor = new Color(128, 128, 128, 200);
 scroll.ShowScrollbarX = true;  // enable horizontal scrollbar
 ```
 
+### A virtual list is sized by its parent, never by its rows
+
+A parent measures a `VirtualListElement` as a leaf: its own width and height (set, min, max),
+padding and border, and nothing of the rows it has realized, which are only the ones its
+viewport shows. So size it from outside: in a column give it `FlexGrow(1)` or a height, and let
+the column stretch it across or give it a width. A box sized from its content around a list (a
+dialog card, a popup, an item in a row aligned to the start) is as big as its other children:
+give the list a height there, as the command palette and Vesper's Find do, and a width or a
+width-setting parent if the rows should decide nothing.
+
+Until 2026-11-19 a parent measured the list through its realized rows, as a column: a box sized
+from its content took the widest row, and the spacer above the rows (as tall as the rows
+scrolled past), at the first layout after they were made, so its size moved as rows scrolled
+in. It also laid every visible row out again at each width a flex ancestor measured the list at
+(Junction's diff lines at four widths a resize step, three never drawn), though the list lays
+its rows out at its own width.
+
 ### Nesting scroll views
 
 **The wheel is shared out along the path.** A scroll view takes the axes it can move on

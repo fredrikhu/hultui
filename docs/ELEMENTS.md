@@ -1842,7 +1842,8 @@ step 11). What to carry over:
 - **A heading's height is its text's**, as layout measures it: `TextMeasure.Measure(text,
   TextMeasure.StyleFor(size, family)).Height`, kept per text and display scale.
 - **`.FlexGrow(1)` on the list.** A scroll view took its box's height by shrinking to it from its
-  content's; a list measures no children, and with nothing to shrink from it stays 0 tall.
+  content's; a list measures no children (a parent measures it as a leaf, LAYOUT.md "A virtual
+  list is sized by its parent"), and with nothing to shrink from it stays 0 tall.
 - **What the rows' labels said goes in the item's.** A reader walked to a row's child labels; an
   item has none, so what only they said (Meridian's "seen 4× · 200") goes in the item label.
 

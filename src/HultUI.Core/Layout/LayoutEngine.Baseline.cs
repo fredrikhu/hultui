@@ -70,7 +70,9 @@ public sealed partial class LayoutEngine
             break;
         }
 
-        if (!hasFlow)
+        // A virtual list is measured as a leaf (MeasureSize), so its baseline is a leaf's too, not
+        // its spacer's.
+        if (!hasFlow || element is ScrollViewElement { MeasuredAsLeaf: true })
         {
             var outer = MeasureLeafSize(element, constraint.AvailableWidth, constraint.AvailableHeight, forcedWidth, forcedHeight);
             var borderBox = new Size(outer.Width - margin.Horizontal, outer.Height - margin.Vertical);
