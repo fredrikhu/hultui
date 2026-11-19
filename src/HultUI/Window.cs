@@ -2681,6 +2681,19 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             {
                 var pos = new Point(move.X, move.Y);
 
+                // Autoscroll owns the pointer while the middle button is down. A move only
+                // moves the aiming point — the scrolling itself is per frame, in
+                // TickAutoScroll, because the view has to keep moving while the pointer is
+                // held still. Ahead of a capture: the press that anchored the autoscroll still
+                // reaches its element, which may capture the pointer with it (a web view
+                // captures every press, to keep a drag that leaves the page), and the moves
+                // going there instead left the view standing still under the ring.
+                if (_autoScrollTarget is not null)
+                {
+                    _autoScrollPointer = pos;
+                    break;
+                }
+
                 // An element that captured the pointer on its press gets every move,
                 // wherever the pointer is, and nothing else hears about the pointer
                 // (no hover changes, no drag start) until the release.
@@ -2703,16 +2716,6 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 if (_scrollbarDragTarget is not null)
                 {
                     _scrollbarDragTarget.UpdateScrollbarDrag(pos);
-                    break;
-                }
-
-                // Autoscroll owns the pointer while the middle button is down. A move only
-                // moves the aiming point — the scrolling itself is per frame, in
-                // TickAutoScroll, because the view has to keep moving while the pointer is
-                // held still.
-                if (_autoScrollTarget is not null)
-                {
-                    _autoScrollPointer = pos;
                     break;
                 }
 
@@ -2785,6 +2788,19 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     break;
                 }
 
+                // End the autoscroll. Nothing has to be suppressed: a click is the primary
+                // button's alone (see PointerState), so the middle button never synthesizes
+                // one however far it travelled. The release is still dispatched, so nothing
+                // is left holding a pressed :active style — and ahead of the capture's own
+                // release below, which ends in a break: an element that captured the middle
+                // press (a web view) left the gesture running after the button came up.
+                if (!button.IsDown && button.Button == 1 && _autoScrollTarget is not null)
+                {
+                    _autoScrollTarget = null;
+                    _root!.MarkPaintDirty();   // take the anchor marker off the screen
+                    SetCursorOf(_lastHoveredElement);
+                }
+
                 // The release ends a pointer capture: it goes to the captured element
                 // (with the click, if that element was also pressed), then hover catches
                 // up with wherever the pointer is now.
@@ -2827,17 +2843,6 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     _scrollbarDragTarget.EndScrollbarDrag();
                     _scrollbarDragTarget = null;
                     break;
-                }
-
-                // End the autoscroll. Nothing has to be suppressed: a click is the primary
-                // button's alone (see PointerState), so the middle button never synthesizes
-                // one however far it travelled. The release is still dispatched, so nothing
-                // is left holding a pressed :active style.
-                if (!button.IsDown && button.Button == 1 && _autoScrollTarget is not null)
-                {
-                    _autoScrollTarget = null;
-                    _root!.MarkPaintDirty();   // take the anchor marker off the screen
-                    SetCursorOf(_lastHoveredElement);
                 }
 
                 // End text input drag on button up

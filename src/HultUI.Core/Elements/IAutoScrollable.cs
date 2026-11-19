@@ -10,8 +10,10 @@ namespace HultUI.Core.Elements;
 /// visible to a reader, who sees a tall scrollable thing and holds the middle button on it.
 /// So the window looks for this rather than for a class, and both answer to it.</para>
 ///
-/// <para>Implemented by <see cref="ScrollViewElement"/> and <see cref="TextAreaElement"/>;
-/// implement it on anything else that scrolls content it owns.</para>
+/// <para>Implemented by <see cref="ScrollViewElement"/>, <see cref="TextAreaElement"/> and the
+/// web view (which passes each frame on to its page as wheel input); implement it on anything
+/// else that scrolls content it owns. An element that captures the pointer on its press may:
+/// the gesture keeps the moves and ends on the release ahead of the capture.</para>
 /// </summary>
 public interface IAutoScrollable
 {

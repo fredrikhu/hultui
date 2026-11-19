@@ -175,6 +175,26 @@ pointer capture held from down to up so a drag leaving the element keeps
 flowing. Pen and touch through `SendPointerInput` later. Cursor: `CursorChanged`
 → `SystemCursorId` → the nearest HultUI cursor kind.
 
+**Middle-click autoscroll is the window's** (2026-11-19). Chromium's own ran inside the page
+and showed nothing: in visual hosting WebView2 reports no cursor change at all while a button
+is held (polled too: `get_Cursor` never moves), and after a click starts its toggle mode only
+custom cursors (id 0) it cannot name. So `WebViewElement` is an `IAutoScrollable`: the window
+anchors the gesture, draws its ring, shows its cursor and paces it as over any list, and each
+frame reaches the page as wheel input at the anchor (whole 1/120 notches, the rest carried;
+`IWebEngineView.PixelsPerWheelNotch`, 100 on WebView2 at Windows' default three lines,
+measured on 157, and 120 on CEF, whose wheel deltas are pixels). Chromium's own is cancelled by
+a document-created script that `preventDefault`s a middle `mousedown`
+(`WebView2View.NoEngineAutoscroll`): `--disable-features` and `--disable-blink-features` with
+`MiddleClickAutoscroll` both reached the browser and changed nothing. The element holds a middle
+press the window took back until the release: one that never left the dead zone reaches the page
+then, press and release, as a middle click (a link opens); an autoscroll that ran never reaches
+it at all but as scrolling, so no click comes of it, as none comes of one in a list. (Sending
+only the release outside the page was not enough: Chromium fires `auxclick` on the common
+ancestor of the press and the release.) CEF needs no script: Chromium has no middle-click
+autoscroll on Linux. The window now gives an autoscroll the moves and ends it on release *before* a pointer
+capture's routing — the element captures every press, and the capture's branches used to take
+the moves (the view sat still under the ring) and the release (the gesture never ended).
+
 **Keyboard and IME are native.** Microsoft's hosting guide lists only *spatial*
 input (mouse, touch, pen) as the host's to forward in visual hosting; keyboard
 focus stays with a window WebView2 keeps under `ParentWindow` — W0 found exactly
@@ -695,9 +715,11 @@ drag settled it: the first. So `OsDropTests` pins the hover and the acceptance, 
 is a hand check.
 
 
-**Known limits to document:** a web view inside a `ScrollView` loses the middle
-button to the ancestor's autoscroll, and scroll chaining out of the page does not
-exist — give it its own region. Moving an element between windows is unsupported
+**Known limits to document:** scroll chaining out of the page does not exist — give
+it its own region. A ready page takes the middle button's autoscroll from a `ScrollView`
+around it whether or not it has anywhere to scroll, since that is not knowable from outside
+it (as for the wheel). `MiddleClickAutoScroll = false` leaves the button to the page with no
+autoscroll at all, Chromium's being cancelled for every page. Moving an element between windows is unsupported
 framework-wide; the element re-reads its window at render and re-parents the
 engine if it changed, but nothing more.
 

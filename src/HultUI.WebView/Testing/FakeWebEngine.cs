@@ -234,6 +234,10 @@ public sealed class FakeWebEngineView : IWebEngineView, IReleasesGpuWhileHidden
     }
 
     public void SendPointer(in WebPointerInput input) => Pointers.Add(input);
+
+    /// <summary>What a notch of the wheel scrolls; WebView2's 100 by default.</summary>
+    public float PixelsPerWheelNotch { get; set; } = 100f;
+
     public void SendKey(in WebKeyInput input) => Keys.Add(input);
     public void SendText(in WebTextInput input) => Texts.Add(input);
 
