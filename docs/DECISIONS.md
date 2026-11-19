@@ -1173,7 +1173,7 @@ interval stays 0 by design; see THREADING.md).
 Since round 16 (80e94eeb) Junction keeps the texts of big files whose colours a key cancelled (up to
 16 MB), which takes away the re-reads and the gen-2 collections they brought when the reader comes
 back. Expert 8 found the window holding +48 MB working set for it. Plan 17's round 17 step 2 measured
-the ways out in real windows (NativeAOT, the 2560×1440 monitor at DPI 144, 120 Hz; expert 8's jbig
+the ways out in real windows (NativeAOT, the 4K at 150 % (DPI 144), 120 Hz; expert 8's jbig
 scene on bigrepo: the Commit view's file walk, 12 first visits and 12 revisits at 400 ms, 40 held
 keys; one build at HEAD with the choice switched in-process, so "keep" is 80e94eeb's behaviour and
 "none" f76cb440's; two holds, the order reversed in the second; 0 foreground takes). Working set,
