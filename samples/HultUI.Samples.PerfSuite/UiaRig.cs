@@ -17,7 +17,7 @@ namespace PerfSuite;
 /// the window lends it its diff for patches as it lends the bridge (<see cref="ITreeDiffBorrower"/>).
 /// </summary>
 [SupportedOSPlatform("windows")]
-sealed class UiaRig : IBridgeRig, IAccessibilityBridge, ITreeDiffBorrower, IDisposable
+sealed class UiaRig : IBridgeRig, IAccessibilityBridge, ITreeDiffBorrower, IEagerItemsLimit, IDisposable
 {
     private IntPtr _hwnd;
     private readonly WindowsAccessibilityBridge _bridge;
@@ -37,6 +37,17 @@ sealed class UiaRig : IBridgeRig, IAccessibilityBridge, ITreeDiffBorrower, IDisp
     /// <summary>Focus moves the bridge was told of, for a scenario's check.</summary>
     public int FocusMoves { get; private set; }
 
+    /// <summary>The Name property changes the bridge raised since <see cref="CountNames"/>, for a scenario's
+    /// check.</summary>
+    public int NameRaises { get; private set; }
+
+    /// <summary>Counts the Name property changes the bridge raises from now on (<see cref="NameRaises"/>); a
+    /// row that does not ask leaves the bridge's raises as they are.</summary>
+    public void CountNames() => _bridge.Raised = raised =>
+    {
+        if (raised.Kind == UiaRaisedKind.Property && raised.Id == UiaInterop.UIA_NamePropertyId) NameRaises++;
+    };
+
     public static UiaRig Install(HeadlessWindow window)
     {
         // "STATIC" is a system class: no class to register, no window procedure to keep alive.
@@ -47,6 +58,9 @@ sealed class UiaRig : IBridgeRig, IAccessibilityBridge, ITreeDiffBorrower, IDisp
     }
 
     public bool IsActive => true;
+
+    /// <summary>The bridge's: a list over 200 items is served on demand, as in a real window.</summary>
+    public int MaxEagerVirtualItems => AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(_bridge);
 
     public void ApplyChanges(TreeDiff diff, AccessibilityNode root)
     {

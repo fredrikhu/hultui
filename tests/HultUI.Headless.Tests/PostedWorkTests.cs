@@ -381,4 +381,155 @@ public class PostedWorkTests
         session.PumpFrame();
         Assert.True(ran);
     }
+
+    // ── A live frame inside a batch ──
+
+    /// <summary>A session whose window's Resized handler bumps the component's revision, as
+    /// Junction's does (RerenderView); a canvas counts the frames drawn.</summary>
+    private static (HeadlessSession Session, Bumped List, HeadlessPlatformWindow Platform, Action Live, Func<int> Frames) Resizing(
+        Element? before = null)
+    {
+        int frames = 0;
+        var list = new Bumped();
+        var session = Session(Flex.Column().Children(
+            before ?? Box.New(), new ComponentHost(list), Canvas.New(_ => frames++).Width(1f).Height(1f)));
+        var window = session.Window.Window;
+        window.Resized += () => list.Rev.Value++;
+        var platform = (HeadlessPlatformWindow)window.PlatformWindow;
+        var live = platform.LiveResizeFrame ?? throw new InvalidOperationException("the application set no live frame");
+        session.PumpFrames(2);
+        return (session, list, platform, live, () => frames);
+    }
+
+    /// <summary>What a <c>SetWindowPos</c> the app makes does on Windows: the new size, and the size
+    /// message's live frame, before the call returns.</summary>
+    private static void ResizeInsideTheCall(HeadlessPlatformWindow platform, Action live, float width)
+    {
+        platform.SetClientSize(width, 200);
+        platform.ResizePending = true;
+        live();
+    }
+
+    /// <summary>
+    /// A resize made from posted work: the live frame ran inside the drain's batch, which held the
+    /// Resized handler's write, so it drew the new size with no build, and the batch's flush built
+    /// and drew the same size again (Junction's wrapped diff resized by posted steps: 1.90 frames a
+    /// step, plan 17 round 16). The live frame now sets the batch aside: one build and one frame,
+    /// inside the call, and nothing after.
+    /// </summary>
+    [Fact]
+    public void ALiveFrameInsidePostedWork_BuildsWhatResizedWrote_AndDrawsOnce()
+    {
+        var (session, list, platform, live, frames) = Resizing();
+        using var _ = session;
+        int builds = list.Builds, drawn = frames(), builtInside = -1, drawnInside = -1;
+        bool shownInside = false;
+        Application.InvokeOnMainThread(() =>
+        {
+            ResizeInsideTheCall(platform, live, 320);
+            builtInside = list.Builds - builds;
+            drawnInside = frames() - drawn;
+            shownInside = session.Window.FindByText("Revision 1") is not null;
+        });
+
+        session.PumpFrames(3);
+
+        Assert.Equal(1, builtInside);
+        Assert.Equal(1, drawnInside);
+        Assert.True(shownInside, "the frame inside the call drew the old build");
+        Assert.Equal(builds + 1, list.Builds);
+        Assert.Equal(drawn + 1, frames());
+    }
+
+    /// <summary>The same for an event handler, whose dispatch is a batch (a fullscreen toggle from a
+    /// key or a click): what the handler wrote before the call is flushed first, so the frame
+    /// inside it shows that as well as what Resized wrote.</summary>
+    [Fact]
+    public void ALiveFrameInsideAHandler_ShowsWhatTheHandlerWroteBeforeTheCall()
+    {
+        var button = Box.New().Width(Dimension.Px(80)).Height(Dimension.Px(30)).Background(Color.White);
+        var (session, list, platform, live, frames) = Resizing(button);
+        using var _ = session;
+        int builds = list.Builds, drawn = frames(), builtInside = -1, drawnInside = -1;
+        bool shownInside = false;
+        button.On<ClickEvent>(_ =>
+        {
+            list.Rev.Value = 10;   // held by the dispatch's batch until the live frame
+            ResizeInsideTheCall(platform, live, 320);
+            builtInside = list.Builds - builds;
+            drawnInside = frames() - drawn;
+            shownInside = session.Window.FindByText("Revision 11") is not null;
+        });
+
+        session.Window.Click(button);
+        session.PumpFrames(3);
+
+        Assert.Equal(2, builtInside);   // the handler's write, then Resized's
+        Assert.Equal(1, drawnInside);
+        Assert.True(shownInside, "the frame inside the call drew the old build");
+        // Nothing built after; the click still draws the frame a handled click asks for.
+        Assert.Equal(builds + 2, list.Builds);
+    }
+
+    /// <summary>A user's own drag reaches the live frame from the pump, with no batch open: the
+    /// handler's write builds at once, as it always did, and the frame shows it.</summary>
+    [Fact]
+    public void ALiveFrameOutsideEveryBatch_IsUnchanged()
+    {
+        var (session, list, platform, live, frames) = Resizing();
+        using var _ = session;
+        int builds = list.Builds, drawn = frames();
+
+        ResizeInsideTheCall(platform, live, 320);
+        int builtInside = list.Builds - builds, drawnInside = frames() - drawn;
+        session.PumpFrames(3);
+
+        Assert.Equal(1, builtInside);
+        Assert.Equal(1, drawnInside);
+        Assert.NotNull(session.Window.FindByText("Revision 1"));
+        Assert.Equal(builds + 1, list.Builds);
+        Assert.Equal(drawn + 1, frames());
+    }
+
+    /// <summary>
+    /// A build that throws in the live frame's flush: the exception leaves the live frame (on a real
+    /// window SDL's event watch logs and swallows it, as for any live frame's build, and the call
+    /// returns; caught here as the watch catches it), the frame is not drawn, the resize stays
+    /// pending, and the batch is open again for the rest of the action. The next pass lays out the
+    /// new size and draws it.
+    /// </summary>
+    [Fact]
+    public void ABuildThatThrowsInTheLiveFramesFlush_LeavesTheResizePending_AndTheBatchOpen()
+    {
+        var (session, list, platform, live, frames) = Resizing();
+        using var _ = session;
+        list.ThrowAt = 1;
+        int drawn = frames(), drawnInside = -1, builtAfterWrite = -1, builtBeforeWrite = -1;
+        bool pendingAfter = false;
+        Exception? thrown = null;
+        Application.InvokeOnMainThread(() =>
+        {
+            list.Rev.Value = 1;   // held; the live frame's flush builds it, and the build throws
+            try { ResizeInsideTheCall(platform, live, 320); }
+            catch (InvalidOperationException e) { thrown = e; }
+            drawnInside = frames() - drawn;
+            pendingAfter = platform.ResizePending;
+            builtBeforeWrite = list.Builds;
+            list.Rev.Value = 2;   // batched again: built when the action's batch closes
+            builtAfterWrite = list.Builds;
+        });
+
+        session.PumpFrame();
+        Assert.Equal("build", thrown?.Message);
+        Assert.Equal(0, drawnInside);
+        Assert.True(pendingAfter, "the resize was not left pending");
+        Assert.Equal(builtBeforeWrite, builtAfterWrite);
+        Assert.NotNull(session.Window.FindByText("Revision 2"));
+
+        platform.LastResizeRenderTick = 0;   // no real-time throttle headless
+        session.PumpFrames(3);
+        Assert.False(platform.ResizePending);
+        Assert.Equal(320f, session.Window.Window.Root!.Layout.Width);
+        Assert.NotNull(session.Window.FindByText("Revision 3"));   // Resized's write, in the next pass
+    }
 }

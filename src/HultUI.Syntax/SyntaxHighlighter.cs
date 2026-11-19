@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using TextMateSharp.Grammars;
@@ -229,6 +230,13 @@ public static class SyntaxHighlighter
     ///
     /// <para>Call it from a worker, like the other tokenizes: it takes the same gate, and a change
     /// near the end of a large file walks every line above it.</para>
+    ///
+    /// <para>A call cancelled part-way leaves where it got to with its texts: a later call handed
+    /// the same string instances, the same lines shown and the same clock, under the same theme,
+    /// goes on from there instead of walking from the first line again, and gives the spans an
+    /// uncancelled call gives, within the budget one walk has. That is kept only as long as the
+    /// texts are: a caller that reads a file afresh for each call gets a fresh walk each time, and
+    /// keeps nothing.</para>
     /// </summary>
     /// <param name="path">The file's path or name; its extension picks the grammar, as for
     /// <see cref="TokenizeLines(string, string)"/>. Both versions are coloured as that language.</param>
@@ -246,7 +254,8 @@ public static class SyntaxHighlighter
     /// <see cref="OperationCanceledException"/> within a line.</param>
     /// <param name="clock">What the three-second budget is measured on, the system clock when null;
     /// see <see cref="TokenizeLines(string, string, int, CancellationToken, TimeProvider?)"/>.</param>
-    /// <returns>Each version's spans by line, and how many lines it took to find them.</returns>
+    /// <returns>Each version's spans by line, and how many lines this call walked to find them
+    /// (fewer when it went on from a cancelled one).</returns>
     /// <exception cref="ArgumentNullException"><paramref name="oldShown"/> or
     /// <paramref name="newShown"/> is null.</exception>
     /// <exception cref="ArgumentException">A range in <paramref name="oldShown"/> or
@@ -254,7 +263,15 @@ public static class SyntaxHighlighter
     /// after the range before it ends. Checked whether or not that version has text.</exception>
     public static TokenizedDiff TokenizeDiff(string path, string? oldText, IReadOnlyList<LineRange> oldShown,
         string? newText, IReadOnlyList<LineRange> newShown, int maxLines, CancellationToken cancellationToken,
-        TimeProvider? clock = null)
+        TimeProvider? clock = null) =>
+        TokenizeDiff(path, oldText, oldShown, newText, newShown, maxLines, cancellationToken, clock, wrap: null);
+
+    /// <summary><see cref="TokenizeDiff(string, string?, IReadOnlyList{LineRange}, string?, IReadOnlyList{LineRange}, int, CancellationToken, TimeProvider?)"/>
+    /// through a wrapper of the grammar, which a test uses to cancel a walk at a line of its
+    /// choosing. A walk goes on with the grammar, whatever wrapped it before.</summary>
+    internal static TokenizedDiff TokenizeDiff(string path, string? oldText, IReadOnlyList<LineRange> oldShown,
+        string? newText, IReadOnlyList<LineRange> newShown, int maxLines, CancellationToken cancellationToken,
+        TimeProvider? clock, Func<IGrammar, IGrammar>? wrap)
     {
         CheckShown(oldShown, nameof(oldShown));
         CheckShown(newShown, nameof(newShown));
@@ -270,21 +287,90 @@ public static class SyntaxHighlighter
 
             var oldLines = oldText is null ? [] : SplitLines(oldText, oldShown[^1].Last);
             var newLines = newText is null ? [] : SplitLines(newText, newShown[^1].Last);
-            var oldSide = new Side(oldText is null ? null : Uncoloured(oldLines.Count), oldShown);
-            var newSide = new Side(newText is null ? null : Uncoloured(newLines.Count), newShown);
             var longer = newLines.Count >= oldLines.Count ? newLines : oldLines;
             int shared = oldText is null || newText is null ? 0 : Math.Min(SharedLines(oldText, newText), longer.Count);
 
-            var walk = new LineWalk(language.Grammar, language.Colours, clock, cancellationToken);
-            IStateStack? state = null;
-            walk.Run(longer, 0, shared, ref state, ref oldSide, ref newSide);
-            var elapsed = clock.GetElapsedTime(walk.Started);
-            var sharedState = state;
-            walk.Run(newLines, shared, newLines.Count, ref state, ref newSide, ref Side.None);
-            // Each version has its whole budget, as it would alone, less the walk they shared.
-            walk.Started = clock.GetTimestamp() - (long)(elapsed.TotalSeconds * clock.TimestampFrequency);
-            walk.Run(oldLines, shared, oldLines.Count, ref sharedState, ref oldSide, ref Side.None);
-            return new TokenizedDiff(oldSide.Result, newSide.Result, walk.Lines);
+            // The texts are what a walk is kept with: the longer, which an empty one never is.
+            string held = (oldText?.Length ?? -1) > (newText?.Length ?? -1) ? oldText! : newText!;
+            var w = DiffWalks.TryGetValue(held, out var kept) && kept.Continues(language, oldText, oldShown, newText, newShown, clock)
+                ? kept
+                : new DiffWalk(language, oldText, oldShown, newText, newShown, clock,
+                    oldText is null ? null : Uncoloured(oldLines.Count), newText is null ? null : Uncoloured(newLines.Count));
+            var oldSide = new Side(w.OldResult, oldShown);
+            var newSide = new Side(w.NewResult, newShown);
+            var walk = new LineWalk(wrap is null ? language.Grammar : wrap(language.Grammar), language.Colours, clock,
+                cancellationToken);
+            if (w.Spent > TimeSpan.Zero) walk.Started = clock.GetTimestamp() - Ticks(w.Spent, clock);   // the budget goes on
+            try
+            {
+                if (w.Stage == 0)
+                {
+                    walk.Run(longer, w.At, shared, ref w.State, ref oldSide, ref newSide);
+                    w.SharedSpent = clock.GetElapsedTime(walk.Started);
+                    (w.Stage, w.At, w.SharedState) = (1, shared, w.State);
+                }
+                if (w.Stage == 1)
+                {
+                    walk.Run(newLines, w.At, newLines.Count, ref w.State, ref newSide, ref Side.None);
+                    // Each version has its whole budget, as it would alone, less the walk they shared.
+                    walk.Started = clock.GetTimestamp() - Ticks(w.SharedSpent, clock);
+                    (w.Stage, w.At, w.State) = (2, shared, w.SharedState);
+                }
+                walk.Run(oldLines, w.At, oldLines.Count, ref w.State, ref oldSide, ref Side.None);
+            }
+            catch (OperationCanceledException)
+            {
+                // Keep where it got to, for a call with these texts. The lines before walk.At are
+                // done, and w.State is the state the last of them left.
+                (w.At, w.Spent) = (walk.At, clock.GetElapsedTime(walk.Started));
+                if (w.Stage > 0 || w.At > 0) DiffWalks.AddOrUpdate(held, w);
+                throw;
+            }
+            if (ReferenceEquals(w, kept)) DiffWalks.Remove(held);   // its arrays are the caller's now
+            return new TokenizedDiff(w.OldResult, w.NewResult, walk.Lines);
+        }
+    }
+
+    private static long Ticks(TimeSpan span, TimeProvider clock) => (long)(span.TotalSeconds * clock.TimestampFrequency);
+
+    /// <summary>The walks <see cref="TokenizeDiff(string, string?, IReadOnlyList{LineRange}, string?, IReadOnlyList{LineRange}, int, CancellationToken, TimeProvider?)"/>
+    /// was cancelled out of, by the longer of their texts: each is kept while that string is alive,
+    /// and goes with it. Under <see cref="Gate"/>.</summary>
+    private static readonly ConditionalWeakTable<string, DiffWalk> DiffWalks = new();
+
+    /// <summary>Where a diff's walk has got to: the lines both versions start with (stage 0),
+    /// then the new version's own (1), then the old version's (2). A call goes on with it only
+    /// for the same texts, lines shown and clock, and the same grammar, which a theme change
+    /// replaces; anything else would colour from a state the lines above it did not leave.</summary>
+    private sealed class DiffWalk(Language language, string? oldText, IReadOnlyList<LineRange> oldShown,
+        string? newText, IReadOnlyList<LineRange> newShown, TimeProvider clock,
+        IReadOnlyList<TextSpan>[]? oldResult, IReadOnlyList<TextSpan>[]? newResult)
+    {
+        private readonly LineRange[] _oldShown = [.. oldShown], _newShown = [.. newShown];
+
+        public readonly IReadOnlyList<TextSpan>[]? OldResult = oldResult, NewResult = newResult;
+
+        /// <summary>The stage, and the next of its lines to walk.</summary>
+        public int Stage, At;
+
+        /// <summary>The state the lines walked so far left; the one the shared lines left.</summary>
+        public IStateStack? State, SharedState;
+
+        /// <summary>The stage's budget spent so far, and the shared lines' (both zero on a clock
+        /// but the system's).</summary>
+        public TimeSpan Spent, SharedSpent;
+
+        public bool Continues(Language l, string? o, IReadOnlyList<LineRange> os, string? n, IReadOnlyList<LineRange> ns,
+            TimeProvider c) =>
+            ReferenceEquals(l, language) && ReferenceEquals(o, oldText) && ReferenceEquals(n, newText)
+            && ReferenceEquals(c, clock) && Same(os, _oldShown) && Same(ns, _newShown);
+
+        private static bool Same(IReadOnlyList<LineRange> a, LineRange[] b)
+        {
+            if (a.Count != b.Length) return false;
+            for (int i = 0; i < b.Length; i++)
+                if (a[i] != b[i]) return false;
+            return true;
         }
     }
 
@@ -419,6 +505,7 @@ public static class SyntaxHighlighter
             LanguageByExt.Clear();
             LanguageByRoot.Clear();
             Reachings.Clear();
+            DiffWalks.Clear();   // their states and spans are the old theme's
         }
         // Which extensions are highlightable does not depend on the theme: CanHighlight answers
         // from a fixed table.
@@ -810,6 +897,9 @@ public static class SyntaxHighlighter
         /// <summary>Lines walked so far.</summary>
         public int Lines;
 
+        /// <summary>The line <see cref="Run"/> is on: when a cancel stops it, the first not walked.</summary>
+        public int At;
+
         // TextMateSharp measures a line's budget on the wall clock only; MaxValue is none.
         private readonly TimeSpan _lineBudget = clock == TimeProvider.System ? LineBudget : TimeSpan.MaxValue;
         private readonly int _longLine = LongLineFor(grammar.GetScopeName());
@@ -823,6 +913,7 @@ public static class SyntaxHighlighter
         {
             for (int i = from; i < to; i++)
             {
+                At = i;
                 cancellationToken.ThrowIfCancellationRequested();
                 if (clock.GetElapsedTime(Started) > FileBudget) continue;
                 Lines++;

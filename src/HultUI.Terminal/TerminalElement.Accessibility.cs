@@ -47,7 +47,19 @@ public sealed partial class TerminalElement
 
     private ScreenTextSource? _textSource;
 
-    internal override IAccessibleTextSource? AccessibleTextSource => _textSource ??= new ScreenTextSource(this);
+    internal override IAccessibleTextSource? AccessibleTextSource
+    {
+        get
+        {
+            // A tree takes this terminal for a reader (on Windows from the first ask for the window, on Linux
+            // while the bus says one runs): where no place to announce output from is taken, it is taken now,
+            // at the screen as it is, so the next output is read out and nothing from before. The first settle
+            // took it, and with a reader that came later that was the first output it heard nothing of.
+            if (_announcedTo is null && _controller is not null && AccessibilityClients.Active && IsHosted)
+                AnnounceNewOutput();
+            return _textSource ??= new ScreenTextSource(this);
+        }
+    }
 
     /// <summary>Records where the grid is; called from <see cref="Render"/>. A new record only when
     /// something in it moved: one a frame was the element's last render-pass allocation.</summary>
@@ -241,6 +253,7 @@ public sealed partial class TerminalElement
     /// <summary>The user sent keys or text since the last announcement: what comes back up to
     /// the first line break is their echo.</summary>
     private bool _typedSinceAnnounce;
+
 
     private void AnnounceNewOutput()
     {

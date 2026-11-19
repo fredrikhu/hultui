@@ -17,6 +17,8 @@
     <InternalsVisibleTo Include="HultUI.Headless.Tests" />
     <!-- HeadlessUiaReader: an app's tests hear what this bridge tells a reader. -->
     <InternalsVisibleTo Include="HultUI.Headless" />
+    <!-- The perf suite's UIA rows: the events the bridge raises, counted (WindowsAccessibilityBridge.Raised). -->
+    <InternalsVisibleTo Include="HultUI.Samples.PerfSuite" />
   </ItemGroup>
 
   <ItemGroup>

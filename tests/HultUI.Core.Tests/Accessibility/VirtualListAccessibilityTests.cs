@@ -666,6 +666,62 @@ public class VirtualListAccessibilityTests
         Assert.Empty(tree.Children);
     }
 
+    /// <summary>A bridge that says how many items a list may have as item nodes (UI Automation's 200).</summary>
+    private sealed class Limited(int max) : IAccessibilityBridge, IEagerItemsLimit
+    {
+        public int MaxEagerVirtualItems => max;
+        public bool IsActive => true;
+        public void ApplyChanges(TreeDiff diff, AccessibilityNode root) { }
+        public void NotifyFocusChanged(AccessibilityNode? focused) { }
+    }
+
+    /// <summary>
+    /// The number past which a list's items are served on demand is the bridge's (plan 17 round 16: UI
+    /// Automation's 200, AT-SPI's 2,000), and a tree is built, patched and refreshed in place by the one it
+    /// was built by. A bridge that says none has the builder's 2,000.
+    /// </summary>
+    [Fact]
+    public void TheBridgesNumber_DecidesWhereAListsItemsAreServedOnDemand()
+    {
+        Assert.Equal(2_000, AccessibilityTreeBuilder.MaxEagerVirtualItems);
+        Assert.Equal(AccessibilityTreeBuilder.MaxEagerVirtualItems, AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(NullAccessibilityBridge.Instance));
+        Assert.Equal(200, AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(new Limited(200)));
+        Assert.Equal(0, AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(new Limited(-1)));
+
+        AccessibilityNode Build(VirtualListElement<string> list, int maxEager)
+        {
+            _layout.PerformLayout(list, 200, 100);
+            list.UpdateContentSize();
+            return AccessibilityTreeBuilder.Build(list, null, 0f, 0f, default, maxEager);
+        }
+
+        var at = Build(MakeList(200), 200);
+        Assert.False(at.IsVirtualItemContainer);
+        Assert.Equal(200, at.Children.Count);
+        var list = MakeList(201);
+        var over = Build(list, 200);
+        Assert.True(over.IsVirtualItemContainer);
+        Assert.Empty(over.Children);
+        Assert.Equal(201, over.Served.Count);
+        // The same list by the builder's number: an item node each.
+        Assert.Equal(201, BuildLaidOut(MakeList(201)).Children.Count);
+
+        // A move of its selection is the node's own by the number it was built by; by another, its items
+        // are not the node's, and the tree is built again.
+        list.SelectedIndex = 3;
+        var served = new List<(AccessibilityNode, int, int[])>();
+        Assert.True(AccessibilityTreeBuilder.ItemSelectionChanges(over, list, [], served, [], 200));
+        Assert.Equal([3], Assert.Single(served).Item3);
+        Assert.False(AccessibilityTreeBuilder.ItemSelectionChanges(over, list, [], [], [], AccessibilityTreeBuilder.MaxEagerVirtualItems));
+
+        // A layout refresh made in place, the same.
+        var refresh = new AccessibilityTreeBuilder.LayoutRefresh();
+        Assert.True(AccessibilityTreeBuilder.TryRefreshInPlace(over, list, [], null, refresh, 200), refresh.Mismatch);
+        refresh.Clear();
+        Assert.False(AccessibilityTreeBuilder.TryRefreshInPlace(over, list, [], null, refresh));
+        Assert.Equal("a list's items", refresh.Mismatch);
+    }
+
     // ── The current item (the list's cursor): the item a reader's focus is on ──
 
     private AccessibilityNode BuildFocused(VirtualListElement<string> list, Element? focused)

@@ -78,9 +78,11 @@ public interface IUiaHostBridge
 
     /// <summary>
     /// A client asked the window for its root (<c>WM_GETOBJECT</c>), on the UI thread, possibly
-    /// inside the frame loop's wait, which does not end for a message SDL makes no event of. A
-    /// client that has just attached gets the root before any tree is built; the host wakes the
-    /// loop so its next frame builds one.
+    /// inside the frame loop's wait, which does not end for a message SDL makes no event of, before
+    /// the bridge answers. The first ask opens the window's gate
+    /// (<see cref="WindowsAccessibilityBridge.IsActive"/>): no tree was built before it. The host
+    /// builds one now when it can, so the client's first reads find it, or wakes the loop so its next
+    /// frame builds one.
     /// </summary>
     void RootRequested() { }
 }

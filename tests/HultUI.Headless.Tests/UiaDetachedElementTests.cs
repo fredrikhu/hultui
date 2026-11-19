@@ -24,8 +24,10 @@ public class UiaDetachedElementTests(ITestOutputHelper output)
 {
     private const int NotAvailable = unchecked((int)0x80040201);
 
-    private sealed class Active(IAccessibilityBridge inner) : IAccessibilityBridge
+    private sealed class Active(IAccessibilityBridge inner) : IAccessibilityBridge, IEagerItemsLimit
     {
+        // The real bridge's number of items past which a list's are served on demand (UIA 200, AT-SPI 2,000).
+        public int MaxEagerVirtualItems => AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(inner);
         public bool IsActive => true;
         public void ApplyChanges(TreeDiff diff, AccessibilityNode root) => inner.ApplyChanges(diff, root);
         public void ApplyPatchedProperties(TreeDiff patch, AccessibilityNode root) => inner.ApplyPatchedProperties(patch, root);

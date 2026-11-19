@@ -97,8 +97,10 @@ public class A11yKeptChildrenTests
     }
 
     /// <summary>A real bridge, reported active whether or not a client listens; keeps the tree.</summary>
-    private sealed class Keeping(IAccessibilityBridge inner) : IAccessibilityBridge
+    private sealed class Keeping(IAccessibilityBridge inner) : IAccessibilityBridge, IEagerItemsLimit
     {
+        // The real bridge's number of items past which a list's are served on demand (UIA 200, AT-SPI 2,000).
+        public int MaxEagerVirtualItems => AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(inner);
         public AccessibilityNode? Tree;
         public bool IsActive => true;
         public void ApplyChanges(TreeDiff diff, AccessibilityNode root) { Tree = root; inner.ApplyChanges(diff, root); }

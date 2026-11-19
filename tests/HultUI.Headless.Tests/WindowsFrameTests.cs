@@ -30,6 +30,45 @@ public sealed class WindowsFrameTests
         return session;
     }
 
+    /// <summary>
+    /// Full screen as the custom frame does it: <c>SetWindowPos</c> over the monitor sends the size
+    /// inside the call, so the first frame at the new size is drawn there, and the resize is flagged
+    /// again, so the next frame raises Resized and draws once more. What the app wrote before the
+    /// call is in the first frame; what it writes after is not.
+    /// </summary>
+    [Fact]
+    public void FullScreen_DrawsItsFirstFrameInsideTheCall_AndTheNextFrameRaisesResized()
+    {
+        using var session = Session(WindowStyle.Default);
+        var window = session.Window.Window;
+        int frames = 0, resized = 0;
+        var sizes = new List<float>();
+        window.SetRoot(Canvas.New(_ => { frames++; sizes.Add(window.LayoutWidth); }).Width(1f).Height(1f));
+        window.Placement = new WindowPlacement(100, 100, 800, 600, false);   // where leaving full screen returns to
+        session.PumpFrames(2);
+        window.Resized += () => resized++;
+
+        int before = frames, resizedBefore = resized;
+        window.SetFullscreen(true);
+        int inside = frames - before, resizedInside = resized - resizedBefore;
+        session.PumpFrames(3);
+
+        Assert.Equal(1, inside);
+        Assert.Equal(1, resizedInside);
+        Assert.Equal(1920f, sizes[before]);   // the monitor's bounds, task bar and all
+        Assert.Equal(2, frames - before);
+        Assert.Equal(2, resized - resizedBefore);
+
+        // Already full screen: nothing.
+        before = frames;
+        window.SetFullscreen(true);
+        Assert.Equal(before, frames);
+
+        window.SetFullscreen(false);
+        Assert.Equal(before + 1, frames);
+        Assert.Equal(800f, sizes[^1]);
+    }
+
     [Fact]
     public void APlacement_IsTheOuterRectangle_WithTheContentInsetByTheSideAndBottomBorders()
     {

@@ -224,6 +224,50 @@ public class TerminalAccessibilityTests
         return t;
     }
 
+    /// <summary>
+    /// On Windows a reader listens, for the terminal, from its first ask for the root of one of the
+    /// app's windows (plan 17 round 16, the user's question 66): before it no settle is waited for and
+    /// nothing is read out, whatever UI Automation says; at it the place is taken at the screen as it
+    /// is, so the next output is read out, and nothing from before it.
+    /// </summary>
+    [UiaGateFact]
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    public void OnWindows_OutputIsAnnounced_FromTheFirstRootAsk_AndNothingFromBefore()
+    {
+        try
+        {
+            AccessibilityClients.Force = null;
+            AccessibilityClients.Report(false);
+            UiaGateWindow.AssertClientsListen();
+            using var gate = new UiaGateWindow();
+            using var t = Term.Shown();
+            var said = new List<string>();
+            t.Window.InstallAccessibilityBridge(gate.Telling(said));
+            t.Emit("$ ");
+            Settle(t);
+            t.Emit("before\r\n$ ");
+            Settle(t);
+            Assert.False(AccessibilityClients.Active);
+            Assert.Empty(said);
+
+            gate.AskForRoot();
+            t.Session.PumpFrame();
+            Assert.True(AccessibilityClients.Active);
+            Assert.Empty(said);
+
+            t.Emit("after\r\n$ ");
+            Settle(t);
+            var text = Assert.Single(said);
+            Assert.StartsWith("after", text);
+            Assert.DoesNotContain("before", text);
+        }
+        finally
+        {
+            AccessibilityClients.Force = null;
+            AccessibilityClients.Report(false);
+        }
+    }
+
     [Fact]
     public void NewOutput_IsAnnounced_OnceItSettles()
     {

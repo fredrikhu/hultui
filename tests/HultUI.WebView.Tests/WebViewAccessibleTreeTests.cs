@@ -3,6 +3,7 @@ using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Primitives;
 using HultUI.Headless;
+using HultUI.Testing;
 using HultUI.WebView.Testing;
 using Xunit;
 
@@ -122,5 +123,45 @@ public class WebViewAccessibleTreeTests
             Assert.True(((FakeWebEngineView)later.View).AccessibilityEnabled);
         }
         finally { AccessibilityClients.Force = forced; }
+    }
+
+    /// <summary>
+    /// On Windows someone listens, for the page, from a client's first ask for the root of one of the
+    /// app's windows (plan 17 round 16, the user's question 66): before it the page's tree stays off
+    /// whatever UI Automation says, and at it the tree comes on in the page as it is, which is not
+    /// loaded again.
+    /// </summary>
+    [UiaGateFact]
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    public void OnWindows_ThePagesTree_ComesOnAtTheFirstRootAsk_WithoutLoadingThePageAgain()
+    {
+        var forced = AccessibilityClients.Force;
+        try
+        {
+            AccessibilityClients.Force = null;
+            AccessibilityClients.Report(false);
+            UiaGateWindow.AssertClientsListen();
+            using var gate = new UiaGateWindow();
+            var (session, web, view) = Show(scale: 1f);
+            using var _ = session;
+            using var __ = web;
+            session.Window.InstallAccessibilityBridge(gate.Bridge);
+            web.NavigateToString("<title>A page</title><p>Hello</p>");
+            session.PumpFrames(3);
+            Assert.False(AccessibilityClients.Active);
+            Assert.False(view.AccessibilityEnabled);
+            int calls = view.Calls.Count;
+
+            gate.AskForRoot();
+            session.PumpFrame();
+            Assert.True(AccessibilityClients.Active);
+            Assert.True(view.AccessibilityEnabled);
+            Assert.DoesNotContain(view.Calls.Skip(calls), c => c.StartsWith("Navigate", StringComparison.Ordinal) || c == "Reload");
+        }
+        finally
+        {
+            AccessibilityClients.Force = forced;
+            AccessibilityClients.Report(false);
+        }
     }
 }

@@ -37,9 +37,10 @@ public class ReelTests : IDisposable
         return path;
     }
 
-    private (HeadlessSession Session, ReelApp App, FakeMediaBackend Backend) Host(ReelSettings? settings = null)
+    private (HeadlessSession Session, ReelApp App, FakeMediaBackend Backend) Host(ReelSettings? settings = null,
+        HeadlessOptions? options = null)
     {
-        var session = HeadlessSession.Create(900, 600);
+        var session = HeadlessSession.Create(900, 600, options: options);
         var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(24) };
         var app = new ReelApp(session.Application, session.Window.Window,
             settings ?? new ReelSettings(Path.Combine(_folder, "settings.json")),
@@ -210,6 +211,47 @@ public class ReelTests : IDisposable
         session.PumpFrames(4);
 
         Assert.Equal(TimeSpan.Zero, app.Player!.Position);
+    }
+
+    // ── Full screen ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// On Windows a toggle's first frame is drawn inside <c>SetFullscreen</c>: the custom frame's
+    /// <c>SetWindowPos</c> sends the size inside the call, and a Windows-like headless window draws
+    /// it there too. Reel told the overlay after the call, so that frame drew the old controls at
+    /// the new size: "Full screen" on a picture that covered the display (plan 17 round 16). Told
+    /// first, the frame inside the call offers the way out, and on the way out the way back in.
+    /// </summary>
+    [Fact]
+    public void AFullScreenTogglesFirstFrame_ShowsTheNewGlyph()
+    {
+        var (session, app, _) = Host(options: new HeadlessOptions
+        {
+            Monitors = [HeadlessMonitors.Create("A", 0, 0, 1920, 1080, primary: true, taskBar: 40)],
+            WindowsFrame = new(),
+        });
+        using var _s = session;
+        app.Open(File_("film.mkv"));
+        session.PumpFrames(4);
+        var glyphs = new List<string>();
+        typeof(HultUI.Window).GetEvent("FrameRendered", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .AddMethod!.Invoke(session.Window.Window,
+                [new Action(() => glyphs.Add(session.Window.FindByAutomationId("video-fullscreen")?.Name ?? "(none)"))]);
+
+        session.Window.FindByAutomationId("video-fullscreen")!.Click();
+        var inside = glyphs.ToList();
+        session.PumpFrames(3);
+        Assert.True(session.Window.Window.IsFullscreen);
+        Assert.Equal(["Exit full screen"], inside);
+        Assert.Equal("Exit full screen", glyphs[^1]);
+
+        glyphs.Clear();
+        session.Window.FindByAutomationId("video-fullscreen")!.Click();
+        inside = glyphs.ToList();
+        session.PumpFrames(3);
+        Assert.False(session.Window.Window.IsFullscreen);
+        Assert.Equal(["Full screen"], inside);
+        Assert.Equal("Full screen", glyphs[^1]);
     }
 
     // ── While it plays ───────────────────────────────────────────────────

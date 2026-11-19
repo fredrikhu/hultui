@@ -261,10 +261,17 @@ public sealed partial class ApertureApp
     private void SetFullscreen(bool fullscreen)
     {
         if (_window.IsFullscreen == fullscreen) return;
-        _window.SetFullscreen(fullscreen);
-        // The overlay draws the enter/exit glyph off its own flag, so it has to be told.
+        // The overlay draws the enter/exit glyph off its own flag, so it has to be told, and before
+        // the window goes: on Windows the window draws its first frame at the new size inside
+        // SetFullscreen, which shows what was written by then (REACTIVITY.md, "A resize from posted
+        // work or a handler builds in the size message's frame"). Told after, that frame showed the
+        // old glyph.
         if (_videoPlayer is not null) _videoPlayer.IsFullscreen = fullscreen;
         Rerender();
+        _window.SetFullscreen(fullscreen);
+        // A window that did not go (no monitor to cover, a compositor that said no): the glyph
+        // follows the window. The build asked for above reads the window's own state (the title bar).
+        if (_window.IsFullscreen != fullscreen && _videoPlayer is not null) _videoPlayer.IsFullscreen = _window.IsFullscreen;
     }
 
     // ── Reporting ────────────────────────────────────────────────────────

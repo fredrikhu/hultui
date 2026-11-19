@@ -26,6 +26,11 @@ namespace HultUI.Headless;
 /// most and takes that monitor's scale, and its borders are that scale's: a move to a monitor
 /// at another scale changes the window's <c>DisplayScale</c> and raises <c>Window.Resized</c>
 /// on the next frame, as the real display-scale change does.</para>
+/// <para><b>Full screen.</b> <c>Window.SetFullscreen</c> on a shown window draws the window's first
+/// frame at the new size inside the call, as the custom frame's <c>SetWindowPos</c> does on Windows
+/// (SDL's event watch draws it there), and flags the resize again, as <c>SDL3Window</c> does: the next
+/// frame raises <c>Window.Resized</c> and draws once more. So what an app writes after the call is
+/// missing from the toggle's first frame, here as on a real window.</para>
 /// <para><b>Moves.</b> <see cref="HeadlessWindow.Moved"/> is raised from the pump after the
 /// window's outer position changed, as SDL's window-moved event is, and
 /// <see cref="HeadlessWindow.MoveByUser"/> stands in for the person dragging the window.</para>

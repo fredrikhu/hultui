@@ -32,8 +32,10 @@ public class A11yServedItemsTests
     private const int ElementNotAvailable = unchecked((int)0x80040201);
 
     /// <summary>A real bridge, reported active whether or not a client listens.</summary>
-    private sealed class Active(IAccessibilityBridge inner) : IAccessibilityBridge
+    private sealed class Active(IAccessibilityBridge inner) : IAccessibilityBridge, IEagerItemsLimit
     {
+        // The real bridge's number of items past which a list's are served on demand (UIA 200, AT-SPI 2,000).
+        public int MaxEagerVirtualItems => AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(inner);
         public bool IsActive => true;
         public void ApplyChanges(TreeDiff diff, AccessibilityNode root) => inner.ApplyChanges(diff, root);
         public void ApplyPatchedProperties(TreeDiff patch, AccessibilityNode root) => inner.ApplyPatchedProperties(patch, root);
@@ -250,9 +252,9 @@ public class A11yServedItemsTests
 
     [WindowsFact]
     [SupportedOSPlatform("windows")]
-    public void UIA_FortyMovesOver3000Items_RaiseWhatTheyRaiseOver1500()
+    public void UIA_FortyMovesOver3000Items_RaiseWhatTheyRaiseOver150()
     {
-        var (eager, _) = UiaWalk(1_500);
+        var (eager, _) = UiaWalk(150);   // item nodes: UIA serves a list over 200 on demand
         var (served, builds) = UiaWalk(3_000);
 
         Assert.Equal(80, eager.Count);
@@ -292,11 +294,12 @@ public class A11yServedItemsTests
     [SupportedOSPlatform("windows")]
     public void UIA_ItemsServedOnDemand_AnswerFromTheListNode_AsItemNodesWould()
     {
-        // Where an item node would be: the same list at 1,500 items has one for item 0.
+        // Where an item node would be: the same list at 150 items has one for item 0 (UIA serves a list
+        // over 200 on demand, WindowsAccessibilityBridge.MaxEagerVirtualItems).
         UiaRect eagerRect;
         using (var eagerRig = new UiaRig())
         {
-            var eager = List(1_500);
+            var eager = List(150);
             Mount(eagerRig.Session, eager);
             var eagerItem = Logic<UiaFragment>(eagerRig.Bridge.NativeFragment(Item(eager, 0)));
             Assert.Equal(0, eagerItem.GetBoundingRectangle(out eagerRect));
@@ -397,9 +400,9 @@ public class A11yServedItemsTests
         Assert.Contains(new UiaRaised(UiaRaisedKind.Structure, UiaInterop.StructureChangeType_ChildrenBulkAdded, list.Id), rig.Raised);
         Assert.Equal("item 2999", Name(held));
 
-        // Under 2,000 items the list has item nodes again: a provider held from before answers
+        // At 200 items or fewer (UIA's number) the list has item nodes again: a provider held from before answers
         // from its item's node, which has its runtime id.
-        list.Items = Items(1_500);
+        list.Items = Items(150);
         list.SelectedIndex = 5;
         Settle(rig.Session);
         Assert.Equal("item 5", Name(kept));
@@ -573,5 +576,78 @@ public class A11yServedItemsTests
         ], signals.Lines);
         Assert.Equal(3_100, tree.Find(PathOf(list.Id))!.ChildCount);
         Assert.Equal("item 2999", tree.Find(held.Path)!.Name);
+    }
+
+    // ── Where each bridge serves a list's items on demand (plan 17 round 16) ──
+
+    /// <summary>UI Automation serves a list over 200 items on demand; AT-SPI keeps 2,000 until Orca is
+    /// checked with lists served on demand; any other bridge has the builder's 2,000. The window builds
+    /// by its bridge's number, and a wrapper says the one it wraps.</summary>
+    [Fact]
+    public void EachBridge_ServesAListsItemsOnDemandPastItsOwnNumber()
+    {
+        Assert.Equal(200, WindowsAccessibilityBridge.MaxEagerVirtualItems);
+        Assert.Equal(2_000, LinuxAccessibilityBridge.MaxEagerVirtualItems);
+        Assert.Equal(2_000, AccessibilityTreeBuilder.MaxEagerVirtualItems);
+        using var linux = new LinuxAccessibilityBridge(new Signals());
+        Assert.Equal(2_000, AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(linux));
+        Assert.Equal(2_000, AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(new Active(linux)));
+        Assert.Equal(2_000, AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(new HeadlessAccessibilityBridge()));
+        Assert.Equal(2_000, AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(NullAccessibilityBridge.Instance));
+
+        using var session = HeadlessSession.Create(800, 600);
+        Assert.Equal(2_000, session.Window.Window.AccessibilityMaxEagerItems);
+        session.Window.InstallAccessibilityBridge(new Active(linux));
+        Assert.Equal(2_000, session.Window.Window.AccessibilityMaxEagerItems);
+        if (!OperatingSystem.IsWindows()) return;
+        using var uia = new UiaRig();
+        Assert.Equal(200, AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(uia.Bridge));
+        Assert.Equal(200, uia.Session.Window.Window.AccessibilityMaxEagerItems);
+        using (HeadlessUiaReader.Install(session.Window))
+            Assert.Equal(200, session.Window.Window.AccessibilityMaxEagerItems);
+    }
+
+    /// <summary>
+    /// The guard of serving UIA's lists sooner (plan 17 round 16, the survey's scenario (e)): an item put
+    /// above 1,000 item rows, as a commit lands at the top of Junction's History, renamed every place's item
+    /// to a reader: 1,000 Name changes and the provider calls a listening client makes for each. Served on
+    /// demand, the list tells its number, and no item's name.
+    /// </summary>
+    [WindowsFact]
+    [SupportedOSPlatform("windows")]
+    public void UIA_AnItemPutAbove1000Items_TellsNoItemsName()
+    {
+        using var rig = new UiaRig();
+        var list = List(1_000);
+        Mount(rig.Session, list);
+        Assert.True(ListNode(rig.Bridge.RootNode!, list).IsVirtualItemContainer);
+        rig.Raised.Clear();
+
+        list.Items = ["new", .. Items(1_000)];
+        Settle(rig.Session);
+
+        Assert.Empty(rig.Raised.Where(r => r.Kind == UiaRaisedKind.Property && r.Id == UiaInterop.UIA_NamePropertyId));
+        Assert.Contains(new UiaRaised(UiaRaisedKind.Structure, UiaInterop.StructureChangeType_ChildrenBulkAdded, list.Id), rig.Raised);
+        Assert.Equal(1_001, rig.Bridge.GetVirtualItemCount(list.Id));
+    }
+
+    /// <summary>The same on AT-SPI, whose lists have item nodes up to 2,000 items: each item renamed is
+    /// told, as an AT-SPI client keeps a copy of each item it read.</summary>
+    [Fact]
+    public void ATSPI_AnItemPutAbove1999Items_TellsEachItemRenamed()
+    {
+        using var session = HeadlessSession.Create(800, 600);
+        var signals = new Signals();
+        using var bridge = new LinuxAccessibilityBridge(signals);
+        session.Window.InstallAccessibilityBridge(new Active(bridge));
+        var list = List(1_999);
+        Mount(session, list);
+        signals.Lines.Clear();
+
+        list.Items = ["new", .. Items(1_999)];
+        Settle(session);
+
+        Assert.Equal(1_999, signals.Lines.Count(l => l.StartsWith("property-change:accessible-name ", StringComparison.Ordinal)));
+        Assert.Equal(2_000, ((IAtSpiTree)bridge).Find(PathOf(list.Id))!.ChildCount);
     }
 }

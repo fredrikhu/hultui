@@ -31,8 +31,10 @@ public class A11yCurrentItemFocusTests
     private const int FocusChanged = UiaInterop.UIA_AutomationFocusChangedEventId;
 
     /// <summary>Forwards everything to a real bridge, reported active whether or not a client listens.</summary>
-    private sealed class Active(IAccessibilityBridge inner) : IAccessibilityBridge
+    private sealed class Active(IAccessibilityBridge inner) : IAccessibilityBridge, IEagerItemsLimit
     {
+        // The real bridge's number of items past which a list's are served on demand (UIA 200, AT-SPI 2,000).
+        public int MaxEagerVirtualItems => AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(inner);
         public bool IsActive => true;
         public void ApplyChanges(TreeDiff diff, AccessibilityNode root) => inner.ApplyChanges(diff, root);
         public void ApplyPatchedProperties(TreeDiff patch, AccessibilityNode root) => inner.ApplyPatchedProperties(patch, root);
@@ -324,7 +326,7 @@ public class A11yCurrentItemFocusTests
     public void AListServedOnDemand_TheFocusIsOnItsServedItem_AndMovesWithTheSelection()
     {
         using var rig = new UiaRig();
-        int count = AccessibilityTreeBuilder.MaxEagerVirtualItems + 500;
+        int count = WindowsAccessibilityBridge.MaxEagerVirtualItems + 1_000;   // served on demand on UIA
         var (before, list, _, root) = FocusableList(count, selected: 1_000);
         rig.Session.Window.SetRoot(root);
         Settle(rig.Session);
@@ -369,6 +371,194 @@ public class A11yCurrentItemFocusTests
         rig.Session.PumpFrame();
         Assert.Equal([before.Id], rig.FocusEvents());
         Assert.False(rig.HasFocus(Item(list, 1_001)));
+    }
+
+    // ── What a reader hears when a list's contents change under its focus (plan 17 round 16) ──
+
+    /// <summary>The name a client reads from <paramref name="id"/>'s provider: a node's wrapper, or a
+    /// provider of an item served on demand made as navigation makes one.</summary>
+    private static string? NameOf(UiaRig rig, ElementId id)
+    {
+        IntPtr native = VirtualItemId.TryDecode(id, out var listId, out int index) && rig.Node(listId) is { IsVirtualItemContainer: true }
+            ? rig.Bridge.NativeVirtualItem(listId, index)
+            : rig.Bridge.NativeFragment(id);
+        Assert.NotEqual(IntPtr.Zero, native);
+        try
+        {
+            Assert.Equal(0, ((INativeSimple)NativeProvider.LogicOf(native)!).GetPropertyValue(UiaInterop.UIA_NamePropertyId, out var value));
+            try { return value.AsString(); }
+            finally { value.Free(); }
+        }
+        finally { Marshal.Release(native); }
+    }
+
+    private static List<ElementId?> NameChanges(UiaRig rig) =>
+        rig.Raised.Where(e => e.Kind == UiaRaisedKind.Property && e.Id == UiaInterop.UIA_NamePropertyId).Select(e => e.Element).ToList();
+
+    /// <summary>
+    /// Junction's History when a commit lands, with the reader on its first row: the list's contents
+    /// change under the reader's focus, which stays on the same place. An item node's rename is told as a
+    /// Name change on it; an item served on demand has no node, and told nothing until the bridge read its
+    /// name again at the end of the frame. Both lists tell one Name change, on the focused item, and no focus
+    /// event; a change elsewhere in the list tells the served one nothing.
+    /// </summary>
+    [WindowsTheory]
+    [InlineData(150)]
+    [InlineData(1_000)]
+    public void AListsItemRenamedUnderTheReadersFocus_IsToldAsANameChange_ServedOrNot(int count)
+    {
+        using var rig = new UiaRig();
+        var (before, list, _, root) = FocusableList(count, selected: 0);
+        rig.Session.Window.SetRoot(root);
+        Settle(rig.Session);
+        bool served = count > WindowsAccessibilityBridge.MaxEagerVirtualItems;
+        Assert.Equal(served, rig.Node(list.Id)!.IsVirtualItemContainer);
+        before.Focus();
+        rig.Session.PumpFrame();
+        rig.Session.Window.PressKey(KeyCode.Tab);
+        Settle(rig.Session);
+        Assert.Equal(Item(list, 0), rig.GetFocus());
+        Assert.Equal("file 0", NameOf(rig, Item(list, 0)));
+
+        // A commit lands on row 0: one item more, the selection where it was.
+        rig.Raised.Clear();
+        list.Items = ["new 0", .. Enumerable.Range(0, count).Select(i => $"file {i}")];
+        Settle(rig.Session);
+        Assert.Equal(0, list.SelectedIndex);
+        // Served: the focused item's alone. Item nodes: each one's, as an item's id is its place.
+        var renamed = NameChanges(rig);
+        Assert.Equal(served ? 1 : count, renamed.Count);
+        Assert.Equal(Item(list, 0), renamed[0]);
+        Assert.Empty(rig.FocusEvents());
+        Assert.Equal(Item(list, 0), rig.GetFocus());
+        Assert.True(rig.HasFocus(Item(list, 0)));
+        Assert.Equal("new 0", NameOf(rig, Item(list, 0)));
+
+        // Relabelled in place, as Vesper's list is when a folder is entered: the same number of items.
+        rig.Raised.Clear();
+        list.Items = list.Items.Select(s => "other " + s).ToList();
+        Settle(rig.Session);
+        renamed = NameChanges(rig);
+        Assert.Equal(served ? 1 : count + 1, renamed.Count);
+        Assert.Equal(Item(list, 0), renamed[0]);
+        Assert.Empty(rig.FocusEvents());
+        Assert.Equal("other new 0", NameOf(rig, Item(list, 0)));
+
+        if (!served) return;
+        // A served list tells nothing of an item away from the focus: a client reads its name when it asks.
+        rig.Raised.Clear();
+        list.Items = list.Items.Select((s, i) => i == 50 ? "changed" : s).ToList();
+        Settle(rig.Session);
+        Assert.Empty(NameChanges(rig));
+        Assert.Empty(rig.FocusEvents());
+
+        // The focus moves as the items change: the focus event carries the name, and the item the focus
+        // leaves is not renamed to a reader.
+        rig.Raised.Clear();
+        list.Items = list.Items.Select(s => "again " + s).ToList();
+        list.SelectedIndex = 1;
+        Settle(rig.Session);
+        Assert.Equal([Item(list, 1)], rig.FocusEvents());
+        Assert.Empty(NameChanges(rig));
+        Assert.Equal("again other file 0", NameOf(rig, Item(list, 1)));
+    }
+
+    /// <summary>
+    /// The bridge reads the name of the reader's focus at the end of every frame that applied something,
+    /// on the UI thread, where a list on item rows keeps the labels it is asked for in an array as long as
+    /// the list: 480 KB for 20,000 items, made again with every new list (Junction's History, 24 KB for its
+    /// 1,000 commits, at every switch back to it). It reads them without keeping them
+    /// (<see cref="IAccessibleItemSource.PeekItemLabel"/>): a move costs what a move cost.
+    /// </summary>
+    [WindowsFact]
+    public void TheReadersFocusOnAServedItem_KeepsNoLabelForEachItem()
+    {
+        using var rig = new UiaRig();
+        var list = VirtualListElement<string>.New().ItemHeight(20)
+            .RenderWith((t, _) => Flex.Row().Children(TextB.New(t).FontSize(12f)))
+            .Items(Enumerable.Range(0, 20_000).Select(i => $"file {i}").ToList())
+            .AccessibleItemLabel(s => s)
+            .SelectedIndex(0)
+            .FlexGrow(1);
+        list.IsFocusable = true;
+        var before = Button.New("Before");
+        rig.Session.Window.SetRoot(Flex.Column().Children(before, list));
+        Settle(rig.Session);
+        before.Focus();
+        rig.Session.PumpFrame();
+        long bytes = GC.GetAllocatedBytesForCurrentThread();
+        rig.Session.Window.PressKey(KeyCode.Tab);
+        rig.Session.PumpFrame();
+        for (int i = 1; i <= 3; i++)
+        {
+            list.SelectedIndex = i;
+            rig.Session.PumpFrame();
+        }
+        bytes = GC.GetAllocatedBytesForCurrentThread() - bytes;
+        Assert.Equal([Item(list, 0), Item(list, 1), Item(list, 2), Item(list, 3)], rig.FocusEvents().TakeLast(4));
+        Assert.True(bytes < 128 * 1024, $"{bytes / 1024} KB for the focus and 3 moves");
+    }
+
+    /// <summary>
+    /// A list whose items cross UI Automation's number (Vesper's move between folders of 150 and 250
+    /// files) has its tree built whole: item nodes on one side, items served on demand on the other. The
+    /// reader's focus stays on its current item, by the same id, on both sides; a rename of that item at
+    /// the crossing is told once, though no diff tells it (the item's node is new, or gone).
+    /// </summary>
+    [WindowsFact]
+    public void AFocusedListCrossingUiasNumber_KeepsTheFocusOnItsItem_AndTellsItsRename()
+    {
+        using var rig = new UiaRig();
+        int under = WindowsAccessibilityBridge.MaxEagerVirtualItems - 50, over = WindowsAccessibilityBridge.MaxEagerVirtualItems + 50;
+        var (before, list, _, root) = FocusableList(under, selected: 3);
+        rig.Session.Window.SetRoot(root);
+        Settle(rig.Session);
+        before.Focus();
+        rig.Session.PumpFrame();
+        rig.Session.Window.PressKey(KeyCode.Tab);
+        Settle(rig.Session);
+        Assert.Equal(under, rig.Node(list.Id)!.Children.Count);
+        Assert.Equal(Item(list, 3), rig.GetFocus());
+
+        // Over it, the same names: served on demand, the focus on the same item, nothing told of it.
+        int trees = rig.Session.Window.AccessibilityTreesBuilt;
+        rig.Raised.Clear();
+        list.Items = Enumerable.Range(0, over).Select(i => $"file {i}").ToList();
+        Settle(rig.Session);
+        Assert.True(rig.Session.Window.AccessibilityTreesBuilt > trees);
+        var node = rig.Node(list.Id)!;
+        Assert.True(node.IsVirtualItemContainer);
+        Assert.Empty(node.Children);
+        Assert.Equal(over, node.Served.Count);
+        Assert.Equal(Item(list, 3), rig.GetFocus());
+        Assert.True(rig.HasFocus(Item(list, 3)));
+        Assert.False(rig.HasFocus(list));
+        Assert.Empty(rig.FocusEvents());
+        Assert.Empty(NameChanges(rig));
+        Assert.Equal("file 3", NameOf(rig, Item(list, 3)));
+
+        // Under it again, renamed: item nodes, and the focused one's new name told once.
+        rig.Raised.Clear();
+        list.Items = Enumerable.Range(0, under).Select(i => $"b {i}").ToList();
+        Settle(rig.Session);
+        node = rig.Node(list.Id)!;
+        Assert.False(node.IsVirtualItemContainer);
+        Assert.Equal(under, node.Children.Count);
+        Assert.Equal(Item(list, 3), rig.GetFocus());
+        Assert.True(rig.HasFocus(Item(list, 3)));
+        Assert.Empty(rig.FocusEvents());
+        Assert.Equal([Item(list, 3)], NameChanges(rig));
+        Assert.Equal("b 3", NameOf(rig, Item(list, 3)));
+
+        // Over it again, renamed: served, told once.
+        rig.Raised.Clear();
+        list.Items = Enumerable.Range(0, over).Select(i => $"c {i}").ToList();
+        Settle(rig.Session);
+        Assert.True(rig.Node(list.Id)!.IsVirtualItemContainer);
+        Assert.Equal(Item(list, 3), rig.GetFocus());
+        Assert.Empty(rig.FocusEvents());
+        Assert.Equal([Item(list, 3)], NameChanges(rig));
+        Assert.Equal("c 3", NameOf(rig, Item(list, 3)));
     }
 
     // ── A multi-select list's cursor ──
@@ -1190,7 +1380,7 @@ public class A11yCurrentItemFocusTests
     {
         using var rig = new UiaRig();
         var (_, list, _, listRoot) = FocusableList(40, selected: 3);
-        var (_, served, _, servedRoot) = FocusableList(AccessibilityTreeBuilder.MaxEagerVirtualItems + 500, selected: 0);
+        var (_, served, _, servedRoot) = FocusableList(WindowsAccessibilityBridge.MaxEagerVirtualItems + 1_000, selected: 0);
         var nav = new Element[5];
         for (int i = 0; i < nav.Length; i++)
         {
@@ -1205,7 +1395,7 @@ public class A11yCurrentItemFocusTests
         Settle(rig.Session);
 
         Assert.Equal((4, 40), Place(rig, Item(list, 3)));
-        Assert.Equal((1_001, AccessibilityTreeBuilder.MaxEagerVirtualItems + 500), Place(rig, Item(served, 1_000), served: true));
+        Assert.Equal((1_001, WindowsAccessibilityBridge.MaxEagerVirtualItems + 1_000), Place(rig, Item(served, 1_000), served: true));
         Assert.Equal((2, 5), Place(rig, nav[1].Id));
         Assert.Equal((5, 5), Place(rig, nav[4].Id));
         Assert.Equal((0, 0), Place(rig, opener.Id));
@@ -1232,7 +1422,7 @@ public class A11yCurrentItemFocusTests
     /// raised for an entry.</summary>
     [WindowsTheory]
     [InlineData(3)]
-    [InlineData(AccessibilityTreeBuilder.MaxEagerVirtualItems + 1)]
+    [InlineData(WindowsAccessibilityBridge.MaxEagerVirtualItems + 1)]   // a menu over 200 entries: served on demand on UIA
     public void AMenusEntries_AreNoSelectionItems_AndRaiseNoIsSelected(int count)
     {
         using var rig = new UiaRig();
@@ -1245,7 +1435,7 @@ public class A11yCurrentItemFocusTests
             new Point(20, 40), new MenuRequest { HighlightFirst = true });
         rig.Session.PumpFrame();
         var menu = rig.Menu();
-        Assert.Equal(count > AccessibilityTreeBuilder.MaxEagerVirtualItems, menu.IsVirtualItemContainer);
+        Assert.Equal(count > WindowsAccessibilityBridge.MaxEagerVirtualItems, menu.IsVirtualItemContainer);
         rig.Raised.Clear();
         rig.Session.Window.PressKey(KeyCode.Down);
         rig.Session.PumpFrame();

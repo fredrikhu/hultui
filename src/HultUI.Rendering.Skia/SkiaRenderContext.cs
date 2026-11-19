@@ -458,10 +458,15 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
     internal int CachedDashEffectCount => _dashEffects.Count;
 
     // Keyed by content, not by the Gradient: an app that builds its gradient in Build hands an
-    // equal new one on every rebuild. The rect is the snapped one the shader spans, so a box
-    // keeps its shader while it does not move; a scrolled box does not move (scrolling
-    // translates the canvas).
-    private readonly Dictionary<GradientKey, SKShader?> _gradientShaders = new(GradientKeyComparer.Instance);
+    // equal new one on every rebuild. Keyed by the snapped box's size, not its place: the shader
+    // spans the box where one of that size was first drawn, and a box drawn anywhere else is drawn
+    // there with the canvas moved by the difference. Keyed by place, Junction History's "Details"
+    // affordance, which follows the focused row, made a new shader (about 350 B and a native one)
+    // on every key onto a row not visited yet. A box that stays where it was first drawn draws
+    // through no move at all: at a fractional scale a shader made at (0, 0) and moved rounds a
+    // few gradient pixels one level away from one made in place (Aperture's hero scrims at 1.5).
+    // A scrolled box does not move (scrolling translates the canvas).
+    private readonly Dictionary<GradientKey, KeptGradient> _gradientShaders = new(GradientKeyComparer.Instance);
     internal const int GradientShaderCacheMaxSize = 256;
 
     internal int CachedBlurFilterCount => _blurFilters.Count;
@@ -487,9 +492,17 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
 
     private void ClearGradientShaders()
     {
-        foreach (var shader in _gradientShaders.Values)
-            shader?.Dispose();
+        foreach (var kept in _gradientShaders.Values)
+            kept.Shader?.Dispose();
         _gradientShaders.Clear();
+    }
+
+    /// <summary>A kept gradient shader and the top left of the box it spans.</summary>
+    private readonly struct KeptGradient(SKShader? shader, float x, float y)
+    {
+        public readonly SKShader? Shader = shader;
+        public readonly float X = x;
+        public readonly float Y = y;
     }
 
     /// <summary>The dash a border of <paramref name="style"/> strokes with at
@@ -516,15 +529,17 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
         _dashEffects.Clear();
     }
 
-    /// <summary>What a gradient shader draws: the gradient's kind, angle and stops over a rect. A
-    /// stored key holds a copy of the stops, so a stop array the app changes later cannot change
-    /// a key inside the map.</summary>
-    private readonly struct GradientKey(GradientKind kind, float angle, IReadOnlyList<GradientStop> stops, SKRect rect)
+    /// <summary>What a gradient shader draws: the gradient's kind, angle and stops over a box of a
+    /// size, wherever the box is. A stored key holds a copy of the stops, so a stop array the app
+    /// changes later cannot change a key inside the map.</summary>
+    private readonly struct GradientKey(GradientKind kind, float angle, IReadOnlyList<GradientStop> stops,
+        float width, float height)
     {
         public readonly GradientKind Kind = kind;
         public readonly float Angle = angle;
         public readonly IReadOnlyList<GradientStop> Stops = stops;
-        public readonly SKRect Rect = rect;
+        public readonly float Width = width;
+        public readonly float Height = height;
     }
 
     private sealed class GradientKeyComparer : IEqualityComparer<GradientKey>
@@ -533,8 +548,8 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
 
         public bool Equals(GradientKey a, GradientKey b)
         {
-            if (a.Kind != b.Kind || !a.Angle.Equals(b.Angle) || !a.Rect.Equals(b.Rect)
-                || a.Stops.Count != b.Stops.Count)
+            if (a.Kind != b.Kind || !a.Angle.Equals(b.Angle) || !a.Width.Equals(b.Width)
+                || !a.Height.Equals(b.Height) || a.Stops.Count != b.Stops.Count)
                 return false;
             for (int i = 0; i < a.Stops.Count; i++)
                 if (!a.Stops[i].Equals(b.Stops[i]))
@@ -547,10 +562,8 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
             var hash = new HashCode();
             hash.Add((int)key.Kind);
             hash.Add(key.Angle);
-            hash.Add(key.Rect.Left);
-            hash.Add(key.Rect.Top);
-            hash.Add(key.Rect.Right);
-            hash.Add(key.Rect.Bottom);
+            hash.Add(key.Width);
+            hash.Add(key.Height);
             for (int i = 0; i < key.Stops.Count; i++)
                 hash.Add(key.Stops[i]);
             return hash.ToHashCode();
@@ -571,25 +584,39 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
         // Same grid as a solid background, or a gradient-filled box and a solid one beside it
         // would sit half a pixel apart.
         rect = SnapBox(rect);
-        var skRect = ToSkRect(rect);
+        var kept = GradientShader(gradient, rect);
 
         _pooledPaint.Reset();
         _pooledPaint.IsAntialias = true;
-        _pooledPaint.Shader = GradientShader(gradient, skRect);
+        _pooledPaint.Shader = kept.Shader;
 
+        // The box is drawn where the shader spans it, with the canvas moved to the box's own place
+        // when that is somewhere else.
+        bool moved = kept.X != rect.X || kept.Y != rect.Y;
+        var skRect = ToSkRect(moved ? new Rect(kept.X, kept.Y, rect.Width, rect.Height) : rect);
+        if (moved)
+        {
+            Canvas.Save();
+            Canvas.Translate(rect.X - kept.X, rect.Y - kept.Y);
+        }
         if (radius.IsZero)
             Canvas.DrawRect(skRect, _pooledPaint);
         else
             Canvas.DrawRoundRect(ToSkRoundRect(skRect, radius), _pooledPaint);
+        if (moved)
+            Canvas.Restore();
 
         // Detach so the pooled paint never holds a shader the cache may dispose.
         _pooledPaint.Shader = null;
     }
 
-    private SKShader? GradientShader(Gradient gradient, SKRect skRect)
+    /// <summary>The kept shader for <paramref name="gradient"/> over a box of
+    /// <paramref name="box"/>'s size, made over <paramref name="box"/> itself when there is none.</summary>
+    private KeptGradient GradientShader(Gradient gradient, Rect box)
     {
         var stops = gradient.Stops;
-        if (_gradientShaders.TryGetValue(new GradientKey(gradient.Kind, gradient.AngleDegrees, stops, skRect), out var cached))
+        if (_gradientShaders.TryGetValue(new GradientKey(gradient.Kind, gradient.AngleDegrees, stops,
+                box.Width, box.Height), out var cached))
             return cached;
 
         var colors = new SKColor[stops.Count];
@@ -602,6 +629,7 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
             positions[i] = stops[i].Offset;
         }
 
+        var skRect = ToSkRect(box);
         float cx = skRect.MidX, cy = skRect.MidY;
         var shader = gradient.Kind == GradientKind.Linear
             ? CreateLinearShader(gradient.AngleDegrees, skRect, colors, positions)
@@ -612,8 +640,9 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
 
         if (_gradientShaders.Count >= GradientShaderCacheMaxSize)
             ClearGradientShaders();
-        _gradientShaders[new GradientKey(gradient.Kind, gradient.AngleDegrees, copy, skRect)] = shader;
-        return shader;
+        var kept = new KeptGradient(shader, box.X, box.Y);
+        _gradientShaders[new GradientKey(gradient.Kind, gradient.AngleDegrees, copy, box.Width, box.Height)] = kept;
+        return kept;
     }
 
     // Builds a linear-gradient shader whose axis spans the rect edge-to-edge along

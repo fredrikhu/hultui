@@ -170,10 +170,12 @@ public sealed class HeadlessUiaReader : IDisposable
     }
 
     /// <summary>The bridge, reported listening whether or not a client is.</summary>
-    private sealed class Listening(IAccessibilityBridge inner) : IAccessibilityBridge
+    private sealed class Listening(IAccessibilityBridge inner) : IAccessibilityBridge, IEagerItemsLimit
     {
         public bool Disposed;
         public bool IsActive => !Disposed;
+        // A list over 200 items is served on demand, as in a real window.
+        public int MaxEagerVirtualItems => AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(inner);
         public void ApplyChanges(TreeDiff diff, AccessibilityNode root) => inner.ApplyChanges(diff, root);
         public void ApplyPatchedProperties(TreeDiff patch, AccessibilityNode root) => inner.ApplyPatchedProperties(patch, root);
         public void NotifyFocusChanged(AccessibilityNode? focused) => inner.NotifyFocusChanged(focused);

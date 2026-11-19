@@ -99,9 +99,9 @@ public class ApertureAppHostTests
     /// answers nothing, so no test ever reaches the network for artwork.</summary>
     private static void Host(FakeMediaLibrary library, Action<HeadlessSession, ApertureApp> body,
         Func<IMediaBackend>? backends = null, HttpMessageHandler? artwork = null,
-        int width = 1440, int height = 900)
+        int width = 1440, int height = 900, HeadlessOptions? options = null)
     {
-        using var session = HeadlessSession.Create(width, height);
+        using var session = HeadlessSession.Create(width, height, options: options);
         var settingsPath = Path.Combine(Path.GetTempPath(), "aperture-tests", Guid.NewGuid().ToString("N"), "settings.json");
         ApertureApp? app = null;
         try
@@ -723,6 +723,58 @@ public class ApertureAppHostTests
             Assert.False(session.Window.Window.IsFullscreen);
             Assert.True(Shows(session, "APERTURE"));
         }, () => backend);
+    }
+
+    /// <summary>
+    /// On Windows a toggle's first frame is drawn inside <c>SetFullscreen</c>: the custom frame's
+    /// <c>SetWindowPos</c> sends the size inside the call, and a Windows-like headless window draws
+    /// it there too. The app told the overlay after the call, so that frame showed the old glyph,
+    /// "Full screen" on a picture that covered the display (plan 17 round 16). Told first, the
+    /// frame inside the call offers the way out, and on the way out the way back in.
+    /// </summary>
+    [Fact]
+    public void AFullScreenTogglesFirstFrame_ShowsTheNewGlyph()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(167) };
+        var options = new HeadlessOptions
+        {
+            Monitors = [HeadlessMonitors.Create("A", 0, 0, 1920, 1080, primary: true, taskBar: 40)],
+            WindowsFrame = new(),
+        };
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            session.Window.FindByAutomationId("resume-m2")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+            var glyphs = GlyphsDrawn(session);
+
+            session.Window.PressKey(KeyCode.F);
+            var inside = glyphs.ToList();
+            for (int i = 0; i < 3; i++) session.PumpFrame();
+            Assert.True(session.Window.Window.IsFullscreen);
+            Assert.Equal(["Exit full screen"], inside);
+            Assert.Equal("Exit full screen", glyphs[^1]);
+
+            glyphs.Clear();
+            session.Window.PressKey(KeyCode.F);
+            inside = glyphs.ToList();
+            for (int i = 0; i < 3; i++) session.PumpFrame();
+            Assert.False(session.Window.Window.IsFullscreen);
+            Assert.Equal(["Full screen"], inside);
+            Assert.Equal("Full screen", glyphs[^1]);
+        }, () => backend, options: options);
+    }
+
+    /// <summary>The full-screen button's name in every frame the window draws from now on.</summary>
+    private static List<string> GlyphsDrawn(HeadlessSession session)
+    {
+        var glyphs = new List<string>();
+        var rendered = typeof(HultUI.Window).GetEvent("FrameRendered",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        rendered.AddMethod!.Invoke(session.Window.Window,
+            [new Action(() => glyphs.Add(session.Window.FindByAutomationId("video-fullscreen")?.Name ?? "(none)"))]);
+        return glyphs;
     }
 
     [Fact]

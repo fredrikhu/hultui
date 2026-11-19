@@ -396,6 +396,12 @@ same share of its alpha, as an element at that opacity shows it) and give `Opaci
 boxes and images. What overlaps then blends part by part: text over a faded fill is a level or
 two off at glyph edges, and a faded part shows what is under it, which the group hid.
 
+Never fade a window-sized element by its `Opacity`, such as a backdrop with a panel on it: each
+frame draws the whole window through a layer, and on GL Skia keeps that layer's texture for the
+window's life (18 MB at 2160×1350, 32 MB maximized on a 4K screen). Fade the backdrop's colour and
+the panel's own opacity instead, as `Dialog.Show` does (plan 17 round 16: the first command
+palette's video memory +18 → +8 MB).
+
 `PaintBounds` is the border box unless the element says otherwise. `BoxElement` adds its
 shadows and outline, `TextElement` the ink of text longer than its box. **A custom element
 whose `Render` paints outside its border box must override `PaintBounds`** — whatever falls
@@ -1820,7 +1826,8 @@ changed off screen kept its old name (Meridian's map said "seen 1×" for an endp
 until something else walked or built the tree. Items added past the end are told the same way: a
 patch that brings more items than the labels kept, the first new one with no row (below the
 window), asks the walk, which makes their nodes; the labels kept grow to the items' number, so a
-list over 2,000 items (whose labels no walk asks for) asks once, not at every patch. Until plan 17
+list served on demand (over 200 items on UIA, 2,000 on AT-SPI; no walk asks for its labels) asks once,
+not at every patch. Until plan 17
 round 12 a page appended below the window (Junction's History, Aperture's library) left a
 reader's list at its old length (200 items where a build made 201) until something else walked.
 
