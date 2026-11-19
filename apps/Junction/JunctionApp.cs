@@ -503,15 +503,16 @@ public partial class JunctionApp : Component, IDisposable
         Ui.DisplayScale = scale;
         bool widthMoved = _window.LayoutWidth != _resizeLayoutWidth;
         _resizeLayoutWidth = _window.LayoutWidth;
-        // The chrome only for what it shows (a breakpoint, the scale); a wrapped diff's view only
-        // when the width moved, since a height alone leaves every row as tall as it was.
+        // The chrome only for what it shows (a breakpoint, the scale). A wrapped diff's rows only
+        // when the width moved, since a height alone leaves every row as tall as it was, and with
+        // no build: they are measured at the width this frame lays the diff out at and fitted in
+        // place (plan 17 round 16: the view was built for them, 156–164 KB a step).
         bool chrome = RecomputeResponsive() || scaleChanged;
-        bool view = !chrome && widthMoved && DiffWrapNeedsRemeasure();
-        // A wrapped diff's rows are measured in the build at the diff's width, and the build reads
-        // the width of the frame before: it is handed the width this frame lays the diff out at.
-        if (chrome || view) LeadWrappedDiffWidth();
-        if (chrome) Rerender();
-        else if (view) RerenderView();
+        bool rows = !chrome && widthMoved && DiffWrapNeedsRemeasure();
+        // A build reads the width of the frame before: it is handed the width this frame lays the
+        // diff out at.
+        if (chrome) { LeadWrappedDiffWidth(); Rerender(); }
+        else if (rows) LeadWrappedDiffRows();
         // The diff takes the width the window gained or lost, which the pan takes now, for the
         // frame about to be laid out: a build reads the width of the frame before. The pan reads
         // the width again after the layout.
@@ -519,23 +520,21 @@ public partial class JunctionApp : Component, IDisposable
         FollowDiffWidthAfterFrame();
     }
 
-    // The window's layout width at the last resize: a resize that leaves it alone rebuilds no
-    // wrapped diff.
+    // The window's layout width at the last resize: a resize that leaves it alone measures no
+    // wrapped diff's rows.
     private float _resizeLayoutWidth;
 
     /// <summary>
-    /// Whether a wrapped diff is on screen, and so a resize that moves the width has to reach the
-    /// view's build (<see cref="LeadWrappedDiffWidth"/> hands it the width).
+    /// Whether a wrapped diff is on screen, and so a resize that moves the width has to measure its
+    /// rows again (<see cref="LeadWrappedDiffRows()"/>, with no build; a build that crosses a
+    /// breakpoint is handed the width by <see cref="LeadWrappedDiffWidth"/>).
     ///
     /// <para>Every other row in this app is a fixed height, which is why an ordinary resize
     /// deliberately does not rebuild: layout alone repositions everything. A wrapped row is
-    /// the exception — its height <i>is</i> a function of the width, measured in the build
-    /// and handed to the virtual list as a per-row number. Resize without rebuilding and the
-    /// list lays out at the new width using heights measured at the old one, so every line
+    /// the exception — its height <i>is</i> a function of the width, measured at the code width
+    /// and handed to the virtual list as a per-row number. Resize without measuring again and
+    /// the list lays out at the new width using heights measured at the old one, so every line
     /// that now takes an extra visual line overflows onto the row beneath it.</para>
-    ///
-    /// <para>Narrowed by dragging the pane's own splitter this never showed, because that
-    /// drag is app state and rebuilds anyway; it took a window resize, which does not.</para>
     ///
     /// <para>A review's cards are measured the same way, at the card's text width, wrapped or
     /// not (<see cref="ReviewRowsActive"/>, the Commit view only). Until plan 17 round 15 a
@@ -699,12 +698,17 @@ public partial class JunctionApp : Component, IDisposable
     /// </summary>
     private sealed class SharedStatus(GitRepository repo, int gen)
     {
-        private readonly Lazy<GitResult> _result = new(repo.RunStatus);
+        // The print first: the index the status reads is at least as new as it.
+        private readonly Lazy<(ulong? Print, GitResult Result)> _read = new(() => (repo.IndexPrint(), repo.RunStatus()));
 
         public int Gen { get; } = gen;
 
         /// <summary>The status, run on the first read; off the UI thread only.</summary>
-        public GitResult Result => _result.Value;
+        public GitResult Result => _read.Value.Result;
+
+        /// <summary>What the index held as the status began (<see cref="GitRepository.IndexPrint"/>):
+        /// the Changes load uses the status only when its own read begins on the same index.</summary>
+        public ulong? Print => _read.Value.Print;
     }
 
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, SharedStatus> _sharedStatus = new(PathComparer);
@@ -1154,9 +1158,10 @@ public partial class JunctionApp : Component, IDisposable
     protected override void OnAfterBuild()
     {
         // A lead is for the build that asked for it, which is done: from here on the diff's
-        // laid-out width is the one to read, the check after the frame first.
+        // laid-out width is the one to read. The list's layout hook fits measured rows to it
+        // before the frame is drawn (OnDiffListLaidOut); the pan follows it after the frame.
         _diffWrapLead = float.NaN;
-        SettleDiffScrollbar();
+        FollowDiffWidthAfterFrame();
         ServiceReviewAfterBuild();
         ServiceBranchFromIssue();
         ServiceSpinner();
@@ -1534,7 +1539,7 @@ public partial class JunctionApp : Component, IDisposable
 
     private void HandleKeyDown(KeyDownEvent e)
     {
-        var ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
+        var ctrl = KeyChord.IsPrimaryHeld(e.Modifiers);
         var alt = e.Modifiers.HasFlag(KeyModifiers.Alt);
         var typing = e.Target is TextInputElement or TextAreaElement or RichTextEditorElement;
 

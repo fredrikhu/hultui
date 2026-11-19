@@ -84,7 +84,162 @@ public class OptimisticStagingTests
         });
     }
 
+    /// <summary>A stage that comes back after the same file was unstaged does not take the row
+    /// back. Every successful command settled each file still pending, whichever move had put
+    /// it there, so the reload behind the stage retired the unstage too: the row sprang back to
+    /// Staged while <c>git reset</c> was still waiting its turn. On a busy machine the same race
+    /// let a test unstage files that a late reload then showed staged again. The two commands
+    /// are held on gates here, so the window stays open for as long as the test needs.</summary>
+    [Fact]
+    public void AStageThatComesBackAfterAnUnstage_DoesNotTakeTheRowBack()
+    {
+        Hosted((session, app, repo) =>
+        {
+            using var stageGate = new ManualResetEventSlim();
+            using var unstageGate = new ManualResetEventSlim();
+            try
+            {
+                RunStaging(app, "work.txt", toStaged: true, () =>
+                {
+                    stageGate.Wait();
+                    return GitProcess.Run(repo.Path, "add", "--", "work.txt").Success;
+                });
+                RunStaging(app, "work.txt", toStaged: false, () =>
+                {
+                    unstageGate.Wait();
+                    return GitProcess.Run(repo.Path, "reset", "-q", "--", "work.txt").Success;
+                });
+                Assert.Contains("work.txt", Unstaged(app));
+
+                // The stage comes back and the reload behind it reads the file staged in git;
+                // the unstage is still waiting on its gate.
+                stageGate.Set();
+                session.PumpUntil(() => Section(Raw(app), "Staged").Contains("work.txt"), TimeSpan.FromSeconds(30));
+                session.PumpFrames(4);
+                Assert.Contains("work.txt", Unstaged(app));
+                Assert.DoesNotContain("work.txt", Staged(app));
+                Assert.Single(Pending(app));
+
+                // The unstage comes back: git agrees, and the reload retires the move.
+                unstageGate.Set();
+                session.PumpUntil(() => Pending(app).Count == 0, TimeSpan.FromSeconds(30));
+                Assert.False(IsStagedInGit(repo, "work.txt"));
+                Assert.Contains("work.txt", Unstaged(app));
+            }
+            finally
+            {
+                stageGate.Set();
+                unstageGate.Set();
+            }
+        });
+    }
+
+    // ── A reload the index moves under ───────────────────────────────────
+    //
+    // A load reads the staged list and the working tree with separate git commands, and a
+    // staging command can land between them: a click's `git add` runs while the reload of the
+    // click before is still reading. These run one load here, on the test's thread, and move the
+    // index from a hook in front of one of its commands; the background loads the session starts
+    // run their commands on other threads, which the hooks leave alone.
+
+    /// <summary>A file staged between the staged list and the working tree is in one list, not
+    /// neither. The load that landed listed it nowhere: its row vanished until the next reload,
+    /// the selection on it was pruned, and the optimistic move had no row to carry.</summary>
+    [Fact]
+    public void AFileStagedBetweenTheReadsOfALoad_IsInOneList_NotNeither()
+    {
+        Hosted((session, app, repo) =>
+        {
+            int thread = Environment.CurrentManagedThreadId, staged = 0;
+            using var hook = GitProcess.BeforeRun(repo.Path, args =>
+            {
+                // The working tree's diff, read after the staged list.
+                if (Environment.CurrentManagedThreadId == thread && args is ["diff", "--raw", ..]
+                    && Interlocked.Exchange(ref staged, 1) == 0)
+                    Assert.True(GitProcess.Run(repo.Path, "add", "--", "work.txt").Success);
+            });
+
+            var data = LoadChanges(app, repo.Path);
+
+            Assert.Equal(1, staged);
+            Assert.Contains("work.txt", Section(data, "Staged"));
+            Assert.DoesNotContain("work.txt", Section(data, "Unstaged"));
+        });
+    }
+
+    /// <summary>A status the summary ran before a file was staged is not the load's: the file was
+    /// in the staged list and, by that status, still untracked, so it was listed twice.</summary>
+    [Fact]
+    public void AStatusRunBeforeAFileWasStaged_IsNotTheLoads()
+    {
+        Hosted((session, app, repo) =>
+        {
+            repo.Write("new.txt", "new\n");
+            var shared = SharedStatus(new GitRepository(repo.Path));
+            shared.GetType().GetProperty("Result")!.GetValue(shared);   // the summary's run
+            repo.Git("add", "new.txt");
+
+            var data = LoadChanges(app, repo.Path, shared);
+
+            Assert.Contains("new.txt", Section(data, "Staged"));
+            Assert.DoesNotContain("new.txt", Section(data, "Unstaged"));
+        });
+    }
+
+    /// <summary>A load the index keeps moving under gives up after three reads rather than land
+    /// one of them: it throws, and the loader keeps what is on screen until the next reload.</summary>
+    [Fact]
+    public void ALoadTheIndexKeepsMovingUnder_GivesUpRatherThanLandATornRead()
+    {
+        Hosted((session, app, repo) =>
+        {
+            int thread = Environment.CurrentManagedThreadId, moves = 0;
+            using var hook = GitProcess.BeforeRun(repo.Path, args =>
+            {
+                if (Environment.CurrentManagedThreadId != thread || args is not ["diff", "--raw", ..]) return;
+                var move = ++moves % 2 == 1 ? new[] { "add", "--", "work.txt" } : ["reset", "-q", "--", "work.txt"];
+                Assert.True(GitProcess.Run(repo.Path, move).Success);
+            });
+
+            Assert.Throws<InvalidOperationException>(() => LoadChanges(app, repo.Path));
+            Assert.Equal(3, moves);
+        });
+    }
+
     // ── Reaching the app's state ─────────────────────────────────────────
+
+    /// <summary>One load of the working tree (the producer behind the Changes view's loader), run
+    /// on this thread.</summary>
+    private static object LoadChanges(JunctionApp app, string path, object? shared = null)
+    {
+        try
+        {
+            return typeof(JunctionApp).GetMethod("LoadChanges", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(app, [path, false, shared, null])!;
+        }
+        catch (TargetInvocationException e) when (e.InnerException is { } inner)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(inner);
+            throw;
+        }
+    }
+
+    /// <summary>A status shared by the summary and the Changes load of one generation.</summary>
+    private static object SharedStatus(GitRepository repo) =>
+        Activator.CreateInstance(typeof(JunctionApp).GetNestedType("SharedStatus", BindingFlags.NonPublic)!, repo, 0)!;
+
+    /// <summary>A staging move whose git command is <paramref name="command"/>, the way the app
+    /// asks for one (optimistic overlay first, the command on the staging chain).</summary>
+    private static void RunStaging(JunctionApp app, string path, bool toStaged, Func<bool> command) =>
+        typeof(JunctionApp).GetMethod("RunStaging", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(app, [(IReadOnlyList<string>)[path], toStaged, command, null, "failed"]);
+
+    /// <summary>What git last said, without the moves still in flight.</summary>
+    private static object Raw(JunctionApp app)
+    {
+        var loader = typeof(JunctionApp).GetProperty("_changes", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
+        return loader.GetType().GetProperty("Value")!.GetValue(loader)!;
+    }
 
     private static void Stage(JunctionApp app, params string[] paths) =>
         typeof(JunctionApp).GetMethod("StagePaths", BindingFlags.NonPublic | BindingFlags.Instance)!
@@ -104,9 +259,10 @@ public class OptimisticStagingTests
         typeof(JunctionApp).GetProperty("ChangesView", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(app)!;
 
-    private static List<string> Section(JunctionApp app, string name)
+    private static List<string> Section(JunctionApp app, string name) => Section(View(app), name);
+
+    private static List<string> Section(object data, string name)
     {
-        var data = View(app);
         var files = (System.Collections.IEnumerable)data.GetType()
             .GetProperty(name, BindingFlags.Public | BindingFlags.Instance)!.GetValue(data)!;
         var paths = new List<string>();

@@ -41,6 +41,28 @@ public class DiffScrollTests
     }
 
     [Fact]
+    public void SuperWithAnArrow_StaysInTheDiff_OffTheMac()
+    {
+        // Super+← is no pan key off the Mac; it must not reach the Changes tree behind the diff,
+        // where ← steps out to the folder.
+        bool was = KeyChord.SuperIsCtrl;
+        KeyChord.SuperIsCtrl = false;
+        try
+        {
+            Hosted((session, app) =>
+            {
+                var caret = Caret(app);
+                Press(session, app, KeyCode.Left, KeyModifiers.Super);
+                Assert.Equal(caret, Caret(app));
+                Press(session, app, KeyCode.Right, KeyModifiers.Super);
+                Assert.Equal(caret, Caret(app));
+                Assert.Equal(0f, Offset(app), 1);
+            }, file: "dir/wide.txt");
+        }
+        finally { KeyChord.SuperIsCtrl = was; }
+    }
+
+    [Fact]
     public void TheListsOwnHorizontalOffsetStaysZero()
     {
         // The reason for the negative margin. If this ever stops being true the mechanism
@@ -214,13 +236,13 @@ public class DiffScrollTests
     }
 
     // ── harness ──────────────────────────────────────────────────────────
-    internal static void Hosted(Action<HeadlessSession, JunctionApp> body, string? content = null)
+    internal static void Hosted(Action<HeadlessSession, JunctionApp> body, string? content = null, string file = "wide.txt")
     {
         using var repo = TempRepo.CreateWithInitialCommit();
-        repo.Write("wide.txt", content ?? string.Join("\n", Enumerable.Range(0, 60).Select(i => Wide + " " + i)) + "\n");
+        repo.Write(file, content ?? string.Join("\n", Enumerable.Range(0, 60).Select(i => Wide + " " + i)) + "\n");
         repo.Git("add", "-A");
         repo.Git("commit", "-m", "add a wide file");
-        repo.Write("wide.txt", (content ?? string.Join("\n", Enumerable.Range(0, 60).Select(i => Wide + " " + i))) + "\nEDIT\n");
+        repo.Write(file, (content ?? string.Join("\n", Enumerable.Range(0, 60).Select(i => Wide + " " + i))) + "\nEDIT\n");
 
         using var session = HeadlessSession.Create(1400, 900);
         JunctionApp? app = null;
@@ -289,6 +311,10 @@ public class DiffScrollTests
             .GetField("_diffPan", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
 
     private static float MaxScrollX(JunctionApp app) => Pan(app).MaxOffset;
+
+    /// <summary>The Changes list's caret: the row the diff shows.</summary>
+    private static object? Caret(JunctionApp app) =>
+        typeof(JunctionApp).GetField("_changeCaret", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app);
 
     private static Element? TrackOrNull(JunctionApp app) =>
         Pan(app).ScrollbarElement is { Parent: not null } track ? track : null;

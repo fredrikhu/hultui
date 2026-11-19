@@ -47,8 +47,10 @@ public class A11yDialogBackdropTests
     }
 
     /// <summary>A bridge reported active, its diffs and patches kept; forwards to a real one, if any.</summary>
-    private sealed class Recording(IAccessibilityBridge? inner = null) : IAccessibilityBridge
+    private sealed class Recording(IAccessibilityBridge? inner = null) : IAccessibilityBridge, IEagerItemsLimit
     {
+        // The real bridge's number of items past which a list's are served on demand (UIA 200, AT-SPI 2,000).
+        public int MaxEagerVirtualItems => inner is null ? AccessibilityTreeBuilder.MaxEagerVirtualItems : AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(inner);
         public readonly List<TreeDiff> Told = [];
         public AccessibilityNode? Tree;
         public bool IsActive => true;

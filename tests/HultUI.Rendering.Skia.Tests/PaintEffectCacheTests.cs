@@ -2,16 +2,19 @@ using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Testing;
+using SkiaSharp;
 using Xunit;
 
 namespace HultUI.Rendering.Skia.Tests;
 
 /// <summary>
-/// Shadows and gradients keep their native objects between frames. Each blur was a new
-/// <c>SKMaskFilter</c> and each gradient a new <c>SKShader</c> plus two arrays, made and disposed
-/// per draw: 104 B a shadow and 168 B a gradient on every frame (plan 17, round 2), the last
-/// steady-frame bytes in the apps — a popover's shadow, the scrims over Aperture's artwork. The
-/// kept objects must still draw exactly what each draw asks for, and must not pile up.
+/// Shadows, gradients and dashed borders keep their native objects between frames. Each blur was
+/// a new <c>SKMaskFilter</c> and each gradient a new <c>SKShader</c> plus two arrays, made and
+/// disposed per draw: 104 B a shadow and 168 B a gradient on every frame (plan 17, round 2), the
+/// last steady-frame bytes in the apps — a popover's shadow, the scrims over Aperture's artwork.
+/// A dashed or dotted border was a new <c>SKPathEffect</c> and its interval array, 136 B a border
+/// (the Graphite spike's mixed scene; <see cref="MixedDrawAllocationTests"/>). The kept objects
+/// must still draw exactly what each draw asks for, and must not pile up.
 /// </summary>
 public class PaintEffectCacheTests
 {
@@ -21,17 +24,19 @@ public class PaintEffectCacheTests
     private static readonly Color Indigo = Color.FromHex("#6366F1");
     private static readonly Color Violet = Color.FromHex("#8B5CF6");
 
-    private static SkiaRasterRenderSurface Surface()
+    private static SkiaRasterRenderSurface Surface(float scale = 1f)
     {
         var surface = new SkiaRasterRenderSurface();
-        surface.Resize(Width, Height, 1f);
+        surface.Resize((int)MathF.Ceiling(Width * scale), (int)MathF.Ceiling(Height * scale), scale);
         return surface;
     }
 
-    private static void Frame(SkiaRasterRenderSurface surface, Action<IRenderContext> draw)
+    private static void Frame(SkiaRasterRenderSurface surface, Action<IRenderContext> draw) => Frame(surface, 1f, draw);
+
+    private static void Frame(SkiaRasterRenderSurface surface, float scale, Action<IRenderContext> draw)
     {
         var ctx = surface.RenderContext;
-        ctx.BeginFrame(Width, Height, 1f, Color.White);
+        ctx.BeginFrame(Width, Height, scale, Color.White);
         draw(ctx);
         ctx.EndFrame();
     }
@@ -99,6 +104,113 @@ public class PaintEffectCacheTests
         });
 
         Assert.True(perFrame < 1, $"drawing three gradients allocated {perFrame:0.#} B per frame");
+    }
+
+    /// <summary>A box of one size at a new place every frame, as Junction History's "Details"
+    /// affordance follows the focused row: one shader, kept wherever the box goes, and nothing
+    /// allocated. Kept by place, each new place made a shader (about 350 B and a native one).</summary>
+    [Fact]
+    public void AMovingGradient_KeepsOneShader_AndAllocatesNothingPerFrame()
+    {
+        var gradient = Gradient.Horizontal(new Color(99, 102, 241, 0), Indigo);
+        using var surface = Surface();
+        double perFrame = AllocatedPerFrame(surface, (ctx, frame) =>
+            ctx.DrawGradientRect(new Rect(20 + frame % 100, 10 + frame / 100 % 6 * 26, 24, 26), default, gradient));
+
+        Assert.True(perFrame < 1, $"a moving gradient allocated {perFrame:0.#} B per frame");
+        Assert.Equal(1, Context(surface).CachedGradientShaderCount);
+    }
+
+    /// <summary>A gradient drawn with the shader a box of its size made somewhere else, the canvas
+    /// moved by the difference, draws what a shader made in its own place draws: the same edges, and
+    /// colours at most one level apart (the two compose their float matrices in a different order).
+    /// Asked for at fractional places; at 1.5 the snapped edges are whole device pixels.</summary>
+    [Theory]
+    [InlineData(1f)]
+    [InlineData(1.5f)]
+    public void AMovedGradient_DrawsWhatOneMadeInPlaceDraws(float scale)
+    {
+        var first = new Rect(10.3f, 12.2f, 150, 90);
+        var moved = new Rect(98.2f, 80.3f, 150, 90);
+        foreach (var gradient in new[]
+                 {
+                     Gradient.Vertical(new Color(10, 10, 10, 25), new Color(10, 10, 10, 247)),
+                     Gradient.Linear(135f, Indigo, Violet),
+                     Gradient.Radial(new GradientStop(0f, Color.White), new GradientStop(0.4f, Indigo), new GradientStop(1f, Violet)),
+                 })
+        {
+            using var fresh = Surface(scale);
+            Frame(fresh, scale, ctx => ctx.DrawGradientRect(moved, new CornerRadius(8), gradient));
+            var expected = Pixels(fresh);
+
+            using var kept = Surface(scale);
+            Frame(kept, scale, ctx => ctx.DrawGradientRect(first, new CornerRadius(8), gradient));
+            Frame(kept, scale, ctx => ctx.DrawGradientRect(moved, new CornerRadius(8), gradient));
+            var actual = Pixels(kept);
+
+            Assert.Equal(1, Context(kept).CachedGradientShaderCount);
+            Assert.Equal(expected.Length, actual.Length);
+            int worst = 0, off = 0;
+            for (int i = 0; i < expected.Length; i++)
+            {
+                int d = Math.Abs(expected[i] - actual[i]);
+                worst = Math.Max(worst, d);
+                if (d > 0) off++;
+            }
+            Assert.True(worst <= 1, $"{gradient.Kind} {gradient.AngleDegrees}° at {scale}: {off} channels off, by up to {worst}");
+        }
+    }
+
+    /// <summary>A gradient that stays where its shader was made draws exactly what a shader made over
+    /// its box draws (the renderer's own construction, written out here): no move, so not one pixel
+    /// rounds differently. A shader made at (0, 0) and moved to every box rounded 4,254 pixels of
+    /// Aperture's Detail hero one level away at 1.5.</summary>
+    [Theory]
+    [InlineData(1f)]
+    [InlineData(1.5f)]
+    public void AGradientThatDoesNotMove_DrawsExactlyAShaderMadeInPlace(float scale)
+    {
+        // On the grid at both scales (whole device pixels at 1.5 too), so snapping leaves it as it is.
+        var box = new Rect(64, 40, 220, 150);
+        var skRect = new SKRect(box.X, box.Y, box.X + box.Width, box.Y + box.Height);
+        foreach (var gradient in new[]
+                 {
+                     Gradient.Vertical(new Color(10, 10, 10, 25), new Color(10, 10, 10, 247)),
+                     Gradient.Horizontal(new Color(10, 10, 10, 245), new Color(10, 10, 10, 0)),
+                     Gradient.Linear(135f, Indigo, Violet),
+                     Gradient.Radial(new GradientStop(0f, Color.White), new GradientStop(0.4f, Indigo), new GradientStop(1f, Violet)),
+                 })
+        {
+            var colors = gradient.Stops.Select(s => new SKColor(s.Color.R, s.Color.G, s.Color.B, s.Color.A)).ToArray();
+            var positions = gradient.Stops.Select(s => s.Offset).ToArray();
+            SKShader shader;
+            if (gradient.Kind == GradientKind.Linear)
+            {
+                float rad = gradient.AngleDegrees * (MathF.PI / 180f);
+                float dx = MathF.Cos(rad), dy = MathF.Sin(rad);
+                float half = MathF.Abs(dx) * (skRect.Width * 0.5f) + MathF.Abs(dy) * (skRect.Height * 0.5f);
+                shader = SKShader.CreateLinearGradient(new SKPoint(skRect.MidX - dx * half, skRect.MidY - dy * half),
+                    new SKPoint(skRect.MidX + dx * half, skRect.MidY + dy * half), colors, positions, SKShaderTileMode.Clamp);
+            }
+            else
+            {
+                shader = SKShader.CreateRadialGradient(new SKPoint(skRect.MidX, skRect.MidY),
+                    MathF.Sqrt(skRect.Width * skRect.Width + skRect.Height * skRect.Height) * 0.5f,
+                    colors, positions, SKShaderTileMode.Clamp);
+            }
+
+            using var reference = Surface(scale);
+            using (shader)
+            using (var paint = new SKPaint { IsAntialias = true, Shader = shader })
+                Frame(reference, scale, ctx => Context(reference).Canvas.DrawRect(skRect, paint));
+            var expected = Pixels(reference);
+
+            using var drawn = Surface(scale);
+            Frame(drawn, scale, ctx => ctx.DrawGradientRect(box, default, gradient));
+            Frame(drawn, scale, ctx => ctx.DrawGradientRect(box, default, gradient));
+
+            Assert.Equal(expected, Pixels(drawn));
+        }
     }
 
     public static TheoryData<string> GradientChanges => new() { "rect", "stops", "offsets", "angle", "kind", "stop count" };
@@ -172,33 +284,67 @@ public class PaintEffectCacheTests
         Assert.Equal(expected, Pixels(kept));
     }
 
-    /// <summary>A gradient box that moves every frame, or a blur that animates, makes a new object
-    /// every frame; the maps stay within their bounds and are emptied with the context.</summary>
+    /// <summary>A dashed or dotted border drawn after other dashes were kept looks exactly like the
+    /// same border drawn on a fresh surface. Each case first draws one that differs from it in one
+    /// thing only, at the same place: the style, or the width the intervals are made from.</summary>
+    [Theory]
+    [InlineData(BorderStyle.Dashed, BorderStyle.Dotted, 2f, 2f)]
+    [InlineData(BorderStyle.Dotted, BorderStyle.Dashed, 2f, 2f)]
+    [InlineData(BorderStyle.Dashed, BorderStyle.Dashed, 1f, 3f)]
+    [InlineData(BorderStyle.Dotted, BorderStyle.Dotted, 3f, 1f)]
+    [InlineData(BorderStyle.Dashed, BorderStyle.Solid, 2f, 2f)]
+    public void AKeptDashIsNeverReusedForADifferentOne(BorderStyle style, BorderStyle beforeStyle, float width,
+        float beforeWidth)
+    {
+        var box = new Rect(40, 30, 200, 120);
+        void Draw(IRenderContext ctx, BorderStyle s, float w) =>
+            ctx.DrawBorder(box, new CornerRadius(10), Indigo, new Thickness(w), s);
+
+        using var fresh = Surface();
+        Frame(fresh, ctx => Draw(ctx, style, width));
+        var expected = Pixels(fresh);
+
+        using var kept = Surface();
+        Frame(kept, ctx => Draw(ctx, beforeStyle, beforeWidth));
+        Frame(kept, ctx => Draw(ctx, style, width));
+
+        Assert.Equal(expected, Pixels(kept));
+    }
+
+    /// <summary>A gradient box whose size changes every frame, a blur that animates, or a dashed
+    /// border whose width animates, makes a new object every frame; the maps stay within their
+    /// bounds and are emptied with the context.</summary>
     [Fact]
     public void TheKeptObjectsStayBounded_AndGoWithTheContext()
     {
         var surface = Surface();
         var ctx = Context(surface);
         var gradient = Gradient.Horizontal(Indigo, Violet);
-        int most = 0, mostBlurs = 0;
+        int most = 0, mostBlurs = 0, mostDashes = 0;
         for (int i = 0; i < SkiaRenderContext.GradientShaderCacheMaxSize * 2 + 10; i++)
         {
             Frame(surface, c =>
             {
-                c.DrawGradientRect(new Rect(i % 50, i / 50, 100, 40), default, gradient);
+                c.DrawGradientRect(new Rect(i % 50, i / 50, 100 + i % 150, 40 + i / 150), default, gradient);
                 c.DrawBoxShadow(new Rect(10, 10, 50, 50), default, new BoxShadow(0, 0, 1 + i * 0.5f, Color.Black));
+                c.DrawBorder(new Rect(10, 10, 280, 180), default, Color.Black, new Thickness(1 + i % 90),
+                    i % 2 == 0 ? BorderStyle.Dashed : BorderStyle.Dotted);
             });
             most = Math.Max(most, ctx.CachedGradientShaderCount);
             mostBlurs = Math.Max(mostBlurs, ctx.CachedBlurFilterCount);
+            mostDashes = Math.Max(mostDashes, ctx.CachedDashEffectCount);
         }
 
         Assert.Equal(SkiaRenderContext.GradientShaderCacheMaxSize, most);
         Assert.Equal(SkiaRenderContext.BlurFilterCacheMaxSize, mostBlurs);
+        Assert.Equal(SkiaRenderContext.DashEffectCacheMaxSize, mostDashes);
         Assert.InRange(ctx.CachedGradientShaderCount, 1, SkiaRenderContext.GradientShaderCacheMaxSize);
         Assert.InRange(ctx.CachedBlurFilterCount, 1, SkiaRenderContext.BlurFilterCacheMaxSize);
+        Assert.InRange(ctx.CachedDashEffectCount, 1, SkiaRenderContext.DashEffectCacheMaxSize);
 
         surface.Dispose();
         Assert.Equal(0, ctx.CachedGradientShaderCount);
         Assert.Equal(0, ctx.CachedBlurFilterCount);
+        Assert.Equal(0, ctx.CachedDashEffectCount);
     }
 }

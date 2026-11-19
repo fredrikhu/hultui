@@ -23,6 +23,10 @@ namespace HultUI.Headless.Tests;
 [SupportedOSPlatform("windows")]
 public class UiaLazyItemWrapperTests
 {
+    /// <summary>A list of item nodes on UIA: over <see cref="WindowsAccessibilityBridge.MaxEagerVirtualItems"/>
+    /// (200) items, it has none, and its items are served on demand.</summary>
+    private const int Items = 180;
+
     private sealed class Pane(int count) : Component
     {
         public string Prefix = "file a";
@@ -58,7 +62,7 @@ public class UiaLazyItemWrapperTests
         public readonly WindowsAccessibilityBridge Uia;
         public readonly List<UiaRaised> Raised = [];
         public readonly List<ElementId> Disconnected = [];
-        public readonly Pane Pane = new(600);
+        public readonly Pane Pane = new(Items);
 
         public Rig()
         {
@@ -112,8 +116,10 @@ public class UiaLazyItemWrapperTests
     }
 
     /// <summary>A listener whatever the machine: UI Automation reports one only while a client listens.</summary>
-    private sealed class Listening(IAccessibilityBridge inner) : IAccessibilityBridge, ITreeDiffBorrower
+    private sealed class Listening(IAccessibilityBridge inner) : IAccessibilityBridge, IEagerItemsLimit, ITreeDiffBorrower
     {
+        // The real bridge's number of items past which a list's are served on demand (UIA 200, AT-SPI 2,000).
+        public int MaxEagerVirtualItems => AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(inner);
         public bool IsActive => true;
         public void ApplyChanges(TreeDiff diff, AccessibilityNode root) => inner.ApplyChanges(diff, root);
         public void ApplyPatchedProperties(TreeDiff patch, AccessibilityNode root) => inner.ApplyPatchedProperties(patch, root);
@@ -127,15 +133,15 @@ public class UiaLazyItemWrapperTests
     {
         using var rig = new Rig();
         var list = rig.ListNode();
-        Assert.Equal(600, list.Children.Count);
+        Assert.Equal(Items, list.Children.Count);
         Assert.Equal(0, rig.ItemWrappers);
         Assert.Contains(rig.Uia.Wrappers, w => w.ElementId == list.ElementId);
 
-        // A client navigates to item 250: its wrapper is made then, from its node, and answers as
+        // A client navigates to item 150: its wrapper is made then, from its node, and answers as
         // one made with the tree would.
-        var item = list.Children[250];
+        var item = list.Children[150];
         var (wrapper, name) = rig.Ask(item.ElementId);
-        Assert.Equal("file a line 250", name);
+        Assert.Equal("file a line 150", name);
         Assert.Same(item, wrapper.Node);
         Assert.Equal(item.BoundingRect, wrapper.Bounds);
         Assert.Equal(1, rig.ItemWrappers);
@@ -145,7 +151,7 @@ public class UiaLazyItemWrapperTests
     }
 
     /// <summary>Another file's list, a key of the commit file walk: no wrapper made or let go for its
-    /// 600 items, and the structure events the same: the parent's ChildrenBulkRemoved and
+    /// 180 items, and the structure events the same: the parent's ChildrenBulkRemoved and
     /// ChildrenBulkAdded.</summary>
     [WindowsFact]
     public void AnotherList_MakesAndDropsNoItemWrapper_AndRaisesTheSameStructureEvents()
@@ -194,16 +200,16 @@ public class UiaLazyItemWrapperTests
     public void AWrapperMadeLate_IsLetGoWithItsItem()
     {
         using var rig = new Rig();
-        var item = rig.ListNode().Children[400].ElementId;
+        var item = rig.ListNode().Children[120].ElementId;
         rig.Ask(item);
         Assert.Equal(1, rig.ItemWrappers);
 
-        rig.Pane.Count = 300;
+        rig.Pane.Count = 90;
         rig.Pane.Show("file a");   // the same list, fewer items
         rig.Session.PumpFrame(TimeSpan.FromMilliseconds(16));
         rig.Session.PumpFrame(TimeSpan.FromMilliseconds(300));
 
-        Assert.Equal(300, rig.ListNode().Children.Count);
+        Assert.Equal(90, rig.ListNode().Children.Count);
         Assert.Equal(0, rig.ItemWrappers);
         Assert.Equal([item], rig.Disconnected);
     }

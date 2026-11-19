@@ -30,10 +30,29 @@ namespace HultUI.Platform.Accessibility.Windows;
 /// nothing of it is kept (<see cref="ITreeDiffBorrower"/>): the window lends the bridge one diff
 /// for its patches, emptied after each call.
 /// </para>
+/// <para>
+/// A list over <see cref="MaxEagerVirtualItems"/> items has them served on demand
+/// (<see cref="IEagerItemsLimit"/>): the window builds no item nodes for it, and an item's provider
+/// reads the list when a client asks.
+/// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]
-public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ITreeDiffBorrower, IDisposable
+public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ITreeDiffBorrower, IEagerItemsLimit, IDisposable
 {
+    /// <summary>
+    /// The most items a list has as item nodes in this bridge's trees; past it they are served on
+    /// demand (2,000 for any other bridge, <see cref="AccessibilityTreeBuilder.MaxEagerVirtualItems"/>).
+    /// A UI Automation client asks for an item when it reads it, so an item nobody asks for costs
+    /// nothing; an item node is built, diffed and told on every change. With 2,000, a list of 1,000
+    /// items whose contents changed in place told 1,000 Name changes, and the desktop's listener made
+    /// about 13,000 provider calls for them (plan 17 round 16 step 3, real windows on NativeAOT, a ref
+    /// move in Junction with History shown: 1,314.7 → 598.8 KB on the UI thread, 1,002 → 3 raises,
+    /// 13,186 → 199 calls; Vesper's move between two folders of 1,000 files 504.7 → 293.7 KB).
+    /// </summary>
+    internal const int MaxEagerVirtualItems = 200;
+
+    int IEagerItemsLimit.MaxEagerVirtualItems => MaxEagerVirtualItems;
+
     private readonly IntPtr _hwnd;
     private readonly IUiaHostBridge _host;
     private readonly UiaFragmentRoot _fragmentRoot;
@@ -83,24 +102,55 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
         _originalWndProc = UiaInterop.SetWindowLongPtr(hwnd, UiaInterop.GWLP_WNDPROC, (IntPtr)proc);
     }
 
+    /// <summary>
+    /// Whether the window builds its tree and raises events: a client listens, and one has asked for
+    /// this window's root (<see cref="RootAsked"/>).
+    /// </summary>
+    /// <remarks>
+    /// <c>UiaClientsAreListening</c> alone said yes on every desktop with any UI Automation client, and
+    /// this desk always has one that never asks for a window's root: 0 root asks in 16 launches of
+    /// Junction and Vesper (plan 17 round 16). For it each window built its tree, kept it up to date
+    /// and raised every change, and the client made about 13 provider calls a raised event. A reader
+    /// asks for the root of the window it reads (the foreground's, as it comes to the front, or one it
+    /// is pointed at), and then the tree is built at once (<see cref="IUiaHostBridge.RootRequested"/>).
+    /// </remarks>
     public bool IsActive
     {
         get
         {
-            bool listening = UiaInterop.UiaClientsAreListening();
+            // Not even UI Automation is asked while no window of this process has been asked for its root.
+            bool listening = Volatile.Read(ref s_openGates) > 0 && UiaInterop.UiaClientsAreListening();
             // Content that describes itself only while something listens (a terminal's screen
-            // notices, a web page's tree) reads AccessibilityClients; the Linux bridge reports
-            // there from the bus, and this one from UIA. Polled every frame, told on change.
+            // notices, a web page's tree, a text's versions) reads AccessibilityClients; the Linux
+            // bridge reports there from the bus, and this one from UIA, once a client has asked for
+            // the root of one of this process's windows: the same gate, for the whole process, so
+            // that work waits for a reader too. Polled every frame, told on change.
             if (listening != _reportedListening)
             {
                 _reportedListening = listening;
                 AccessibilityClients.Report(listening);
             }
-            return listening;
+            return listening && _rootAsked;
         }
     }
 
     private bool _reportedListening;
+
+    /// <summary>How many of this process's windows have their gate open (<see cref="RootAsked"/>): while
+    /// any has, and a client listens, <see cref="AccessibilityClients"/> is told a client listens. A
+    /// window's goes as its bridge is disposed.</summary>
+    private static int s_openGates;
+
+    /// <summary>
+    /// The window's gate: whether a UI Automation client has asked for this window's root
+    /// (<c>WM_GETOBJECT</c> with <c>UiaRootObjectId</c>). Until one has, the window builds no tree and
+    /// the bridge raises nothing, however many clients listen; from the first ask on it is as if there
+    /// were no gate. Each window has its own, and it never closes. Set on the UI thread (the window
+    /// procedure); read on any.
+    /// </summary>
+    internal bool RootAsked => _rootAsked;
+
+    private volatile bool _rootAsked;
 
     // Raise UIA events (structure/property/focus changed) so an assistive tech
     // refreshes live as the tree changes. This used to fast-fail on the
@@ -1015,7 +1065,12 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     {
         long told = Volatile.Read(ref _targetIdRaw);
         long target = ResolveFocusTarget();
-        if (target == told && !holderMoved) return;
+        bool renamed = TrackServedTargetName(target, stays: target == told && !holderMoved);
+        if (target == told && !holderMoved)
+        {
+            if (renamed) RaiseServedTargetName(target);
+            return;
+        }
         Volatile.Write(ref _targetIdRaw, target);
         if (!RaiseEvents) return;
         if (told != target)
@@ -1024,6 +1079,71 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
             if (target != 0) RaiseFocusState(target, focused: true);
         }
         if (target != 0) RaiseFocusEvent(target);
+    }
+
+    // The reader's focus while it is a list's item, the name a reader was told it has (with the focus
+    // event, by a diff's Name change, or by the last one raised here) and whether the list served it on
+    // demand then. 0 and null otherwise. UI thread.
+    private long _namedTarget;
+    private string? _namedTargetName;
+    private bool _namedTargetServed;
+
+    /// <summary>
+    /// Keeps the name of the reader's focus <paramref name="target"/> while it is a list's item, and says
+    /// whether a reader has to be told it has another one, when the focus <paramref name="stays"/> on it.
+    /// An item node's rename is told by the diff, or the refresh made in place, that finds it; an item
+    /// served on demand has no node, and its name is read when a client asks for it. A list's contents
+    /// changed under the reader's focus (Junction's History, where a commit lands on row 0 under it;
+    /// Vesper's list, relabelled in place as a folder is entered) told a reader nothing, where an item
+    /// node told the Name change. So it is told here when the item is served on demand now or was then
+    /// (a list that crossed the number its items are served from has new nodes, or none: no diff tells
+    /// the rename). One label read a frame that applied something, while the focus is on such an item,
+    /// kept by the list or made for the read (about 0.1 KB a key move in a list of files), never an
+    /// array as long as the list.
+    /// </summary>
+    private bool TrackServedTargetName(long target, bool stays)
+    {
+        var id = new ElementId(unchecked((ulong)target));
+        bool served = ServedItem(id, out var listId, out int index);
+        string? name;
+        if (served)
+        {
+            // Not GetItemLabel: on the UI thread a list on item rows keeps the label it gives, in an array as
+            // long as the list, which no walk asks for when its items are served on demand (IAccessibleItemSource.PeekItemLabel).
+            try { name = ItemsOf(listId)?.PeekItemLabel(index); }
+            catch { name = null; }
+        }
+        else if (target != 0 && VirtualItemId.TryDecode(id, out listId, out index) && listId != default
+            && NodeOf(listId) is { IsVirtualItemContainer: false } list && (uint)index < (uint)list.Children.Count)
+            name = list.Children[index].Name;
+        else
+        {
+            _namedTarget = 0;
+            _namedTargetName = null;
+            _namedTargetServed = false;
+            return false;
+        }
+        bool renamed = stays && _namedTarget == target && (served || _namedTargetServed)
+            && !string.Equals(name, _namedTargetName, StringComparison.Ordinal);
+        _namedTarget = target;
+        _namedTargetName = name;
+        _namedTargetServed = served;
+        return renamed;
+    }
+
+    /// <summary>A Name property change on the reader's focus, a list's item, with the name it has now
+    /// (<see cref="TrackServedTargetName"/>): on a provider of the item made for it when the list serves it
+    /// on demand, else on its node's wrapper.</summary>
+    private void RaiseServedTargetName(long target)
+    {
+        if (!RaiseEvents) return;
+        var id = new ElementId(unchecked((ulong)target));
+        var name = _namedTargetName is { } n ? UiaVariant.FromBStr(n) : UiaVariant.Empty;
+        if (ServedItem(id, out var listId, out int index))
+            RaiseItemProperty(listId, index, UiaInterop.UIA_NamePropertyId, name);
+        else if (TryWrapper(id, out var wrapper))
+            RaiseProperty(wrapper, UiaInterop.UIA_NamePropertyId, name);
+        else name.Free();
     }
 
     private long ResolveFocusTarget()
@@ -1224,10 +1344,17 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
 
             if (msg == UiaInterop.WM_GETOBJECT && (int)lParam == UiaInterop.UiaRootObjectId)
             {
+                // The first ask opens the window's gate (RootAsked). The host builds the tree before
+                // the answer when it can, so the client's first reads find it; otherwise the next frame.
+                if (!self._rootAsked)
+                {
+                    self._rootAsked = true;
+                    Interlocked.Increment(ref s_openGates);
+                }
+                self._host.RootRequested();
                 IntPtr root = self.NativeRootSimple(); // UiaReturnRawElementProvider wants IRawElementProviderSimple*
                 IntPtr lresult = UiaInterop.UiaReturnRawElementProvider(hwnd, wParam, lParam, root);
                 if (root != IntPtr.Zero) Marshal.Release(root); // UIA took its own reference
-                self._host.RootRequested();
                 return lresult;
             }
 
@@ -1328,6 +1455,13 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
         // After the window procedure is restored, so no WM_GETOBJECT hands out a provider being
         // torn down; the window itself is destroyed after its bridge, so it still exists here.
         ReleaseProviders();
+
+        // The last window a client asked for: what reads AccessibilityClients hears nobody listens.
+        if (_rootAsked && Interlocked.Decrement(ref s_openGates) == 0 && _reportedListening)
+        {
+            _reportedListening = false;
+            AccessibilityClients.Report(false);
+        }
 
         lock (_applyLock) _wrappers.Clear();
 

@@ -152,6 +152,36 @@ static partial class Scenarios
                     keyEvery: GridReaderKeys, clear: bridge.ClearDiffs);
             }) { Width = 1440, Height = 900 };
 
+        yield return new Scenario("a11y/cursor walk 1,000 state rows, bridge on",
+            "virtual/cursor walk over 1,000 items with an accessibility client listening: the list holds the reader's focus, and each move marks the cursor as its node's current item on the applied tree and tells the bridge, building no tree",
+            ctx =>
+            {
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                return CursorWalk(ctx, 1_000, (list, current) =>
+                    bridge.FocusedNode?.ElementId != list.Id ? $"the reader's focus is on {bridge.FocusedNode?.ElementId}, not the list"
+                    : bridge.FocusedNode.CurrentItem != current ? $"the list's current item is {bridge.FocusedNode.CurrentItem}, not {current}"
+                    : null);
+            });
+
+        yield return new Scenario("a11y/columns 2,000 wheel, bridge on",
+            "Wheel 3 notches through 2,000 items in columns, the recording bridge listening, frames 120 ms apart so each rebuilds: 2,000 item nodes with column bounds",
+            ctx =>
+            {
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                var list = VirtualListElement<RowItem>.New().ItemHeight(24)
+                    .RenderWith(RenderVirtualRow).AccessibleItemLabel(m => m.Label)
+                    .Flow(ListFlow.Columns, 220f).Items(Models(ctx.Rng, 2_000));
+                ctx.Mount(list.FlexGrow(1));
+                var moved = MovedColumns(list, 3);
+                return new Op
+                {
+                    Run = step => ctx.Window.Wheel(500, 380, 0, ((step / 20) % 2 == 0 ? -1 : 1) * 3),
+                    FrameDelta = TimeSpan.FromMilliseconds(120),
+                    Check = step => moved(step) ?? (HoldsItems(bridge.CurrentTree, 2_000) ? null
+                        : "the tree does not hold the list's 2,000 items"),
+                };
+            });
+
         yield return new Scenario("a11y/selection walk beside details, keys 60 ms apart, real loop, bridge on",
             "Down every 60 ms through a 1,000-commit list on item rows beside a details pane the same Build makes again, in Application.Run's own loop on the virtual clock, an accessibility client listening: the trees a key builds (all under build)",
             ctx =>
@@ -579,6 +609,15 @@ static partial class Scenarios
             "Change one row's label in 1,000 rows with the UIA bridge: one name event over 2,001 nodes",
             ctx => EditOneLabel(ctx, UiaRig.Install(ctx.Window)));
 
+        yield return new Scenario("a11y/insert above 1,000 item rows, UIA",
+            "Put an item above a list of 1,000 item rows with the UIA bridge, as a commit lands in Junction's History (taken out again between steps, untimed): with item nodes every place's item changed, 1,000 Name changes; served on demand past 200 items (plan 17 round 16), the list's number. Checks 3 Name changes a step at most",
+            ctx =>
+            {
+                var rig = UiaRig.Install(ctx.Window);
+                rig.CountNames();
+                return InsertAboveItems(ctx, 1_000, rig, () => rig.NameRaises, least: 0, most: 3);
+            });
+
         yield return new Scenario("a11y/tab through 300 fields, UIA",
             "Press Tab in a 300-field form with the UIA bridge: the focus moves, no rebuild",
             ctx => TabThroughFields(ctx, UiaRig.Install(ctx.Window)));
@@ -835,6 +874,49 @@ static partial class Scenarios
         {
             Run = step => labels[step * 37 % labels.Count].Content += " !",
             Check = Applied(rig),
+        };
+    }
+
+    /// <summary>
+    /// An item put above a list of <paramref name="count"/> item rows, as a commit lands at the top of
+    /// Junction's History, and taken out again between steps (untimed). An item's id is its place, so each
+    /// place has another item: a list of item nodes tells each one renamed, a list served on demand tells
+    /// its number. Checks that the bridge told between <paramref name="least"/> and <paramref name="most"/>
+    /// Name changes a step (<paramref name="names"/>, counted since the step began), and reports them.
+    /// </summary>
+    private static Op InsertAboveItems(Ctx ctx, int count, IBridgeRig rig, Func<int> names, int least, int most)
+    {
+        var items = Enumerable.Range(0, count).Select(i => $"commit {i}").ToList();
+        var list = VirtualListElement<string>.New().ItemHeight(22)
+            .Items(items)
+            .AccessibleItemLabel(s => s)
+            .RenderWith(s => Flex.Row().Padding(new Thickness(2, 8)).Children(Text.New(s).FontSize(12f)))
+            .FlexGrow(1);
+        list.AccessibleName = "History";
+        ctx.Mount(Flex.Column().FlexGrow(1).Children(list));
+        int before = 0;
+        var applied = Applied(rig);
+        return new Op
+        {
+            Reset = _ => { if (list.Items.Count != count) list.Items = items; },
+            Run = step =>
+            {
+                before = names();
+                list.Items = [$"new commit {step}", .. items];
+            },
+            // The rows are made again as the frame draws, after its accessibility phase: the next frame
+            // walks them, 120 ms on, past the 100 ms a layout refresh waits, so all of it is told.
+            Frames = 2,
+            FrameDelta = TimeSpan.FromMilliseconds(120),
+            Figure = () => names() - before,
+            FigureUnit = "names/step",
+            Check = step =>
+            {
+                int told = names() - before;
+                if (list.Items.Count != count + 1) return $"the list has {list.Items.Count} items";
+                if (told < least || told > most) return $"the {rig.Name} bridge told {told} Name changes, not {least}–{most}";
+                return applied(step);
+            },
         };
     }
 

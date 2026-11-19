@@ -209,9 +209,17 @@ public sealed partial class ReelApp : Component, IDisposable
 
     private void ToggleFullscreen()
     {
-        _window.ToggleFullscreen();
-        if (_videoPlayer is { } video) video.IsFullscreen = _window.IsFullscreen;
+        bool fullscreen = !_window.IsFullscreen;
+        // Told before the window goes: on Windows the window draws its first frame at the new size
+        // inside SetFullscreen, which shows what was written by then (REACTIVITY.md, "A resize from
+        // posted work or a handler builds in the size message's frame"). Told after, that frame
+        // drew the old controls at the new size.
+        if (_videoPlayer is { } video) video.IsFullscreen = fullscreen;
         Rerender();
+        _window.SetFullscreen(fullscreen);
+        // A window that did not go (no monitor to cover, a compositor that said no): the glyph
+        // follows the window, as it did when it was read from the window after the call.
+        if (_videoPlayer is { } shown && shown.IsFullscreen != _window.IsFullscreen) shown.IsFullscreen = _window.IsFullscreen;
     }
 
     private string WindowTitle()

@@ -105,6 +105,9 @@ using HultUI.WebView.WebView2;
 // that should be HDR is tagged so through HULTUI_MPV_OPTIONS (a Y4M carries no colour tags). Exits 4
 // when there is no libmpv.
 //
+// --dialog-fade opens a dialog the command palette's size over a 1440x900 window and prints the local video memory
+// the first open and a second one kept (Windows): see DialogFadeProbe.
+//
 // No window made here may become the foreground, whatever it does (Windows): see Foreground.
 
 internal static class Program
@@ -132,6 +135,7 @@ internal static class Program
         if (args.FirstOrDefault(a => a.StartsWith("--resizes=")) is { } resizes)
             return Resizes(renderer, int.Parse(resizes["--resizes=".Length..]), args.Contains("--new-sizes"));
         if (args.Contains("--drag")) return DragAndMove(renderer);
+        if (args.Contains("--dialog-fade")) return DialogFadeProbe.Run(renderer);
         if (args.Contains("--page-and-video"))
             return PageAndVideo(renderer, args.FirstOrDefault(a => a.StartsWith("--clip="))?["--clip=".Length..]
                 ?? "av://lavfi:color=c=magenta:s=320x240");

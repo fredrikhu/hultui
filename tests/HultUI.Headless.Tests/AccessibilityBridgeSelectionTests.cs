@@ -99,7 +99,16 @@ internal sealed class TestHwnd : IDisposable
 
     [DllImport("user32.dll")] private static extern bool DestroyWindow(IntPtr hWnd);
 
+    [DllImport("user32.dll")] private static extern IntPtr SendMessageW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
     public IntPtr Handle { get; private set; }
+
+    /// <summary>
+    /// Asks the window for its UI Automation root as a client does (<c>WM_GETOBJECT</c> with
+    /// <c>UiaRootObjectId</c>), on this thread. A Windows bridge installed in a window builds no tree and
+    /// raises nothing until a client has asked (its gate, plan 17 round 16); this opens it.
+    /// </summary>
+    public void AskForRoot() => SendMessageW(Handle, UiaInterop.WM_GETOBJECT, IntPtr.Zero, UiaInterop.UiaRootObjectId);
 
     private TestHwnd(IntPtr handle) => Handle = handle;
 

@@ -190,8 +190,17 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
 
     public void SetFullscreen(bool fullscreen)
     {
+        bool changed = IsFullscreen != fullscreen;
         IsFullscreen = fullscreen;
         ApplyDesktop();
+        // Windows-like: the custom frame moves the window over its monitor with SetWindowPos, which
+        // sends the new size inside the call, and SDL's event watch draws it there
+        // (Application.RenderLiveResizeFrame); SDL3Window then flags the resize again, so the next
+        // pass raises Resized and draws once more. A toggle is two frames, the first inside the call.
+        if (!changed || !WindowsLike || !IsShown || LiveResizeFrame is not { } live) return;
+        live();
+        ResizePending = true;
+        LastResizeRenderTick = 0;   // no real-time throttle headless
     }
 
     private WindowPlacement? _placement;

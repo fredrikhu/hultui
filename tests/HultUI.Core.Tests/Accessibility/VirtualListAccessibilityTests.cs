@@ -1,6 +1,9 @@
 using HultUI.Core.Accessibility;
+using HultUI.Core.Builders;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
 using HultUI.Core.Layout;
+using HultUI.Core.Primitives;
 using Xunit;
 
 namespace HultUI.Core.Tests.Accessibility;
@@ -661,5 +664,168 @@ public class VirtualListAccessibilityTests
         Assert.Equal(AccessibilityRole.List, tree.Role);
         Assert.True(tree.IsVirtualItemContainer);
         Assert.Empty(tree.Children);
+    }
+
+    /// <summary>A bridge that says how many items a list may have as item nodes (UI Automation's 200).</summary>
+    private sealed class Limited(int max) : IAccessibilityBridge, IEagerItemsLimit
+    {
+        public int MaxEagerVirtualItems => max;
+        public bool IsActive => true;
+        public void ApplyChanges(TreeDiff diff, AccessibilityNode root) { }
+        public void NotifyFocusChanged(AccessibilityNode? focused) { }
+    }
+
+    /// <summary>
+    /// The number past which a list's items are served on demand is the bridge's (plan 17 round 16: UI
+    /// Automation's 200, AT-SPI's 2,000), and a tree is built, patched and refreshed in place by the one it
+    /// was built by. A bridge that says none has the builder's 2,000.
+    /// </summary>
+    [Fact]
+    public void TheBridgesNumber_DecidesWhereAListsItemsAreServedOnDemand()
+    {
+        Assert.Equal(2_000, AccessibilityTreeBuilder.MaxEagerVirtualItems);
+        Assert.Equal(AccessibilityTreeBuilder.MaxEagerVirtualItems, AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(NullAccessibilityBridge.Instance));
+        Assert.Equal(200, AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(new Limited(200)));
+        Assert.Equal(0, AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(new Limited(-1)));
+
+        AccessibilityNode Build(VirtualListElement<string> list, int maxEager)
+        {
+            _layout.PerformLayout(list, 200, 100);
+            list.UpdateContentSize();
+            return AccessibilityTreeBuilder.Build(list, null, 0f, 0f, default, maxEager);
+        }
+
+        var at = Build(MakeList(200), 200);
+        Assert.False(at.IsVirtualItemContainer);
+        Assert.Equal(200, at.Children.Count);
+        var list = MakeList(201);
+        var over = Build(list, 200);
+        Assert.True(over.IsVirtualItemContainer);
+        Assert.Empty(over.Children);
+        Assert.Equal(201, over.Served.Count);
+        // The same list by the builder's number: an item node each.
+        Assert.Equal(201, BuildLaidOut(MakeList(201)).Children.Count);
+
+        // A move of its selection is the node's own by the number it was built by; by another, its items
+        // are not the node's, and the tree is built again.
+        list.SelectedIndex = 3;
+        var served = new List<(AccessibilityNode, int, int[])>();
+        Assert.True(AccessibilityTreeBuilder.ItemSelectionChanges(over, list, [], served, [], 200));
+        Assert.Equal([3], Assert.Single(served).Item3);
+        Assert.False(AccessibilityTreeBuilder.ItemSelectionChanges(over, list, [], [], [], AccessibilityTreeBuilder.MaxEagerVirtualItems));
+
+        // A layout refresh made in place, the same.
+        var refresh = new AccessibilityTreeBuilder.LayoutRefresh();
+        Assert.True(AccessibilityTreeBuilder.TryRefreshInPlace(over, list, [], null, refresh, 200), refresh.Mismatch);
+        refresh.Clear();
+        Assert.False(AccessibilityTreeBuilder.TryRefreshInPlace(over, list, [], null, refresh));
+        Assert.Equal("a list's items", refresh.Mismatch);
+    }
+
+    // ── The current item (the list's cursor): the item a reader's focus is on ──
+
+    private AccessibilityNode BuildFocused(VirtualListElement<string> list, Element? focused)
+    {
+        _layout.PerformLayout(list, 200, 100);
+        list.UpdateContentSize();
+        var focusManager = new FocusManager();
+        focusManager.SetFocus(focused);
+        return AccessibilityTreeBuilder.Build(list, focusManager);
+    }
+
+    [Fact]
+    public void CurrentItem_IsTheCursor_NotTheSelection()
+    {
+        var list = MakeList(50);
+        list.IsFocusable = true;
+        list.SelectedIndex = 7;
+        list.CurrentIndex = 3;
+
+        var tree = BuildFocused(list, list);
+
+        Assert.True(tree.IsFocused);
+        Assert.Equal(3, tree.CurrentItem);
+        Assert.True(tree.Children[7].IsSelected);
+        Assert.False(tree.Children[3].IsSelected);
+    }
+
+    [Fact]
+    public void WithoutACursor_TheCurrentItemIsTheSelection()
+    {
+        var list = MakeList(50);
+        list.IsFocusable = true;
+        list.SelectedIndex = 7;
+
+        var tree = BuildFocused(list, list);
+
+        Assert.Equal(-1, list.CurrentIndex);
+        Assert.Equal(7, tree.CurrentItem);
+    }
+
+    [Fact]
+    public void ACursorPastTheItems_IsNoCurrentItem()
+    {
+        var list = MakeList(50);
+        list.IsFocusable = true;
+        list.SelectedIndex = 7;
+        list.CurrentIndex = 50;
+
+        var tree = BuildFocused(list, list);
+
+        Assert.Equal(-1, tree.CurrentItem);
+    }
+
+    [Fact]
+    public void OnDemandList_CarriesTheCursorOnItsNode()
+    {
+        var list = MakeList(2_001);
+        list.IsFocusable = true;
+        list.CurrentIndex = 1_500;
+
+        var tree = BuildFocused(list, list);
+
+        Assert.True(tree.IsVirtualItemContainer);
+        Assert.True(tree.IsFocused);
+        Assert.Empty(tree.Children);
+        Assert.Equal(1_500, tree.CurrentItem);
+    }
+
+    // ── Item bounds in both flows ──
+
+    [Fact]
+    public void ItemsInColumns_CarryTheirColumnsBounds_AndOffscreenState()
+    {
+        var list = MakeList(40);   // 100 px tall, 20 px rows: five a column
+        list.Flow(ListFlow.Columns, columnWidth: 80f);
+        list.ShowScrollbarX = false;
+
+        var tree = BuildLaidOut(list);
+
+        var item7 = tree.Children[7];   // column 1, row 2
+        Assert.Equal(new Rect(80, 40, 80, 20), item7.BoundingRect);
+        Assert.False(item7.IsOffscreen);
+        Assert.True(tree.Children[15].IsOffscreen);   // column 3, past the 200 px viewport
+    }
+
+    [Fact]
+    public void UniformRowBounds_AreTheNumbersTheyWere()
+    {
+        var tree = BuildLaidOut(MakeList(50));
+
+        Assert.Equal(new Rect(0, 0, 200, 20), tree.Children[0].BoundingRect);
+        Assert.Equal(new Rect(0, 60, 200, 20), tree.Children[3].BoundingRect);
+        Assert.True(tree.Children[10].IsOffscreen);
+    }
+
+    [Fact]
+    public void UnequalRowBounds_FollowTheRowHeights()
+    {
+        var list = MakeList(20);
+        list.ItemHeightFor = (_, i) => i % 2 == 0 ? 10f : 30f;   // 10, 30, 10, 30, …
+
+        var tree = BuildLaidOut(list);
+
+        Assert.Equal(new Rect(0, 40, 200, 10), tree.Children[2].BoundingRect);
+        Assert.Equal(new Rect(0, 50, 200, 30), tree.Children[3].BoundingRect);
     }
 }

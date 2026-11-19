@@ -35,6 +35,10 @@ public sealed class GitWatcher : IDisposable
     /// files a second; a new token, task and delay per event, and the cancelled delay's
     /// exception, were most of what the watcher cost (plan 17 round 14).</summary>
     private readonly ITimer _debounce;
+    /// <summary>The clock the debounce is counted on, and its reading when the watcher was made:
+    /// the system's, unless a test passes one it moves itself.</summary>
+    private readonly TimeProvider _time;
+    private readonly long _epoch;
     private readonly object _lock = new();
     /// <summary>Whether HEAD, a ref, the config or the packed refs changed since the last
     /// callback. Guarded by <see cref="_lock"/>.</summary>
@@ -43,7 +47,7 @@ public sealed class GitWatcher : IDisposable
     /// the last <see cref="Forget"/> covered; how many the last callback posted had heard.
     /// Guarded by <see cref="_lock"/>.</summary>
     private long _heard, _told, _forgotten, _posted;
-    /// <summary>When the window closes (<see cref="Environment.TickCount64"/>): the debounce
+    /// <summary>When the window closes (<see cref="NowMs"/>): the debounce
     /// after the last event heard. Whether the timer is set to fire. Whether it was
     /// disposed. Guarded by <see cref="_lock"/>.</summary>
     private long _due;
@@ -104,12 +108,17 @@ public sealed class GitWatcher : IDisposable
     /// <param name="onChange">Called on the UI thread, debounced; its argument is true when
     /// HEAD, a ref, the config or the packed refs changed, false when only the working tree or
     /// the index did.</param>
-    public GitWatcher(string repoPath, Action<bool> onChange, int debounceMs = 300)
+    /// <param name="time">The clock the debounce is counted on, its timer included; the system's
+    /// when null. A test passes one it moves itself, so that a runner stalled for longer than the
+    /// debounce cannot close a window in the middle of a burst.</param>
+    public GitWatcher(string repoPath, Action<bool> onChange, int debounceMs = 300, TimeProvider? time = null)
     {
         _listening = DateTime.UtcNow;
         _onChange = onChange;
         _debounceMs = debounceMs;
-        _debounce = TimeProvider.System.CreateTimer(static w => ((GitWatcher)w!).OnDue(), this,
+        _time = time ?? TimeProvider.System;
+        _epoch = _time.GetTimestamp();
+        _debounce = _time.CreateTimer(static w => ((GitWatcher)w!).OnDue(), this,
             Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         _repoPath = repoPath;
         _folderBySpan = _folders.GetAlternateLookup<ReadOnlySpan<char>>();
@@ -424,13 +433,16 @@ public sealed class GitWatcher : IDisposable
         }
     }
 
+    /// <summary>Milliseconds since the watcher was made, on <see cref="_time"/>.</summary>
+    private long NowMs() => (long)_time.GetElapsedTime(_epoch).TotalMilliseconds;
+
     /// <summary>Counts an event and moves the window's end on. Under <see cref="_lock"/>.</summary>
     private void Heard()
     {
         _heard++;
         // The window closes a debounce after the last event. The timer is set once a window;
         // OnDue moves it on while events keep coming, rather than every event doing so.
-        _due = Environment.TickCount64 + _debounceMs;
+        _due = NowMs() + _debounceMs;
         if (!_armed)
         {
             _armed = true;
@@ -452,7 +464,7 @@ public sealed class GitWatcher : IDisposable
         lock (_lock)
         {
             if (_disposed || !_armed) return;   // stopped by Forget or Dispose
-            long wait = _due - Environment.TickCount64;
+            long wait = _due - NowMs();
             if (wait > 0 || _busy)
             {
                 _debounce.Change(TimeSpan.FromMilliseconds(wait > 0 ? wait : _debounceMs), Timeout.InfiniteTimeSpan);
@@ -526,8 +538,8 @@ public sealed class GitWatcher : IDisposable
     }
 
     /// <summary>20 bytes, or 32 when the repository's objects are SHA-256
-    /// (<c>extensions.objectFormat</c>).</summary>
-    private static int ObjectIdLength(string gitDir)
+    /// (<c>extensions.objectFormat</c> in the config under <paramref name="gitDir"/>).</summary>
+    internal static int ObjectIdLength(string gitDir)
     {
         try
         {

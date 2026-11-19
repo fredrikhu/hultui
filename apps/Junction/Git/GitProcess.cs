@@ -115,7 +115,28 @@ public static class GitProcess
 
         if (!s_counted.IsEmpty && s_counted.TryGetValue(workingDirectory, out var counted))
             Interlocked.Increment(ref counted.Value);
+        if (!s_before.IsEmpty && s_before.TryGetValue(workingDirectory, out var before))
+            before(args);
         return psi;
+    }
+
+    // The repositories a test does something in front of each git command against (BeforeRun).
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Action<IReadOnlyList<string>>>
+        s_before = new(StringComparer.Ordinal);
+
+    /// <summary>For tests: calls <paramref name="hook"/> with the arguments of every git command
+    /// started against <paramref name="repository"/> (the path as callers pass it), on the thread
+    /// starting it and before it starts, until the handle is disposed. A command the hook runs
+    /// against the same repository comes back through it.</summary>
+    internal static IDisposable BeforeRun(string repository, Action<IReadOnlyList<string>> hook)
+    {
+        s_before[repository] = hook;
+        return new Unhook(repository, hook);
+    }
+
+    private sealed class Unhook(string repository, Action<IReadOnlyList<string>> hook) : IDisposable
+    {
+        public void Dispose() => s_before.TryRemove(new KeyValuePair<string, Action<IReadOnlyList<string>>>(repository, hook));
     }
 
     // The repositories whose git commands a test counts (CountRuns), by the path as callers pass it.

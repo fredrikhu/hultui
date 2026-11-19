@@ -33,8 +33,10 @@ namespace HultUI.Headless.Tests;
 public class A11yLeafPatchTests
 {
     /// <summary>A real bridge, reported active whether or not a client listens; counts patches.</summary>
-    private sealed class Counting(IAccessibilityBridge inner) : IAccessibilityBridge
+    private sealed class Counting(IAccessibilityBridge inner) : IAccessibilityBridge, IEagerItemsLimit
     {
+        // The real bridge's number of items past which a list's are served on demand (UIA 200, AT-SPI 2,000).
+        public int MaxEagerVirtualItems => AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(inner);
         public int Patches;
         public AccessibilityNode? Tree;
         public bool IsActive => true;

@@ -142,6 +142,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
     // ──── Accessibility state ────
     private IAccessibilityBridge _accessibilityBridge = NullAccessibilityBridge.Instance;
+    // The most items a list has as item nodes in this window's trees, past which they are served on
+    // demand: the bridge's number (IEagerItemsLimit; UIA 200, AT-SPI 2,000), read as it is put in.
+    private int _a11yMaxEager = AccessibilityTreeBuilder.MaxEagerVirtualItems;
     private AccessibilityNode? _previousA11yTree;
     // The element whose node _previousA11yTree marks focused: the focused one when the tree
     // was built, then each focus move's (see MoveA11yFocus). Null for none. The element, not its
@@ -827,7 +830,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // Windows this wires an SDL message hook for WM_GETOBJECT; on Linux
         // it attempts a connection to the AT-SPI bus. Either way it falls
         // back to NullAccessibilityBridge if the platform can't be reached.
-        _accessibilityBridge = AccessibilityBridgeFactory.Create(this);
+        SetAccessibilityBridge(AccessibilityBridgeFactory.Create(this));
 
         // One-line graphics diagnostic: the renderer/driver/vsync config the
         // platform *actually* gave us. Cross-OS perf comparisons are meaningless
@@ -873,13 +876,14 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// </summary>
     private AccessibilityNode BuildAccessibilityTreeWithOverlays(Element root)
     {
-        var tree = AccessibilityTreeBuilder.Build(root, _focusManager);
+        var tree = AccessibilityTreeBuilder.Build(root, _focusManager, 0f, 0f, default, _a11yMaxEager);
         for (int i = 0; i < _overlays.Count; i++)
         {
             var overlay = _overlays[i];
             if (!overlay.IsHitTestable) continue;
             // Under the root's node, whose scroll (a root that is a scroll view) it does not take.
-            tree.AddChild(AccessibilityTreeBuilder.Build(overlay.Content, _focusManager, overlay.X, overlay.Y, tree.ScrollOffset));
+            tree.AddChild(AccessibilityTreeBuilder.Build(overlay.Content, _focusManager, overlay.X, overlay.Y, tree.ScrollOffset,
+                _a11yMaxEager));
         }
         return tree;
     }
@@ -887,9 +891,18 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// <summary>
     /// Replaces the platform accessibility bridge. Used by headless sessions to
     /// install a capturing bridge that exercises the per-frame build/diff path.
+    /// The trees are built by the bridge's number of items past which a list's are
+    /// served on demand (<see cref="AccessibilityTreeBuilder.MaxEagerVirtualItemsOf"/>).
     /// </summary>
     internal void SetAccessibilityBridge(IAccessibilityBridge bridge)
-        => _accessibilityBridge = bridge;
+    {
+        _accessibilityBridge = bridge;
+        _a11yMaxEager = AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(bridge);
+    }
+
+    /// <summary>For tests: the most items a list has as item nodes in this window's trees, past which
+    /// they are served on demand (the bridge's number).</summary>
+    internal int AccessibilityMaxEagerItems => _a11yMaxEager;
 
     /// <summary>Moves keyboard focus programmatically (same path as click/Tab focus).</summary>
     internal void SetFocus(Element? element) => _focusManager.SetFocus(element);
@@ -1227,7 +1240,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 switch (target.Kind)
                 {
                     case A11yPatchKind.List:
-                        if (!AccessibilityTreeBuilder.ItemSelectionChanges(node, (IAccessibleItemSource)element, changes, served, currents))
+                        if (!AccessibilityTreeBuilder.ItemSelectionChanges(node, (IAccessibleItemSource)element, changes, served, currents,
+                                _a11yMaxEager))
                             return false;
                         break;
                     case A11yPatchKind.Selected when element is MenuBarElement bar:
@@ -1488,7 +1502,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 if (!overlay.A11yStale) continue;
                 overlay.A11yStale = false;
                 int at = OverlayNodeIndex(tree, overlay.Content);
-                var part = AccessibilityTreeBuilder.Build(overlay.Content, _focusManager, overlay.X, overlay.Y, tree.ScrollOffset);
+                var part = AccessibilityTreeBuilder.Build(overlay.Content, _focusManager, overlay.X, overlay.Y, tree.ScrollOffset, _a11yMaxEager);
                 AccessibilityOverlayPartsBuilt++;
                 var partDiff = AccessibilityTreeDiffer.Diff(tree.Children[at], part);
                 tree.ReplaceChild(at, part);
@@ -1582,7 +1596,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         for (int i = 0; i < _overlays.Count; i++)
         {
             if (_overlays[i] is not { IsHitTestable: true, A11yOpened: true } overlay) continue;
-            var part = AccessibilityTreeBuilder.Build(overlay.Content, _focusManager, overlay.X, overlay.Y, tree.ScrollOffset);
+            var part = AccessibilityTreeBuilder.Build(overlay.Content, _focusManager, overlay.X, overlay.Y, tree.ScrollOffset, _a11yMaxEager);
             AccessibilityOverlayPartsBuilt++;
             next[n++] = part;
             AccessibilityTreeBuilder.AddRecursive(come, part, tree);
@@ -1637,7 +1651,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             var before = _a11yOverlaysCameOrWent ? SwapOverlayParts(tree, come, gone) : null;
             for (int i = 0; i < _overlays.Count; i++)
                 if (_overlays[i] is { IsHitTestable: true } overlay) parts.Add((overlay.Content, overlay.X, overlay.Y));
-            if (!AccessibilityTreeBuilder.TryRefreshInPlace(tree, _root!, parts, _focusManager, refresh))
+            if (!AccessibilityTreeBuilder.TryRefreshInPlace(tree, _root!, parts, _focusManager, refresh, _a11yMaxEager))
             {
                 if (before is not null) tree.ReplaceChildren(before);
                 AccessibilityLayoutRefreshMismatch = refresh.Mismatch;
@@ -3208,7 +3222,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 // The text comes from the group's model, so it spans lines that were never
                 // realized — copying 900 lines does not need 900 live labels.
                 if (key.IsDown && key.KeyCode == KeyCode.C
-                    && (key.Modifiers.HasFlag(KeyModifiers.Ctrl) || key.Modifiers.HasFlag(KeyModifiers.Super))
+                    && KeyChord.IsPrimaryHeld(key.Modifiers)
                     && _activeTextGroup is { HasSelection: true } copyGroup)
                 {
                     var text = copyGroup.SelectedText;
@@ -5555,11 +5569,12 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     or AccessibilityProperties.IsExpanded
                 && element.Children.Count != 0 && element.AccessibleTextSource is null)
                 window._a11yWalkDue = true;
-            // A list's selection moved: two items' selected state, which the frame marks on the
-            // applied tree and tells without a rebuild (TryPatchA11y). A rebuild for it
+            // A list's selection moved, or its current item (VirtualListElement.CurrentIndex): two
+            // items' selected state or the reader's focus, which the frame marks on the applied tree
+            // and tells without a rebuild (TryPatchA11y). A rebuild for it
             // built and diffed the whole tree on every key of a walk: Junction's History list, a
             // key every 60 ms, 25 rebuilds per 40 keys became 41, its a11y share 7 % became 30 %.
-            else if (propertyName == AccessibilityProperties.IsSelected
+            else if ((propertyName == AccessibilityProperties.IsSelected || propertyName == AccessibilityProperties.CurrentItem)
                 && element is IAccessibleItemSource { PublishesItemNodes: true })
             {
                 if (!window._a11ySelectionMoved.Contains(element)) window._a11ySelectionMoved.Add(element);

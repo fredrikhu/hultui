@@ -1,5 +1,6 @@
 using System.Linq;
 using HultUI.Core.Elements;
+using HultUI.Core.Primitives;
 
 namespace HultUI.Core.Accessibility;
 
@@ -73,6 +74,14 @@ public interface IAccessibleItemSource
     (float Top, float Height)? ItemBounds(int index) => null;
 
     /// <summary>
+    /// Where item <paramref name="index"/> sits in the container's content space, both axes: for
+    /// a container that lays its items out in columns as well as rows. Wins over
+    /// <see cref="ItemBounds"/>; null (the default) falls back to it. Must be cheap, and must not
+    /// realize the item: it may be asked for every item, and off the UI thread.
+    /// </summary>
+    Rect? ItemRect(int index) => null;
+
+    /// <summary>
     /// Whether the item at <paramref name="index"/> is a choice that is on or off, or
     /// <c>null</c> (the default) when the item has no such state. A menu of choices
     /// answers here rather than marking the chosen one inside its label, where the mark
@@ -134,6 +143,18 @@ public interface IAccessibleItemSource
     /// element (that would defeat virtualization).
     /// </summary>
     string? GetItemLabel(int index);
+
+    /// <summary>
+    /// The label <see cref="GetItemLabel"/> gives item <paramref name="index"/>, read on the UI thread
+    /// without keeping it: a kept one when there is one, else made for the call. For the UI
+    /// Automation bridge's read of the reader's focus at the end of each accessibility phase that
+    /// applied something, an item served on demand whose rename no diff tells. A list that keeps its
+    /// labels (<see cref="Elements.VirtualListElement{T}"/> on item rows) sizes what it keeps to the
+    /// items' number at the first label kept: an array as long as the list, 24 KB for Junction's
+    /// History of 1,000 commits, made again with every new list, for a list served on demand that
+    /// no walk asks the labels of. By default <see cref="GetItemLabel"/>.
+    /// </summary>
+    internal string? PeekItemLabel(int index) => GetItemLabel(index);
 
     /// <summary>
     /// Performs the item's primary action (as a click would) when assistive tech

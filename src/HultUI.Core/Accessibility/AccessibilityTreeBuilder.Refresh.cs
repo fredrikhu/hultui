@@ -62,6 +62,10 @@ public static partial class AccessibilityTreeBuilder
         /// <summary>Whether a build would make other nodes, which the refresh makes in their place.</summary>
         internal bool Structural => Added.Count > 0 || Removed.Count > 0 || Reordered.Count > 0;
 
+        /// <summary>While the walk runs: the most items a list has as item nodes, past which a build
+        /// serves them on demand (<see cref="TryRefreshInPlace"/>'s).</summary>
+        internal int MaxEager = MaxEagerVirtualItems;
+
         /// <summary>Why the last walk did not match, for tests: the first thing it found that a
         /// build would make otherwise. Null when it matched.</summary>
         internal string? Mismatch;
@@ -142,11 +146,15 @@ public static partial class AccessibilityTreeBuilder
     /// from, a described node or a list's item with children whose own properties changed, the
     /// window's root node's own, an overlay opened or closed, or a change no diff tells (a node
     /// focusable or not, another text source). The window builds the tree then, as it always did.</para>
+    /// <para><c>maxEager</c> is the most items a list has as item nodes, as the tree was built
+    /// (<see cref="Build(Element, FocusManager?, float, float, Point, int)"/>).</para>
     /// </summary>
     internal static bool TryRefreshInPlace(AccessibilityNode tree, Element root,
-        IReadOnlyList<(Element Content, float X, float Y)> overlays, FocusManager? focusManager, LayoutRefresh refresh)
+        IReadOnlyList<(Element Content, float X, float Y)> overlays, FocusManager? focusManager, LayoutRefresh refresh,
+        int maxEager = MaxEagerVirtualItems)
     {
         refresh.Mismatch = null;
+        refresh.MaxEager = maxEager;
         if (tree.ElementId != root.Id) return refresh.Fail("another root");
         // The root's node has its element's children's nodes, then one part per open overlay; the
         // same overlays, each checked below.
@@ -186,7 +194,7 @@ public static partial class AccessibilityTreeBuilder
     /// <summary>
     /// The node of <paramref name="element"/> (a semantic one, or a tree's root), against
     /// <paramref name="applied"/>, the node in its place in the applied tree with its id, and its
-    /// children after it. As <see cref="BuildChild"/> and <see cref="Build(Element, FocusManager?, float, float, Point)"/>.
+    /// children after it. As <see cref="BuildChild"/> and <see cref="Build(Element, FocusManager?, float, float, Point, int)"/>.
     /// </summary>
     /// <param name="parent">The node <paramref name="applied"/> is a child of, at
     /// <paramref name="index"/>; null for the window's root node.</param>
@@ -239,7 +247,7 @@ public static partial class AccessibilityTreeBuilder
                 {
                     int count = items.ItemCount;
                     MarkItemSource(made, element, items, count);
-                    if (count > MaxEagerVirtualItems && OpenRow(element, items, focusManager).Element is null)
+                    if (count > refresh.MaxEager && OpenRow(element, items, focusManager).Element is null)
                         ServeOnDemand(made, items, count);
                 }
                 int start = refresh.Changes.Count;
@@ -315,7 +323,7 @@ public static partial class AccessibilityTreeBuilder
         {
             if (!ReferenceEquals(node.ItemSource, items)) return refresh.Fail("a list's items");
             var open = OpenRow(element, items, focusManager);
-            if (items.ItemCount > MaxEagerVirtualItems && open.Element is null)
+            if (items.ItemCount > refresh.MaxEager && open.Element is null)
             {
                 if (!node.IsVirtualItemContainer || node.Children.Count != 0) return refresh.Fail("a list's items");
                 // Its items' number and selection are the node's own: told as a diff tells them, and
@@ -426,7 +434,7 @@ public static partial class AccessibilityTreeBuilder
         if (found < 0)
         {
             // New to the tree: built here as a build builds it, which adds its one node.
-            BuildChild(child, pending, focusManager, childPlace, clip);
+            BuildChild(child, pending, focusManager, childPlace, clip, refresh.MaxEager);
             AddRecursive(refresh.Added, pending[^1], node);
             return true;
         }
@@ -592,8 +600,7 @@ public static partial class AccessibilityTreeBuilder
         {
             var node = nodes[i];
             if (node.ElementId != VirtualItemId.ForSlot(slot, i)) return refresh.Fail("a list's items");
-            var (localTop, height) = source.ItemBounds(i) ?? (i * itemHeight, itemHeight);
-            var box = new Rect(content.X, content.Y + localTop, content.Width, height);
+            var box = ItemBox(source, i, content, itemHeight);
             var unscrolled = place.Unscrolled(box);
             bool offscreen = !RectsIntersect(clip, place.OnScreen(box));
             // Kept labels on item rows are the same string; a label made on each ask is compared.
@@ -629,15 +636,14 @@ public static partial class AccessibilityTreeBuilder
         for (int i = 0; i < kept; i++) pending.Add(nodes[i]);
         for (int i = kept; i < count; i++)
         {
-            var (localTop, height) = source.ItemBounds(i) ?? (i * itemHeight, itemHeight);
-            var box = new Rect(content.X, content.Y + localTop, content.Width, height);
+            var box = ItemBox(source, i, content, itemHeight);
             var item = MakeItemNode(slot, i, role, source.GetItemLabel(i), place.Unscrolled(box), source.ItemIsToggled(i),
                 source.ItemIsExpanded(i), source.IsItemSelected(i), source.ItemIsEnabled(i),
                 !RectsIntersect(clip, place.OnScreen(box)));
             if (i == open.Item)
             {
                 int row = pending.Count;
-                BuildChild(open.Element!, pending, focusManager, Placed(open.Element!, place), clip);
+                BuildChild(open.Element!, pending, focusManager, Placed(open.Element!, place), clip, refresh.MaxEager);
                 TakePending(item, pending, row);
             }
             pending.Add(item);

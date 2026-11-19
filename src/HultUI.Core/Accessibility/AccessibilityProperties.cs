@@ -70,8 +70,8 @@ public static class AccessibilityProperties
     public const string NativeContent = "NativeContent";
 
     /// <summary>
-    /// A menu bar's highlighted title moved (<see cref="AccessibilityNode.CurrentItem"/>). Told by the
-    /// element only: the window marks the bar's node in place and asks the bridge to read the focus
+    /// A menu bar's highlighted title, or a list's current item, moved (<see cref="AccessibilityNode.CurrentItem"/>).
+    /// Told by the element only: the window marks the node in place and asks the bridge to read the focus
     /// again (<see cref="IAccessibilityBridge.NotifyChangesApplied"/>). No diff carries it, and no
     /// bridge is handed it as a change.
     /// </summary>

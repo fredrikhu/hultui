@@ -87,23 +87,63 @@ public partial class JunctionApp
     /// generation it was read at (see <see cref="EnsureChangesLoaded"/>).</summary>
     private readonly Dictionary<string, (int RefsGen, string? Message)> _changesHeadRead = new(PathComparer);
 
-    // Runs off the UI thread. <paramref name="shared"/>: the status the summary of this generation
-    // reads too. <paramref name="head"/>: HEAD's message, when one read at this refs generation is
-    // known.
+    /// <summary>How many times one load reads the working tree while the index keeps moving under
+    /// it, before it gives up and keeps what is on screen (see <see cref="LoadChanges"/>).</summary>
+    private const int MaxChangesReads = 3;
+
+    /// <summary>
+    /// Runs off the UI thread. <paramref name="shared"/>: the status the summary of this generation
+    /// reads too. <paramref name="head"/>: HEAD's message, when one read at this refs generation is
+    /// known.
+    ///
+    /// <para>The lists are several git commands read one after another, and a <c>git add</c> that
+    /// lands between them tears them apart: the staged list read before it and the working tree
+    /// after said the file was in neither, and the row vanished. It takes no bad luck: a staging
+    /// click runs its command while the reload of the click before is still reading. The load that
+    /// landed then pruned the selection against the torn lists, the optimistic move had no row to
+    /// carry (it moves rows, and there was none), and "Unstage all" over the gap did nothing. So
+    /// the index is read before and after (only its entries: the file times a status refreshes are
+    /// left out), and a read it moved under is read again. One it keeps moving under throws: the
+    /// loader keeps what is on screen and asks again shortly, and whatever moved the index reloads
+    /// in any case (this app's own command when it is done, anyone else's through the watcher).
+    /// A change undone within one read (staged and unstaged again) goes unseen.</para>
+    /// </summary>
     private ChangesData LoadChanges(string path, bool ignoreWhitespace, SharedStatus? shared = null,
         (int RefsGen, string? Message)? head = null)
     {
         var repo = RepoFor(path);
+        for (int read = 1; ; read++)
+        {
+            var before = repo.IndexPrint();
+            var data = ReadChanges(repo, path, ignoreWhitespace, shared, before, head);
+            if (repo.IndexPrint() == before) return data;
+            if (read == MaxChangesReads)
+                throw new InvalidOperationException($"The index of {path} moved under {read} reads in a row.");
+            shared = null;   // spent on the read it tore
+        }
+    }
+
+    /// <summary>One read of the working tree for <see cref="LoadChanges"/>, begun when the index
+    /// held <paramref name="before"/>.</summary>
+    private ChangesData ReadChanges(GitRepository repo, string path, bool ignoreWhitespace,
+        SharedStatus? shared, ulong? before, (int RefsGen, string? Message)? head)
+    {
         var staged = repo.GetStagedChanges();
         // One status for the files only it lists and, mid-operation, the conflicts: read after
-        // the diff, as before, from the summary's run when there is one.
+        // the diff, as before, from the summary's run when there is one. The summary may have run
+        // it before this read began: when the index has moved since, it is not this read's (a file
+        // staged in between was in the staged list and, by the status, still untracked).
         GitResult? statusRead = null;
         GitResult Status()
         {
             if (statusRead is not null) return statusRead;
-            statusRead = shared?.Result ?? repo.RunStatus();
-            if (shared is not null) _sharedStatus.TryRemove(new KeyValuePair<string, SharedStatus>(path, shared));
-            return statusRead;
+            if (shared is not null)
+            {
+                var result = shared.Result;
+                _sharedStatus.TryRemove(new KeyValuePair<string, SharedStatus>(path, shared));
+                if (shared.Print == before) return statusRead = result;
+            }
+            return statusRead = repo.RunStatus();
         }
         var unstaged = repo.GetUnstagedChanges(Status);
 
@@ -535,17 +575,19 @@ public partial class JunctionApp
     /// beside it takes what is left, and its pan reads that after the frame (FollowDiffWidth). A
     /// move built the view, 42 KB with Changes' diff (plan 17 round 10 step 13). The press, which
     /// lights the handle, the release, which remembers the width, and the arrow keys build the
-    /// view, which reads the width; so does a move while the diff's rows are measured at its
-    /// width (wrapped, or a review's cards), where the rows have to be measured again. A wrapped
-    /// diff's build is handed the width the move leaves it (LeadWrappedDiffSplit), so it measures
-    /// the rows once, at the width they are drawn at.
+    /// view, which reads the width; a wrapped diff's build is handed the width the move leaves it
+    /// (LeadWrappedDiffSplit), so it measures the rows once, at the width they are drawn at. A
+    /// move beside a diff whose rows are measured at its width (wrapped, or a review's cards)
+    /// measures them at that width and fits them in place, with no build (FitWrappedDiffInPlace;
+    /// it built the view until plan 17 round 16).
     /// </summary>
     private void FileListSplitMoved(PaneSplitter split, Element? list)
     {
-        if (split.IsDragging && !_diffWrap && !ReviewRowsActive
+        if (split.IsDragging
             && list is { IsHosted: true, Box.Width.Unit: DimensionUnit.Pixels }
             && list.Box.Width != Dimension.Px(split.Size))   // the press moves nothing
         {
+            if (_diffWrap || ReviewRowsActive) LeadWrappedDiffRows(split, list);
             list.Width(split.Size);
             list.MarkLayoutDirty();
             FollowDiffWidthAfterFrame();
@@ -1350,7 +1392,7 @@ public partial class JunctionApp
         // a newline.
         box.On<KeyDownEvent>(EventPhase.Capture, e =>
         {
-            var mod = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
+            var mod = KeyChord.IsPrimaryHeld(e.Modifiers);
             if (mod && e.Key == KeyCode.Enter)
             {
                 e.StopPropagation = true;
@@ -1524,8 +1566,17 @@ public partial class JunctionApp
     /// same path exists in more than one open repository.</summary>
     private readonly record struct StageKey(string Repo, string Path);
 
-    /// <summary>True: on its way into the staged list; false: on its way out of it.</summary>
-    private readonly Dictionary<StageKey, bool> _pendingStage = new();
+    /// <summary>Where a file is on its way: into the staged list or out of it, and the move that
+    /// sent it, which only that move's command may settle or take back. A file staged and then
+    /// unstaged before git answered the stage is the unstage's: the stage coming back settled it,
+    /// the reload behind the stage retired it, and the row sprang back to Staged while
+    /// <c>git reset</c> was still waiting its turn.</summary>
+    private readonly Dictionary<StageKey, PendingMove> _pendingStage = new();
+
+    private readonly record struct PendingMove(bool ToStaged, int Move);
+
+    /// <summary>Counts the moves asked for; each one's number is in <see cref="_pendingStage"/>.</summary>
+    private int _stageMoves;
 
     /// <summary>Moves whose git command has come back successfully. They stay on screen
     /// until the reload behind them lands, or the row would flick back to where it started
@@ -1578,7 +1629,7 @@ public partial class JunctionApp
         var stagedDiffs = new Dictionary<string, GitFileDiff>(data.StagedDiffs, StringComparer.Ordinal);
         var unstagedDiffs = new Dictionary<string, GitFileDiff>(data.UnstagedDiffs, StringComparer.Ordinal);
 
-        foreach (var (key, toStaged) in mine)
+        foreach (var (key, (toStaged, _)) in mine)
         {
             var from = toStaged ? unstaged : staged;
             var to = toStaged ? staged : unstaged;
@@ -1670,13 +1721,22 @@ public partial class JunctionApp
     {
         var repoPath = _activeRepoPath;
         var keys = paths.Select(p => new StageKey(repoPath, p)).ToList();
-        foreach (var key in keys) _pendingStage[key] = toStaged;
+        int move = ++_stageMoves;
+        foreach (var key in keys)
+        {
+            _pendingStage[key] = new PendingMove(toStaged, move);
+            // Settled by an earlier move whose reload has not landed: that reload is not this
+            // move's, and must not retire it.
+            _settledStage.Remove(key);
+        }
         _pendingStageGen++;
         MarkDirty();
-        _stagingChain = RunStagingAsync(keys, command, ok, fail, repoPath);
+        _stagingChain = RunStagingAsync(keys, move, command, ok, fail, repoPath);
     }
 
-    private async Task RunStagingAsync(List<StageKey> keys, Func<bool> command,
+    /// <param name="move">The move this command is for: it settles, or on failure takes back,
+    /// only the files still on their way by it (see <see cref="_pendingStage"/>).</param>
+    private async Task RunStagingAsync(List<StageKey> keys, int move, Func<bool> command,
         string? ok, string fail, string repoPath)
     {
         // Read before the first await, so this is the chain as it stood when the click
@@ -1695,12 +1755,14 @@ public partial class JunctionApp
             if (success)
             {
                 foreach (var key in keys)
-                    if (_pendingStage.ContainsKey(key)) _settledStage.Add(key);
+                    if (IsMoveOf(key, move)) _settledStage.Add(key);
                 if (ok != null) Flash(ok);
             }
             else
             {
-                foreach (var key in keys) { _pendingStage.Remove(key); _settledStage.Remove(key); }
+                // A later move of the same file runs its own command after this one.
+                foreach (var key in keys)
+                    if (IsMoveOf(key, move)) { _pendingStage.Remove(key); _settledStage.Remove(key); }
                 _pendingStageGen++;
                 Flash(error is null ? fail : FirstLine(error, fail));
             }
@@ -1708,6 +1770,10 @@ public partial class JunctionApp
             else MarkDirty();
         });
     }
+
+    /// <summary>Whether <paramref name="key"/> is still on its way by <paramref name="move"/>.</summary>
+    private bool IsMoveOf(StageKey key, int move) =>
+        _pendingStage.TryGetValue(key, out var pending) && pending.Move == move;
 
     /// <summary>
     /// Runs a git command off the UI thread and applies its result on the main thread once

@@ -90,6 +90,17 @@ window.Title = $"{Path.GetFileName(folder)} — Vesper Commander";
 
 A borderless window has one too. No caption paints it, but the task bar, Alt+Tab and every window switcher read it — so an app with custom chrome should still keep it current, and draw its own caption text from the same string. Assigning the value it already has is a no-op all the way down to the platform, which makes it safe to set once per build rather than tracking a separate invalidation path.
 
+### The app id
+
+On Linux the desktop finds an app's icon, name and launcher entry through its id: the Wayland `app_id` and the class of the X11 `WM_CLASS`. Without one, SDL uses the executable's name. Name the app once, before the first `Application`, and ship `identifier.desktop` with `StartupWMClass=identifier`. A window keeps the id it was made with, so setting it after a window exists throws. The `SDL_APP_ID` environment variable still overrides it, for packagers.
+
+```csharp
+Application.SetAppMetadata("Example", "1.0.0", "com.example.App");
+using var app = new Application("Example", 1280, 800);
+// Wayland: xdg_toplevel.set_app_id("com.example.App")
+// X11:     WM_CLASS = ("example", "com.example.App")
+```
+
 ### Placement
 
 `Window.Placement` is where the window is and whether it is maximized: a `WindowPlacement` record to save as the app closes and give back as it starts, so the window opens where the person left it. Store it with the app's settings (it serializes through a source-generated `JsonSerializerContext` like any other property):

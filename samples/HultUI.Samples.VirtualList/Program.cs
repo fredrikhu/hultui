@@ -6,13 +6,21 @@ using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
 
-// Generate a dataset of 100,000 items
-var items = Enumerable.Range(0, 100_000)
+// --marks: a keyboard cursor apart from the selection, and marks the app keeps (a file manager's
+// shape). --count N: how many items (100,000 by default).
+bool marksMode = args.Contains("--marks");
+int countAt = Array.IndexOf(args, "--count");
+int count = countAt >= 0 && countAt + 1 < args.Length && int.TryParse(args[countAt + 1], out int n) && n > 0 ? n : 100_000;
+
+// Generate the dataset
+var items = Enumerable.Range(0, count)
     .Select(i => new ItemData(i, $"Item #{i:N0}", GenerateColor(i)))
     .ToList();
 
 var statusText = Text.New($"{items.Count:N0} items — scroll to explore");
 var selectedText = Text.New("No selection");
+var marks = new bool[items.Count];
+int marked = 0;
 
 var virtualList = VirtualListElement<ItemData>.New()
     .ItemHeight(48)
@@ -27,6 +35,15 @@ virtualList.OnItemActivate = item =>
     virtualList.SelectedIndex = item.Index;
     selectedText.Content = $"Selected {item.Label}";
 };
+if (marksMode)
+{
+    // The list takes the keyboard itself; the cursor moves with no rebuild, and each move makes
+    // only the row it left and the row it reached again.
+    virtualList.IsFocusable = true;
+    virtualList.CurrentIndex(0).RenderWithState((item, state) => MakeStateRow(item, state, marks[item.Index]));
+    virtualList.On<KeyDownEvent>(OnListKey);
+    ShowCursor();
+}
 
 var root = Flex.Column(gap: 0).Children(
 
@@ -37,7 +54,7 @@ var root = Flex.Column(gap: 0).Children(
         .Children(
             Flex.Column(gap: 4).Children(
                 Text.New("VirtualList Demo").FontSize(22f).FontWeight(FontWeight.Bold),
-                Text.New("100,000 items — only visible rows are materialized").FontSize(13f)
+                Text.New($"{items.Count:N0} items — only visible rows are materialized").FontSize(13f)
                     .TextColor(new Color(199, 210, 254))
             )
         ),
@@ -46,8 +63,11 @@ var root = Flex.Column(gap: 0).Children(
     Flex.Row(gap: 12).Padding(12).FlexShrink(0).AlignItems(AlignItems.Center)
         .Background(Color.FromHex("#F8FAFC")).Children(
         Button.New("Scroll to top").OnClick(_ => ScrollTo(0)),
-        Button.New("Scroll to middle").OnClick(_ => ScrollTo(50_000)),
-        Button.New("Scroll to bottom").OnClick(_ => ScrollTo(99_999)),
+        Button.New("Scroll to middle").OnClick(_ => ScrollTo(items.Count / 2)),
+        Button.New("Scroll to bottom").OnClick(_ => ScrollTo(items.Count - 1)),
+        // Rows, or columns that scroll sideways (a file manager's Brief view).
+        Button.New("Columns").OnClick(_ =>
+            virtualList.Flow(virtualList.Flow == ListFlow.Rows ? ListFlow.Columns : ListFlow.Rows, 220f)),
         Box.New().FlexGrow(1),
         selectedText.FontSize(13f).TextColor(Color.FromHex("#64748B"))
     ),
@@ -117,9 +137,74 @@ Element MakeRow(ItemData item)
 
 void ScrollTo(int index)
 {
-    virtualList.ScrollOffsetY = index * 48f;
+    // Where the item is, in either flow: its column in columns, its row in rows.
+    var cell = virtualList.ItemRect(index);
+    if (virtualList.Flow == ListFlow.Columns)
+        virtualList.ScrollRangeIntoViewHorizontal(cell.X, cell.Width);
+    else
+        virtualList.ScrollRangeIntoView(cell.Y, cell.Height, ScrollAlignment.Start);
     statusText.Content = $"Scrolled to item #{index:N0}";
 }
+
+// A row drawn from its item, its state and its mark: a filled bar where the cursor is, ◆ where
+// the item is marked. The marks are the app's, so a toggle makes the rows again (InvalidateRows).
+Element MakeStateRow(ItemData item, ListItemState state, bool isMarked)
+{
+    var accent = Color.FromHex("#4F46E5");
+    return Flex.Row(gap: 12).Padding(new Thickness(8, 16, 8, 0))
+        .AlignItems(AlignItems.Center)
+        .Background(state.IsCurrent ? Color.FromHex("#EEF2FF") : item.Index % 2 == 0 ? Color.Transparent : Color.FromHex("#F8FAFC"))
+        .Children(
+            Box.New().Width(4).Height(32).CornerRadius(2f).Background(state.IsCurrent ? accent : Color.Transparent),
+            Text.New(isMarked ? "◆" : " ").FontSize(14f).TextColor(accent).Width(16),
+            Box.New().Width(56).Height(32).CornerRadius(6f)
+                .Background(item.Color)
+                .Children(
+                    Text.New($"#{item.Index}").FontSize(12f).FontWeight(FontWeight.Bold)
+                        .TextColor(Color.White)
+                )
+                .Padding(new Thickness(6, 8))
+                .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center),
+            Text.New(item.Label).FontSize(14f).FlexGrow(1)
+        );
+}
+
+// Up/Down/PageUp/PageDown/Home/End move the cursor; Space marks the current item, Insert marks it
+// and moves down. Chorded keys are someone else's.
+void OnListKey(KeyDownEvent e)
+{
+    if ((e.Modifiers & (KeyModifiers.Ctrl | KeyModifiers.Alt | KeyModifiers.Super)) != 0) return;
+    int current = virtualList.CurrentIndex, last = items.Count - 1;
+    int page = Math.Max(1, (int)(virtualList.Layout.AbsoluteContentBox.Height / 48f) - 1);
+    int next;
+    switch (e.Key)
+    {
+        case KeyCode.Down: next = current + 1; break;
+        case KeyCode.Up: next = current - 1; break;
+        case KeyCode.PageDown: next = current + page; break;
+        case KeyCode.PageUp: next = current - page; break;
+        case KeyCode.Home: next = 0; break;
+        case KeyCode.End: next = last; break;
+        case KeyCode.Space: ToggleMark(current); next = current; break;
+        case KeyCode.Insert: ToggleMark(current); next = current + 1; break;
+        default: return;
+    }
+    next = Math.Clamp(next, 0, last);
+    virtualList.CurrentIndex = next;
+    virtualList.ScrollIndexIntoView(next);
+    ShowCursor();
+    e.StopPropagation = true;
+}
+
+void ToggleMark(int index)
+{
+    if (index < 0 || index >= marks.Length) return;
+    marks[index] = !marks[index];
+    marked += marks[index] ? 1 : -1;
+    virtualList.InvalidateRows();
+}
+
+void ShowCursor() => statusText.Content = $"Item #{virtualList.CurrentIndex:N0} · {marked:N0} marked";
 
 static Color GenerateColor(int index)
 {

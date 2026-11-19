@@ -1224,6 +1224,16 @@ public class DiffViewTests
             return () => gate.TrySetResult();
         }
 
+        /// <summary>Holds every read of the reader (Shift+F3) from now on at "Loading…" until the
+        /// returned action is called, as <see cref="HoldComparison"/> holds the compare view.</summary>
+        public System.Action HoldViewerLoad()
+        {
+            var gate = new System.Threading.Tasks.TaskCompletionSource(
+                System.Threading.Tasks.TaskCreationOptions.RunContinuationsAsynchronously);
+            _app.ViewerLoadGate = () => gate.Task;
+            return () => gate.TrySetResult();
+        }
+
         public void ClickFirstLine()
         {
             var box = FirstLineCell().text.Layout.AbsoluteBorderBox;

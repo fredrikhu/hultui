@@ -62,7 +62,8 @@ public sealed class TextPipeline
     // line lost its last character to the clip, or its last word to a wrap: "SAME DAY" drew as
     // "SAME DA". Widths that are not binary fractions lose that bit (a letter spacing of 0.4, a font
     // size of 13.333); HarfBuzz's advances alone are exact. A line this much too wide overhangs its
-    // box by nothing that draws. Not on the styled or BiDi paths, whose fits are their own.
+    // box by nothing that draws. Not on the styled or BiDi paths, whose fits are their own. A wrap kept
+    // for a range of widths (WrapRange) does not answer at these widths either.
     internal const float OneLineFitTolerance = 1f / 256f;
 
     // ── How much the caches above may hold ──
@@ -603,7 +604,7 @@ public sealed class TextPipeline
         if (overflow == TextOverflow.Clip && KeepsWrapRanges && ReuseAcrossWidths
             && fitsFrom <= maxWidth && maxWidth < fitsBelow)
             _wrapRanges.Put(wrapKey.IsMade ? wrapKey : new WrapKey(text, style, maxLines),
-                new WrapRange(layout, fitsFrom, fitsBelow), bytes);
+                new WrapRange(layout, fitsFrom, fitsBelow, shaped.HasNewline ? float.NaN : shaped.TotalWidth), bytes);
         return layout;
     }
 
@@ -620,7 +621,9 @@ public sealed class TextPipeline
     // kept paragraph is not shaped again (the archive's shapings did not fit the shape cache and were
     // all made again each step). Only Clip: truncation reads the width again (TruncatedTail). The
     // width-keyed cache above keeps answering widths seen before.
-    private readonly record struct WrapRange(TextLayout Layout, float From, float Below);
+    // OneLine is the text's own width (NaN with a newline): a width it fits within OneLineFitTolerance
+    // is the one-line fast path's, even below the text's own width, where the range still runs.
+    private readonly record struct WrapRange(TextLayout Layout, float From, float Below, float OneLine);
 
     // A paragraph's key in _wrapRanges: a layout cache key with no width, and its hash. A layout makes
     // it once, for its ask and the put after a miss: a long paragraph is hashed once, not four times
@@ -652,6 +655,10 @@ public sealed class TextPipeline
         if (!key.IsMade)
             key = new WrapKey(text, style, maxLines);
         if (!_wrapRanges.TryGet(key, out var kept) || !(kept.From <= maxWidth && maxWidth < kept.Below))
+            return null;
+        // One line by the fast path's own test, written as it is so that float rounding cannot tell the
+        // two apart: asked before shaping, a kept wrap must not answer where the shaped text would not wrap.
+        if (kept.OneLine <= maxWidth + OneLineFitTolerance)
             return null;
         WrapRangeHits++;
         return kept.Layout;

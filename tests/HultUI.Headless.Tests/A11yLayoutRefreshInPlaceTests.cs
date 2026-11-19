@@ -30,8 +30,10 @@ public class A11yLayoutRefreshInPlaceTests
     /// <summary>Counts patches and keeps the applied tree; a real bridge behind it, or the recording
     /// one. It keeps nothing of a diff past the call, as they do not, so the window lends it its diff
     /// for each refresh made in place, as it lends the real bridges (<see cref="ITreeDiffBorrower"/>).</summary>
-    private sealed class Counting(IAccessibilityBridge inner) : IAccessibilityBridge, ITreeDiffBorrower
+    private sealed class Counting(IAccessibilityBridge inner) : IAccessibilityBridge, IEagerItemsLimit, ITreeDiffBorrower
     {
+        // The real bridge's number of items past which a list's are served on demand (UIA 200, AT-SPI 2,000).
+        public int MaxEagerVirtualItems => AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(inner);
         public int Patches;
         public AccessibilityNode? Tree;
         public bool IsActive => true;
@@ -926,6 +928,7 @@ public class A11yLayoutRefreshInPlaceTests
         var raised = new List<string>();
         uia.Raised = r => raised.Add($"{r.Kind} {r.Id} {(r.Element is { } e ? e.Value.ToString() : "root")}");
         session.Window.InstallAccessibilityBridge(uia);
+        hwnd.AskForRoot();   // as a reader does: the bridge builds and raises nothing before
         var group = Flex.Column(gap: 2).AccessibleRole(AccessibilityRole.Group).AccessibleName("Left pane, docs").Children(Rows(20));
         session.Window.SetRoot(Flex.Column(gap: 4).Padding(8).Children(TextB.New("Header"), group));
         session.PumpFrames(2);

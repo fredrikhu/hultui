@@ -13,9 +13,16 @@ public static partial class AccessibilityTreeBuilder
     /// and hit-testable straight off the snapshot tree). Above it, the list is
     /// marked <see cref="AccessibilityNode.IsVirtualItemContainer"/> and the bridge
     /// provisions items on demand by index, so a list of any size costs nothing
-    /// until assistive tech walks into it.
+    /// until assistive tech walks into it. This is the number for the AT-SPI bridge and any
+    /// bridge that does not say another (<see cref="IEagerItemsLimit"/>); the UIA bridge
+    /// serves a list over 200 items on demand.
     /// </summary>
     internal const int MaxEagerVirtualItems = 2000;
+
+    /// <summary>The number of items past which <paramref name="bridge"/> has a list's items served on
+    /// demand: its own (<see cref="IEagerItemsLimit"/>), or <see cref="MaxEagerVirtualItems"/>.</summary>
+    internal static int MaxEagerVirtualItemsOf(IAccessibilityBridge bridge) =>
+        bridge is IEagerItemsLimit limit ? Math.Max(0, limit.MaxEagerVirtualItems) : MaxEagerVirtualItems;
 
     /// <summary>
     /// The nodes built so far on this thread whose parent is still being built, deepest last.
@@ -48,8 +55,10 @@ public static partial class AccessibilityTreeBuilder
     /// the scroll views above it: an open overlay's part goes under the window's root node
     /// (<see cref="AccessibilityNode.ScrollAbove"/>), which may scroll, and the overlay does not
     /// move with it.</param>
+    /// <param name="maxEager">The most items a list has as item nodes; past it, they are served on
+    /// demand: the window's bridge's number (<see cref="MaxEagerVirtualItemsOf"/>).</param>
     internal static AccessibilityNode Build(Element root, FocusManager? focusManager, float originX, float originY,
-        Point scrollAbove)
+        Point scrollAbove, int maxEager = MaxEagerVirtualItems)
     {
         Realize(root);
         // Threaded as a negative scroll: the builder already subtracts an accumulated
@@ -63,13 +72,13 @@ public static partial class AccessibilityTreeBuilder
         // (and out of any scroll view along the way) are marked offscreen.
         var childClip = ClipForChildren(root, place.OnScreen(box), place);
         if (!TryBuildContent(root, node, childPlace, childClip)
-            && !TryBuildVirtualItems(root, node, focusManager, childPlace, childClip))
+            && !TryBuildVirtualItems(root, node, focusManager, childPlace, childClip, maxEager))
         {
             var pending = t_pending ??= [];
             int start = pending.Count;
             try
             {
-                BuildElementChildren(root, node, pending, focusManager, childPlace, childClip);
+                BuildElementChildren(root, node, pending, focusManager, childPlace, childClip, maxEager);
             }
             finally
             {
@@ -190,10 +199,10 @@ public static partial class AccessibilityTreeBuilder
     /// <summary>Builds <paramref name="node"/>'s children from <paramref name="element"/>'s, on top
     /// of <paramref name="pending"/>, and gives them to the node.</summary>
     private static void BuildElementChildren(Element element, AccessibilityNode node, List<AccessibilityNode> pending,
-        FocusManager? focusManager, Place place, Rect clip)
+        FocusManager? focusManager, Place place, Rect clip, int maxEager)
     {
         int start = pending.Count;
-        BuildChildren(element, pending, focusManager, place, clip);
+        BuildChildren(element, pending, focusManager, place, clip, maxEager);
         TakePending(node, pending, start);
     }
 
@@ -210,13 +219,13 @@ public static partial class AccessibilityTreeBuilder
     }
 
     private static void BuildChildren(Element element, List<AccessibilityNode> pending, FocusManager? focusManager,
-        Place place, Rect clip)
+        Place place, Rect clip, int maxEager)
     {
         var children = element.Children;   // by index: foreach over the interface boxes an enumerator
         for (int i = 0; i < children.Count; i++)
         {
             var child = children[i];
-            BuildChild(child, pending, focusManager, Placed(child, place), clip);
+            BuildChild(child, pending, focusManager, Placed(child, place), clip, maxEager);
         }
     }
 
@@ -240,7 +249,7 @@ public static partial class AccessibilityTreeBuilder
     }
 
     private static void BuildChild(Element child, List<AccessibilityNode> pending, FocusManager? focusManager,
-        Place place, Rect clip)
+        Place place, Rect clip, int maxEager)
     {
         Realize(child);
         // The child's own box sits in the parent's scroll space; its own
@@ -258,13 +267,13 @@ public static partial class AccessibilityTreeBuilder
             // text-only button folded its text into its own name (which would
             // double-announce), walk the real children.
             if (!TryBuildContent(child, childNode, childPlace, childClip)
-                && !TryBuildVirtualItems(child, childNode, focusManager, childPlace, childClip) && !ConsumesTextContent(child))
-                BuildElementChildren(child, childNode, pending, focusManager, childPlace, childClip);
+                && !TryBuildVirtualItems(child, childNode, focusManager, childPlace, childClip, maxEager) && !ConsumesTextContent(child))
+                BuildElementChildren(child, childNode, pending, focusManager, childPlace, childClip, maxEager);
         }
         else
         {
             // Flatten: promote this element's children directly into the parent's
-            BuildChildren(child, pending, focusManager, childPlace, childClip);
+            BuildChildren(child, pending, focusManager, childPlace, childClip, maxEager);
         }
     }
 
@@ -339,7 +348,7 @@ public static partial class AccessibilityTreeBuilder
     /// falls back to walking realized children.
     /// </summary>
     private static bool TryBuildVirtualItems(Element element, AccessibilityNode node, FocusManager? focusManager,
-        Place place, Rect clip)
+        Place place, Rect clip, int maxEager)
     {
         if (element is not IAccessibleItemSource source) return false;
         // A container whose rows are composite (a grid row of cards) publishes nothing of
@@ -351,10 +360,10 @@ public static partial class AccessibilityTreeBuilder
         var open = OpenRow(element, source, focusManager);
         // A row that holds the focus hangs under its item's node, which a list served on demand does
         // not have: it has item nodes for as long as the row is open.
-        if (count <= MaxEagerVirtualItems || open.Element is not null)
+        if (count <= maxEager || open.Element is not null)
             // Small enough: materialize every item as a child node (fast, and
             // supports hit-testing directly off the snapshot tree).
-            BuildVirtualItems(element, source, node, open, focusManager, place, clip);
+            BuildVirtualItems(element, source, node, open, focusManager, place, clip, maxEager);
         else
             // Too large to expand eagerly: mark it so the bridge provisions items on demand by
             // index instead of building/diffing them all. What is told of them, their number and
@@ -573,7 +582,7 @@ public static partial class AccessibilityTreeBuilder
     /// hit-testing stay correct as the list scrolls.
     /// </summary>
     private static void BuildVirtualItems(Element list, IAccessibleItemSource source,
-        AccessibilityNode listNode, ItemRow open, FocusManager? focusManager, Place place, Rect clip)
+        AccessibilityNode listNode, ItemRow open, FocusManager? focusManager, Place place, Rect clip, int maxEager)
     {
         int count = source.ItemCount;
         if (count == 0) return;
@@ -586,10 +595,7 @@ public static partial class AccessibilityTreeBuilder
         var items = new AccessibilityNode[count];
         for (int i = 0; i < count; i++)
         {
-            // A container with uneven items (a menu with separators in it) places them
-            // itself; everything else stacks at one height.
-            var (localTop, height) = source.ItemBounds(i) ?? (i * itemHeight, itemHeight);
-            var box = new Rect(content.X, content.Y + localTop, content.Width, height);
+            var box = ItemBox(source, i, content, itemHeight);
             items[i] = MakeItemNode(slot, i, role, source.GetItemLabel(i), place.Unscrolled(box), source.ItemIsToggled(i),
                 source.ItemIsExpanded(i), source.IsItemSelected(i), source.ItemIsEnabled(i),
                 !RectsIntersect(clip, place.OnScreen(box)));
@@ -598,10 +604,23 @@ public static partial class AccessibilityTreeBuilder
         {
             var pending = t_pending ??= [];
             int start = pending.Count;
-            BuildChild(row, pending, focusManager, Placed(row, place), clip);
+            BuildChild(row, pending, focusManager, Placed(row, place), clip, maxEager);
             TakePending(items[open.Item], pending, start);
         }
         listNode.SetChildren(items);
+    }
+
+    /// <summary>
+    /// Item <paramref name="index"/>'s box in the list's <paramref name="content"/>, unscrolled: where
+    /// the list places it on both axes (<see cref="IAccessibleItemSource.ItemRect"/>, a list in
+    /// columns), else a row as wide as the content, at its place when the items are uneven (a menu
+    /// with separators in it, rows of unequal heights) and stacked at one height otherwise.
+    /// </summary>
+    private static Rect ItemBox(IAccessibleItemSource source, int index, Rect content, float itemHeight)
+    {
+        if (source.ItemRect(index) is { } r) return new Rect(content.X + r.X, content.Y + r.Y, r.Width, r.Height);
+        var (localTop, height) = source.ItemBounds(index) ?? (index * itemHeight, itemHeight);
+        return new Rect(content.X, content.Y + localTop, content.Width, height);
     }
 
     /// <summary>
@@ -643,23 +662,25 @@ public static partial class AccessibilityTreeBuilder
     /// them, added to <paramref name="changes"/>. The nodes are not touched. False, adding nothing,
     /// when the node's items cannot be patched and the tree has to be built again: the list does
     /// not publish item nodes (its rows are composite), or its items are not the node's (their
-    /// number changed, or crossed <see cref="MaxEagerVirtualItems"/> with no row open). A list whose items are
+    /// number changed, or crossed <paramref name="maxEager"/> with no row open). A list whose items are
     /// served on demand has no item nodes: the selection, and the items' number, are its node's own
     /// (<see cref="ServedItemChanges"/>), what to put on it added to <paramref name="served"/>.
     /// </summary>
     /// <remarks>Only the selected state, and the item the keyboard is on (<see cref="AccessibilityNode.CurrentItem"/>):
     /// when it moved, the node and the index now go to <paramref name="currents"/>, to write in place
     /// (no diff reports it). An item whose label changed with the move is told by the
-    /// next rebuild, when the list's layout refresh comes due, as a change of items always was.</remarks>
+    /// next rebuild, when the list's layout refresh comes due, as a change of items always was.
+    /// <c>maxEager</c> is the number of items the tree was built to serve a list's items on demand past
+    /// (<see cref="MaxEagerVirtualItemsOf"/>).</remarks>
     internal static bool ItemSelectionChanges(AccessibilityNode listNode, IAccessibleItemSource source,
         List<PropertyChange> changes, List<(AccessibilityNode Node, int Count, int[] Selected)> served,
-        List<(AccessibilityNode Node, int Current)> currents)
+        List<(AccessibilityNode Node, int Current)> currents, int maxEager = MaxEagerVirtualItems)
     {
         if (!source.PublishesItemNodes) return false;
         int count = source.ItemCount;
         if (listNode.IsVirtualItemContainer)
         {
-            if (count <= MaxEagerVirtualItems) return false;
+            if (count <= maxEager) return false;
             ServedItemChanges(listNode, source, changes, served);
             AddCurrentMove(listNode, source, count, currents);
             return true;

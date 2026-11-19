@@ -23,8 +23,10 @@ public class A11yLentDiffTests
 {
     /// <summary>Forwards to a bridge and, while <see cref="Counting"/>, writes down each diff it is
     /// handed and how many entries it held during the call.</summary>
-    private class Forwarding(IAccessibilityBridge inner) : IAccessibilityBridge
+    private class Forwarding(IAccessibilityBridge inner) : IAccessibilityBridge, IEagerItemsLimit
     {
+        // The real bridge's number of items past which a list's are served on demand (UIA 200, AT-SPI 2,000).
+        public int MaxEagerVirtualItems => AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(inner);
         public readonly List<(TreeDiff Diff, int Entries)> Handed = [];
         public bool Counting;
         public bool IsActive => true;

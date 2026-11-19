@@ -27,7 +27,7 @@ interface IBridgeRig
 /// (<see cref="ITreeDiffBorrower"/>).
 /// </summary>
 #pragma warning disable CA1416 // Linux's bridge, with a signal sink and no bus: any OS
-sealed class AtSpiRig : IBridgeRig, IAccessibilityBridge, ITreeDiffBorrower, IDisposable
+sealed class AtSpiRig : IBridgeRig, IAccessibilityBridge, ITreeDiffBorrower, IEagerItemsLimit, IDisposable
 {
     private readonly CountingSignals _signals = new();
     private readonly LinuxAccessibilityBridge _bridge;
@@ -41,9 +41,15 @@ sealed class AtSpiRig : IBridgeRig, IAccessibilityBridge, ITreeDiffBorrower, IDi
     /// <summary>Signals the bridge has sent.</summary>
     public int Signals => _signals.Count;
 
+    /// <summary>The accessible-name changes among them.</summary>
+    public int NameChanges => _signals.Names;
+
     public static AtSpiRig Install(HeadlessWindow window) => window.InstallAccessibilityBridge(new AtSpiRig());
 
     public bool IsActive => _bridge.IsActive;
+
+    /// <summary>The bridge's: a list over 2,000 items is served on demand, as in a real window.</summary>
+    public int MaxEagerVirtualItems => AccessibilityTreeBuilder.MaxEagerVirtualItemsOf(_bridge);
 
     public void ApplyChanges(TreeDiff diff, AccessibilityNode root)
     {
@@ -79,9 +85,13 @@ sealed class AtSpiRig : IBridgeRig, IAccessibilityBridge, ITreeDiffBorrower, IDi
     /// <summary>Counts what the bridge sends; a cache-add hands over its object, read by nothing.</summary>
     private sealed class CountingSignals : IAtSpiSignals
     {
-        public int Count;
+        public int Count, Names;
         public void EmitChildrenChanged(string parentPath, string childPath, int index, bool isAdd) => Count++;
-        public void EmitPropertyChange(string path, string atSpiProperty, string newValue) => Count++;
+        public void EmitPropertyChange(string path, string atSpiProperty, string newValue)
+        {
+            Count++;
+            if (atSpiProperty == AtSpiConstants.PropAccessibleName) Names++;
+        }
         public void EmitValueChanged(string path, double value) => Count++;
         public void EmitRoleChange(string path, uint role) => Count++;
         public void EmitStateChanged(string path, string state, bool active) => Count++;

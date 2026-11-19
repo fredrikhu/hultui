@@ -181,10 +181,11 @@ public class ReviewTests
 
     /// <summary>
     /// A window resize measures the review's cards again at the new width with lines unwrapped,
-    /// in one build of the view a step, so a card whose note wraps still fits its row. Until plan 17
-    /// round 15 only a wrapped diff was measured again on a resize: each card kept the height of the
-    /// width it was first measured at and laid its text out at the new one, until something else
-    /// built the view. The widths cross no breakpoint, so nothing else builds.
+    /// once a step and with no build (the rows fitted in place), so a card whose note wraps still
+    /// fits its row. Until plan 17 round 15 only a wrapped diff was measured again on a resize: each
+    /// card kept the height of the width it was first measured at and laid its text out at the new
+    /// one, until something else built the view; until round 16 each step built the view for it.
+    /// The widths cross no breakpoint, so nothing else builds.
     /// </summary>
     [Fact]
     public void AResizeMeasuresTheCardsAgain_WithLinesUnwrapped()
@@ -207,16 +208,18 @@ public class ReviewTests
 
             foreach (int width in new[] { 1600, 1520, 1500, 1460, 1900, 1440 })
             {
-                int builds = app.Builds, chrome = app.ChromeBuilds;
+                int builds = app.Builds, chrome = app.ChromeBuilds, passes = app.DiffHeightPasses;
                 session.Window.SetClientSize(width, 900);
                 int frames = FramesDrawn(session);
-                Assert.True((frames, app.Builds - builds, app.ChromeBuilds - chrome) == (1, 1, 0), $"at {width} px: {frames} frames, {app.Builds - builds} builds, {app.ChromeBuilds - chrome} chrome part builds");
+                Assert.True((frames, app.Builds - builds, app.ChromeBuilds - chrome, app.DiffHeightPasses - passes) == (1, 0, 0, 1),
+                    $"at {width} px: {frames} frames, {app.Builds - builds} builds, {app.ChromeBuilds - chrome} chrome part builds, {app.DiffHeightPasses - passes} measures of the rows");
                 AssertCardFitsItsRow(session);
             }
 
             // The Commit view's file list splitter dragged beside the cards: the same, each step
-            // built at the width the step leaves the diff (before, at the width of the frame before,
-            // and the check after the frame built and drew it again).
+            // measured at the width the step leaves the diff (before round 15, at the width of the
+            // frame before, and the check after the frame built and drew it again; until round 16
+            // each step built the view).
             var files = ((HultUI.Core.Reactivity.Ref<ScrollViewElement>)typeof(JunctionApp)
                 .GetField("_fileScrollRef", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!).Current!;
             float edge = files.Layout.AbsoluteBorderBox.Right;
@@ -233,7 +236,7 @@ public class ReviewTests
                 x += step;
                 session.Window.MoveMouse(x, y);
                 Assert.Equal(1, FramesDrawn(session));
-                Assert.Equal((1, 0), (app.Builds - builds, app.ChromeBuilds - chrome));
+                Assert.Equal((0, 0), (app.Builds - builds, app.ChromeBuilds - chrome));
                 AssertCardFitsItsRow(session);
             }
             session.Window.MouseUp(x, y);

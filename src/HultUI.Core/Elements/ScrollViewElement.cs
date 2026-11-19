@@ -44,7 +44,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     /// How far the content is scrolled down, from its top. Setting it clamps it to the content, and
     /// an offset set before the view has a size or content to clamp against is kept for the layout
     /// pass, as <see cref="ScrollOffsetX"/>'s is. A reveal asked for after it
-    /// (<see cref="ScrollRangeIntoView"/>) is applied from it.
+    /// (<see cref="ScrollRangeIntoView(float, float)"/>) is applied from it.
     /// </summary>
     public float ScrollOffsetY
     {
@@ -202,7 +202,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     /// the call.</para>
     ///
     /// <para>A scroll from code calls nothing: setting the offsets, <see cref="ScrollBy"/>, a
-    /// reveal (<see cref="ScrollRangeIntoView"/>, including one assistive technology asks for).
+    /// reveal (<see cref="ScrollRangeIntoView(float, float)"/>, including one assistive technology asks for).
     /// Nor does sideways motion handed to a <see cref="SidewaysScroller"/>, which moves the
     /// app's own pan and not this offset. The wheel's <see cref="ScrollEvent"/> is unchanged: its
     /// handlers run as before, and this comes after the view's own handler has moved it.</para>
@@ -241,7 +241,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     private void OnScroll(ScrollEvent evt)
     {
         if (!evt.IsFor(this)) return;
-        float dx = evt.RemainingDeltaX * ScrollSpeed;
+        float dx = evt.RemainingDeltaX * SidewaysWheelStep;
         float dy = evt.RemainingDeltaY * ScrollSpeed;
         if (dx == 0 && dy == 0) return;
 
@@ -254,7 +254,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         // the vertical one, so that is the axis reported used.
         if (dy != 0 && !movedY && dx == 0 && VerticalWheelScrollsSideways && !AncestorCanScrollVertically(dy))
         {
-            movedY = ScrollSideways(dy);
+            movedY = ScrollSideways(evt.RemainingDeltaY * SidewaysWheelStep);
             dy = 0;
         }
 
@@ -365,7 +365,12 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     internal virtual Rect StickyRoom(in Rect box, in Rect view) =>
         new(view.X, view.Y, MathF.Max(view.Width, ContentWidth), MathF.Max(view.Height, ContentHeight));
 
-    protected float ClampX(float value)
+    /// <summary>How far one wheel notch moves the content sideways, the vertical wheel turned
+    /// sideways included. <see cref="ScrollSpeed"/> unless a view has a step of its own (a list
+    /// in columns moves a column).</summary>
+    protected virtual float SidewaysWheelStep => ScrollSpeed;
+
+    protected virtual float ClampX(float value)
     {
         var viewportWidth = Layout.AbsoluteContentBox.Width;
         float maxScroll = Math.Max(0, _contentWidth - viewportWidth);
@@ -444,7 +449,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     // ──── Scroll into view ────
 
     /// <summary>
-    /// How far out of the viewport, in layout units, a band <see cref="ScrollRangeIntoView"/> is
+    /// How far out of the viewport, in layout units, a band <see cref="ScrollRangeIntoView(float, float)"/> is
     /// asked for may be and still count as in view. A reveal asked before the layout and checked
     /// after it (Junction's caret, plan 17 round 15) reads the viewport of two layouts, and the
     /// same box can lay out 711 high in one and 711.00006 in the next: the check moved the content
@@ -460,7 +465,15 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     /// the top of the content — so callers with a fixed row height can pass
     /// <c>index * rowHeight</c> without materialising the row element.
     /// </summary>
-    public void ScrollRangeIntoView(float top, float height)
+    public void ScrollRangeIntoView(float top, float height) => ScrollRangeIntoView(top, height, ScrollAlignment.Nearest);
+
+    /// <summary>
+    /// Scrolls the vertical band <c>[top, top + height]</c> into the viewport and leaves it where
+    /// <paramref name="alignment"/> says: <see cref="ScrollAlignment.Nearest"/> is the least scroll
+    /// that shows it, as <see cref="ScrollRangeIntoView(float, float)"/> does; the others put its
+    /// top, middle or bottom at the viewport's. Coordinates are in this scroll's content space.
+    /// </summary>
+    public void ScrollRangeIntoView(float top, float height, ScrollAlignment alignment)
     {
         var viewportHeight = Layout.AbsoluteContentBox.Height;
         if (viewportHeight <= 0)
@@ -471,20 +484,19 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
             // minimum distance" has no answer without a viewport, and answering anyway
             // parks the band a viewport off. Hold the request; the layout pass honours it
             // the moment the geometry exists.
-            _pendingReveal = (top, height);
+            _pendingReveal = (top, height, alignment);
             return;
         }
         _pendingReveal = null;
         // From the offset as set: one held for the layout (no content laid out yet) counts.
         float cur = ScrollOffsetY;
-        float bottom = top + height;
         // Layout is unscrolled, so the band's coordinates don't move as we scroll;
-        // only the [cur, cur + viewportHeight] window does. Reveal the nearer edge.
-        // (The setter clamps, so an over-shoot near the ends is corrected.) A band out by
-        // less than RevealSlack is in view: that is the rounding of two layouts' sums, and
-        // moving by it drew another frame of the same pixels.
-        if (top < cur - RevealSlack) ScrollOffsetY = top;
-        else if (bottom > cur + viewportHeight + RevealSlack) ScrollOffsetY = bottom - viewportHeight;
+        // only the [cur, cur + viewportHeight] window does. (The setter clamps, so an
+        // over-shoot near the ends is corrected.) For Nearest, a band out by less than
+        // RevealSlack is in view: that is the rounding of two layouts' sums, and moving by it
+        // drew another frame of the same pixels.
+        float target = RevealOffset(top, height, viewportHeight, cur, alignment, RevealSlack);
+        if (target != cur) ScrollOffsetY = target;
 
         // A sticky header held at the top would now cover the band's top — a row revealed by
         // arrowing up would land under its own section's header. Scroll back by as much.
@@ -520,12 +532,29 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         }
     }
 
+    /// <summary>The offset that leaves the band <c>[top, top + height]</c> where
+    /// <paramref name="alignment"/> says, from the offset <paramref name="current"/>; not
+    /// clamped. For <see cref="ScrollAlignment.Nearest"/>, a band out by no more than
+    /// <paramref name="slack"/> counts as in view.</summary>
+    private static float RevealOffset(float top, float height, float viewportHeight, float current, ScrollAlignment alignment, float slack)
+    {
+        float bottom = top + height;
+        return alignment switch
+        {
+            ScrollAlignment.Start => top,
+            ScrollAlignment.Center => top + ((height - viewportHeight) / 2),
+            ScrollAlignment.End => bottom - viewportHeight,
+            // The nearer edge: the top when it is above, the bottom when it is below, else stay.
+            _ => top < current - slack ? top : bottom > current + viewportHeight + slack ? bottom - viewportHeight : current,
+        };
+    }
+
     /// <summary>A reveal that arrived before this view knew its own size, waiting for the
     /// layout pass that gives it one.</summary>
-    private (float Top, float Height)? _pendingReveal;
+    private (float Top, float Height, ScrollAlignment Alignment)? _pendingReveal;
 
     /// <summary>
-    /// Honours a held <see cref="ScrollRangeIntoView"/> now that the geometry is known.
+    /// Honours a held <see cref="ScrollRangeIntoView(float, float)"/> now that the geometry is known.
     /// Called from the layout pass, so it writes the offset field rather than the property:
     /// the property marks paint dirty and notifies accessibility, neither of which belongs
     /// in the middle of a layout.
@@ -537,15 +566,15 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         if (viewportHeight <= 0) return;   // still nothing to measure against; keep holding it
 
         _pendingReveal = null;
-        float bottom = band.Top + band.Height;
-        float target = band.Top < _scrollOffsetY ? band.Top
-            : bottom > _scrollOffsetY + viewportHeight ? bottom - viewportHeight
-            : _scrollOffsetY;
+        float target = RevealOffset(band.Top, band.Height, viewportHeight, _scrollOffsetY, band.Alignment, 0f);
         SetOffsets(_scrollOffsetX, ClampY(target));
+        // As ScrollRangeIntoView: a header held at the top must not cover the band's top.
+        float covered = StuckHeaderReach(band.Top) - (band.Top - _scrollOffsetY);
+        if (covered > 0.5f) SetOffsets(_scrollOffsetX, ClampY(_scrollOffsetY - covered));
     }
 
     /// <summary>
-    /// Horizontal counterpart of <see cref="ScrollRangeIntoView"/>: scrolls the
+    /// Horizontal counterpart of <see cref="ScrollRangeIntoView(float, float)"/>: scrolls the
     /// minimum distance needed to bring the horizontal band <c>[left, left + width]</c>
     /// fully into the viewport. Coordinates are in this scroll's own content space
     /// (0 is the left edge of the content).

@@ -412,6 +412,9 @@ public partial class JunctionApp
         var children = e.Children;
         for (int i = 0; i < children.Count; i++) RebaseCodeLabels(children[i], was, now);
     }
+    /// <summary>Times every row's height was measured (<see cref="RebuildDiffHeights"/>), for tests.</summary>
+    internal int DiffHeightPasses { get; private set; }
+
     // Review is the review's height version, so a card opening or a composer appearing
     // measures the rows again; -1 when no review is on.
     private (bool Wrap, bool Split, float Width, int Rows, int Review) _diffHeightShape = (false, false, -1f, -1, -1);
@@ -423,6 +426,7 @@ public partial class JunctionApp
     /// </summary>
     private void RebuildDiffHeights(IReadOnlyList<DiffRow> rows, float codeWidth)
     {
+        DiffHeightPasses++;
         var heights = new float[rows.Count];
         var style = TextMeasure.StyleFor(DiffCodeSize, CodeFont);
         float cardText = CardTextWidth;
@@ -556,13 +560,6 @@ public partial class JunctionApp
         // the rows — how wide the code column is. When any of them moves the rows have to be
         // measured again and rebuilt, because a realized row is otherwise reused exactly as it was.
         float codeWidth = _diffCodeWidth;
-        // Switching mode or file re-arms the width settle: the first build of a shape is the
-        // one that has to guess, so each shape is allowed its one corrective rebuild. A width
-        // that merely moves — a resize — needs no settle, because it is measured from a body
-        // that has already been laid out.
-        var settleKey = (_diffWrap, _diffSplit, rows.Count);
-        if (_diffWidthSettleKey != settleKey) { _diffWidthSettleKey = settleKey; _diffSettledWidth = float.NaN; }
-
         bool perRow = _diffWrap || review is not null;
         // The width is part of the shape only when the rows are measured at it. Unwrapped and
         // with no review every row is one line high, and the width reaches only the pan's
@@ -571,16 +568,35 @@ public partial class JunctionApp
         // 8: a drag move 159.3 → 42.0 KB, a 4 px resize step 32.1 → 20.3). -1 is no width a
         // column has.
         var shape = (_diffWrap, _diffSplit, perRow ? codeWidth : -1f, rows.Count, review?.HeightKey ?? -1);
-        if (_diffHeightShape != shape)
+        // A list with no box on screen yet (the Commit or Changes view's first build, or the first
+        // since it was away), or one in another place (the other view's, or the pane's for the
+        // fullscreen diff), cannot tell this build its width: the window's or another list's stood
+        // in, every row was measured at it, and the check after the frame built and measured them
+        // all again at the width laid out (plan 17 round 16: the first wrapped Commit view at
+        // 1,318 px, then 808). Such a build measures nothing; the list's first layout does, before
+        // the frame is drawn (OnDiffListLaidOut). A resize or a file list drag leads the width; a
+        // file switch reads the list it replaces, which is where the new one goes.
+        var slot = (View, _diffFull);
+        bool waitForBox = perRow && float.IsNaN(_diffWrapLead)
+            && (_diffBodyRef.Current is not { IsHosted: true, Layout.AbsoluteContentBox.Width: > 0 } || _diffListSlot != slot);
+        _diffListSlot = slot;
+        _diffListRows = rows;
+        if (_diffHeightShape != shape || _diffHeightsPending)
         {
-            if (perRow) RebuildDiffHeights(rows, codeWidth); else _diffHeights = [];
+            if (waitForBox) { _diffHeights = []; _diffHeightsPending = true; }
+            else
+            {
+                if (perRow) RebuildDiffHeights(rows, codeWidth); else _diffHeights = [];
+                _diffHeightsPending = false;
+            }
             // Wrapped and with no review, a width alone changes how tall the rows are and, but
             // for its code labels' basis, nothing they show: a code label wraps into whatever
             // column it is laid out in. The rows on screen are kept, their labels take the new
             // basis, and the list gives them their new heights (plan 17 round 15: a resize step or
             // a file list drag made every row on screen again, 279 → 153 KB a 4 px step).
             bool widthOnly = _diffWrap && review is null && _diffHeightShape with { Width = shape.Item3 } == shape;
-            if (widthOnly && _diffBodyRef.Current is VirtualListElement<DiffRow> kept)
+            if (_diffHeightShape == shape) { }   // only the heights were owed (a build before the list's first layout)
+            else if (widthOnly && _diffBodyRef.Current is VirtualListElement<DiffRow> kept)
             {
                 float pad = _diffSplit ? SplitCodePadX : UnifiedCodePadX;
                 var was = CodeBasis(_diffHeightShape.Width, pad);
@@ -661,6 +677,10 @@ public partial class JunctionApp
         // still ends in the composer.
         if (review is { } rv)
             list.On<PointerUpEvent>(_ => { if (rv.Dragging) { rv.Dragging = false; OpenComposer(rv); } });
+        // Measured rows are fitted to the width the list is laid out at, in the frame that lays it
+        // out. Only then: the first listener turns the framework's layout watching on for the rest
+        // of the process.
+        if (perRow) list.OnLayoutChanged(_diffListLaidOut ??= OnDiffListLaidOut);
         list.WithRef(_diffBodyRef);
         // The list's content is exactly as wide as its viewport, so it cannot scroll sideways
         // itself: it is told who does, and the wheel's sideways motion (a trackpad swipe, or
@@ -683,8 +703,9 @@ public partial class JunctionApp
     private float _diffLaidOutWidth;
 
     // What the number / sign / staging-mark columns took in the last build. Kept so the
-    // post-frame check can redo the same arithmetic against the width the body ended up
-    // with, rather than reconstructing the column model a second time and drifting from it.
+    // layout hook and the check after the frame can redo the same arithmetic against the width
+    // the body ended up with, rather than reconstructing the column model a second time and
+    // drifting from it.
     private float _diffFixedCols;
 
     // The horizontal padding a code label carries, and the hairline between the two halves
@@ -705,59 +726,113 @@ public partial class JunctionApp
         ? Math.Max(0, (body - _diffFixedCols - SplitDividerWidth) / 2 - SplitCodePadX)
         : Math.Max(0, body - _diffFixedCols - UnifiedCodePadX);
 
-    // The shape the width settle is armed for. Changing it forgets the width below, so a
-    // new file or a switch to split gets its own corrective rebuild.
-    private (bool Wrap, bool Split, int Rows) _diffWidthSettleKey = (false, false, -1);
+    // The rows the list on screen was built with, for its layout hook to measure, and where it
+    // was built: the view, and whether as the fullscreen diff.
+    private IReadOnlyList<DiffRow>? _diffListRows;
+    private (JunctionView View, bool Full) _diffListSlot;
 
-    // The code width the last corrective rebuild was asked for. A rebuild measures the rows
-    // at the width the body actually has, so afterwards the two agree and this stops firing
-    // on its own; the guard only exists so a rebuild that somehow did not take cannot spin.
-    //
-    // It used to be a once-per-shape flag instead, and that was too coarse: a resize changes
-    // neither the wrap mode, the layout, nor the row count, so after the first settle nothing
-    // could ever correct the width again.
-    private float _diffSettledWidth = float.NaN;
+    // A build left the rows' heights to the list's first layout (it had no box to read).
+    private bool _diffHeightsPending;
+
+    // A row a reveal asked for while the heights were owed; -1 for none.
+    private int _diffRevealHeld = -1;
+
+    private Action<LayoutChangedEvent>? _diffListLaidOut;
+
+    /// <summary>How far the width a resize or a drag led the rows to may be from the one laid out
+    /// and still be it: the float error of adding and taking away widths (a 150 % window is
+    /// 1,440.6666 logical px wide), far below a width a line wraps differently at.</summary>
+    private const float LedWidthError = 0.01f;
 
     /// <summary>
-    /// Ask for one more build when the scrollbar's presence, or the width the wrapped rows
-    /// were measured at, was decided on a guess.
-    ///
-    /// <para>Whether there is anything to scroll to depends on how wide the diff pane is,
-    /// and the first build after opening a file runs before any layout — so
-    /// <see cref="DiffCodeWidth"/> falls back to the window, which here is several times
-    /// the pane. Once the body has a real width the answer can flip, and nothing else would
-    /// mark the tree dirty to act on it. Rebuilds at most once: after it, the two agree.</para>
-    ///
-    /// <para>The same guess sizes the wrapped rows, and there it is not cosmetic: heights
-    /// come from measuring each line at the code width, so a width guessed too wide measures
-    /// fewer lines than the row goes on to draw, and the overflow lands on top of the next
-    /// row. That state sticks — the scrollbar half of this check has already agreed by then,
-    /// so without the width half nothing asks for the build that would correct it.</para>
-    ///
-    /// <para>A window resize and a drag of the file list beside a wrapped diff hand their build
-    /// the width they lead to (<see cref="LeadWrappedDiffWidth"/>), and this is their check: it
-    /// finds nothing to do when the lead was right, and corrects a wrong one a frame later.</para>
+    /// The diff list was laid out at a new size (its <c>OnLayoutChanged</c>, after the frame's
+    /// layout and before it is drawn): rows measured at another code width, or owed by a build
+    /// that had no box to read, are measured at the width laid out, and the list takes them in
+    /// this frame's layout.
     /// </summary>
-    private void SettleDiffScrollbar()
+    /// <remarks>
+    /// <para>Heights come from measuring each line at the code width, so a width guessed too
+    /// wide measures fewer lines than the row goes on to draw, and the overflow lands on top of
+    /// the next row. A build measures at the width the list has, or at the one a window resize
+    /// or a move of the file list beside it leads to (<see cref="LeadWrappedDiffWidth"/>,
+    /// <see cref="LeadWrappedDiffSplit"/>), and a resize or a drag step that builds nothing
+    /// measures at its lead before the layout (<see cref="FitWrappedDiffInPlace"/>); this is the
+    /// check that finds nothing to do when that was right, and the first measure of a list with no
+    /// box yet. The rows on screen are kept:
+    /// their code labels take the new basis, as a build's would, or with the review's cards
+    /// they are made again.</para>
+    /// <para>Until plan 17 round 16 this ran after the frame and asked for another build. The
+    /// first wrapped Commit view measured its rows at the window's width (1,318 px against the
+    /// 808 laid out), drew a frame at those heights, and built and measured again: 7 builds and
+    /// 401 line measures against 3 and 201. The pan's viewport and the scrollbar's presence,
+    /// which only an unwrapped diff has, are still followed after the frame
+    /// (<see cref="FollowDiffWidth"/>): a scrollbar that comes or goes is a build.</para>
+    /// </remarks>
+    private void OnDiffListLaidOut(LayoutChangedEvent e)
     {
-        if (_diffBodyRef.Current is null) return;
-        // Read after the frame has been laid out. OnAfterBuild is too early — the list has
-        // no box for this frame yet, and on the first build it is a brand new element with
-        // no prior layout at all, so the width DiffCodeWidth needs is simply not knowable
-        // here. Same reason ScrollChangeCaretIntoView defers.
-        _window.RequestPostFrameCallback(() =>
-        {
-            if (_diffBodyRef.Current is not { Layout.AbsoluteContentBox.Width: > 0 } body) return;
-            if (FollowDiffWidth()) return;
-            if (!_diffWrap && !ReviewRowsActive) return;
+        if (!e.SizeChanged) return;
+        if (_diffBodyRef.Current is not VirtualListElement<DiffRow> { IsHosted: true } list) return;
+        FitDiffRows(list, list.Layout.AbsoluteContentBox.Width);
+    }
 
-            // _diffHeightShape.Width is the width the heights on screen were measured at.
-            float observed = CodeWidthFor(body.Layout.AbsoluteContentBox.Width);
-            if (Math.Abs(observed - _diffHeightShape.Width) <= 0.5f) return;
-            if (Math.Abs(observed - _diffSettledWidth) <= 0.5f) return;   // already asked, at this width
-            _diffSettledWidth = observed;
-            MarkDirty();
-        });
+    /// <summary>
+    /// A width change that crosses no breakpoint, a window resize step or a move of the file
+    /// list's splitter beside a wrapped diff (or one with a review's cards), builds nothing: the
+    /// rows are measured at the width the change leads the list to (<paramref name="body"/>) and
+    /// fitted in place before the frame is laid out, as the list's layout hook would fit them
+    /// after it, and the frame lays the list out once, at its new heights. Only from a width the
+    /// check after the frame saw (<see cref="DiffLaidOutAsSeen"/>): otherwise the layout hook
+    /// measures, in the same frame.
+    /// </summary>
+    /// <remarks>
+    /// Until plan 17 round 16 each such step built the view for the rows' heights (156–164 KB a
+    /// step of jrepo's Commit view in a real window), where Vesper Commander's wrapped reader fits
+    /// its rows in place (FitWrappedRowsInPlace). Nothing else the view shows reads the width: an
+    /// unwrapped diff's resize builds nothing either, and the pan follows the width after the frame.
+    /// </remarks>
+    private void FitWrappedDiffInPlace(float body)
+    {
+        if (_diffHeightsPending || _diffLaidOutWindowWidth <= 0 || !DiffLaidOutAsSeen()) return;
+        if (_diffBodyRef.Current is VirtualListElement<DiffRow> list) FitDiffRows(list, body);
+    }
+
+    /// <summary>Measures the rows at the code width of a body <paramref name="body"/> pixels wide,
+    /// when they were measured at another (or owed), and fits <paramref name="list"/>'s rows to
+    /// them: kept rows' code labels take the new basis, or with the review's cards the rows are
+    /// made again, and the list takes the new heights in its next layout.</summary>
+    private void FitDiffRows(VirtualListElement<DiffRow> list, float body)
+    {
+        if (_diffListRows is not { } rows) return;
+        bool review = ReviewRowsActive;
+        if (!(_diffWrap || review)) return;
+        if (body <= 0) return;
+        float codeWidth = CodeWidthFor(body);
+        if (!_diffHeightsPending && MathF.Abs(codeWidth - _diffHeightShape.Width) <= LedWidthError) return;
+
+        float was = _diffHeightShape.Width;
+        _diffHeightsPending = false;
+        _diffBodyWidth = body;
+        _diffCodeWidth = codeWidth;
+        RebuildDiffHeights(rows, codeWidth);
+        _diffHeightShape = _diffHeightShape with { Width = codeWidth };
+        if (_diffWrap && !review)
+        {
+            float pad = _diffSplit ? SplitCodePadX : UnifiedCodePadX;
+            var from = CodeBasis(was, pad);
+            var to = CodeBasis(codeWidth, pad);
+            var onScreen = list.Children;
+            if (from != to)
+                for (int i = 0; i < onScreen.Count; i++) RebaseCodeLabels(onScreen[i], from, to);
+        }
+        else list.InvalidateRows();
+        list.InvalidateHeights();
+
+        if (_diffRevealHeld >= 0)
+        {
+            int line = _diffRevealHeld;
+            _diffRevealHeld = -1;
+            RevealDiffLine(line);
+        }
     }
 
     /// <summary>
@@ -821,24 +896,26 @@ public partial class JunctionApp
         _diffPan.ViewportWidth = viewport;
     }
 
-    // The diff list's width a resize or a drag of the file list hands the build it starts
-    // (LeadWrappedDiffWidth, LeadWrappedDiffSplit); NaN otherwise. OnAfterBuild forgets it.
+    // The diff list's width a resize or a move of the file list's splitter hands the build it
+    // starts (LeadWrappedDiffWidth, LeadWrappedDiffSplit); NaN otherwise. OnAfterBuild forgets it.
     private float _diffWrapLead = float.NaN;
 
     /// <summary>
-    /// A window resize hands a wrapped diff's build the width the frame is about to lay the list
-    /// out at, so the rows are measured at the width they are drawn at: the frame the resize lays
-    /// out draws each row as tall as its text, and the check after it
-    /// (<see cref="SettleDiffScrollbar"/>) finds nothing to correct.
+    /// A window resize that builds (one across a breakpoint, or a scale change) hands a wrapped
+    /// diff's build the width the frame is about to lay the list out at, so the rows are measured
+    /// at the width they are drawn at: the frame the resize lays out draws each row as tall as its
+    /// text, and the list's layout hook (<see cref="OnDiffListLaidOut"/>) finds nothing to correct.
+    /// Any other resize builds nothing and fits the rows in place (<see cref="LeadWrappedDiffRows()"/>).
     /// </summary>
     /// <remarks>
     /// Without it the build read the list's width from the frame before, the frame drew every row
     /// at the old width's height, and the check built and drew a second frame, the chrome with it:
     /// each size change of a wrapped diff built twice and drew twice (plan 17 round 14). The list
-    /// takes the window's slack, so it moves by what the window gained or lost since the check last
-    /// read it, as the pan does (<see cref="LeadDiffWidth"/>) and as Vesper Commander's wrapped
-    /// viewer does. Only from a width the check saw: a list laid out since at some other width, or
-    /// never read, is left to the build to read and to the check to correct, as before.
+    /// takes the window's slack, so it moves by what the window gained or lost since the check
+    /// after the frame last read it (<see cref="FollowDiffWidth"/>), as the pan does
+    /// (<see cref="LeadDiffWidth"/>) and as Vesper Commander's wrapped viewer does. Only from a
+    /// width that check saw: a list laid out since at some other width, or never read, is left to
+    /// the build to read and to the layout hook to correct, in the same frame.
     /// </remarks>
     private void LeadWrappedDiffWidth()
     {
@@ -847,12 +924,26 @@ public partial class JunctionApp
         _diffWrapLead = Math.Max(0, _diffLaidOutWidth + _window.LayoutWidth - _diffLaidOutWindowWidth);
     }
 
+    /// <summary><see cref="FitWrappedDiffInPlace"/> for a window resize that builds nothing: the
+    /// list moves by what the window gained or lost, as a build's lead does
+    /// (<see cref="LeadWrappedDiffWidth"/>).</summary>
+    private void LeadWrappedDiffRows() =>
+        FitWrappedDiffInPlace(Math.Max(0, _diffLaidOutWidth + _window.LayoutWidth - _diffLaidOutWindowWidth));
+
+    /// <summary><see cref="FitWrappedDiffInPlace"/> for a move of a file list's splitter: the diff
+    /// gains what the file list (<paramref name="list"/>, laid out at its old width) loses.</summary>
+    private void LeadWrappedDiffRows(PaneSplitter split, Element list)
+    {
+        if (list.Layout.Width > 0) FitWrappedDiffInPlace(Math.Max(0, _diffLaidOutWidth + list.Layout.Width - split.Size));
+    }
+
     /// <summary>
     /// <see cref="LeadWrappedDiffWidth"/> for a move of a file list's splitter beside a wrapped
-    /// diff: the list gains what the file list (<paramref name="list"/>, laid out at its old width)
-    /// loses. The drag builds the view for the rows' heights, and that build read the width of the
-    /// frame before, so each step built and drew twice, the second time the chrome too. A review's
-    /// cards are measured at the width as wrapped lines are, so the same while reviewing.
+    /// diff that builds the view (an arrow key on the handle; a drag's steps build nothing, see
+    /// <see cref="FitWrappedDiffInPlace"/>): the list gains what the file list
+    /// (<paramref name="list"/>, laid out at its old width) loses. Such a build read the width of
+    /// the frame before, so each step built and drew twice, the second time the chrome too. A
+    /// review's cards are measured at the width as wrapped lines are, so the same while reviewing.
     /// </summary>
     private void LeadWrappedDiffSplit(PaneSplitter split, Element? list)
     {
@@ -944,6 +1035,12 @@ public partial class JunctionApp
             case KeyCode.Escape when _diffFull:
                 _diffFull = false;
                 MarkDirty();
+                e.StopPropagation = true;
+                break;
+            // Sideways is the pane's, whatever the pan makes of the key: Super+← off the Mac is
+            // no pan key, and bubbling on it would step the Changes tree behind the diff.
+            case KeyCode.Left or KeyCode.Right:
+                _diffPan.HandleKey(e);
                 e.StopPropagation = true;
                 break;
             default:
@@ -1370,6 +1467,9 @@ public partial class JunctionApp
     /// keyboard selection whose loose end has walked past the edge of the viewport.</summary>
     private void RevealDiffLine(int line)
     {
+        // The rows' heights are owed to the list's first layout, which reveals the row with them
+        // (a thread asked for as the Commit view opens on it).
+        if (_diffHeightsPending) { _diffRevealHeld = line; return; }
         if (_diffBodyRef.Current is not ScrollViewElement sv) return;
 
         float top = 0f, height = DiffRowHeight;

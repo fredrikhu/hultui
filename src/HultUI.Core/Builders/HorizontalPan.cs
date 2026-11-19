@@ -277,19 +277,21 @@ public sealed class HorizontalPan : ISidewaysScroller
     }
 
     /// <summary>
-    /// Handles ← and → by <see cref="KeyStep"/>, and Ctrl (or Cmd) with either to jump to a
+    /// Handles ← and → by <see cref="KeyStep"/>, and Ctrl (⌘ on a Mac) with either to jump to a
     /// margin. True when the key was one of those, whether or not the view could move — the
-    /// caller should stop propagation either way, or the key means two things at once.
+    /// caller should stop propagation either way, or the key means two things at once. Super
+    /// with an arrow, off the Mac, is not its key.
     /// </summary>
     public bool HandleKey(KeyDownEvent e)
     {
-        bool ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
+        bool primary = KeyChord.IsPrimaryHeld(e.Modifiers);
+        bool chorded = (e.Modifiers & (KeyModifiers.Ctrl | KeyModifiers.Super)) != 0;
         switch (e.Key)
         {
-            case KeyCode.Left when ctrl: PanTo(0); return true;
-            case KeyCode.Right when ctrl: PanTo(float.MaxValue); return true;
-            case KeyCode.Left: PanBy(-KeyStep); return true;
-            case KeyCode.Right: PanBy(KeyStep); return true;
+            case KeyCode.Left when primary: PanTo(0); return true;
+            case KeyCode.Right when primary: PanTo(float.MaxValue); return true;
+            case KeyCode.Left when !chorded: PanBy(-KeyStep); return true;
+            case KeyCode.Right when !chorded: PanBy(KeyStep); return true;
             default: return false;
         }
     }

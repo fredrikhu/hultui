@@ -56,6 +56,27 @@ public class GitRepository
         return _gitDir = dir.Length > 0 ? dir : System.IO.Path.Combine(Path, ".git");
     }
 
+    private int _oidLength;
+
+    /// <summary>
+    /// A hash of what the index holds (see <see cref="GitWatcher.IndexPrint"/>): each entry's
+    /// path, mode, object id and flags, without the file times a <c>git status</c> refreshes.
+    /// The same before and after a read unless something was staged or unstaged meanwhile.
+    /// Null when there is no index (nothing was ever staged) or it cannot be read.
+    /// </summary>
+    public ulong? IndexPrint()
+    {
+        if (_oidLength == 0)
+        {
+            // A linked worktree keeps its own index, and the main repository's config: commondir
+            // names where that is.
+            var gitDir = GitDir();
+            var common = ReadGitFile("commondir") is { } dir ? System.IO.Path.GetFullPath(dir, gitDir) : gitDir;
+            _oidLength = GitWatcher.ObjectIdLength(common);
+        }
+        return GitWatcher.IndexPrint(GitPath("index"), _oidLength);
+    }
+
     /// <summary>A path inside the git directory (<c>MERGE_HEAD</c>, <c>rebase-merge/onto</c>).</summary>
     private string GitPath(params string[] parts) =>
         System.IO.Path.Combine([GitDir(), .. parts]);

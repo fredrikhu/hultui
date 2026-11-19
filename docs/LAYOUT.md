@@ -664,14 +664,13 @@ Don't set `StopPropagation` on a wheel event: in this framework it also ends the
 remaining handlers, which is what used to keep an app's own wheel handler on a scroll view
 from ever running.
 
-One constraint still decides how a wide *virtualized* list has to be built:
+A `VirtualListElement` scrolls sideways itself in two cases: rows wider than the viewport
+(`.RowWidth(w)`), and items laid out in columns (`.Flow(ListFlow.Columns, width)`, a file
+manager's Brief view); see [ELEMENTS.md — Sideways: columns and wide rows](ELEMENTS.md). What
+it cannot do on its own is pan one cell of a row while fixed gutters beside it stay put.
 
-- **A `VirtualListElement` cannot scroll sideways at all.** Its content width is pinned
-  to the viewport, so `ScrollOffsetX` is permanently 0. A plain `ScrollView` measures its
-  children and can.
-
-The pattern that works, used by every wide list in the apps (a side-by-side diff, a
-file viewer): keep **one vertical scroll view**, hold the horizontal offset as app state
+The pattern for that, used by the wide lists in the apps that pan beside gutters (a
+side-by-side diff, a file viewer): keep **one vertical scroll view**, hold the horizontal offset as app state
 in a `HorizontalPan`, and apply it as a **negative left margin on the content inside a
 cell with `OverflowX(Overflow.Hidden)`** — which is what `HorizontalPan.Cell(content)`
 builds. The margin both shifts the content left and widens it by the same amount
@@ -736,13 +735,32 @@ the width either, measure the heights in the `Window.Resized` handler at the led
 nothing: a height-only step then measures nothing at all. Vesper Commander's wrapped reader and
 compare view built the whole window and made every row on screen again on each step until plan
 17 round 15 (`FitWrappedRowsInPlace`): 281 → 24 KB a 4 px step of the reader over a
-1,000-line file, 62 → 2 KB a height-only step, with byte-identical frames. Keep the check after
-the frame: a wrong lead still builds once, and that build keeps the rows too. A row that carries
+1,000-line file, 62 → 2 KB a height-only step, with byte-identical frames. Junction's wrapped diff
+and a review's cards built the view on each step of a resize, and of a drag of the file list's
+splitter beside them, until plan 17 round 16 (`FitWrappedDiffInPlace`): 105 → 48 KB a 6 px step of
+a Commit view, 164 → 126 KB of a Changes view. Check the lead in the
+list's `.OnLayoutChanged`, not after the frame: the handler hears the width the frame laid the
+list out at, measures again when the lead was wrong and calls `InvalidateHeights`, and that frame
+draws the right heights. A check after the frame drew the wrong ones and built again. A row that carries
 the width it was made at must be given the new one, or a kept row lays out unlike a new one:
 Junction's wrapped code labels have the code width as their flex basis, and with the old basis a
 shrinking label stops at its min-content width, so a line of one unbreakable token stayed as wide
 as the old column (`RebaseCodeLabels`, plan 17 round 15: 279 → 153 KB a 4 px step of a Commit
 view).
+
+**Measure at a width once the element has one.** A build that makes a new list cannot read the
+list's width: it has no box yet, and what is at hand is a guess, the window's width or the box an
+earlier list had somewhere else. Rows measured at a guess are measured again at the width laid out,
+and the frame between draws the guessed heights. Leave them unmeasured in that build and measure
+them in the list's `.OnLayoutChanged`, which hears the first box after the frame's layout and
+before it is drawn: a virtual list makes its rows when it is drawn, so none is made at a wrong
+height. Hold a reveal asked for meanwhile (a row's top needs the heights above it) until the
+handler has measured. A list that replaces one in the same place (the next file of a commit) can
+read the width of the one it replaces. Junction's first wrapped Commit view measured its rows at
+the window's 1,318 px, drew them, then built and measured again at the 808 px laid out (plan 17
+round 16: 7 builds, 3 frames, 401 line measures → 3, 2 and 201). Add the handler only where a
+width is measured: the first listener turns the framework's layout watching on for the rest of the
+process, a check for each box a layout writes and each element a build removes.
 
 ---
 

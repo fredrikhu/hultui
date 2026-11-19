@@ -19,6 +19,10 @@ public partial class JunctionApp
     // One tokenize runs at a time, on a worker, and it is the latest one asked for: a file, a
     // commit or a scheme the reader has left is cancelled, and what they went on to waits in
     // one slot, which the next ask takes over. A held key leaves nothing queued behind it.
+    //
+    // A cancelled tokenize is not wasted: its file's two texts are kept (_highlightTexts), and
+    // SyntaxHighlighter keeps where the walk got to with them, so coming back to the file goes on
+    // from there and reads nothing.
 
     private sealed record FileHighlight(
         IReadOnlyList<TextSpan>[]? OldLines,
@@ -133,14 +137,70 @@ public partial class JunctionApp
     /// <summary>Lines walked by the tokenizes that landed so far, for tests.</summary>
     internal int HighlightLinesTokenized { get; private set; }
 
-    /// <summary>Tokenizes that got past their rest and read the file, for tests.</summary>
+    /// <summary>Tokenizes that got past their rest, to read the file or go on with its kept texts
+    /// (<see cref="HighlightFileReads"/> counts the reads), for tests.</summary>
     internal int HighlightsRead => _highlightsRead;
 
     /// <summary>Tokenizes whose result is on its way to the UI thread, for tests: what lands next
     /// frame lands after it.</summary>
     internal int HighlightsPosted => Volatile.Read(ref _highlightsPosted);
 
-    private int _highlightsRead, _highlightsPosted;
+    /// <summary>Tokenizes that read their file's texts, rather than going on with kept ones, for
+    /// tests.</summary>
+    internal int HighlightFileReads => Volatile.Read(ref _highlightFileReads);
+
+    private int _highlightsRead, _highlightsPosted, _highlightFileReads;
+
+    /// <summary>A file's two versions as a tokenize read them; a side is read only when the diff
+    /// shows lines of it. <see cref="Bytes"/>: the texts, and the array of a slot a line that the
+    /// walk kept with them fills (SyntaxHighlighter's spans of the lines shown are what the colours
+    /// keep anyway).</summary>
+    private sealed record HighlightTexts(string? Old, bool OldRead, string? New, bool NewRead)
+    {
+        public long Bytes { get; } = Size(Old) + Size(New);
+
+        private static long Size(string? text) =>
+            text is null ? 0 : 2L * text.Length + 8L * (text.AsSpan().Count('\n') + 1);
+    }
+
+    /// <summary>
+    /// The texts of the files whose colours were cancelled part-way, by highlight key, the last
+    /// touched at the end of <see cref="_highlightTextsOrder"/>. A tokenize handed the same strings
+    /// goes on where the one before it stopped, since SyntaxHighlighter keeps a cancelled walk with
+    /// its texts, and reads nothing. A reader going through big files at a reading pace cancels
+    /// every walk: on bigrepo's 675 KB files each visit went back to line 1 and read both versions
+    /// again, 2.6 MB of large-heap strings, and never got further (plan 17 round 16). Dropped when
+    /// the colours land, and on a scheme change; held to <see cref="MaxKeptHighlightBytes"/>.
+    /// </summary>
+    private readonly Dictionary<string, HighlightTexts> _highlightTexts = new(StringComparer.Ordinal);
+    private readonly List<string> _highlightTextsOrder = [];
+
+    /// <summary>The most <see cref="_highlightTexts"/> holds: five of bigrepo's 675 KB files
+    /// (2.7 MB of text a pair, 2.8 with the walk's line arrays), the files a reader pages through
+    /// before turning back, and a pair of the longest texts coloured at all (2,000,000 characters
+    /// a side, 8 MB). Files of ordinary size, which finish before a key cancels them, keep
+    /// nothing.</summary>
+    internal const long MaxKeptHighlightBytes = 16L << 20;
+
+    /// <summary>What <see cref="_highlightTexts"/> holds, for tests.</summary>
+    internal long HighlightTextsKeptBytes { get; private set; }
+
+    private void KeepHighlightTexts(string key, HighlightTexts texts)
+    {
+        ForgetHighlightTexts(key);
+        if (texts.Bytes > MaxKeptHighlightBytes) return;
+        _highlightTexts[key] = texts;
+        _highlightTextsOrder.Add(key);
+        HighlightTextsKeptBytes += texts.Bytes;
+        while (HighlightTextsKeptBytes > MaxKeptHighlightBytes) ForgetHighlightTexts(_highlightTextsOrder[0]);
+    }
+
+    private void ForgetHighlightTexts(string key)
+    {
+        if (!_highlightTexts.Remove(key, out var was)) return;
+        _highlightTextsOrder.Remove(key);
+        HighlightTextsKeptBytes -= was.Bytes;
+    }
 
     private bool HighlightRunningLive =>
         _highlightRunning is not null && _highlightCancel is { IsCancellationRequested: false };
@@ -165,6 +225,9 @@ public partial class JunctionApp
     private void RetokenizeCode()
     {
         _highlights.Clear();
+        _highlightTexts.Clear();   // the walks kept with them are the old theme's
+        _highlightTextsOrder.Clear();
+        HighlightTextsKeptBytes = 0;
         _highlightScheme++;
         _highlightNext = null;
         _highlightCancel?.Cancel();
@@ -273,6 +336,7 @@ public partial class JunctionApp
         _highlightCancel = cancel;
         var (clock, rest, hold) = (_app.Time == TimeProvider.System ? TimeProvider.System : NoBudget, HighlightRest, HighlightHold);
         var token = cancel.Token;
+        var texts = _highlightTexts.GetValueOrDefault(ask.Key);
 
         Task.Run(async () =>
         {
@@ -283,18 +347,19 @@ public partial class JunctionApp
                 if (ask.Rest) await Task.Delay(rest, token);
                 if (hold is not null) await hold.WaitAsync(token);
                 Interlocked.Increment(ref _highlightsRead);
-                (result, lines) = Tokenize(ask, clock, token);
+                texts = ReadHighlightTexts(ask, texts, token);
+                (result, lines) = Tokenize(ask, texts, clock, token);
             }
             catch (OperationCanceledException)
             {
-                // Replaced. Whoever wants it now will ask.
+                // Replaced. Whoever wants it now will ask, and goes on from where this got to.
             }
             catch
             {
                 result = FileHighlight.None;   // cache the failure so it isn't retried every build
             }
 
-            Application.InvokeOnMainThread(() => HighlightLanded(ask, result, lines));
+            Application.InvokeOnMainThread(() => HighlightLanded(ask, result, lines, texts));
             Interlocked.Increment(ref _highlightsPosted);
         });
     }
@@ -310,38 +375,66 @@ public partial class JunctionApp
         public override long GetTimestamp() => 0;
     }
 
-    // Runs off the UI thread.
-    private static (FileHighlight, int Lines) Tokenize(HighlightAsk ask, TimeProvider clock, CancellationToken token)
+    /// <summary>The sides of the file <paramref name="ask"/> shows lines of, those in
+    /// <paramref name="kept"/> as they are and the others read. Runs off the UI thread. A file's
+    /// key is its content (a commit's, or the working tree's at one data generation), so a kept
+    /// text is the one a read would give.</summary>
+    private HighlightTexts ReadHighlightTexts(HighlightAsk ask, HighlightTexts? kept, CancellationToken token)
     {
         var (repo, path, oldPath, shown) = (ask.Repo, ask.Path, ask.OldPath, ask.Shown);
-        bool wantOld = shown.Old.Length > 0, wantNew = shown.New.Length > 0;
-        string? oldText = null, newText = null;
-        if (wantOld)
+        string? oldText = kept?.Old, newText = kept?.New;
+        bool oldRead = kept?.OldRead == true, newRead = kept?.NewRead == true, read = false;
+        if (shown.Old.Length > 0 && !oldRead)
+        {
             oldText = ask.Mode switch
             {
                 ExternalDiffMode.Commit => repo.GetFileText(ask.BaseHash ?? ask.CommitHash + "^", oldPath),
                 ExternalDiffMode.Staged => repo.GetFileText("HEAD", oldPath),
                 _ => repo.GetIndexFileText(oldPath) ?? repo.GetFileText("HEAD", oldPath),
             };
+            oldRead = read = true;
+        }
         token.ThrowIfCancellationRequested();
-        if (wantNew)
+        if (shown.New.Length > 0 && !newRead)
+        {
             newText = ask.Mode switch
             {
                 ExternalDiffMode.Commit => repo.GetFileText(ask.CommitHash!, path),
                 ExternalDiffMode.Staged => repo.GetIndexFileText(path),
                 _ => repo.GetWorkingFileText(path),
             };
-        var sides = SyntaxHighlighter.TokenizeDiff(path, oldText, shown.Old, newText, shown.New,
-            SyntaxHighlighter.DefaultMaxLines, token, clock);
+            newRead = read = true;
+        }
+        if (!read && kept is not null) return kept;
+        Interlocked.Increment(ref _highlightFileReads);
+        return new HighlightTexts(oldText, oldRead, newText, newRead);
+    }
+
+    // Runs off the UI thread.
+    private static (FileHighlight, int Lines) Tokenize(HighlightAsk ask, HighlightTexts texts, TimeProvider clock,
+        CancellationToken token)
+    {
+        var shown = ask.Shown;
+        var sides = SyntaxHighlighter.TokenizeDiff(ask.Path, shown.Old.Length > 0 ? texts.Old : null, shown.Old,
+            shown.New.Length > 0 ? texts.New : null, shown.New, SyntaxHighlighter.DefaultMaxLines, token, clock);
         return (new FileHighlight(sides.Old, sides.New, shown), sides.LinesWalked);
     }
 
-    private void HighlightLanded(HighlightAsk ask, FileHighlight? result, int lines)
+    private void HighlightLanded(HighlightAsk ask, FileHighlight? result, int lines, HighlightTexts? texts)
     {
         _highlightRunning = null;
         _highlightCancel?.Dispose();
         _highlightCancel = null;
         HighlightLinesTokenized += lines;
+
+        // A cancelled tokenize keeps its texts, and so where it got to, for the next ask of the
+        // file; one that landed has no more use for them. Before the next ask starts: it may be
+        // this file's.
+        if (ask.Scheme == _highlightScheme)
+        {
+            if (result is not null) ForgetHighlightTexts(ask.Key);
+            else if (texts is not null) KeepHighlightTexts(ask.Key, texts);
+        }
 
         // A tokenize that finished before the ask that replaced it is as good as any: the reader
         // may well come back to the file. A cancelled one that stopped short has no result.

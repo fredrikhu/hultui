@@ -44,6 +44,7 @@ public sealed class ReaderFocusTests(ITestOutputHelper output)
         var heard = new ConcurrentQueue<(string Name, bool HasFocus)>();
         automation.RegisterFocusChangedEvent(element =>
         {
+            if (!Ours(element)) return;
             try { heard.Enqueue((element.Name, element.Properties.HasKeyboardFocus.ValueOrDefault)); }
             catch (Exception ex) { heard.Enqueue(($"<{ex.GetType().Name}>", false)); }
         });
@@ -66,6 +67,77 @@ public sealed class ReaderFocusTests(ITestOutputHelper output)
             // One focus event a move, on the item: none on the list itself, none twice.
             Assert.Equal(["file 0", "file 3"], heard.Where(h => h.Name.StartsWith("file", StringComparison.OrdinalIgnoreCase)
                 || h.Name == "Files").Select(h => h.Name));
+        }
+        finally { automation.UnregisterAllEvents(); }
+    }
+
+    /// <summary>
+    /// Junction's History when a commit lands under the reader: a list over 200 items is served on demand on
+    /// Windows (plan 17 round 16), so its items have no nodes, and a rename of the one the reader's focus is
+    /// on was told nothing, where an item node told its Name change. A real client's property handler hears
+    /// the item's new name once, from the item, which has the keyboard focus, and its focus handler hears
+    /// no move.
+    /// </summary>
+    [UiFact]
+    public void AServedListsFocusedItemRenamed_ReachesAClientsPropertyHandler_Once()
+    {
+        using var guard = ForegroundGuard.Begin();
+        using var app = new Application(new SdlWindowingPlatform(), "reader focus", 360, 260);
+        var items = Enumerable.Range(0, 300).Select(i => $"file {i}").ToList();
+        var list = VirtualListElement<string>.New().ItemHeight(20)
+            .RenderWith(t => Flex.Row().Children(Text.New(t).FontSize(12f)))
+            .Items(items)
+            .SelectedIndex(0)
+            .FlexGrow(1);
+        list.IsFocusable = true;
+        list.AccessibleName = "Files";
+        app.SetRoot(Flex.Column().FlexGrow(1).Children(list));
+        app.RunFrame(TimeSpan.FromMilliseconds(16));
+
+        using var automation = new UIA3Automation();
+        var focus = new ConcurrentQueue<string>();
+        var names = new ConcurrentQueue<string>();
+        var senders = new ConcurrentQueue<(string Name, bool HasFocus)>();
+        automation.RegisterFocusChangedEvent(element =>
+        {
+            if (!Ours(element)) return;
+            try { focus.Enqueue(element.Name); }
+            catch (Exception ex) { focus.Enqueue($"<{ex.GetType().Name}>"); }
+        });
+        var hwnd = ((HultUI.Core.Platform.IWin32WindowHandle)typeof(Window).GetProperty("PlatformWindow",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(app.PrimaryWindow)!).Hwnd;
+        var window = automation.FromHandle(hwnd);
+        // Let go with the others (UnregisterAllEvents, below).
+        window.RegisterPropertyChangedEvent(FlaUI.Core.Definitions.TreeScope.Subtree,
+            (element, _, value) =>
+            {
+                names.Enqueue(value?.ToString() ?? "<null>");
+                try { senders.Enqueue((element.Name, element.Properties.HasKeyboardFocus.ValueOrDefault)); }
+                catch (Exception ex) { senders.Enqueue(($"<{ex.GetType().Name}>", false)); }
+            }, automation.PropertyLibrary.Element.Name);
+        try
+        {
+            Pump(app, TimeSpan.FromMilliseconds(300));
+            list.Focus();
+            bool focused = Pump(app, TimeSpan.FromSeconds(3), () => focus.Contains("file 0"));
+            if (!focused && focus.IsEmpty)
+                Assert.Fail("no focus event reached the client's handler from a window that is not the foreground: "
+                    + "UI Automation may not deliver one without it");
+            Assert.True(focused, "the focus handler heard " + string.Join(" | ", focus));
+            while (focus.TryDequeue(out _)) { }
+            while (names.TryDequeue(out _)) { }
+            while (senders.TryDequeue(out _)) { }
+
+            list.Items = ["new commit", .. items];
+            bool renamed = Pump(app, TimeSpan.FromSeconds(3), () => names.Contains("new commit"));
+            Pump(app, TimeSpan.FromMilliseconds(300));
+            output.WriteLine("names: " + string.Join(" | ", names));
+            output.WriteLine("focus: " + string.Join(" | ", focus));
+            Assert.True(renamed, "the property handler heard " + string.Join(" | ", names));
+            Assert.Single(names, n => n == "new commit");
+            Assert.DoesNotContain(focus, n => n.StartsWith("file", StringComparison.Ordinal) || n == "new commit" || n == "Files");
+            // The element the event came from is the item, by its new name, with the keyboard focus.
+            Assert.Contains(senders, s => s.Name == "new commit" && s.HasFocus);
         }
         finally { automation.UnregisterAllEvents(); }
     }
@@ -121,6 +193,7 @@ public sealed class ReaderFocusTests(ITestOutputHelper output)
         var heard = new ConcurrentQueue<string>();
         automation.RegisterFocusChangedEvent(element =>
         {
+            if (!Ours(element)) return;
             try
             {
                 var selected = element.Patterns.SelectionItem.PatternOrDefault?.IsSelected.ValueOrDefault;
@@ -229,5 +302,13 @@ public sealed class ReaderFocusTests(ITestOutputHelper output)
             Thread.Sleep(10);
         }
         return until?.Invoke() ?? true;
+    }
+
+    /// <summary>Whether a focus event came from this process. A focus handler hears the whole desktop's
+    /// focus moves, and another process's elements are not a test's to read, not even their names.</summary>
+    private static bool Ours(FlaUI.Core.AutomationElements.AutomationElement element)
+    {
+        try { return element.Properties.ProcessId.ValueOrDefault == Environment.ProcessId; }
+        catch { return false; }
     }
 }

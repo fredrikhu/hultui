@@ -94,14 +94,13 @@ public partial class CommanderApp
     private (bool Wrap, float Pan, float Width) _diffRowShape = (false, -1f, -1f);
 
     /// <summary>
-    /// Measures every row once, at the current column width. Wrapped, a row is as tall as
+    /// Measures every row once, at the column width <paramref name="width"/>. Wrapped, a row is as tall as
     /// whichever side wrapped further; unwrapped, every row is one line and the whole thing is
     /// arithmetic. Called when the comparison, the wrap mode, or the width changes — not per
     /// frame, and never per row per frame.
     /// </summary>
-    private void RebuildDiffHeights()
+    private void RebuildDiffHeights(float width)
     {
-        float width = DiffCodeWidth();
         _diffHeightsWidth = width;
         var tops = new float[_diffRows.Count + 1];
         float y = 0f;
@@ -495,7 +494,10 @@ public partial class CommanderApp
     /// that: the first Build after opening a comparison runs before any layout, and it still
     /// has to decide whether there is a scrollbar to show. A resize's build takes the width
     /// the resize leads the body to (<see cref="BodyWidth"/>).</summary>
-    private float DiffCodeWidth() => Math.Max(0, (BodyWidth(_diffScrollRef.Current) - DiffGutterW * 2 - DiffMarkerW) / 2);
+    private float DiffCodeWidth() => DiffCodeWidthFor(BodyWidth(_diffScrollRef.Current));
+
+    /// <summary>One code column of a body <paramref name="body"/> wide.</summary>
+    private float DiffCodeWidthFor(float body) => Math.Max(0, (body - DiffGutterW * 2 - DiffMarkerW) / 2);
 
     /// <summary>How far right the view can scroll: the longest line, less what one code
     /// column shows of it. Nowhere, when lines wrap instead.</summary>
@@ -744,9 +746,12 @@ public partial class CommanderApp
         if (_diffTops.Length != _diffRows.Count + 1 || _diffRowShape != shape)
         {
             bool widthOnly = WrappedWidthOnly(_diffRowShape, shape, _diffTops.Length == _diffRows.Count + 1);
-            if (_diffRowShape.Item1 != shape.Item1 || _diffHeightsWidth != shape.Item3
+            // Wrapped, a body with no box yet measures nothing here: its first layout does
+            // (WrappedBodyLaidOut), as the reader's does.
+            if ((_diffRowShape.Item1 != shape.Item1 || _diffHeightsWidth != shape.Item3
                 || _diffTops.Length != _diffRows.Count + 1)
-                RebuildDiffHeights();
+                && !(DiffWrap && WaitsForTheBody(_diffScrollRef.Current)))
+                RebuildDiffHeights(shape.Item3);
             if (!widthOnly) remake = true;
             _diffRowShape = shape;
         }
@@ -770,6 +775,8 @@ public partial class CommanderApp
         // Keyed by comparison so each file pair starts at the top instead of inheriting the
         // previous one's offset, and so toggling wrap reconciles rather than rebuilding.
         list.Key = $"diff:{_diffLeftPath}|{_diffRightPath}|{_diffGen}";
+        // Wrapped, the rows are fitted to the width the body is laid out at, in that frame.
+        if (DiffWrap) list.OnLayoutChanged(_wrappedBodyLaidOut ??= WrappedBodyLaidOut);
         list.WithRef(_diffScrollRef);
         // The list's content is exactly as wide as its viewport, so it cannot scroll sideways
         // itself: it is told who does, and the wheel's sideways motion (a trackpad swipe, or

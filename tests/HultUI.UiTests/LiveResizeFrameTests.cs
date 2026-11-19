@@ -1,8 +1,10 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
 using HultUI.Core.Builders;
+using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Core.Rendering;
 using HultUI.Platform.SDL3;
 using SDL;
@@ -11,6 +13,8 @@ using Xunit.Abstractions;
 using static SDL.SDL3;
 
 namespace HultUI.UiTests;
+
+using Text = HultUI.Core.Builders.Text;
 
 /// <summary>
 /// The frames a real window draws from SDL's event watch, the one place that runs while Win32
@@ -418,6 +422,136 @@ public sealed class LiveResizeFrameTests(ITestOutputHelper output)
     }
 
     private const uint NoSize = 0x0001;
+
+    /// <summary>An app-shaped list of wrapped rows: its window's Resized handler writes the width it
+    /// builds for (Junction's wrapped diff, RerenderView), and each build wraps every row at it.</summary>
+    private sealed class WrappedRows : Component
+    {
+        private const string Line = "A wrapped row of a diff, long enough to wrap into a few lines at any width the window takes here";
+        public Signal<float> Width { get; } = new(0f);
+        public Signal<int> Note { get; } = new(0);
+        public float BuiltFor { get; private set; } = -1f;
+        public int Builds { get; private set; }
+        public int ThrowAt { get; set; } = -1;
+
+        public override Element Build()
+        {
+            Builds++;
+            BuiltFor = Width.Value;
+            _ = Note.Value;
+            if (ThrowAt >= 0 && Builds == ThrowAt) throw new InvalidOperationException("build");
+            var column = Flex.Column().FlexGrow(1);
+            for (int i = 0; i < 12; i++) column.AddChild(Text.New($"{i}: {Line}").FontSize(13f));
+            return column;
+        }
+    }
+
+    /// <summary>
+    /// A resize made from posted work (plan 17 round 16, suite proposal (g)): <c>SetWindowPos</c>
+    /// sends the size inside the call, so its live frame ran inside the drain's batch, which held
+    /// what the Resized handler wrote. That frame drew the new size with the old build, and the
+    /// batch's flush then built and drew the same size again: 2 frames a step, the first stale
+    /// (Junction's wrapped diff: 1.90 a step). The live frame now sets the batch aside: one frame a
+    /// step, inside the call, with the build for its width.
+    /// </summary>
+    [UiFact]
+    public void AResizeFromPostedWork_DrawsOneFrameAStep_WithItsBuild()
+    {
+        using var guard = ForegroundGuard.Begin();
+        var rows = new WrappedRows();
+        Window? window = null;
+        int stale = 0;
+        var (app, hwnd, counter) = Open(c => Flex.Column().FlexGrow(1).Background(Color.FromHex("#202020")).Children(
+            rows.Mount(),
+            Canvas.New(_ => { if (window is { } w && rows.BuiltFor != w.LayoutWidth) stale++; }).Width(1f).Height(1f),
+            c));
+        using var _ = app;
+        window = app.PrimaryWindow;
+        window.Resized += () => rows.Width.Value = window.LayoutWidth;
+        GetClientRect(hwnd, out var start);
+        int width = start.Right - start.Left, height = start.Bottom - start.Top;
+
+        const int steps = 21;
+        int inside = 0, after = 0, unbuilt = 0;
+        stale = 0;
+        for (int i = 0; i < steps; i++)
+        {
+            int w = 400 + 6 * (i + 1);
+            int before = counter.Frames;
+            Application.InvokeOnMainThread(() =>
+            {
+                int frames = counter.Frames, builds = rows.Builds;
+                SetWindowPos(hwnd, 0, 0, 0, w, 300, NoMove | NoZOrder | NoActivate);
+                inside += counter.Frames - frames;
+                if (rows.Builds == builds) unbuilt++;
+            });
+            for (int f = 0; f < 3; f++) app.RunFrame(TimeSpan.FromMilliseconds(16));
+            after += counter.Frames - before;
+        }
+        after -= inside;
+
+        output.WriteLine($"{steps} posted steps: {inside} frames inside SetWindowPos, {after} in the passes after, " +
+            $"{stale} drawn with the build for another width, {unbuilt} steps that built nothing inside the call " +
+            $"(window {width}x{height} at the start)");
+        Assert.True(inside == steps, $"{inside} frames inside {steps} steps");
+        Assert.True(after == 0, $"{after} frames after {steps} steps");
+        Assert.True(stale == 0, $"{stale} frames drew the build for another width");
+        Assert.True(unbuilt == 0, $"{unbuilt} steps built nothing inside the call");
+    }
+
+    /// <summary>
+    /// A build that throws in that flush, inside the size message: SDL's event watch logs it and
+    /// swallows it, as it does for any live frame's build, so <c>SetWindowPos</c> returns and the
+    /// action runs on, its batch open again. That event's frame is not drawn and the resize stays
+    /// pending, so the step's next event (PIXEL_SIZE_CHANGED for the same size) or the next pass
+    /// lays out and draws the new size.
+    /// </summary>
+    [UiFact]
+    public void ABuildThatThrowsInsideTheSizeMessage_IsLogged_AndTheNextPassDrawsTheSize()
+    {
+        using var guard = ForegroundGuard.Begin();
+        var rows = new WrappedRows();
+        var (app, hwnd, counter) = Open(c => Flex.Column().FlexGrow(1).Children(rows.Mount(), c));
+        using var _ = app;
+        var window = app.PrimaryWindow;
+        window.Resized += () => rows.Width.Value = window.LayoutWidth;
+        window.ResizeThrottleMs = 0;
+
+        var log = new StringWriter();
+        var error = Console.Error;
+        int drawnInside = -1, builtAfterWrite = -1, builtBeforeWrite = -1;
+        bool ranOn = false;
+        Console.SetError(log);
+        try
+        {
+            Application.InvokeOnMainThread(() =>
+            {
+                rows.ThrowAt = rows.Builds + 1;
+                rows.Note.Value = 1;   // held; the live frame's flush builds it, and that build throws
+                int frames = counter.Frames;
+                SetWindowPos(hwnd, 0, 0, 0, 460, 330, NoMove | NoZOrder | NoActivate);
+                drawnInside = counter.Frames - frames;
+                builtBeforeWrite = rows.Builds;
+                rows.Note.Value = 2;   // batched again: built when the action's batch closes
+                builtAfterWrite = rows.Builds;
+                ranOn = true;
+            });
+            for (int f = 0; f < 4; f++) app.RunFrame(TimeSpan.FromMilliseconds(16));
+        }
+        finally { Console.SetError(error); }
+
+        GetClientRect(hwnd, out var client);
+        output.WriteLine($"drawn inside {drawnInside}; built {builtBeforeWrite} -> {builtAfterWrite} on a write after it; " +
+            $"last frame {counter.Sizes[^1]}, client {client.Right - client.Left}x{client.Bottom - client.Top}; " +
+            $"logged: {log.ToString().Split('\n')[0]}");
+        Assert.True(ranOn, "the action did not run on past SetWindowPos");
+        Assert.Contains("EventWatchCallback failed", log.ToString());
+        Assert.Contains("build", log.ToString());
+        Assert.InRange(drawnInside, 0, 1);
+        Assert.Equal(builtBeforeWrite, builtAfterWrite);
+        Assert.Equal((client.Right - client.Left, client.Bottom - client.Top), counter.Sizes[^1]);
+        Assert.Equal(window.LayoutWidth, rows.BuiltFor);   // the next pass's Resized built for the size
+    }
 
     private static unsafe void PushLiveResizeExpose(SDL_WindowID window)
     {
