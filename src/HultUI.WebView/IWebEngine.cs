@@ -83,6 +83,14 @@ public interface IWebEngineView : IDisposable
     /// <summary>A pointer event over the page, in device pixels relative to its top-left.</summary>
     void SendPointer(in WebPointerInput input);
 
+    /// <summary>
+    /// How far one wheel notch (<see cref="WebPointerInput.WheelY"/> of 1) scrolls the page, in
+    /// layout units at the page's default zoom. The window's middle-button autoscroll speaks in
+    /// layout units and reaches the page as wheel input, so this sets its speed there. Read on
+    /// the UI thread, per frame of the gesture.
+    /// </summary>
+    float PixelsPerWheelNotch => 100f;
+
     /// <summary>A key, for an engine without <see cref="WebEngineCapabilities.NativeKeyboard"/>.</summary>
     void SendKey(in WebKeyInput input);
 

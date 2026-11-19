@@ -162,6 +162,12 @@ internal static unsafe partial class Native
     [LibraryImport("user32.dll")]
     public static partial short GetKeyState(int virtualKey);
 
+    /// <summary>SPI_GETWHEELSCROLLLINES: lines a notch of the wheel scrolls; WHEEL_PAGESCROLL for a page.</summary>
+    public const uint SPI_GETWHEELSCROLLLINES = 0x0068;
+
+    [LibraryImport("user32.dll")]
+    public static partial int SystemParametersInfoW(uint action, uint param, uint* value, uint winIni);
+
     [LibraryImport("user32.dll")]
     public static partial int EnumChildWindows(nint parent, delegate* unmanaged[Stdcall]<nint, nint, int> proc, nint state);
 

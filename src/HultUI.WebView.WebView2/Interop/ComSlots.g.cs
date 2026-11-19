@@ -403,6 +403,13 @@ namespace HultUI.WebView.WebView2.Interop;
     }
 
     /// <summary>From WebView2.h.</summary>
+    internal static class ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler
+    {
+        public static readonly Guid IID = new("b99369f3-9b11-47b5-bc6f-8e7895fcea17");
+        public const int Invoke = 3;
+    }
+
+    /// <summary>From WebView2.h.</summary>
     internal static class ICoreWebView2NavigationStartingEventHandler
     {
         public static readonly Guid IID = new("9adbe429-f36d-432b-9ddc-f8881fbd76e3");

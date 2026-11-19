@@ -282,6 +282,146 @@ public sealed class WebView2Tests
         public GetIntegervFn GetIntegerv;
     }
 
+    /// <summary>
+    /// The middle button over a page, the whole way in from SDL's events: the window's autoscroll
+    /// scrolls the page, at the speed it gives every list, and Chromium's own never starts — not
+    /// while the button is held, where it scrolled the page with no ring and no cursor, and not
+    /// after a click, where it set the page following the pointer with nothing on screen to say so
+    /// (both measured on 157 before the fix). The ring is on screen over the page while the button
+    /// is held. The page still hears the press — cancelled, which is what keeps Chromium's off —
+    /// the release and the click, and a middle click on a link still asks for a new window.
+    /// </summary>
+    [WebView2UiFact]
+    public void TheMiddleButton_ScrollsThePageByTheWindowsAutoscroll_NeverChromiumsOwn() => OnSta(() =>
+    {
+        using var page = Open("""
+            <html><body style='margin:0;background:#fff'><div style='height:6000px'></div>
+            <a href='https://link.test/' style='position:absolute;left:0;top:0;width:100px;height:40px'></a><script>
+              for (const t of ['mousedown', 'mouseup', 'auxclick'])
+                addEventListener(t, e => chrome.webview.postMessage(t + ' ' + e.button + ' ' + e.defaultPrevented));
+              chrome.webview.postMessage('ready');
+            </script></body></html>
+            """);
+        var received = new List<string>();
+        page.Web.MessageReceived += m => received.Add(m.Json);
+        Assert.True(page.PumpUntil(() => received.Contains("\"ready\"") && page.Web.Frames.IsLoaded), "the page never got ready");
+        double ScrollY() => double.Parse(page.Await(page.Web.ExecuteScriptAsync("scrollY")), System.Globalization.CultureInfo.InvariantCulture);
+        void For(double seconds)
+        {
+            var clock = Stopwatch.StartNew();
+            page.PumpUntil(() => clock.Elapsed.TotalSeconds >= seconds);
+        }
+        var mouse = new SdlMouse(page.App);
+        var opened = new List<Uri>();
+        page.Web.NewWindowRequested += r => opened.Add(r.Uri);
+
+        // A middle click on a link still asks for it in a new window, its press cancelled or not.
+        mouse.Move(50, 20);
+        mouse.Middle(down: true, 50, 20);
+        mouse.Middle(down: false, 50, 20);
+        Assert.True(page.PumpUntil(() => opened.Count > 0, 5), "a middle click on a link opened nothing");
+        Assert.Equal(new Uri("https://link.test/"), opened[0]);
+        For(0.2);
+        received.Clear();
+
+        // A click, then the pointer moved away with no button held: Chromium's toggle mode
+        // would follow it down the page.
+        mouse.Move(240, 160);
+        mouse.Middle(down: true, 240, 160);
+        mouse.Middle(down: false, 240, 160);
+        For(0.2);
+        for (int y = 170; y <= 280; y += 10)
+        {
+            mouse.Move(240, y);
+            For(0.03);
+        }
+        For(0.6);
+        Assert.Equal(0, ScrollY());
+        Assert.True(page.PumpUntil(() => received.Contains("\"auxclick 1 false\"")), "received: " + string.Join(", ", received));
+        Assert.Contains("\"mousedown 1 true\"", received);
+        Assert.Contains("\"mouseup 1 false\"", received);
+
+        // On screen, a row of pixels through the anchor: the page's white, until the ring is drawn
+        // over it — which is the indication this was all about.
+        float scale = page.App.PrimaryWindow.DisplayScale;
+        bool RingShows()
+        {
+            int y = (int)(160 * scale);
+            for (int x = (int)((240 - 20) * scale); x <= (int)((240 + 20) * scale); x++)
+                if (!Page.Near(page.Screen(x, y), (255, 255, 255))) return true;
+            return false;
+        }
+        Assert.False(RingShows(), "the page is not plain white at the anchor");
+
+        // Held 40 below the anchor with the pointer still: 26 past the dead zone, 234 a second.
+        received.Clear();
+        mouse.Move(240, 160);
+        mouse.Middle(down: true, 240, 160);
+        mouse.Move(240, 200);
+        var held = Stopwatch.StartNew();
+        For(0.5);
+        Assert.True(RingShows(), "no ring over the page at the anchor");
+        For(0.5);
+        mouse.Middle(down: false, 240, 200);
+        double seconds = held.Elapsed.TotalSeconds;
+        For(0.4);   // the wheel's last smooth scroll lands
+        double scrolled = ScrollY();
+        Assert.InRange(scrolled, 234 * seconds * 0.6, 234 * seconds * 1.2);
+        For(0.6);
+        Assert.Equal(scrolled, ScrollY());   // the release ended it
+        Assert.False(RingShows(), "the ring outlived the gesture");
+        // No middle click came of it, though the pointer ended on the element it pressed: the
+        // gesture was the window's from press to release.
+        Assert.Empty(received);
+    });
+
+    /// <summary>The mouse as SDL's events into the app's one window, at points in its layout
+    /// units: the whole way in, as a real mouse's come.</summary>
+    private sealed unsafe class SdlMouse(Application app)
+    {
+        private readonly SDL.SDL_WindowID _window = WindowId();
+        // SDL's coordinates to the window's layout units (SDL3Window.InputScale), undone.
+        private readonly float _scale = ((SDL3Window)typeof(Window).GetProperty("PlatformWindow",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(app.PrimaryWindow)!).InputScale;
+
+        public void Move(float x, float y)
+        {
+            var e = new SDL.SDL_Event();
+            e.motion.type = SDL.SDL_EventType.SDL_EVENT_MOUSE_MOTION;
+            e.motion.windowID = _window;
+            e.motion.x = x / _scale;
+            e.motion.y = y / _scale;
+            Push(e);
+        }
+
+        public void Middle(bool down, float x, float y)
+        {
+            var e = new SDL.SDL_Event();
+            e.button.type = down ? SDL.SDL_EventType.SDL_EVENT_MOUSE_BUTTON_DOWN : SDL.SDL_EventType.SDL_EVENT_MOUSE_BUTTON_UP;
+            e.button.windowID = _window;
+            e.button.button = 2;   // SDL_BUTTON_MIDDLE
+            e.button.down = down;
+            e.button.clicks = 1;
+            e.button.x = x / _scale;
+            e.button.y = y / _scale;
+            Push(e);
+        }
+
+        private static void Push(SDL.SDL_Event e) => Assert.True(SDL.SDL3.SDL_PushEvent(&e), SDL.SDL3.SDL_GetError());
+
+        private static SDL.SDL_WindowID WindowId()
+        {
+            int count;
+            var windows = SDL.SDL3.SDL_GetWindows(&count);
+            try
+            {
+                Assert.Equal(1, count);
+                return SDL.SDL3.SDL_GetWindowID(windows[0]);
+            }
+            finally { SDL.SDL3.SDL_free(windows); }
+        }
+    }
+
     [WebView2UiFact]
     public void ScriptAndMessages_GoBothWays() => OnSta(() =>
     {

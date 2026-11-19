@@ -58,6 +58,10 @@ internal sealed unsafe partial class CefView
         });
     }
 
+    /// <summary>CEF's off-screen browser takes a wheel's deltas as pixels, and a notch is sent
+    /// as 120 of them (above).</summary>
+    public float PixelsPerWheelNotch => 120f;
+
     private static cef_mouse_button_type_t? Button(WebPointerButtons b) => b switch
     {
         WebPointerButtons.Left => cef_mouse_button_type_t.MBT_LEFT,

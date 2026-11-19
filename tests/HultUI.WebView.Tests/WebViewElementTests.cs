@@ -216,6 +216,158 @@ public class WebViewElementTests
         Assert.Equal(0f, scroll!.ScrollOffsetY);
     }
 
+    // ──── Middle-click autoscroll ────
+
+    // The window's dead zone and gain (Window.AutoScrollDeadZone, AutoScrollGain), duplicated as
+    // MiddleClickAutoScrollTests duplicates them: a feel decision a test should notice changing.
+    private const float DeadZone = 14f, Gain = 9f;
+
+    /// <summary>Presses the middle button at (100, 100), parks the pointer off by (dx, dy), and
+    /// runs <paramref name="seconds"/> of frames without moving it again.</summary>
+    private static void HoldMiddle(Page page, float dx, float dy, double seconds, bool release = true)
+    {
+        page.Window.MoveMouse(100, 100);
+        page.Window.MouseDown(100, 100, MouseButton.Middle);
+        page.Window.MoveMouse(100 + dx, 100 + dy);
+        for (int i = 0; i < (int)Math.Round(seconds * 60); i++) page.Session.PumpFrame();
+        if (release) page.Window.MouseUp(100 + dx, 100 + dy, MouseButton.Middle);
+    }
+
+    private static List<WebPointerInput> Wheels(Page page) =>
+        page.View.Pointers.Where(i => i.Action == WebPointerAction.Wheel).ToList();
+
+    /// <summary>The window's speed for a displacement, in layout units a second.</summary>
+    private static float Speed(float displacement) =>
+        (Math.Abs(displacement) - DeadZone) * Gain * Math.Sign(displacement);
+
+    [Fact]
+    public void AHeldMiddleButton_ScrollsThePage_AsWheelInputAtThePress_UnderTheWindowsRingAndCursor()
+    {
+        using var page = Show(scale: 1.5f, recording: true);
+        page.Window.MoveMouse(100, 100);
+        page.Window.MouseDown(100, 100, MouseButton.Middle);
+        page.Window.MoveMouse(100, 140);
+        page.Window.RenderLog.Clear();
+        page.Session.PumpFrame();
+
+        // What every list in the app shows: the ring at the anchor, the dead zone's size, and the cursor.
+        Assert.Contains("(86,86 28x28) r=14", page.Window.RenderLog.ToString());
+        Assert.Equal(CursorType.Move, page.Window.LastCursor);
+
+        for (int i = 1; i < 30; i++) page.Session.PumpFrame();   // half a second, the pointer still
+        page.Window.MouseUp(100, 140, MouseButton.Middle);
+
+        var wheels = Wheels(page);
+        Assert.NotEmpty(wheels);
+        Assert.All(wheels, w => Assert.Equal((150, 90), (w.X, w.Y)));   // the press, (100, 100 - 40) × 1.5
+        Assert.All(wheels, w => Assert.Equal(0f, w.WheelX));
+        // Down the content is the wheel toward the user: negative notches, 100 units each.
+        Assert.Equal(Speed(40) * 0.5f, -wheels.Sum(w => w.WheelY) * 100f, 1f);
+
+        // An autoscroll that ran is the gesture's from press to release: the page hears the
+        // scrolling and nothing else — no press, no release (so no middle click), no moves.
+        var p = page.View.Pointers;
+        Assert.DoesNotContain(p, i => i.Action is WebPointerAction.Down or WebPointerAction.Up);
+        Assert.DoesNotContain(p, i => i.Action == WebPointerAction.Move && i.Y == 150);
+        Assert.All(wheels, w => Assert.Equal(WebPointerButtons.None, w.Held));
+
+        // The release ends it: the cursor is the page's again, and nothing more is sent.
+        Assert.NotEqual(CursorType.Move, page.Window.LastCursor);
+        int sent = Wheels(page).Count;
+        page.Session.PumpFrames(10);
+        Assert.Equal(sent, Wheels(page).Count);
+    }
+
+    /// <summary>A middle click that never left the dead zone scrolled nothing, and is the page's:
+    /// its press, held back while it could still have become an autoscroll, reaches the page with
+    /// the release — each where it happened — and a link under it opens.</summary>
+    [Fact]
+    public void AMiddleClickThatNeverLeftTheDeadZone_ReachesThePage_PressAndRelease()
+    {
+        using var page = Show();
+        page.Window.MoveMouse(100, 100);
+        page.Window.MouseDown(100, 100, MouseButton.Middle);
+        page.Session.PumpFrames(5);
+        Assert.DoesNotContain(page.View.Pointers, i => i.Action == WebPointerAction.Down);
+
+        page.Window.MoveMouse(102, 101);
+        page.Session.PumpFrames(5);
+        page.Window.MouseUp(102, 101, MouseButton.Middle);
+
+        Assert.Empty(Wheels(page));
+        var down = page.View.Pointers.Single(i => i.Action == WebPointerAction.Down);
+        var up = page.View.Pointers.Single(i => i.Action == WebPointerAction.Up);
+        Assert.Equal((WebPointerButtons.Middle, WebPointerButtons.Middle, 100, 60), (down.Button, down.Held, down.X, down.Y));
+        Assert.Equal((WebPointerButtons.Middle, WebPointerButtons.None, 102, 61), (up.Button, up.Held, up.X, up.Y));
+    }
+
+    /// <summary>
+    /// A notch is 120 whole units and nothing finer reaches the page, so a frame's share of a slow
+    /// crawl rounds to nothing. Carried to the next frame, it adds up: CEF's 120 pixels a notch
+    /// make a unit a pixel, and one past the dead zone is 9 of them a second.
+    /// </summary>
+    [Fact]
+    public void ACrawlJustPastTheDeadZone_StillMovesThePage_ItsFractionsCarried()
+    {
+        using var page = Show();
+        page.View.PixelsPerWheelNotch = 120f;
+
+        HoldMiddle(page, 0, DeadZone + 1, seconds: 1.0);
+
+        var wheels = Wheels(page);
+        Assert.All(wheels, w => Assert.Equal(-1f / 120f, w.WheelY));
+        Assert.Equal(Speed(DeadZone + 1), wheels.Count, 1f);
+    }
+
+    [Fact]
+    public void ADiagonalHold_ScrollsBothWays_OneAxisToAnEvent()
+    {
+        using var page = Show();
+
+        HoldMiddle(page, 40, -40, seconds: 0.5);
+
+        var wheels = Wheels(page);
+        // WebView2's wheel messages carry one axis each.
+        Assert.All(wheels, w => Assert.True((w.WheelX == 0) != (w.WheelY == 0)));
+        // Right through the content is negative on HultUI's horizontal wheel; up is positive.
+        Assert.Equal(Speed(40) * 0.5f, -wheels.Sum(w => w.WheelX) * 100f, 1f);
+        Assert.Equal(Speed(40) * 0.5f, wheels.Sum(w => w.WheelY) * 100f, 1f);
+    }
+
+    [Fact]
+    public void WithAutoscrollOff_TheMiddleButtonIsThePagesAlone()
+    {
+        using var page = Show();
+        page.Element.MiddleClickAutoScroll = false;
+
+        HoldMiddle(page, 0, 40, seconds: 0.5, release: false);
+
+        Assert.Empty(Wheels(page));
+        Assert.NotEqual(CursorType.Move, page.Window.LastCursor);
+        Assert.Contains(page.View.Pointers, i => i.Action == WebPointerAction.Move && i.Held == WebPointerButtons.Middle);
+    }
+
+    /// <summary>The innermost surface takes the gesture, as nested lists do: the page, not the
+    /// list around it — which used to scroll while the page under the pointer sat still.</summary>
+    [Fact]
+    public void InsideAScrollView_TheGestureScrollsThePage_NotTheListAroundIt()
+    {
+        ScrollViewElement? scroll = null;
+        using var page = Show(around: element =>
+        {
+            scroll = ScrollView.New();
+            scroll.Children(Flex.Column().Children(
+                element.FlexGrow(0).Height(200f),
+                Box.New().Height(800f).FlexShrink(0)));
+            return Flex.Column().Children(scroll.FlexGrow(1));
+        });
+
+        HoldMiddle(page, 0, 40, seconds: 0.5);
+
+        Assert.NotEmpty(Wheels(page));
+        Assert.Equal(0f, scroll!.ScrollOffsetY);
+    }
+
     // ──── Focus ────
 
     [Fact]

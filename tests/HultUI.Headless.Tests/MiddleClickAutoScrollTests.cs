@@ -156,6 +156,37 @@ public class MiddleClickAutoScrollTests
         Assert.Equal(atRelease, scroll.ScrollOffsetY, 3);
     }
 
+    /// <summary>
+    /// A press handler may capture the pointer — a web view captures every press, to keep a drag
+    /// that leaves the page. The capture's routing ran first and took the gesture's moves (the
+    /// list sat still under the ring) and its release (the gesture never ended). The autoscroll
+    /// keeps both now, and the release still reaches the element that captured.
+    /// </summary>
+    [Fact]
+    public void ARowThatCapturesTheMiddlePress_StillScrollsItsList_AndHearsTheRelease()
+    {
+        using var session = HeadlessSession.Create(width: 200, height: 300);
+        var (scroll, rows) = BuildList(session);
+        int ups = 0, moves = 0;
+        foreach (var row in rows)
+        {
+            // Moves counted from the press: MouseDown moves the pointer there first.
+            row.On<PointerDownEvent>(e => { e.CapturePointer(); moves = 0; });
+            row.On<PointerUpEvent>(_ => ups++);
+            row.On<PointerMoveEvent>(_ => moves++);
+        }
+
+        HoldBelow(session, originY: 50, dy: 30, seconds: 0.5);
+
+        Assert.Equal(ExpectedScroll(30, 0.5), scroll.ScrollOffsetY, 0);
+        Assert.Equal(0, moves);
+        Assert.Equal(1, ups);
+
+        float atRelease = scroll.ScrollOffsetY;
+        Pump(session, 0.5);
+        Assert.Equal(atRelease, scroll.ScrollOffsetY, 3);   // the release ended it
+    }
+
     [Fact]
     public void ItStopsAtTheEndOfTheContentRatherThanRunningPastIt()
     {
