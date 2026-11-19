@@ -4,27 +4,24 @@ State of [the performance team](17-performance-team.md). The orchestrator update
 file after every step and commits it with the step's work. Full survey reports are in
 [`17-reports/`](17-reports/).
 
-- **Round:** 16
-- **Phase:** release — round 16: the build order done, the user's Narrator check passed, the full suite passed (Fedora's one test race fixed 89506c22), main merged in (666e6486, 5e180d17) (step 9 landed f76cb440 + 80e94eeb; step 8 49b0da84; step 7 3d728568 + 13a1b363; step 1 landed 40cadb57, step 2 ec57c4ee + 5766a137, step 3 41ecec65, step 4 0d96e805 + b02b46d6 + 32fffce7, step 5 96d00ab3, step 6 89732bec (question 68: keep); the user does the Narrator check after step 10, before the full suite — the user's Narrator check of `r16b4\live\` (this session's scratchpad) is open and the release waits for it; the survey merged 2026-11-18; 10 steps in "Round 16 build order"; questions
-  66 and 67 answered 2026-11-18 with the recommendations (66 (a), 67 (b) with images first); build briefs `brief-r16b<N>.md` in this session's
-  scratchpad, agent ids in `r16-agents.txt`). Survey: started 2026-11-18 in a fresh context (session b6ef64d9). Main had moved by 59 commits
-  outside plan 17 (to 3038f82b: SkiaSharp 4.156 with HarfBuzzSharp 14.4 and the CPU surface in BGRA, SDL 3.5.0, the
-  app team's fixes, `Element.OnLayoutChanged`, the software renderer); merged into the branch as cd699003 (clean).
-  Round 14's Landed rows, round 15's build order, questions 62, 63 and 65 and round 14's log moved to the archive
-  (`archive_r16.py`). Round 16's files: the common brief `brief-r16-survey.md`, agent ids `r16-agents.txt`, probes
-  `r16-<area>\`, desktop lock `Global\HultUI-r16-desktop`, all in this session's scratchpad
-  `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\b6ef64d9-4ed1-4793-9955-6a986d74de79\scratchpad\`. If
-  the session dies, re-spawn only experts without a `17-reports/r16-*` report. Round 15's files (briefs, probes
-  `r15-<area>\` and `r15b<N>\`, `fullsuite-r15.sh` with `fedora-r15.sh` — the model for round 16's full suite: Fedora
-  runs Junction, Meridian, Aperture and Reel on their own, each in a private D-Bus session, as
-  `HultUI.CrossPlatform.slnf` has none of them — `archive_r15.py`, `merge_r15.py`, `sr-variants\`) are in session
-  8e8ba33b's scratchpad `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\8e8ba33b-db33-43fa-885a-cb6b82b7253f\scratchpad\`.
-  **Round 16 builds a11y-gate-on-client (question 50: build) and a11y-items-on-demand-sooner (question 64: (a), Windows
-  only)**; the prototypes are that scratchpad's `sr-variants\patches\gate.patch` and `items200.patch`. The screen-reader
-  fix (a11y-keyboard-moves-silent, 9b7513d1..9550ecec, outside plan 17) is on main and released (junction-v1.28.0,
-  vesper-v1.28.0, meridian-v1.11.0, aperture-v1.26.0, reel-v1.12.0 on 9df64bf6); the survey treats it as reviewed. Open
-  for the user, not blocking: another F16 held-drag run (Waiting) only with a new approval. Outside plan 17: CI's Linux
-  job runs no Junction, Meridian, Aperture or Reel tests; AT-SPI/Orca is unchecked for the screen-reader fix.
+- **Round:** 17
+- **Phase:** survey — round 17, to start in a fresh context. Round 16 RELEASED 2026-11-19: main b131ae85 (merge, tree
+  identical to the tested branch; origin/main 227e9462 was in the branch), CI run 44426151547 green on the first attempt
+  (test, test-linux, docs, both meridian-keyring jobs) and "Push on main" 44426148065 green. App releases (the user asked,
+  2026-11-19): junction-v1.29.0, vesper-v1.29.0, meridian-v1.12.0, aperture-v1.27.0, reel-v1.13.0 on b131ae85, pushed 3 + 2
+  (installer runs 44429665145, 44429664689, 44429664549, 44429682575, 44429682521). Round 16's files: the survey brief
+  `brief-r16-survey.md`, build briefs `brief-r16b<N>.md` and `brief-r16fix.md`, agent ids `r16-agents.txt`, probes
+  `r16-<area>\` and `r16b<N>\`, `archive_r16.py`, `merge_r16_a.py`, `merge_r16_b.py`, `land_r16.py` (appends a Landed row
+  and a log entry), `fullsuite-r16.sh` with `fedora-r16.sh` (the model for round 17's full suite), the live-check build
+  `r16b4\live\`, all in session b6ef64d9's scratchpad
+  `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\b6ef64d9-4ed1-4793-9955-6a986d74de79\scratchpad\`.
+  For round 17's start: move round 15's Landed rows, round 16's build order with its closed-from-Waiting note, and the
+  answered questions 64, 66, 67 and 68 to the archive, as `archive_r16.py` did; the survey reviews round 16's build,
+  `git log 32c85e81..b131ae85` (the last survey report to the round 16 release; its merges are main's 666e6486 and
+  5e180d17 and round 16's own b131ae85), and anything main gained since. Waiting leads from the build: junction-colour-
+  landing-remakes-rows (step 7), a11y-served-item-one-provider-per-tell (step 3), step 8's heights pass (keep each row's
+  same-height width range) and step 9's shared-stretch skip (log). The 4K monitor was not attached during steps 8–10
+  (the 1440p at 100 %, 200 Hz only): read the desk at the start. Jellyfin sign-in failed in round 16 (the user to check).
   To resume in a fresh context, run in this worktree: `/loop Run the next step of
   the performance team: follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
   Read both once per session (afterwards only the ledger's Phase and the part the step needs), do the step the ledger's
@@ -1223,3 +1220,9 @@ From 2026-11-14 (round 15's survey); earlier entries are in the archive ([to 202
   under a reverse edit of step 7; the shipped path's `Task.Run` of an async lambda +80 B an open. Main moved again by
   one Junction change (791d1a44: a staging move is settled only by its own command); merged as 5e180d17 (clean);
   Junction.Tests re-run on Windows and Fedora on the merge: Windows 1,167 and Fedora 1,167 (private D-Bus), 0 failures. Phase → release.
+- 2026-11-19: round 16 RELEASED. Merged into main b131ae85 and pushed (origin/main 227e9462 in the branch, tree identical
+  to the tested branch; the primary checkout fast-forwarded behind the guard). CI run 44426151547 green on the first
+  attempt (test, test-linux, docs, meridian-keyring on Ubuntu and macOS); "Push on main" green. The user asked for app
+  releases: junction-v1.29.0, vesper-v1.29.0, meridian-v1.12.0, aperture-v1.27.0, reel-v1.13.0 on b131ae85 (99 commits
+  since the 1.28.0 set: SkiaSharp 4, SDL 3.5.0, Jellyfin.Sdk 2026.10.12, round 16), pushed 3 + 2, all five installer runs
+  started. Round → 17, Phase survey, in a fresh context.
