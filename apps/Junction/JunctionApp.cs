@@ -1941,6 +1941,7 @@ public partial class JunctionApp : Component, IDisposable
         _retryPending.Clear();   // a pending retry finds nothing to do
         _highlightNext = null;
         _highlightCancel?.Cancel();
+        _collectWhenIdle = false;   // an idle collection on its way finds nothing to do
         _detailRest?.Dispose();
         DisposeMarkdown();
     }

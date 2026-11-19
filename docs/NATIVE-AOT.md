@@ -149,6 +149,21 @@ bytes in light windows, but every value added collections, and 6 MB made Junctio
 and longer frames. None of the apps sets it; the numbers are in
 [DECISIONS.md](DECISIONS.md#a-smaller-gen-0-budget-for-the-apps-measured-and-declined).
 
+### After a burst that leaves large objects alive: one aggressive collection at rest
+
+The collector decides how much memory to keep committed from what survives its collections, and it
+gives the rest back only when it collects. A burst that allocates hundreds of megabytes and leaves a
+few large objects alive ends with the committed memory of the burst, and an app at rest collects
+nothing. Junction's big-file colour walk is one: after a walk through 675 KB files that kept their
+texts (13.6 MB of large strings), the window held 202.7 MB working set with 92 MB committed to the
+heap. A forced, compacting gen-2 collection with the large object heap compacted left 72 MB committed
+for 24 MB of objects; `GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true)`
+left 24 MB, and the window went to 134.0 MB, less than the 154.0 MB of the same walk keeping nothing
+(round 17 of plan 17; the numbers are in [DECISIONS.md](DECISIONS.md)). It is a blocking collection:
+run it once, when the burst is over and the app has stood idle a moment, on the UI thread between
+frames (8–12 ms there), not on a timer or after every action. `System.GC.ConserveMemory` (5) did less
+(175.4 MB) and adds gen-2 collections to every app; the apps do not set it.
+
 ### A large JSON document stays in the shared pool
 
 `JsonDocument` rents its arrays from `ArrayPool<byte>.Shared` and gives them back when it is

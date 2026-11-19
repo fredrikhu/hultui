@@ -273,7 +273,48 @@ public partial class JunctionApp
         _highlightTexts[key] = texts;
         _highlightTextsOrder.Add(key);
         HighlightTextsKeptBytes += texts.Bytes;
+        _collectWhenIdle = true;
         while (HighlightTextsKeptBytes > MaxKeptHighlightBytes) ForgetHighlightTexts(_highlightTextsOrder[0]);
+    }
+
+    // ── Giving the walk's memory back ────────────────────────────────────
+    //
+    // A big file's walk allocates some 300 MB, nearly all of it garbage at once, and the texts kept
+    // for it are large objects that survive. The collector sizes what it keeps committed from what
+    // survives, and the kept texts also take away the large-heap reads that brought gen-2
+    // collections (5-6 -> 0-1 per 12 revisits): after a walk through bigrepo the window held 202.7 MB
+    // working set, 92 MB of it committed to the heap for 86 MB of objects, against 154.0 MB with no
+    // texts kept, and a forced compacting gen-2 collection still left 72 MB committed for 24 MB live
+    // (plan 17 round 17). Nothing at rest collects again. So once the worker has stood idle for
+    // HighlightIdleCollect after a walk that kept texts, one aggressive collection runs, on the UI
+    // thread between frames: it compacts (the large objects too) and gives the free memory back to
+    // the system, 202.7 -> 134.0 MB in that window, in 8-12 ms. The kept texts stay. A compacting
+    // gen-2 collection (the large objects too) kept the committed memory, 182 MB; a smaller bound or
+    // ConserveMemory brought the gen-2s back and kept more (docs/DECISIONS.md).
+
+    /// <summary>How long the worker stands idle, nothing started and nothing waiting, before the one
+    /// collection that gives a walk's memory back; set by tests.</summary>
+    internal TimeSpan HighlightIdleCollect { get; set; } = TimeSpan.FromSeconds(2);
+
+    /// <summary>The idle collections run so far, for tests.</summary>
+    internal int HighlightIdleCollections { get; private set; }
+
+    // Texts were kept since the last idle collection; tokenizes started so far, which an idle check
+    // compares with the count when it was scheduled.
+    private bool _collectWhenIdle;
+    private int _highlightStarts;
+
+    private void CollectWhenIdle()
+    {
+        int starts = _highlightStarts;
+        _ = Task.Delay(HighlightIdleCollect).ContinueWith(_ => Application.InvokeOnMainThread(() =>
+        {
+            if (!_collectWhenIdle || starts != _highlightStarts || _highlightRunning is not null || _highlightNext is not null)
+                return;
+            _collectWhenIdle = false;
+            HighlightIdleCollections++;
+            GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+        }), TaskScheduler.Default);
     }
 
     private void ForgetHighlightTexts(string key)
@@ -418,6 +459,7 @@ public partial class JunctionApp
         var cancel = new CancellationTokenSource();
         _highlightRunning = ask;
         _highlightCancel = cancel;
+        _highlightStarts++;
         var (clock, rest, hold) = (_app.Time == TimeProvider.System ? TimeProvider.System : NoBudget, HighlightRest, HighlightHold);
         var token = cancel.Token;
         var texts = _highlightTexts.GetValueOrDefault(ask.Key);
@@ -563,6 +605,7 @@ public partial class JunctionApp
             _highlightNext = null;
             StartHighlight(next);
         }
+        else if (_collectWhenIdle) CollectWhenIdle();
     }
 
     // ── Mapping diff lines onto tokenized file lines ─────────────────────
