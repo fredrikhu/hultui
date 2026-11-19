@@ -1,7 +1,7 @@
 # Shaping text a run at a time
 
-**Status (2026-11-18): investigated and prototyped. Run shaping: no-go. A wider digit table
-instead: go, waiting for a yes.** Nothing here is built on `main`; the prototype is on branch
+**Status (2026-11-19): run shaping no-go. Item 1, the wider digit table, is built (781a857f, on
+this plan's branch, not merged); items 2–4 wait.** The run-shaping prototype is on branch
 `claude/run-shaping-prototype` (14b29b66), every part of it off unless an environment variable
 turns it on.
 
@@ -244,7 +244,8 @@ not met, opened large.
 
 **Go, if agreed, in this order:**
 
-1. **Widen the digit table to number punctuation.** It removes the one HarfBuzz call the
+1. **Widen the digit table to number punctuation. Built 2026-11-19 (781a857f); see "Item 1, built"
+   below.** It removes the one HarfBuzz call the
    regressed row makes per label, and it is the largest win measured here. Real interfaces are
    full of such cold tokens: sizes, times, dates, versions, signed values. Steps:
    - Alphabet `0123456789-+.,:/%−` (U+2212). Prove each punctuation mark lazily, the first time a
@@ -273,6 +274,53 @@ not met, opened large.
    four BiDi rows first: they make 500–5,700 HarfBuzz calls a step today.
 4. **Keep the instruments.** `HULTUI_SHAPE_COUNT` (or a `PerformanceCounters` field) and the
    unseen-words row are cheap and say at once where HarfBuzz time goes; both could land with item 1.
+
+## Item 1, built (2026-11-19)
+
+Commit 781a857f, on this plan's branch; not merged.
+
+- **What composes.** A segment of digits and marks from `TextPipeline.NumberMarks`
+  (`- + . , : / %` and U+2212), with at least one digit: `-38913`, `1,234.56`, `12:30`, `50%`,
+  `2026-11-19`, `+46-70-123`. A segment of marks alone (`-`, `...`) is a word as before and proves
+  nothing, so a face that never shows a number with punctuation pays nothing new.
+- **The proof, per mark, the first time a segment has it:** the mark alone one glyph at no
+  offset; beside itself, each digit and each mark proven before it, both ways round, at the summed
+  advances; and between every two digits, the three glyphs at the summed advances. 122 shaper
+  calls for the first mark, two more for each mark proven before it; the digits keep their own
+  110-call proof, made first. A mark that fails is refused for that face and size alone: numbers
+  with it are shaped as words, the digits and other marks still compose. Tolerance 0.01 px, as for
+  the digits.
+- **The reference:** `ComposesNumberPunctuation = false` composes digits only, as before.
+- **Tests.** `DigitFastPathTests` (stub shapers): the marks' slots; the proof's call counts
+  (122, then 124); marks alone stay words; a mark that kerns beside a digit is refused and the
+  others still compose; a colon that takes another glyph between two digits (every pair passes)
+  is refused; the reference composes digits only. `NumberPunctuationTests` (system faces:
+  sans-serif and monospace at 11, 13 and 17.5 px, and Arial on Windows, which fails the digits'
+  proof): 23 numbers and sentences lay out with the reference's glyph ids, each glyph within
+  0.02 px of where the reference put it; in Segoe UI, 50 new labels full of signed, separated
+  and timed numbers make no shaper call. `CacheBoundTests` takes a cold word with letters in it.
+- **Perf A/B, Windows** (`scripts/perf/step-ab.ps1 -Base 4be5be67`, `text/` and `input/type`
+  rows, two idle-gated pairs per runtime, P-cores; the A/A pairs flag no row): **0 slower**, 2
+  faster on both runtimes.
+
+  | Row | JIT min ms | NativeAOT min ms | KB a step |
+  |---|---|---|---|
+  | `text/create 2,000 unique labels` | 3.306 → 1.398 (−56 to −58 %) | 3.953 → 2.003 (−49 to −56 %) | 3,276 → 2,572 |
+  | `text/create 2,000 unique emoji labels` | 5.653 → 3.696 (−33 to −37 %) | 6.977 → 4.632 (−33 to −35 %) | 3,989 → 3,285 |
+  | `text/page down through highlighted JSON …` | flat | flat | 38.8 → 36.2 |
+  | `text/wheel highlighted JSON …` | flat | flat | 7.6 → 7.2 |
+  | `text/wrap 150 paragraphs resize`, `input/type in TextInput` | flat | flat | flat |
+
+  The labels row is now well below its 2.857 ms from before HarfBuzz 14.4 (plan 18), so the
+  regression this plan was about is more than won back on that row; but the row now shapes no word
+  at all, which is what item 2 is for.
+- **Perf A/B, Fedora** (WSL, unpinned, the same commits in two worktrees of the WSL clone, two
+  alternated pairs, `text/` and `input/type` rows; the A/A pair moved no row more than 6 %):
+  **0 slower**, 2 faster. `text/create 2,000 unique labels` 2.556 → 1.569 and 2.461 → 1.528 ms
+  (−38 to −39 %), `text/create 2,000 unique emoji labels` −22 %, the same allocation drops.
+- **Suites:** Windows, all 30 assemblies pass (Junction 1,161). Fedora, `HultUI.CrossPlatform.slnf`
+  passes in full (22 assemblies, the goldens among them); Junction, Meridian, Aperture and Reel,
+  which that filter leaves out, were not run on Fedora.
 
 ## Traps found on the way
 
