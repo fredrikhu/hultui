@@ -1,8 +1,8 @@
 # Shaping text a run at a time
 
-**Status (2026-11-19): run shaping no-go. Item 1, the wider digit table, is built (781a857f), and
-item 2, a cold word in the cold-label rows on purpose (ba15d841); both on this plan's branch, not
-merged. Items 3 and 4 wait.** The run-shaping prototype is on branch
+**Status (2026-11-19): run shaping no-go. Item 1, the wider digit table, is built (781a857f);
+item 2, a cold word in the cold-label rows on purpose (ba15d841); item 3, a memo of right-to-left
+runs (78a69ee5); all on this plan's branch, not merged. Item 4 waits.** The run-shaping prototype is on branch
 `claude/run-shaping-prototype` (14b29b66), every part of it off unless an environment variable
 turns it on.
 
@@ -361,6 +361,80 @@ Commit ba15d841, on this plan's branch; not merged. A perf-suite change only: no
   costs more than the old one did before item 1 (2.56 ms with its `-38913`), on Windows less
   (2.78 against 3.31 ms). Why is not known: the faces differ (Segoe UI, and Fedora's sans), and
   the old word shaped as DFLT, the new one as Latin; not looked into.
+
+## Item 3, built (2026-11-19)
+
+Commit 78a69ee5 (with d78e06ce, two perf rows), on this plan's branch; not merged.
+
+- **The memo.** A second `WordCache` (`_rtlRunCache`) keeps right-to-left runs by their
+  characters, the face and the size: all a run's shaping depends on (the key above), so a run
+  found is the shaper's to the bit and needs no proof. `MeasureRun(rtl: true)` reads it by span
+  (`MeasureRtlRun`); `ShapeBidiLine` takes from it a run of its own (`RtlRun`), over the string
+  and glyphs kept, since layout sets a run's offset and level; a run found makes no string.
+  Weighed as words are (`WordBytes`), bounded as the word cache is (32,768 entries, 16 MB):
+  right-to-left text never reaches the word cache, so the memo holds its words and its lines'
+  runs alike, and a pipeline that meets no right-to-left text keeps nothing there.
+  `MemoizesRtlRuns = false` is the reference.
+- **Two new perf rows** (d78e06ce): `text/rtl wrap 150 Hebrew paragraphs resize` and
+  `text/rtl ellipsis 1,000 Hebrew labels resize`, the `text/bidi …` rows in Hebrew alone. Their
+  runs are the memo's worst case: the `text/bidi …` rows' right-to-left runs are pairs of words
+  from a vocabulary of 12, which recur at every width, while a line of Hebrew alone is one run that
+  changes wherever the line's breaks do.
+- **HarfBuzz calls a step** (the prototype's counter in a scratch tree):
+
+  | Row | Before | After |
+  |---|---|---|
+  | `text/bidi ellipsis 1,000 labels resize` | 2,510 | 12 |
+  | `text/styled bidi ellipsis 1,000 labels resize` | 5,678 | 0 |
+  | `text/bidi wrap 150 paragraphs resize` | 504 | 0 |
+  | `text/styled bidi wrap 150 paragraphs resize` | 989 | 0 |
+  | `text/rtl ellipsis 1,000 Hebrew labels resize` | 249 | 185 |
+  | `text/rtl wrap 150 Hebrew paragraphs resize` | 52 | 44 |
+
+- **Tests.** `RtlRunMemoTests` (stubs): over 40 texts at seven widths, wrapped and truncated, no
+  run is shaped twice for one face and size, where the reference shapes them over three times as
+  often; the layouts, plain, truncated and with a bold, larger span, in either paragraph
+  direction, are the reference's; a run handed out is an object of its own over the glyphs kept;
+  a run is kept for each face and size. The Skia twin holds Hebrew, Hebrew with points, Arabic and
+  Arabic with marks, numbers and Latin inside them and emoji, at 13 and 17.5 px, seven widths,
+  both directions, truncated and not, to the bit against the reference (1,794 runs).
+  `CacheBoundTests`: 3,000 lines of 1,000 Hebrew characters leave the memo within its 16 MB and
+  above half of it. `WidthChangeEquivalenceTests`' reference keeps no run either, or it shapes
+  none; nor do both sides of `BidiProbeWidthsTests.ThePrefixesOfAnUnboundedBidiLine_ShapeTheLineOnly`
+  (2b5e9f4c), which counts what two ways of measuring ask the shaper for: with the memo on Fedora
+  both shape little (406 calls against 504), past its three quarters, where Windows still passed.
+- **Perf A/B, Windows** (`scripts/perf/step-ab.ps1 -Base d78e06ce`, the `text/`, `richtext/` and
+  `input/type` rows, two idle-gated pairs per runtime, P-cores; the A/A pairs flag no row): 5
+  faster on both runtimes; 0 slower on NativeAOT, 1 on JIT (below).
+
+  | Row | JIT min ms | NativeAOT min ms | KB a step |
+  |---|---|---|---|
+  | `text/bidi ellipsis 1,000 labels resize` | 10.21 → 2.55 (−74 to −75 %) | 10.71 → 2.84 (−73 to −74 %) | 1,012 → 457 |
+  | `text/styled bidi ellipsis 1,000 labels resize` | 15.82 → 3.16 (−80 %) | 17.09 → 3.99 (−76 to −77 %) | 1,406 → 553 |
+  | `text/bidi wrap 150 paragraphs resize` | 2.70 → 1.24 (−54 %) | 2.75 → 1.19 (−57 %) | 229 → 130 |
+  | `text/styled bidi wrap 150 paragraphs resize` | 3.51 → 1.56 (−54 to −55 %) | 3.94 → 1.72 (−56 to −57 %) | 303 → 180 |
+  | `text/rtl ellipsis 1,000 Hebrew labels resize` | 5.07 → 4.29 (−15 to −16 %) | 5.21 → 4.30 (−16 to −19 %) | 480 → 449 |
+  | `text/rtl wrap 150 Hebrew paragraphs resize` | flat | flat | 159 → 173 |
+
+  `text/wrap 150 paragraphs resize`, left to right alone, read +14 % and +16 % on JIT in both
+  pairs (0.914 → 1.042 ms); a filtered rerun of it and two neighbours, three alternated pairs,
+  reads it 0.883 → 0.889 ms (+0.7 %) and flags nothing, and NativeAOT never moved it. The +14 KB a
+  step on `text/rtl wrap`, where nearly every run is new, is most likely the memo filling (its
+  table grows while a session's runs come in, and a run missed gets one more `ShapedRun`); not
+  measured apart.
+- **Perf A/B, Fedora** (WSL, unpinned, the same commits in two worktrees of the WSL clone, two
+  alternated pairs, the same rows; the A/A pair moved `text/bidi ellipsis` +14 %, the noise here):
+  **0 slower, 6 faster** in both pairs: `text/bidi ellipsis` 4.21 → 2.27 and 4.80 → 2.32 ms min
+  (−46 to −52 %), `text/styled bidi ellipsis` −40 to −45 %, `text/bidi wrap` −25 to −26 %,
+  `text/styled bidi wrap` −19 to −24 %, and the Hebrew rows, flat to −16 % on Windows, −28 to
+  −30 % (`text/rtl wrap`) and −22 to −29 % (`text/rtl ellipsis`); allocation −41 to −61 % on all
+  six. Why the Hebrew rows gain more here, and allocate less where Windows allocates as much or
+  more, was not looked into.
+- **Suites:** Windows, all 30 assemblies pass at 78a69ee5 (Junction 1,161), and
+  `HultUI.Rendering.Skia.Tests` again at 2b5e9f4c. Fedora, `HultUI.CrossPlatform.slnf` at 78a69ee5:
+  21 of 22 assemblies pass, and `HultUI.Rendering.Skia.Tests` failed the one count above; at
+  2b5e9f4c it passes (446). Junction, Meridian, Aperture and Reel, which that filter leaves out,
+  were not run on Fedora.
 
 ## Traps found on the way
 

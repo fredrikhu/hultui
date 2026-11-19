@@ -889,7 +889,9 @@
   `- + . , : / % −`, each mark proven on first use (cold labels −56 % JIT, −49 % AOT on Windows, −38 % on Fedora; both suites pass).
   Item 2 built 2026-11-19 (ba15d841, not merged): the two cold-label rows shape one new five-letter
   word a label on purpose (their `-38913` was an `int` overflow); their history breaks there.
-  Next: a memo of right-to-left runs for the BiDi rows (item 3).
+  Item 3 built 2026-11-19 (78a69ee5, not merged): right-to-left runs kept whole by characters,
+  face and size; BiDi rows −52 to −80 % on Windows, −19 to −52 % on Fedora, Hebrew-alone rows added.
+  Left: item 4 (keep the HarfBuzz call counter and the unseen-words row as instruments).
   Prototype on `claude/run-shaping-prototype` (14b29b66).
 
 ## Deferred
