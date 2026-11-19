@@ -72,6 +72,45 @@ static partial class Scenarios
                 };
             });
 
+        // Cold words several to a run, which the label rows above, with one cold word each, do not
+        // have: what a first layout of text read for the first time pays HarfBuzz (plan 19).
+        yield return new Scenario("text/create 200 paragraphs of unseen words",
+            "200 wrapped paragraphs of 40 words, two in three a word no cache has seen and every third a common one: "
+            + "the first layout of text read for the first time",
+            ctx =>
+            {
+                var column = Flex.Column(gap: 6).FlexShrink(0).Padding(12);
+                ctx.Mount(ScrollView.New().FlexGrow(1).Children(column));
+                int next = 0;
+                string[] common = ["the", "of", "and", "a", "to", "in", "is", "for", "that", "with", "on", "as"];
+                string[] syllables = ["ka", "ren", "to", "mil", "sa", "dor", "ve", "lin", "qu", "ash", "pe", "ri", "ston", "gal", "fe", "nu"];
+                var sb = new System.Text.StringBuilder();
+                return new Op
+                {
+                    Reset = _ => column.ReplaceChildren(),
+                    Run = _ =>
+                    {
+                        var paragraphs = new Element[200];
+                        for (int p = 0; p < paragraphs.Length; p++)
+                        {
+                            sb.Clear();
+                            for (int w = 0; w < 40; w++)
+                            {
+                                if (w > 0) sb.Append(' ');
+                                if (w % 3 == 1) { sb.Append(common[(p + w) % common.Length]); continue; }
+                                // A syllable, then the running count in letters: never the same word twice.
+                                sb.Append(syllables[(next * 7 + w) % syllables.Length]);
+                                for (int n = next++; n > 0; n /= 16) sb.Append("bcdfghjklmnprstv"[n % 16]);
+                                if (w % 7 == 6) sb.Append(',');
+                            }
+                            sb.Append('.');
+                            paragraphs[p] = Text.New(sb.ToString()).FontSize(13f).LineHeight(19f);
+                        }
+                        column.ReplaceChildren(paragraphs);
+                    },
+                };
+            });
+
         yield return new Scenario("text/ellipsis 1,000 labels resize",
             "1,000 one-line labels truncated with an ellipsis, resize drag: every truncation point found again",
             ctx =>

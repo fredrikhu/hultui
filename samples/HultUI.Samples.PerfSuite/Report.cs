@@ -9,8 +9,8 @@ static class Report
     public static void PrintTable(IReadOnlyList<Result> results)
     {
         Console.WriteLine();
-        Console.WriteLine($"{"scenario",-44}{"elems",7}{"min",9}{"median",9}{"build",8}{"style",8}{"layout",8}{"render",8}{"other",8}{"alloc",10}");
-        Console.WriteLine($"{"",-44}{"",7}{"ms",9}{"ms",9}{"ms",8}{"ms",8}{"ms",8}{"ms",8}{"ms",8}{"KB/op",10}");
+        Console.WriteLine($"{"scenario",-44}{"elems",7}{"min",9}{"median",9}{"build",8}{"style",8}{"layout",8}{"render",8}{"other",8}{"alloc",10}{"shaped",9}");
+        Console.WriteLine($"{"",-44}{"",7}{"ms",9}{"ms",9}{"ms",8}{"ms",8}{"ms",8}{"ms",8}{"ms",8}{"KB/op",10}{"/op",9}");
         string? group = null;
         foreach (var r in results)
         {
@@ -19,7 +19,7 @@ static class Report
             string flag = r.UnrenderedSteps > 0 ? $"  ! {r.UnrenderedSteps}/{r.N} steps rendered nothing" : "";
             string figure = r.Figure is { } f ? $"  {f:0.0} {r.FigureUnit}" : "";
             string detail = r.Detail is { } d ? $" ({d})" : "";
-            Console.WriteLine($"{r.Name,-44}{r.Elements,7}{r.MinMs,9:0.000}{r.MedianMs,9:0.000}{r.BuildMs,8:0.00}{r.StyleMs,8:0.00}{r.LayoutMs,8:0.00}{r.RenderMs,8:0.00}{r.OtherMs,8:0.00}{r.AllocKB,10:N0}{figure}{detail}{flag}");
+            Console.WriteLine($"{r.Name,-44}{r.Elements,7}{r.MinMs,9:0.000}{r.MedianMs,9:0.000}{r.BuildMs,8:0.00}{r.StyleMs,8:0.00}{r.LayoutMs,8:0.00}{r.RenderMs,8:0.00}{r.OtherMs,8:0.00}{r.AllocKB,10:N0}{r.Shaped ?? 0,9:N0}{figure}{detail}{flag}");
         }
         Console.WriteLine();
     }
@@ -67,6 +67,8 @@ static class Report
             w.WriteNumber("otherMs", Math.Round(r.OtherMs, 4));
             w.WriteNumber("allocKB", Math.Round(r.AllocKB, 1));
             w.WriteNumber("unrenderedSteps", r.UnrenderedSteps);
+            // Strings handed to the shaper a step (HarfBuzz calls): absent from captures before plan 19 item 4.
+            if (r.Shaped is { } shaped) w.WriteNumber("shaped", Math.Round(shaped, 1));
             if (r.Figure is { } figure)
             {
                 w.WriteNumber("figure", Math.Round(figure, 2));
@@ -99,7 +101,8 @@ static class Report
                 e.GetProperty("unrenderedSteps").GetInt32(),
                 e.TryGetProperty("figure", out var figure) ? figure.GetDouble() : null,
                 e.TryGetProperty("figureUnit", out var unit) ? unit.GetString() : null,
-                e.TryGetProperty("detail", out var detail) ? detail.GetString() : null);
+                e.TryGetProperty("detail", out var detail) ? detail.GetString() : null,
+                e.TryGetProperty("shaped", out var shaped) ? shaped.GetDouble() : null);
             results[r.Name] = r;
             order.Add(r.Name);
         }
@@ -142,7 +145,9 @@ static class Report
             if (verdict == "  slower") slower++;
             if (verdict == "  faster") faster++;
             string figures = x.Figure is { } fx && y.Figure is { } fy ? $"  {fx:0.0} → {fy:0.0} {y.FigureUnit}" : "";
-            Console.WriteLine($"{name,-44}{x.MinMs,10:0.000}{y.MinMs,10:0.000}{Pct(dMin),8}{x.MedianMs,10:0.000}{y.MedianMs,10:0.000}{Pct(dMed),8}{Pct(dAlloc),9}{verdict}{figures}");
+            // The shaper calls a step, where they moved: what a change to the text caches did.
+            string shapedMoved = x.Shaped is { } sx && y.Shaped is { } sy && Math.Abs(sx - sy) >= 0.5 ? $"  shaped {sx:N0} → {sy:N0}" : "";
+            Console.WriteLine($"{name,-44}{x.MinMs,10:0.000}{y.MinMs,10:0.000}{Pct(dMin),8}{x.MedianMs,10:0.000}{y.MedianMs,10:0.000}{Pct(dMed),8}{Pct(dAlloc),9}{verdict}{figures}{shapedMoved}");
             if (x.Detail is not null || y.Detail is not null)
                 Console.WriteLine($"{"",-44}  {x.Detail ?? "—"}  →  {y.Detail ?? "—"}");
         }

@@ -35,6 +35,7 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
         _layoutHeight = height;
         _scale = scale;
         PinnedText = options?.PinnedText == true;
+        Text = text;
         _frame = options?.WindowsFrame;
         _raster = PinnedText ? PinnedFonts.CreateSurface(text) : new SkiaRasterRenderSurface(text);
 
@@ -57,6 +58,9 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
 
     /// <summary>Whether text draws in the bundled fonts, as outlines (<see cref="HeadlessOptions.PinnedText"/>).</summary>
     public bool PinnedText { get; }
+
+    /// <summary>The text services the window draws and measures with, shared by the session's windows.</summary>
+    internal SkiaTextServices Text { get; }
 
     /// <summary>The captured display list, or null when recording is off.</summary>
     public RenderLog? RenderLog { get; }
