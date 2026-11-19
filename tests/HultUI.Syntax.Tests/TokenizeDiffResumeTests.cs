@@ -29,7 +29,9 @@ public class TokenizeDiffResumeTests
     private const int Changed = 603;    // the first line that differs, inside the block comment opened on line 3
     private const int Last = 1203;      // inside the verbatim string opened on line 607
     private const int Shared = Changed - 1;
-    private const int Walk = Shared + 2 * (Last - Shared);   // the shared lines once, then each side's own
+    // The shared lines once, then the new version's own, then of the old version's the two that
+    // differ: it takes the new version's walk of the lines between them.
+    private const int Walk = Shared + (Last - Shared) + 2;
 
     private static readonly LineRange[] Shown = [new(Changed - 3, Changed + 3), new(Last - 3, Last)];
 
@@ -73,7 +75,7 @@ public class TokenizeDiffResumeTests
         Shared + 1,           // the first of the new version's own
         Shared + 300,         // inside the block comment's end and the verbatim string
         Shared + (Last - Shared),   // the new version's last: the old version's own are next
-        Walk - 1,             // one line to go
+        Walk - 1,             // one line to go, after the stretch the old version takes
     };
 
     [Theory]
@@ -159,7 +161,7 @@ public class TokenizeDiffResumeTests
 
         var other = Tokenize(old, @new, fewer);
 
-        Assert.Equal(Shared + 2 * 4, other.LinesWalked);
+        Assert.Equal(Shared + 4 + 1, other.LinesWalked);
         Same(Whole(old, @new, fewer), other);
         // and the walk for all of them is still there
         Assert.Equal(Walk - 300, Tokenize(old, @new).LinesWalked);

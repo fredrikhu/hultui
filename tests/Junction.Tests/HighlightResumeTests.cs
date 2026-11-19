@@ -141,6 +141,26 @@ public class HighlightResumeTests
         static List<string> Order(JunctionApp app) => (List<string>)Field(app, "_highlightTextsOrder")!;
     }
 
+    /// <summary>What a kept pair counts: two bytes a character and a line's array slot of eight on
+    /// each side, and with both versions the nine a line of the new one that the walk keeps for the
+    /// old one's to take; a version alone keeps no such line.</summary>
+    [Fact]
+    public void AKeptPair_CountsWhatTheWalkKeepsALine()
+    {
+        string old = "a\nbb\n", @new = "a\nbb\nccc\n";   // 3 and 4 lines, the empty one after the last break counted
+
+        Assert.Equal(2 * 5 + 8 * 3 + 2 * 9 + (8 + 9) * 4, Bytes(old, @new));
+        Assert.Equal(2 * 9 + 8 * 4, Bytes(null, @new));
+        Assert.Equal(2 * 5 + 8 * 3, Bytes(old, null));
+
+        static long Bytes(string? old, string? @new)
+        {
+            var type = typeof(JunctionApp).GetNestedType("HighlightTexts", All)!;
+            var texts = Activator.CreateInstance(type, old, old is not null, @new, @new is not null)!;
+            return (long)type.GetProperty("Bytes")!.GetValue(texts)!;
+        }
+    }
+
     // ── Harness ──────────────────────────────────────────────────────────
 
     private const BindingFlags All = BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance;

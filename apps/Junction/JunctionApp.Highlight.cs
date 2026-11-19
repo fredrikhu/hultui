@@ -160,21 +160,23 @@ public partial class JunctionApp
     private int _highlightsRead, _highlightsPosted, _highlightFileReads;
 
     /// <summary>A file's two versions as a tokenize read them; a side is read only when the diff
-    /// shows lines of it. <see cref="Bytes"/>: the texts, and the array of a slot a line that the
-    /// walk kept with them fills (SyntaxHighlighter's spans of the lines shown are what the colours
-    /// keep anyway). <see cref="Hashes"/>: of a working-tree or index diff's texts, made where they
-    /// were read. <see cref="Walked"/>: the lines the walk with these texts was asked for, which
-    /// SyntaxHighlighter goes on with only when it is asked for the same lines.</summary>
+    /// shows lines of it. <see cref="Bytes"/>: the texts, the array of a slot a line that the walk
+    /// kept with them fills (SyntaxHighlighter's spans of the lines shown are what the colours keep
+    /// anyway), and with two versions the 9 bytes a line of the new one that the walk keeps for the
+    /// old one's to take (the state each line left, and what it can give). <see cref="Hashes"/>: of
+    /// a working-tree or index diff's texts, made where they were read. <see cref="Walked"/>: the
+    /// lines the walk with these texts was asked for, which SyntaxHighlighter goes on with only when
+    /// it is asked for the same lines.</summary>
     private sealed record HighlightTexts(string? Old, bool OldRead, string? New, bool NewRead)
     {
-        public long Bytes { get; } = Size(Old) + Size(New);
+        public long Bytes { get; } = Size(Old, 8) + Size(New, Old is null ? 8 : 8 + 9);
 
         public TextHashes Hashes { get; init; }
 
         public DiffShownLines? Walked { get; init; }
 
-        private static long Size(string? text) =>
-            text is null ? 0 : 2L * text.Length + 8L * (text.AsSpan().Count('\n') + 1);
+        private static long Size(string? text, int perLine) =>
+            text is null ? 0 : 2L * text.Length + (long)perLine * (text.AsSpan().Count('\n') + 1);
     }
 
     /// <summary>A hash of each side of a file a tokenize read: 0 for a side it did not read, 1 for
@@ -257,7 +259,7 @@ public partial class JunctionApp
     private readonly List<string> _highlightTextsOrder = [];
 
     /// <summary>The most <see cref="_highlightTexts"/> holds: five of bigrepo's 675 KB files
-    /// (2.7 MB of text a pair, 2.8 with the walk's line arrays), the files a reader pages through
+    /// (2.7 MB of text a pair, 2.8 with what the walk keeps a line), the files a reader pages through
     /// before turning back, and a pair of the longest texts coloured at all (2,000,000 characters
     /// a side, 8 MB). Files of ordinary size, which finish before a key cancels them, keep
     /// nothing.</summary>

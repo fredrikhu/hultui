@@ -92,7 +92,9 @@ loads the grammars, and a large file takes the low hundreds of milliseconds.
 A diff shows a few lines of two versions of a file, and `TokenizeDiff` colours only those. A
 line's colour depends on the lines above it (a block comment opened 900 lines up), so each
 version is walked from its first line to its last shown one, and the lines both versions start
-with are walked once. Lines are `LineRange`s, numbered from 1 with both ends included, in rising
+with are walked once. So are the stretches they share between hunks: an old line with the text of
+a new one that started in the same state takes that line's colours and state without a tokenize
+(a five-hunk diff of an 8,000-line file walked 13,626 lines, now 7,453). Lines are `LineRange`s, numbered from 1 with both ends included, in rising
 order and not overlapping; anything else throws `ArgumentException`.
 
 ```csharp
@@ -118,7 +120,7 @@ string instances, the same lines shown and the same clock, and the walk goes on 
 stopped, with the spans one uncancelled call gives (`LinesWalked` counts this call's lines). A
 theme change, other lines or other strings, even of the same characters, start from line 1. The
 walk is kept only as long as its texts: read the file again for each call and nothing is kept.
-Junction keeps the texts of the files a key cancelled, up to 16 MB, so a reader who pages
+Besides its spans, a kept walk holds 9 bytes a line of the new version. Junction keeps the texts of the files a key cancelled, up to 16 MB, so a reader who pages
 through big files and comes back finds the walk part done and reads nothing again. A working-tree
 diff's colours are keyed by the data generation, which every save in the repository moves; Junction
 hashes the texts it reads at the new generation and, when they are the ones it coloured, takes the
