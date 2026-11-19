@@ -27,7 +27,8 @@ static partial class Scenarios
             });
 
         yield return new Scenario("text/create 2,000 unique labels",
-            "2,000 labels no cache has seen (unique numbers in each): shaping and measuring cold",
+            "2,000 labels no cache has seen (a new word and new numbers in each): one word a label shaped cold, "
+            + "the numbers composed from the digit table, every label measured cold",
             ctx =>
             {
                 var column = Flex.Column().FlexShrink(0);
@@ -40,7 +41,7 @@ static partial class Scenarios
                     {
                         var labels = new Element[2_000];
                         for (int i = 0; i < labels.Length; i++)
-                            labels[i] = Text.New($"Item {next++} — {next * 7919 % 100_003} units").FontSize(13f);
+                            labels[i] = Text.New(ColdLabel(next++)).FontSize(13f);
                         column.ReplaceChildren(labels);
                     },
                 };
@@ -63,7 +64,7 @@ static partial class Scenarios
                         for (int i = 0; i < labels.Length; i++)
                         {
                             var set = i % 2 == 0 ? BmpEmoji : SequenceEmoji;
-                            labels[i] = Text.New($"{set[i % set.Length]} Item {next++} — {next * 7919 % 100_003} units {set[i / 2 % set.Length]}")
+                            labels[i] = Text.New($"{set[i % set.Length]} {ColdLabel(next++)} {set[i / 2 % set.Length]}")
                                 .FontSize(13f);
                         }
                         column.ReplaceChildren(labels);
@@ -445,6 +446,24 @@ static partial class Scenarios
 
     private const int ViewerLines = 400;
     private const int PlainLabelLines = 2_000;
+
+    // A label of the two text/create rows: one word no cache has seen, of letters, so it is shaped
+    // (one HarfBuzz call a label), and two numbers the digit table composes. Until plan 19 item 2
+    // (2026-11-19) the label was `Item {n} — {(n + 1) * 7919 % 100_003} units`: the product overflowed
+    // int, so the second number came out negative (`-38913`) and its minus sign made it the label's
+    // one cold word, by accident; once the digit table took signed numbers (item 1) the rows shaped
+    // nothing.
+    private static string ColdLabel(int n) => $"Item {n} {ColdWord(n)} — {(int)((long)n * 7919 % 100_003)} units";
+
+    // n in base 26, a to z, lowest letter first: five letters, different for every n from 456,976 to
+    // 11,881,375 (the rows count up from 1,000,000 in each session).
+    private static string ColdWord(int n)
+    {
+        Span<char> word = stackalloc char[7];
+        int length = 0;
+        do { word[length++] = (char)('a' + n % 26); n /= 26; } while (n > 0);
+        return new string(word[..length]);
+    }
 
     // Emoji of the Basic Multilingual Plane that ask for emoji presentation on their own:
     // ⭐ ✅ ☕ ⚡ ❌ ⌛ ⛔ ⚽. Nothing in them sends a label to the BiDi path.
