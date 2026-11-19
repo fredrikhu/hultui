@@ -927,7 +927,8 @@
   word a label on purpose (their `-38913` was an `int` overflow); their history breaks there.
   Item 3 built 2026-11-19 (78a69ee5, not merged): right-to-left runs kept whole by characters,
   face and size; BiDi rows −52 to −80 % on Windows, −19 to −52 % on Fedora, Hebrew-alone rows added.
-  Left: item 4 (keep the HarfBuzz call counter and the unseen-words row as instruments).
+  Items 1–3 merged to main (447b3a57). Item 4 built 2026-11-19 (52acb2f2): `TextPipeline.ShaperCalls`,
+  a `shaped` column in the perf suite, and `text/create 200 paragraphs of unseen words`. Plan done.
   Prototype on `claude/run-shaping-prototype` (14b29b66).
 
 ## Deferred

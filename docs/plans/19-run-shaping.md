@@ -1,8 +1,9 @@
 # Shaping text a run at a time
 
-**Status (2026-11-19): run shaping no-go. Item 1, the wider digit table, is built (781a857f);
-item 2, a cold word in the cold-label rows on purpose (ba15d841); item 3, a memo of right-to-left
-runs (78a69ee5); all on this plan's branch, not merged. Item 4 waits.** The run-shaping prototype is on branch
+**Status (2026-11-19): run shaping no-go; all four items built. Item 1, the wider digit table
+(781a857f); item 2, a cold word in the cold-label rows on purpose (ba15d841); item 3, a memo of
+right-to-left runs (78a69ee5): merged to main in 447b3a57. Item 4, the shaper-call counter and the
+unseen-words row (52acb2f2).** The run-shaping prototype is on branch
 `claude/run-shaping-prototype` (14b29b66), every part of it off unless an environment variable
 turns it on.
 
@@ -435,6 +436,33 @@ Commit 78a69ee5 (with d78e06ce, two perf rows), on this plan's branch; not merge
   21 of 22 assemblies pass, and `HultUI.Rendering.Skia.Tests` failed the one count above; at
   2b5e9f4c it passes (446). Junction, Meridian, Aperture and Reel, which that filter leaves out,
   were not run on Fedora.
+
+## Item 4, built (2026-11-19)
+
+Commit 52acb2f2.
+
+- **The counter.** `TextPipeline.ShaperCalls` counts every string the pipeline hands its shaper,
+  one HarfBuzz call each with `SkiaTextShaper`: its ten call sites, the cut shaper's among them,
+  go through one place (`CallShaper`). A plain increment on the thread that lays text out, always
+  on, not the prototype's static switched by `HULTUI_SHAPE_COUNT`. `HeadlessWindow.TextShaperCalls`
+  reads it for the session's shared pipeline.
+- **The perf suite reports it a step**, for every row: a `shaped` column in its table, a `shaped`
+  field in captures (absent from earlier ones), `shaped x → y` in `--compare` where it moved, and
+  `scripts/perf/step-ab.ps1` lists the rows whose calls moved. The counts this plan took from a
+  scratch tree now come out of every run: 2,000 a step on the cold-label rows, 12 and 185 on the
+  BiDi and Hebrew ellipsis rows, 44 on the Hebrew wrap, one a keystroke when typing, 0 on most rows.
+- **The unseen-words row**, from the prototype: `text/create 200 paragraphs of unseen words`, 200
+  wrapped paragraphs of 40 words, two in three new: 5,400 shaper calls a step, the first layout of
+  text read for the first time, which the one-cold-word label rows do not cover. 7.34 ms min on
+  Windows JIT, 8.48 on NativeAOT, 2,670 KB a step.
+- **Tests.** `ShaperCallsTests` (stubs): the count equals the calls a counting shaper sees through
+  words, the digit and mark proofs, right-to-left runs, truncation, a styled span and a prefix
+  table; text the caches hold counts nothing, one new word counts one. Its Skia twin counts the
+  calls a cutting shaper takes. `TextShaperCallsTests` (headless): new words shaped once, frames
+  with nothing new and labels of words seen before shape none.
+- **Perf A/B, Windows** (`scripts/perf/step-ab.ps1 -Base 447b3a57`, the `text/`, `richtext/` and
+  `input/type` rows, two idle-gated pairs per runtime): **0 slower, 0 faster, allocation unchanged
+  on every row**, on JIT and NativeAOT; the A/A pairs flag nothing.
 
 ## Traps found on the way
 
