@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 16
-- **Phase:** build — round 16's build order is done (step 10 measured, 5da967d2 docs); waiting for the user's Narrator check of Meridian's preview, then the full suite and release (step 9 landed f76cb440 + 80e94eeb; step 8 49b0da84; step 7 3d728568 + 13a1b363; step 1 landed 40cadb57, step 2 ec57c4ee + 5766a137, step 3 41ecec65, step 4 0d96e805 + b02b46d6 + 32fffce7, step 5 96d00ab3, step 6 89732bec (question 68: keep); the user does the Narrator check after step 10, before the full suite — the user's Narrator check of `r16b4\live\` (this session's scratchpad) is open and the release waits for it; the survey merged 2026-11-18; 10 steps in "Round 16 build order"; questions
+- **Phase:** release — round 16: the build order done, the user's Narrator check passed, the full suite passed (Fedora's one test race fixed 89506c22), main merged in (666e6486, 5e180d17) (step 9 landed f76cb440 + 80e94eeb; step 8 49b0da84; step 7 3d728568 + 13a1b363; step 1 landed 40cadb57, step 2 ec57c4ee + 5766a137, step 3 41ecec65, step 4 0d96e805 + b02b46d6 + 32fffce7, step 5 96d00ab3, step 6 89732bec (question 68: keep); the user does the Narrator check after step 10, before the full suite — the user's Narrator check of `r16b4\live\` (this session's scratchpad) is open and the release waits for it; the survey merged 2026-11-18; 10 steps in "Round 16 build order"; questions
   66 and 67 answered 2026-11-18 with the recommendations (66 (a), 67 (b) with images first); build briefs `brief-r16b<N>.md` in this session's
   scratchpad, agent ids in `r16-agents.txt`). Survey: started 2026-11-18 in a fresh context (session b6ef64d9). Main had moved by 59 commits
   outside plan 17 (to 3038f82b: SkiaSharp 4.156 with HarfBuzzSharp 14.4 and the CPU surface in BGRA, SDL 3.5.0, the
@@ -1205,3 +1205,21 @@ From 2026-11-14 (round 15's survey); earlier entries are in the archive ([to 202
   MB then level. Round 16's build order is done. Next: the user's Narrator check of Meridian's preview (question 66;
   `r16b4\live\CHECKLIST.md`), then the full suite (Windows, Fedora with the four app projects each in a private D-Bus
   session, docfx), then release.
+- 2026-11-19: the user's live Narrator check of Meridian's preview (question 66, step 4's `r16b4\live\` build) passed:
+  "It works as expected in the checklist." Main had moved by 7 commits (VirtualList cursor apart from the selection,
+  lists in columns, the app id from the application, KeyChord Super, a million-row PerfSuite row, Roslyn's version, a
+  TODO); merged into the branch as 666e6486, one conflict (VirtualListAccessibilityTests.cs: both sides added tests,
+  both kept), the merged tree built.
+- 2026-11-19: round 16's full suite at 666e6486, 00:20–00:37: Windows `HultUI.slnx` 30 projects, 0 failures (Junction
+  1,166 in 9 m 9 s); docfx 0 warnings; Fedora the slnf 22 projects and Junction 1,166, Meridian 680, Aperture 369, Reel 53
+  each in a private D-Bus session, but **VesperCommander 1 failure**: step 7's `WrapResizeFrameTests` (3 of 3 reruns of
+  the class failed one or both tests). Cause (expert 1): a timing race in the test — on Fedora the 22 KB read lands
+  before the first frame drains the UI queue, so that frame draws the text and "Loading…" is never drawn (1 frame, not
+  2); the one-frame open is correct (each line measured once at the laid-out width, nothing built after the frame); it
+  failed 1 of 2 at 3d728568 too (step 7's Fedora pass ran the whole slnf at once, which slowed the read). Fixed in
+  89506c22: an internal `ViewerLoadGate` (null in shipped code, modelled on `DiffCompareGate`) and `HoldViewerLoad()`;
+  the tests hold the read until the waiting view is drawn and also assert that the first frame shows it; the class 10/10
+  on Windows, 5/5 on 2 cores, 10/10 on Fedora, VesperCommander.Tests whole 953 (+4) / 935 (+20); both tests still fail
+  under a reverse edit of step 7; the shipped path's `Task.Run` of an async lambda +80 B an open. Main moved again by
+  one Junction change (791d1a44: a staging move is settled only by its own command); merged as 5e180d17 (clean);
+  Junction.Tests re-run on Windows and Fedora on the merge: Windows 1,167 and Fedora 1,167 (private D-Bus), 0 failures. Phase → release.
