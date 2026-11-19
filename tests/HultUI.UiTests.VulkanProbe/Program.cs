@@ -108,6 +108,9 @@ using HultUI.WebView.WebView2;
 // --dialog-fade opens a dialog the command palette's size over a 1440x900 window and prints the local video memory
 // the first open and a second one kept (Windows): see DialogFadeProbe.
 //
+// --bar-fade lets a video player's bar fade out twice in a window Reel's size and prints the local video memory the
+// first fade and a second one kept (Windows): see BarFadeProbe.
+//
 // No window made here may become the foreground, whatever it does (Windows): see Foreground.
 
 internal static class Program
@@ -136,6 +139,7 @@ internal static class Program
             return Resizes(renderer, int.Parse(resizes["--resizes=".Length..]), args.Contains("--new-sizes"));
         if (args.Contains("--drag")) return DragAndMove(renderer);
         if (args.Contains("--dialog-fade")) return DialogFadeProbe.Run(renderer);
+        if (args.Contains("--bar-fade")) return BarFadeProbe.Run(renderer);
         if (args.Contains("--page-and-video"))
             return PageAndVideo(renderer, args.FirstOrDefault(a => a.StartsWith("--clip="))?["--clip=".Length..]
                 ?? "av://lavfi:color=c=magenta:s=320x240");

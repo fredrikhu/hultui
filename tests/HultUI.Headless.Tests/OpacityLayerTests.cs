@@ -333,6 +333,68 @@ public sealed class OpacityLayerTests
         public override Rect? PaintBounds(IRenderContext ctx) => null;
     }
 
+    /// <summary>
+    /// A faded row of sliders — focused, at either end, one squeezed flatter than its thumb — is
+    /// drawn through a group of its own bounds, and loses nothing to them: every pixel is within
+    /// the moved origin's few levels of the same row drawn through a group the window's size (an
+    /// element no type vouches for beside them). The sliders' bounds were null, so a video
+    /// player's bar faded through a window-sized layer (plan 17, round 17).
+    /// </summary>
+    [Theory]
+    [InlineData(1f)]
+    [InlineData(1.5f)]
+    public void FadedSlidersAreBoundedAndLoseNothing(float scale)
+    {
+        // Each slider faded alone, in a box no bigger than it, so nothing but the slider's own
+        // bounds holds what reaches past its box.
+        Element Faded(SliderElement slider, bool unbounded)
+        {
+            var box = Box.New().Opacity(0.6f).Children(slider);
+            if (unbounded) box.AddChild(new UnboundedElement().Width(1).Height(1));
+            return box;
+        }
+
+        SliderElement? low = null;
+        Element Row(bool unbounded)
+        {
+            low = Slider.New(0).Width(90);
+            var high = Slider.New(100).Width(90);
+            var flat = Slider.New(60).Width(90).Height(6);
+            return Flex.Row(gap: 24).AlignItems(AlignItems.Center).Padding(new Thickness(14, 30)).Children(
+                Faded(low, unbounded), Faded(high, unbounded), Faded(flat, unbounded));
+        }
+
+        SKBitmap Draw(bool unbounded, out string log)
+        {
+            using var session = HeadlessSession.Create(420, 90, scale,
+                options: new HeadlessOptions { RecordDrawCalls = true, PinnedText = true });
+            var row = Row(unbounded);
+            session.Window.SetRoot(Box.New().Width(420).Height(90).Background(Color.White).Children(row));
+            session.PumpFrame();
+            low!.Focus();   // the ring, 3 past the thumb at the track's start
+            session.PumpFrame();
+            session.Window.RenderLog.Clear();
+            using var image = session.Window.CapturePixels();
+            log = session.Window.RenderLog.ToString();
+            return SKBitmap.FromImage(image);
+        }
+
+        using var bounded = Draw(unbounded: false, out var boundedLog);
+        using var window = Draw(unbounded: true, out _);
+        Assert.Equal(3, boundedLog.Split('\n').Count(l => l.Contains("PushOpacity 0.6 bounds=", StringComparison.Ordinal)));
+
+        int max = 0, far = 0;
+        for (int y = 0; y < bounded.Height; y++)
+            for (int x = 0; x < bounded.Width; x++)
+            {
+                SKColor a = bounded.GetPixel(x, y), b = window.GetPixel(x, y);
+                int d = Math.Max(Math.Abs(a.Red - b.Red), Math.Max(Math.Abs(a.Green - b.Green), Math.Abs(a.Blue - b.Blue)));
+                max = Math.Max(max, d);
+                if (d > MovedOrigin.Channel) far++;
+            }
+        Assert.True(far == 0, $"{far} pixels differ by more than {MovedOrigin.Channel} levels (at most {max}): the bounds cut something off");
+    }
+
     // ── At opacity 0 a subtree that only paints is not drawn ──
 
     /// <summary>A box at opacity 0 holding a box, a label, a canvas, a slider and an image: none of

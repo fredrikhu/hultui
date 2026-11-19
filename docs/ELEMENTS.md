@@ -408,7 +408,22 @@ whose `Render` paints outside its border box must override `PaintBounds`** — w
 outside it is cut off under opacity. Return `null` when the extent is not known cheaply:
 the group is then as large as the clip, which is always right and, on a CPU surface, slow
 (a window-sized image per faded element). The framework's controls with focus rings or
-thumbs past their box (checkbox, slider, toggle and others) return `null`.
+thumbs past their box (checkbox, toggle and others) return `null`; a `Slider` reports its
+track and the square its thumb and focus ring can reach. A `Canvas` returns `null`, as its
+callback may draw anywhere.
+
+**One element with unknown bounds makes its faded ancestor window-sized**, whatever the
+ancestor's own size: the group covers the clip, and on GL and Vulkan Skia keeps that texture for
+the window's life. A video player's 1280×52 bar faded through a 1920×1140 layer on every frame of
+its fade, and the first fade kept 12 MB of video memory (32 MB in a 3800×2100 window), because it
+held two sliders and three canvas glyphs (plan 17 round 17). Before fading a panel, check what is
+in it; a glyph drawn on a `Canvas` that stays inside its box can be a `CanvasElement` subclass that
+returns its border box, grown by what its strokes reach (`VideoPlayer`'s glyphs: 2).
+
+At opacity 0 a subtree is not drawn at all when every element in it only paints — a plain box,
+a canvas, a label nothing hit-tests, a plain image, a slider — so a hidden bar costs nothing a
+frame. Anything else in it (a scroll view, a text field, a selectable label, a video, a web view,
+an app's own element) keeps the subtree drawn, as its `Render` does more than paint.
 
 ---
 
