@@ -887,8 +887,9 @@
   (2026-11-18; flat to 8 % slower on real text; the regressed row has one cold word per label).
   Item 1 built 2026-11-19 (781a857f, not merged): the digit table composes numbers with
   `- + . , : / % −`, each mark proven on first use (cold labels −56 % JIT, −49 % AOT on Windows, −38 % on Fedora; both suites pass).
-  Next: give `text/create 2,000 unique labels` a deliberate cold word (its `-38913` was an `int`
-  overflow and now shapes nothing), then a memo of right-to-left runs for the BiDi rows.
+  Item 2 built 2026-11-19 (ba15d841, not merged): the two cold-label rows shape one new five-letter
+  word a label on purpose (their `-38913` was an `int` overflow); their history breaks there.
+  Next: a memo of right-to-left runs for the BiDi rows (item 3).
   Prototype on `claude/run-shaping-prototype` (14b29b66).
 
 ## Deferred

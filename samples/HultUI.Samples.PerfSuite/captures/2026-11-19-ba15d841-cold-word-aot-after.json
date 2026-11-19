@@ -1,0 +1,46 @@
+{
+  "label": "step-ab after (ba15d841), Aot, pair 2",
+  "date": "2026-11-19 09:30 +01:00",
+  "commit": "",
+  "machine": "SPELDATOR",
+  "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+  "cores": 28,
+  "os": "Microsoft Windows 10.0.26200",
+  "runtime": ".NET 11.0.0",
+  "configuration": "Release",
+  "rounds": 5,
+  "perRound": 5,
+  "pinning": "pinned to the 16 fastest of 28 logical processors (hybrid CPU; --no-pin to disable)",
+  "results": [
+    {
+      "name": "text/create 2,000 unique labels",
+      "description": "2,000 labels no cache has seen (a new word and new numbers in each): one word a label shaped cold, the numbers composed from the digit table, every label measured cold",
+      "elements": 2002,
+      "n": 25,
+      "minMs": 3.6907,
+      "medianMs": 3.8995,
+      "buildMs": 0.1799,
+      "styleMs": 0.0465,
+      "layoutMs": 3.4282,
+      "renderMs": 0.2179,
+      "otherMs": 0.0136,
+      "allocKB": 3120,
+      "unrenderedSteps": 0
+    },
+    {
+      "name": "text/create 2,000 unique emoji labels",
+      "description": "text/create with emoji in every label: half with emoji alone in the BMP (the plain path), half with faces, a heart, a keycap and a trade mark asking for emoji presentation, a family, a skin tone and a flag (the BiDi path)",
+      "elements": 2002,
+      "n": 25,
+      "minMs": 6.8161,
+      "medianMs": 7.0248,
+      "buildMs": 0.2854,
+      "styleMs": 0.0474,
+      "layoutMs": 6.33,
+      "renderMs": 0.3294,
+      "otherMs": 0.015,
+      "allocKB": 4293,
+      "unrenderedSteps": 0
+    }
+  ]
+}

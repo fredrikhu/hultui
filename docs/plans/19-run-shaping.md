@@ -1,7 +1,8 @@
 # Shaping text a run at a time
 
-**Status (2026-11-19): run shaping no-go. Item 1, the wider digit table, is built (781a857f, on
-this plan's branch, not merged); items 2–4 wait.** The run-shaping prototype is on branch
+**Status (2026-11-19): run shaping no-go. Item 1, the wider digit table, is built (781a857f), and
+item 2, a cold word in the cold-label rows on purpose (ba15d841); both on this plan's branch, not
+merged. Items 3 and 4 wait.** The run-shaping prototype is on branch
 `claude/run-shaping-prototype` (14b29b66), every part of it off unless an environment variable
 turns it on.
 
@@ -321,6 +322,45 @@ Commit 781a857f, on this plan's branch; not merged.
 - **Suites:** Windows, all 30 assemblies pass (Junction 1,161). Fedora, `HultUI.CrossPlatform.slnf`
   passes in full (22 assemblies, the goldens among them); Junction, Meridian, Aperture and Reel,
   which that filter leaves out, were not run on Fedora.
+
+## Item 2, built (2026-11-19)
+
+Commit ba15d841, on this plan's branch; not merged. A perf-suite change only: no framework code.
+
+- **The label.** `text/create 2,000 unique labels` and its emoji twin, `text/create 2,000 unique
+  emoji labels`, which had the same overflow, now make each label as `Item {n} {word} — {m} units`:
+  `word` is n in base 26, a to z, lowest letter first (five letters for every n the rows reach,
+  different for each), and `m` is `n * 7919 % 100_003` worked out in `long`, so never negative:
+  `Item 1000000 ohxec — 62439 units`. Every label holds one word no cache has seen, of letters,
+  which the digit table cannot compose; its two numbers are digits only, which it does.
+- **What a step shapes**, counted with the prototype's HarfBuzz call counter (`HULTUI_SHAPE_COUNT`,
+  added to a scratch tree, not committed): **2,000 calls and 10,000 characters a step on both rows,
+  on Windows and on Fedora**; the old labels with item 1, 0. One cold call a label, by design now.
+- **The history breaks here.** The rows keep their names (captures join on them), so a capture
+  from before ba15d841 does not compare with one after it on these two rows; the perf suite's
+  README says so on the `text/` row. On Windows JIT the labels row was 3.31 ms min with the old
+  label before item 1 (one cold `-38913` a label), 1.31 with it after item 1 (none), and is 2.78
+  with the new label (one cold five-letter word a label).
+- **Perf, Windows** (`scripts/perf/step-ab.ps1 -Base 7d4a185f`, the two rows, two idle-gated pairs
+  per runtime, P-cores; the A/A pairs flag no row): the cost of shaping one cold word a label,
+  back in the rows.
+
+  | Row | JIT min ms | NativeAOT min ms | KB a step |
+  |---|---|---|---|
+  | `text/create 2,000 unique labels` | 1.312 → 2.783 | 1.884 → 3.691 | 2,572 → 3,120 |
+  | `text/create 2,000 unique emoji labels` | 3.484 → 5.374 | 4.462 → 6.816 | 3,285 → 4,246 (AOT 3,331 → 4,293) |
+
+  On the labels row that is 1.47 ms a step on JIT and 1.81 on NativeAOT: 735 and 904 ns for each
+  cold five-letter word in Segoe UI, HarfBuzz and the word cache together, and 281 B. The emoji row
+  pays more for the same words (945 and 1,177 ns, 492 B), half its labels being on the BiDi path;
+  not looked into.
+- **Perf, Fedora** (WSL, unpinned, the same commits in two worktrees of the WSL clone, two
+  alternated pairs; the A/A pair moved neither row more than 6 %): labels 1.647 → 2.887 and
+  1.604 → 2.948 ms min (+75 to +84 %, 620–670 ns a cold word), emoji labels 3.845 → 5.319 and
+  3.672 → 5.513 (+38 to +50 %); allocation +21 % and +29 %, as on Windows. Here the new label
+  costs more than the old one did before item 1 (2.56 ms with its `-38913`), on Windows less
+  (2.78 against 3.31 ms). Why is not known: the faces differ (Segoe UI, and Fedora's sans), and
+  the old word shaped as DFLT, the new one as Latin; not looked into.
 
 ## Traps found on the way
 
