@@ -119,7 +119,10 @@ stopped, with the spans one uncancelled call gives (`LinesWalked` counts this ca
 theme change, other lines or other strings, even of the same characters, start from line 1. The
 walk is kept only as long as its texts: read the file again for each call and nothing is kept.
 Junction keeps the texts of the files a key cancelled, up to 16 MB, so a reader who pages
-through big files and comes back finds the walk part done and reads nothing again.
+through big files and comes back finds the walk part done and reads nothing again. A working-tree
+diff's colours are keyed by the data generation, which every save in the repository moves; Junction
+hashes the texts it reads at the new generation and, when they are the ones it coloured, takes the
+colours it has (or the kept texts, whose walk then goes on) instead of walking the file again.
 
 ## The framework's own controls
 

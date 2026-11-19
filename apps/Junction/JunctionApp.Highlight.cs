@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using HultUI;
 using HultUI.Core.Rendering;
 using HultUI.Syntax;
@@ -23,6 +24,12 @@ public partial class JunctionApp
     // A cancelled tokenize is not wasted: its file's two texts are kept (_highlightTexts), and
     // SyntaxHighlighter keeps where the walk got to with them, so coming back to the file goes on
     // from there and reads nothing.
+    //
+    // A working-tree or index diff (the Changes view's) is keyed by the data generation, which
+    // every working-tree event moves: an editor's save of any file, a new untracked file. Its
+    // texts mostly did not change, so a tokenize at the new generation reads them and, when they
+    // hash the same as the last generation's (_highlightSeen), takes that one's colours at once,
+    // or goes on with the walk kept with its texts, instead of walking from line 1 again.
 
     private sealed record FileHighlight(
         IReadOnlyList<TextSpan>[]? OldLines,
@@ -97,9 +104,10 @@ public partial class JunctionApp
     /// new name, a renamed file's old side was not found and its deleted lines stayed plain.
     /// <paramref name="Rest"/>: wait until the reader has stayed on it (<see cref="HighlightRest"/>)
     /// before starting. <paramref name="Scheme"/>: which scheme it is coloured under, of those so
-    /// far.</summary>
+    /// far. <paramref name="Shown"/>: the lines to colour; <paramref name="DiffLines"/>: the lines of
+    /// the diff it was asked for, which <paramref name="Shown"/> may reach past (<see cref="SaveAskMargin"/>).</summary>
     private sealed record HighlightAsk(string Key, GitRepository Repo, string Path, string OldPath, ExternalDiffMode Mode,
-        string? CommitHash, string? BaseHash, DiffShownLines Shown, bool Rest, int Scheme);
+        string? CommitHash, string? BaseHash, DiffShownLines Shown, bool Rest, int Scheme, DiffShownLines DiffLines);
 
     /// <summary>
     /// How long the selection stays on a file before its colours are asked for, when nothing says
@@ -154,13 +162,86 @@ public partial class JunctionApp
     /// <summary>A file's two versions as a tokenize read them; a side is read only when the diff
     /// shows lines of it. <see cref="Bytes"/>: the texts, and the array of a slot a line that the
     /// walk kept with them fills (SyntaxHighlighter's spans of the lines shown are what the colours
-    /// keep anyway).</summary>
+    /// keep anyway). <see cref="Hashes"/>: of a working-tree or index diff's texts, made where they
+    /// were read. <see cref="Walked"/>: the lines the walk with these texts was asked for, which
+    /// SyntaxHighlighter goes on with only when it is asked for the same lines.</summary>
     private sealed record HighlightTexts(string? Old, bool OldRead, string? New, bool NewRead)
     {
         public long Bytes { get; } = Size(Old) + Size(New);
 
+        public TextHashes Hashes { get; init; }
+
+        public DiffShownLines? Walked { get; init; }
+
         private static long Size(string? text) =>
             text is null ? 0 : 2L * text.Length + 8L * (text.AsSpan().Count('\n') + 1);
+    }
+
+    /// <summary>A hash of each side of a file a tokenize read: 0 for a side it did not read, 1 for
+    /// one with no text (the file is not in the index, say), else a 64-bit hash of its characters,
+    /// two of the runtime's 32-bit hashes (xxHash32 and Marvin, both seeded per process).</summary>
+    private readonly record struct TextHashes(ulong Old, ulong New)
+    {
+        public static TextHashes Of(string? old, bool oldRead, string? @new, bool newRead) =>
+            new(Hash(old, oldRead), Hash(@new, newRead));
+
+        private static ulong Hash(string? text, bool read)
+        {
+            if (!read) return 0;
+            if (text is null) return 1;
+            var chars = text.AsSpan();
+            var xx = new HashCode();
+            xx.AddBytes(MemoryMarshal.AsBytes(chars));
+            return ((ulong)(uint)xx.ToHashCode() << 32 | (uint)string.GetHashCode(chars)) | 2;
+        }
+    }
+
+    /// <summary>
+    /// The last tokenize of each working-tree or index diff's file (the Changes view's), by
+    /// repository, mode and path (<see cref="FileOf"/>): the key it ran under, and the hashes of the
+    /// texts it read. Every working-tree event moves the key's data generation, and an editor's save
+    /// of another file, or a new untracked one, leaves this file's texts as they were: the file was
+    /// read and walked from line 1 again, the diff on screen drew uncoloured until the walk landed
+    /// (bigrepo's 675 KB file: 13,623 lines, 324 MB, 2.7 s), and the texts kept with a cancelled walk
+    /// could never be found again (plan 17 round 17). A tokenize at the new generation still reads
+    /// the file, to hash it; when the hashes are these, it takes what the last one left (see
+    /// <see cref="PriorOf"/>). Whatever the hashes, what the last generation left goes when the new
+    /// one's tokenize ends: no build asks for that key again.
+    /// </summary>
+    private readonly Dictionary<string, HighlightSeen> _highlightSeen = new(StringComparer.Ordinal);
+
+    private readonly record struct HighlightSeen(string Key, TextHashes Hashes);
+
+    /// <summary>What a working-tree or index diff's last generation left that a tokenize of the next
+    /// takes when its texts hash to <see cref="Hashes"/>: the colours, when they hold the lines the
+    /// diff shows, or else the texts kept with a cancelled walk.</summary>
+    private sealed record HighlightPrior(TextHashes Hashes, FileHighlight? Colours, HighlightTexts? Texts);
+
+    private static string FileOf(HighlightAsk ask) => $"{ask.Repo.Path}|{ask.Mode}|{ask.Path}";
+
+    /// <summary>The <see cref="HighlightPrior"/> for <paramref name="ask"/>, or null: a commit's
+    /// key is its content, and a file seen at this key already has it.</summary>
+    private HighlightPrior? PriorOf(HighlightAsk ask)
+    {
+        if (ask.Mode == ExternalDiffMode.Commit || !_highlightSeen.TryGetValue(FileOf(ask), out var seen)
+            || seen.Key == ask.Key) return null;
+        var colours = _highlights.GetValueOrDefault(seen.Key);
+        if (colours is not null && !colours.Covers(ask.DiffLines)) colours = null;
+        var texts = colours is null ? _highlightTexts.GetValueOrDefault(seen.Key) : null;
+        return colours is null && texts is null ? null : new HighlightPrior(seen.Hashes, colours, texts);
+    }
+
+    /// <summary>A tokenize of a working-tree or index diff read <paramref name="texts"/> at
+    /// <paramref name="ask"/>'s key, or went on with them: the file's last generation is done with.</summary>
+    private void SeeHighlightFile(HighlightAsk ask, HighlightTexts texts)
+    {
+        string file = FileOf(ask);
+        if (_highlightSeen.TryGetValue(file, out var was) && was.Key != ask.Key)
+        {
+            ForgetHighlightTexts(was.Key);   // carried over to this key, or of other characters
+            _highlights.Remove(was.Key);
+        }
+        _highlightSeen[file] = new HighlightSeen(ask.Key, texts.Hashes);
     }
 
     /// <summary>
@@ -228,6 +309,7 @@ public partial class JunctionApp
         _highlightTexts.Clear();   // the walks kept with them are the old theme's
         _highlightTextsOrder.Clear();
         HighlightTextsKeptBytes = 0;
+        _highlightSeen.Clear();
         _highlightScheme++;
         _highlightNext = null;
         _highlightCancel?.Cancel();
@@ -279,7 +361,8 @@ public partial class JunctionApp
         // Commit content is immutable → content-addressed key (old ref explicit so
         // a single-commit view and a range compare ending at the same commit don't
         // collide). Working/index content changes with the repo's data generation,
-        // exactly like the Changes loader, so stale highlights die with the gen bump.
+        // exactly like the Changes loader; a generation whose texts hash the same as
+        // the last one's takes its colours (_highlightSeen).
         string key = mode == ExternalDiffMode.Commit
             ? $"{repo.Path}|{baseHash ?? commitHash + "^"}..{commitHash}|{path}"
             : $"{repo.Path}|{ChangesGen(_activeRepoPath)}|{mode}|{path}";
@@ -303,7 +386,8 @@ public partial class JunctionApp
         // on files of 8,000 lines is two large-heap strings a key. Nothing is lost by the file
         // they stop on but the rest.
         rest |= HighlightRunningLive && _highlightRunning!.Key != key;
-        AskHighlight(new HighlightAsk(key, repo, path, diff.RenamedFrom ?? path, mode, commitHash, baseHash, shown, rest, _highlightScheme));
+        AskHighlight(new HighlightAsk(key, repo, path, diff.RenamedFrom ?? path, mode, commitHash, baseHash, shown, rest,
+            _highlightScheme, _highlightLinesOf.Shown!));
         return hit;   // what is known so far, if anything: the rest follows
     }
 
@@ -337,6 +421,7 @@ public partial class JunctionApp
         var (clock, rest, hold) = (_app.Time == TimeProvider.System ? TimeProvider.System : NoBudget, HighlightRest, HighlightHold);
         var token = cancel.Token;
         var texts = _highlightTexts.GetValueOrDefault(ask.Key);
+        var prior = texts is null ? PriorOf(ask) : null;
 
         Task.Run(async () =>
         {
@@ -348,7 +433,21 @@ public partial class JunctionApp
                 if (hold is not null) await hold.WaitAsync(token);
                 Interlocked.Increment(ref _highlightsRead);
                 texts = ReadHighlightTexts(ask, texts, token);
-                (result, lines) = Tokenize(ask, texts, clock, token);
+                if (prior is not null && prior.Hashes == texts.Hashes)
+                {
+                    // The file as it was at the generation before: its colours, or the strings a
+                    // walk was kept with, in place of the same characters read again.
+                    if (prior.Colours is { } colours) result = colours;
+                    else texts = prior.Texts!;
+                }
+                if (result is null)
+                {
+                    // A walk kept with these texts goes on only for the lines it was asked for: those,
+                    // when they hold the diff's (a save's ask reaches past them).
+                    var shown = texts.Walked is { } walked && walked.Holds(ask.DiffLines) ? walked : ask.Shown;
+                    if (!ReferenceEquals(shown, texts.Walked)) texts = texts with { Walked = shown };
+                    (result, lines) = Tokenize(ask.Path, shown, texts, clock, token);
+                }
             }
             catch (OperationCanceledException)
             {
@@ -407,15 +506,17 @@ public partial class JunctionApp
         }
         if (!read && kept is not null) return kept;
         Interlocked.Increment(ref _highlightFileReads);
-        return new HighlightTexts(oldText, oldRead, newText, newRead);
+        return new HighlightTexts(oldText, oldRead, newText, newRead)
+        {
+            Hashes = ask.Mode == ExternalDiffMode.Commit ? default : TextHashes.Of(oldText, oldRead, newText, newRead),
+        };
     }
 
     // Runs off the UI thread.
-    private static (FileHighlight, int Lines) Tokenize(HighlightAsk ask, HighlightTexts texts, TimeProvider clock,
-        CancellationToken token)
+    private static (FileHighlight, int Lines) Tokenize(string path, DiffShownLines shown, HighlightTexts texts,
+        TimeProvider clock, CancellationToken token)
     {
-        var shown = ask.Shown;
-        var sides = SyntaxHighlighter.TokenizeDiff(ask.Path, shown.Old.Length > 0 ? texts.Old : null, shown.Old,
+        var sides = SyntaxHighlighter.TokenizeDiff(path, shown.Old.Length > 0 ? texts.Old : null, shown.Old,
             shown.New.Length > 0 ? texts.New : null, shown.New, SyntaxHighlighter.DefaultMaxLines, token, clock);
         return (new FileHighlight(sides.Old, sides.New, shown), sides.LinesWalked);
     }
@@ -432,6 +533,8 @@ public partial class JunctionApp
         // this file's.
         if (ask.Scheme == _highlightScheme)
         {
+            if (ask.Mode != ExternalDiffMode.Commit && texts is not null && !ReferenceEquals(result, FileHighlight.None))
+                SeeHighlightFile(ask, texts);
             if (result is not null) ForgetHighlightTexts(ask.Key);
             else if (texts is not null) KeepHighlightTexts(ask.Key, texts);
         }
@@ -440,7 +543,11 @@ public partial class JunctionApp
         // may well come back to the file. A cancelled one that stopped short has no result.
         if (result is not null && ask.Scheme == _highlightScheme)
         {
-            if (_highlights.Count >= 128) _highlights.Clear();   // crude cap; entries are per-file-version
+            if (_highlights.Count >= 128)
+            {
+                _highlights.Clear();   // crude cap; entries are per-file-version
+                _highlightSeen.Clear();
+            }
             _highlights[ask.Key] = result;
             // Re-render the diff rows with their colours — when the diff on screen is the
             // one waiting for them. The History prefetch lands while the log is on screen,
