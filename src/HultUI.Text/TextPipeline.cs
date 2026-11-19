@@ -37,6 +37,16 @@ public sealed class TextPipeline
     // be the entry's key.
     private readonly WordCache _wordShapeCache = new(capacity: WordCacheEntries, maxWeight: WordCacheBytes);
 
+    // Right-to-left runs, shaped whole (they bypass the word cache: RtlRun), kept by their
+    // characters, face and size — all a run's shaping depends on, so a run found here is the
+    // shaper's to the bit. Without it the BiDi path shaped every right-to-left run of a line
+    // again at each width a resize passed through (plan 19 item 3).
+    private readonly WordCache _rtlRunCache = new(capacity: RtlRunEntries, maxWeight: RtlRunBytes);
+
+    /// <summary>Whether right-to-left runs are kept (<c>RtlRun</c>, <c>MeasureRtlRun</c>):
+    /// false shapes every one again, as before plan 19 item 3, for the tests that hold the two alike.</summary>
+    internal bool MemoizesRtlRuns { get; init; } = Environment.GetEnvironmentVariable("HULTUI_RTL_MEMO") != "0";
+
     // Widths of whole strings on one unbounded line, for MeasureWidth (Widths, below). Made at
     // the first width asked for: a pipeline that measures none — no TextArea — has none.
     private Widths? _widths;
@@ -78,7 +88,11 @@ public sealed class TextPipeline
     // are all let go before they are read again. Both READMEs of Chinese and Japanese in one
     // file (154,000 characters) want ~19,000 entries and ~11 MB, README.zh-CN.md alone at 960
     // logical px ~10,000 and ~5 MB; 8,192 entries and 4 MB made every frame of a drag over them
-    // shape the whole document again (plan 17, round 14). Ordinary words fill ~2 MB. The width
+    // shape the whole document again (plan 17, round 14). Ordinary words fill ~2 MB. The
+    // right-to-left run memo has the word cache's bounds: right-to-left text never reaches the
+    // word cache, so the memo is what holds it, its words measured apart and its lines' runs alike
+    // (a line of Hebrew alone is one run); a pipeline that never meets right-to-left text keeps
+    // nothing there. The width
     // cache holds the distinct lines of a 19,000-line JSON response (~7,000 of them, ~1.8 MB)
     // with room for the next one's. The wrap ranges hold a wrapped layout of each paragraph a view
     // measures again at every width of a drag: walked in the same order each time, paragraphs that
@@ -90,6 +104,8 @@ public sealed class TextPipeline
     internal const long ShapeCacheBytes = 8L << 20;
     internal const int WordCacheEntries = 32768;
     internal const long WordCacheBytes = 16L << 20;
+    internal const int RtlRunEntries = 32768;
+    internal const long RtlRunBytes = 16L << 20;
     internal const long LayoutCacheBytes = 4L << 20;
     internal const long WidthCacheBytes = 4L << 20;
     internal const int WrapRangeEntries = 4096;
@@ -98,6 +114,7 @@ public sealed class TextPipeline
     // What each holds now, for the tests that hold them to their bounds.
     internal (int Entries, long Bytes) ShapeCacheUse => (_shapeCache.Count, _shapeCache.Weight);
     internal (int Entries, long Bytes) WordCacheUse => (_wordShapeCache.Count, _wordShapeCache.Weight);
+    internal (int Entries, long Bytes) RtlRunCacheUse => (_rtlRunCache.Count, _rtlRunCache.Weight);
     internal (int Entries, long Bytes) LayoutCacheUse => (_cache.Count, _cache.Weight);
     internal (int Entries, long Bytes) WrapRangeUse => (_wrapRanges.Count, _wrapRanges.Weight);
     internal (int Entries, long Bytes) WidthCacheUse => _widths is { } w ? (w.Cache.Count, w.Cache.Weight) : (0, 0);
@@ -1698,8 +1715,13 @@ public sealed class TextPipeline
                 ItemizeRange(text, i, b, eff, Kept(_lineRuns));
                 foreach (var (runStart, runEnd, font) in _lineRuns)
                 {
-                    var shaped = ShapeWithSpacing(text[runStart..runEnd], font, eff.FontSize, eff.LetterSpacing,
-                        rtl: (level & 1) == 1);
+                    // Right-to-left runs bypass the word cache and digit fast path: their
+                    // space-split assumptions are unproven for RTL (Arabic joining does not
+                    // cross spaces, but "likely sound" is not proven — docs/plans/14-bidi.md).
+                    // They are shaped whole, and kept whole (RtlRun).
+                    var shaped = (level & 1) == 1
+                        ? Spaced(RtlRun(text, runStart, runEnd - runStart, font, eff.FontSize), eff.LetterSpacing)
+                        : ShapeWithSpacing(text[runStart..runEnd], font, eff.FontSize, eff.LetterSpacing);
                     shaped.Level = level;
                     lineRuns.Add(shaped);
                     maxAscent = Math.Max(maxAscent, Math.Abs(font.Ascent) * eff.FontSize);
@@ -3052,11 +3074,7 @@ public sealed class TextPipeline
         float width;
         int glyphs;
         if (rtl)
-        {
-            var run = _shaper.Shape(text[from..to], font, fontSize, rtl: true);
-            width = run.Width;
-            glyphs = run.Glyphs.Length;
-        }
+            (width, glyphs) = MeasureRtlRun(text, from, to - from, font, fontSize);
         else if (text.AsSpan(from, to - from).IndexOf(' ') < 0)
         {
             var word = ShapeSegment(text, from, to - from, font, fontSize, WordCache.FontHash(font, fontSize));
@@ -3081,20 +3099,16 @@ public sealed class TextPipeline
         return letterSpacing == 0f || glyphs == 0 ? width : width + letterSpacing * glyphs;
     }
 
-    // Shapes a run, then applies letter spacing by widening each glyph's advance
-    // and shifting the following glyphs. Returns the shaper's result unchanged
-    // when spacing is zero (the common case), so there is no allocation cost.
-    private ShapedRun ShapeWithSpacing(string text, IResolvedFont font, float fontSize, float letterSpacing,
-        bool rtl = false)
+    // Shapes a left-to-right run, then applies letter spacing (Spaced). Spacing moves every
+    // glyph, so a spaced run needs its glyphs now.
+    private ShapedRun ShapeWithSpacing(string text, IResolvedFont font, float fontSize, float letterSpacing) =>
+        Spaced(ShapeByWords(text, font, fontSize, composeNow: letterSpacing != 0f), letterSpacing);
+
+    // Applies letter spacing by widening each glyph's advance and shifting the following glyphs.
+    // Returns the run unchanged when spacing is zero (the common case), so there is no
+    // allocation cost.
+    private static ShapedRun Spaced(ShapedRun run, float letterSpacing)
     {
-        // RTL runs bypass the word cache and digit fast path in stage 1: correctness
-        // first, and the caches' space-split assumptions are unproven for RTL
-        // (Arabic joining does not cross spaces, but "likely sound" is not proven —
-        // docs/plans/14-bidi.md). LTR text keeps every cache untouched.
-        // Spacing moves every glyph, so a spaced run needs its glyphs now.
-        var run = rtl
-            ? _shaper.Shape(text, font, fontSize, rtl: true)
-            : ShapeByWords(text, font, fontSize, composeNow: letterSpacing != 0f);
         if (letterSpacing == 0f || run.Glyphs.Length == 0)
             return run;
 
@@ -3291,6 +3305,44 @@ public sealed class TextPipeline
         foreach (char c in segment)
             x += digits.Advances[Slot(c)];
         return new WordShape(null, digits, start, x, segment.Length);
+    }
+
+    // The width and glyph count of text[start..start + length], a right-to-left run, shaped whole as
+    // the shaper shapes it: from the run cache, looked up by the span, else shaped as a string of its
+    // own and kept under it.
+    private (float Width, int Glyphs) MeasureRtlRun(string text, int start, int length, IResolvedFont font, float fontSize)
+    {
+        ShapedRun run;
+        if (!MemoizesRtlRuns)
+            run = _shaper.Shape(text.Substring(start, length), font, fontSize, rtl: true);
+        else
+        {
+            int fontHash = WordCache.FontHash(font, fontSize);
+            if (!_rtlRunCache.TryGet(text.AsSpan(start, length), font, fontSize, fontHash, out run))
+                run = NewRtlRun(text.Substring(start, length), font, fontSize, fontHash);
+        }
+        return (run.Width, run.Glyphs.Length);
+    }
+
+    // text[start..start + length], a right-to-left run, shaped whole, as a run of its own: the
+    // cache's run is never handed out (layout sets a run's offset and level), its string and glyphs
+    // are, as the word cache's are — nothing writes to a run's glyph array once it is made. A run
+    // found makes no string.
+    private ShapedRun RtlRun(string text, int start, int length, IResolvedFont font, float fontSize)
+    {
+        if (!MemoizesRtlRuns)
+            return _shaper.Shape(text.Substring(start, length), font, fontSize, rtl: true);
+        int fontHash = WordCache.FontHash(font, fontSize);
+        if (!_rtlRunCache.TryGet(text.AsSpan(start, length), font, fontSize, fontHash, out var run))
+            run = NewRtlRun(text.Substring(start, length), font, fontSize, fontHash);
+        return new ShapedRun(run.Text, font, fontSize, run.Width, run.Glyphs);
+    }
+
+    private ShapedRun NewRtlRun(string text, IResolvedFont font, float fontSize, int fontHash)
+    {
+        var run = _shaper.Shape(text, font, fontSize, rtl: true);
+        _rtlRunCache.Put(text, font, fontSize, fontHash, run, WordBytes(text, run));
+        return run;
     }
 
     private ShapedRun ShapeNewWord(string word, IResolvedFont font, float fontSize, int fontHash, bool withCuts = false)
