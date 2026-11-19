@@ -78,6 +78,18 @@ static class Ui
         return string.Join(' ', parts);
     }
 
+    /// <summary>
+    /// Hebrew alone: a line of it is one right-to-left run, which the BiDi path shapes whole, so
+    /// the runs a line holds change wherever its breaks do.
+    /// </summary>
+    public static string HebrewParagraph(Random rng, int words)
+    {
+        var parts = new string[words];
+        for (int i = 0; i < words; i++)
+            parts[i] = HebrewWords[rng.Next(HebrewWords.Length)];
+        return string.Join(' ', parts);
+    }
+
     // IPA letters Cascadia Mono (Windows' monospace) has no glyph for: in a monospace label
     // they come from a fallback face, so the label is several font runs.
     private static readonly string[] IpaWords = ["ɐɓɖ", "ɠɦɨ", "ɯɰɱ", "ɕɗɘ", "ɜɝɞ", "ɟɡɤ", "ɥɧɭ", "ɮɳɐ"];
