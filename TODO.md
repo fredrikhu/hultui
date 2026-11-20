@@ -918,7 +918,18 @@
   SkiaSharp 4.156 with HarfBuzzSharp 14.4 (its CPU surface now draws in BGRA). ppy.SDL3-CS 2026.1002.1
   (SDL 3.5.0-ea7a2da, in place of fredrikhu/hultui#8) is merged too, after a real-window check on Windows
   and WSLg; KDE on Wayland with HDR was not checked. Left by SkiaSharp 4 for plans of their own:
-  HarfBuzz 14.4's per-call shaping cost on words not cached yet (shaping whole runs), and Graphite.
+  HarfBuzz 14.4's per-call shaping cost on words not cached yet (plan 19, below), and Graphite.
+- **Shaping cold words** — docs/plans/19-run-shaping.md. Shaping whole runs: measured, no-go
+  (2026-11-18; flat to 8 % slower on real text; the regressed row has one cold word per label).
+  Item 1 built 2026-11-19 (781a857f, not merged): the digit table composes numbers with
+  `- + . , : / % −`, each mark proven on first use (cold labels −56 % JIT, −49 % AOT on Windows, −38 % on Fedora; both suites pass).
+  Item 2 built 2026-11-19 (ba15d841, not merged): the two cold-label rows shape one new five-letter
+  word a label on purpose (their `-38913` was an `int` overflow); their history breaks there.
+  Item 3 built 2026-11-19 (78a69ee5, not merged): right-to-left runs kept whole by characters,
+  face and size; BiDi rows −52 to −80 % on Windows, −19 to −52 % on Fedora, Hebrew-alone rows added.
+  Items 1–3 merged to main (447b3a57). Item 4 built 2026-11-19 (52acb2f2): `TextPipeline.ShaperCalls`,
+  a `shaped` column in the perf suite, and `text/create 200 paragraphs of unseen words`. Plan done.
+  Prototype on `claude/run-shaping-prototype` (14b29b66).
 
 ## Deferred
 - **Replace Onigwrap** — `HultUI.Syntax` tokenizes through TextMateSharp 2.0.5, whose regex engine is

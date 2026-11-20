@@ -10,7 +10,8 @@ sides are built in Release before any timed run. Each pair runs before then afte
 scripts/perf/idle-gate.ps1 (timings only count on a quiet machine; allocation numbers do not drift with load).
 
 Output stays short: per pair the suite's slower/faster verdicts (min AND median past -Threshold, as --compare) and
-the rows whose allocKB moved by more than 0.2 KB and 2 %; an A/A line (before against before) for the noise when
+the rows whose allocKB moved by more than 0.2 KB and 2 %, and those whose shaper (HarfBuzz) calls a step moved, where
+both captures count them; an A/A line (before against before) for the noise when
 -Pairs is 2 or more; and a table of the -Show rows (best min, median and allocKB of each side). Everything else
 (captures, logs, the suite's own output) goes to -Work.
 
@@ -226,7 +227,7 @@ function Rows([string]$path) {
 }
 function Pct($a, $b) { if ($a -eq 0) { return 0 } ; return ($b - $a) / $a * 100 }
 function Verdicts($a, $b, [string]$title) {
-    $slow = @(); $fast = @(); $alloc = @()
+    $slow = @(); $fast = @(); $alloc = @(); $shaped = @()
     foreach ($n in $b.Keys) {
         if (-not $a.ContainsKey($n)) { continue }
         $x = $a[$n]; $y = $b[$n]
@@ -235,12 +236,17 @@ function Verdicts($a, $b, [string]$title) {
         if ($dMin -lt -$Threshold -and $dMed -lt -$Threshold) { $fast += ('{0} {1:+0;-0}%/{2:+0;-0}%' -f $n, $dMin, $dMed) }
         $dKB = $y.allocKB - $x.allocKB
         if ([math]::Abs($dKB) -gt 0.2 -and [math]::Abs((Pct $x.allocKB $y.allocKB)) -gt 2) { $alloc += ('{0} {1} -> {2} KB' -f $n, $x.allocKB, $y.allocKB) }
+        # Shaper (HarfBuzz) calls a step, in captures since plan 19 item 4: a move says the text caches changed.
+        $sx = $x.PSObject.Properties['shaped']; $sy = $y.PSObject.Properties['shaped']
+        if ($sx -and $sy -and [math]::Abs($sy.Value - $sx.Value) -ge 0.5) { $shaped += ('{0} {1} -> {2} a step' -f $n, $sx.Value, $sy.Value) }
     }
-    Say ("{0}: {1} slower, {2} faster (min and median past +/-{3}%), {4} rows' allocKB moved" -f $title, $slow.Count, $fast.Count, $Threshold, $alloc.Count)
+    Say ("{0}: {1} slower, {2} faster (min and median past +/-{3}%), {4} rows' allocKB moved, {5} rows' shaper calls" -f $title, $slow.Count, $fast.Count, $Threshold, $alloc.Count, $shaped.Count)
     $slow | ForEach-Object { Say "    slower  $_" }
     $fast | ForEach-Object { Say "    faster  $_" }
     $alloc | Select-Object -First 20 | ForEach-Object { Say "    alloc   $_" }
     if ($alloc.Count -gt 20) { Say "    ... $($alloc.Count - 20) more" }
+    $shaped | Select-Object -First 20 | ForEach-Object { Say "    shaped  $_" }
+    if ($shaped.Count -gt 20) { Say "    ... $($shaped.Count - 20) more" }
 }
 foreach ($rt in $Runtime) {
     Say ""

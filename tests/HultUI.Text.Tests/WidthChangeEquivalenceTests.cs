@@ -279,7 +279,9 @@ public class WidthChangeEquivalenceTests
         var shaper = new CountingShaper(new ContextShaper());
         var reuse = new TextPipeline(new TwoFonts(negativeDescent: false), shaper);
         var referenceShaper = new CountingShaper(new ContextShaper());
-        var reference = new TextPipeline(new TwoFonts(negativeDescent: false), referenceShaper) { ReuseAcrossWidths = false };
+        // The reference keeps no right-to-left run either (plan 19 item 3), or it would shape none.
+        var reference = new TextPipeline(new TwoFonts(negativeDescent: false), referenceShaper)
+            { ReuseAcrossWidths = false, MemoizesRtlRuns = false };
         var rtl = Base with { TextDirection = TextDirection.Rtl };
         const string label = "שלום עולם ספר";
 

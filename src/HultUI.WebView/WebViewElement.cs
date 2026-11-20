@@ -26,8 +26,9 @@ namespace HultUI.WebView;
 /// <para><b>Focus.</b> Focusable, and focused by a press on it. Tab into it lands on the
 /// page's first stop, Shift+Tab on its last; tabbing out of the page moves focus on to
 /// the window's next element.</para>
+/// <para><b>Middle-click autoscroll</b> is the window's, as over any list (<see cref="MiddleClickAutoScroll"/>).</para>
 /// </remarks>
-public partial class WebViewElement : Element, IAccessibleContentSource
+public partial class WebViewElement : Element, IAccessibleContentSource, IAutoScrollable
 {
     private WebViewController? _controller;
     private bool _listening;
@@ -269,15 +270,41 @@ public partial class WebViewElement : Element, IAccessibleContentSource
         if (_controller is null) return;
         // Held from press to release, so a drag-select that leaves the element keeps going.
         e.CapturePointer();
+        e.StopPropagation = true;
         var button = ButtonOf(e.Button);
+        if (button == WebPointerButtons.Middle && TakesAutoScroll)
+        {
+            // The window's autoscroll has this press. Whether it is the page's too is known at the
+            // release, so it waits until then (OnPointerUp).
+            _autoScrollAnchor = e.Position;
+            _wheelCarryX = _wheelCarryY = 0f;
+            _autoScrollRan = false;
+            _withheldPress = (e.Position, Math.Max(1, e.ClickCount), e.Modifiers);
+            return;
+        }
         _held |= button;
         _controller.SendPointer(At(e, WebPointerAction.Down) with { Button = button, ClickCount = Math.Max(1, e.ClickCount) });
-        e.StopPropagation = true;
     }
 
     private void OnPointerUp(PointerUpEvent e)
     {
         var button = ButtonOf(e.Button);
+        if (button == WebPointerButtons.Middle && _withheldPress is { } press)
+        {
+            _withheldPress = null;
+            e.StopPropagation = true;
+            // An autoscroll that ran was the gesture's from press to release, and clicks nothing,
+            // as in any list. Given the press and release, the page would make a middle click of
+            // them — a link would open, and Linux would paste — whatever was under the release:
+            // Chromium clicks the common ancestor of the two.
+            if (_autoScrollRan || _controller is null) return;
+            // One that never left the dead zone is a middle click, and the page's.
+            _held |= button;
+            _controller.SendPointer(At(press.At, WebPointerAction.Down, press.Modifiers) with { Button = button, ClickCount = press.Clicks });
+            _held &= ~button;
+            _controller.SendPointer(At(e, WebPointerAction.Up) with { Button = button, ClickCount = 1 });
+            return;
+        }
         // A release whose press the page never saw is not the page's: the press opened or
         // closed a menu over it, and the menu is gone by the time the button comes up.
         if (_controller is null || (_held & button) == 0) return;
@@ -287,6 +314,71 @@ public partial class WebViewElement : Element, IAccessibleContentSource
     }
 
     private void OnPointerLeave(PointerLeaveEvent e) => _controller?.SendPointer(At(e, WebPointerAction.Leave));
+
+    // ──── Middle-click autoscroll ────
+
+    private Point? _autoScrollAnchor;
+    private float _wheelCarryX, _wheelCarryY;
+    private bool _autoScrollRan;
+    private (Point At, int Clicks, KeyModifiers Modifiers)? _withheldPress;
+
+    /// <summary>Whether a middle press here is the window's autoscroll's: the window claims it
+    /// for the innermost <see cref="IAutoScrollable"/> that will take it, and nothing inside a
+    /// web view is an element, so that is this one exactly when this says so.</summary>
+    private bool TakesAutoScroll => MiddleClickAutoScroll && ((IAutoScrollable)this).CanAutoScroll;
+
+    /// <summary>
+    /// The window's middle-button autoscroll over the page, as over any list: the press anchors
+    /// it under the ring, and the pointer's distance from the anchor is a speed. The page hears
+    /// it as wheel input at the anchor, so what scrolls is what the wheel would scroll there — a
+    /// frame's or a scroller's of the page's own. On by default. Set it false where the page's
+    /// own middle button matters (a map dragged with it, say): the page then has the button to
+    /// itself, with no autoscroll at all — WebView2's own is turned off for every page, since it
+    /// showed nothing (see <c>WebView2View.NoEngineAutoscroll</c>).
+    /// </summary>
+    /// <remarks>A middle click that never left the dead zone is the page's as before (a link
+    /// opens): its press and release reach the page together, at the release. An autoscroll that
+    /// ran is the gesture's from press to release, and the page hears none of it but the scrolling
+    /// — no click comes of it, as none does in a list. Whether the
+    /// page has anywhere to scroll is not knowable from here (as for the wheel), so a ready page
+    /// always takes the gesture — and keeps it from a scroll view around it.</remarks>
+    public bool MiddleClickAutoScroll { get; set; } = true;
+
+    bool IAutoScrollable.CanAutoScroll => _controller is { State: WebViewState.Ready };
+
+    /// <summary>The page keeps its own place. A rebuild that replaces the element mid-gesture
+    /// shows the same page, so there is nothing to carry across.</summary>
+    float IAutoScrollable.ScrollOffsetY { get => 0f; set { } }
+
+    /// <summary>
+    /// One frame of the gesture, as wheel input at the anchor. Both engines take a notch as 120
+    /// units and only whole ones; the rest is carried to the next frame, so a crawl just past
+    /// the dead zone still moves. True when input was sent — whether the page moved is the
+    /// page's to know.
+    /// </summary>
+    bool IAutoScrollable.ScrollBy(float dx, float dy)
+    {
+        if (_controller is not { } c) return false;
+        float perUnit = c.View.PixelsPerWheelNotch / 120f;
+        if (!(perUnit > 0f)) return false;
+        _wheelCarryX += dx / perUnit;
+        _wheelCarryY += dy / perUnit;
+        int ux = (int)_wheelCarryX, uy = (int)_wheelCarryY;   // toward zero; the rest carries
+        _wheelCarryX -= ux;
+        _wheelCarryY -= uy;
+        if (ux == 0 && uy == 0) return false;
+
+        // A rebuild that replaced the element mid-gesture left no anchor here: the middle of the page.
+        var box = ScreenContentBox;
+        var at = _autoScrollAnchor is { } anchor && box.Contains(anchor)
+            ? anchor : new Point(box.X + box.Width / 2f, box.Y + box.Height / 2f);
+        // One axis per event, as WebView2's wheel messages carry one. Further down the content is
+        // the wheel turned toward the user, which is negative; no modifiers, or Ctrl held would zoom.
+        if (uy != 0) c.SendPointer(At(at, WebPointerAction.Wheel, KeyModifiers.None) with { WheelY = -uy / 120f });
+        if (ux != 0) c.SendPointer(At(at, WebPointerAction.Wheel, KeyModifiers.None) with { WheelX = -ux / 120f });
+        _autoScrollRan = true;
+        return true;
+    }
 
     private void OnScroll(ScrollEvent e)
     {
@@ -406,6 +498,7 @@ public partial class WebViewElement : Element, IAccessibleContentSource
         if (source is not WebViewElement web) return;
         // The copy took the twin's name and cursor; the page's own win where they are the page's.
         _titleName = web._titleName;
+        MiddleClickAutoScroll = web.MiddleClickAutoScroll;
         Controller = web.Controller;
         if (_controller is not null)
         {

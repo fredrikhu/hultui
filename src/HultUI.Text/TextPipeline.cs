@@ -37,6 +37,16 @@ public sealed class TextPipeline
     // be the entry's key.
     private readonly WordCache _wordShapeCache = new(capacity: WordCacheEntries, maxWeight: WordCacheBytes);
 
+    // Right-to-left runs, shaped whole (they bypass the word cache: RtlRun), kept by their
+    // characters, face and size — all a run's shaping depends on, so a run found here is the
+    // shaper's to the bit. Without it the BiDi path shaped every right-to-left run of a line
+    // again at each width a resize passed through (plan 19 item 3).
+    private readonly WordCache _rtlRunCache = new(capacity: RtlRunEntries, maxWeight: RtlRunBytes);
+
+    /// <summary>Whether right-to-left runs are kept (<c>RtlRun</c>, <c>MeasureRtlRun</c>):
+    /// false shapes every one again, as before plan 19 item 3, for the tests that hold the two alike.</summary>
+    internal bool MemoizesRtlRuns { get; init; } = Environment.GetEnvironmentVariable("HULTUI_RTL_MEMO") != "0";
+
     // Widths of whole strings on one unbounded line, for MeasureWidth (Widths, below). Made at
     // the first width asked for: a pipeline that measures none — no TextArea — has none.
     private Widths? _widths;
@@ -79,7 +89,11 @@ public sealed class TextPipeline
     // are all let go before they are read again. Both READMEs of Chinese and Japanese in one
     // file (154,000 characters) want ~19,000 entries and ~11 MB, README.zh-CN.md alone at 960
     // logical px ~10,000 and ~5 MB; 8,192 entries and 4 MB made every frame of a drag over them
-    // shape the whole document again (plan 17, round 14). Ordinary words fill ~2 MB. The width
+    // shape the whole document again (plan 17, round 14). Ordinary words fill ~2 MB. The
+    // right-to-left run memo has the word cache's bounds: right-to-left text never reaches the
+    // word cache, so the memo is what holds it, its words measured apart and its lines' runs alike
+    // (a line of Hebrew alone is one run); a pipeline that never meets right-to-left text keeps
+    // nothing there. The width
     // cache holds the distinct lines of a 19,000-line JSON response (~7,000 of them, ~1.8 MB)
     // with room for the next one's. The wrap ranges hold a wrapped layout of each paragraph a view
     // measures again at every width of a drag: walked in the same order each time, paragraphs that
@@ -91,6 +105,8 @@ public sealed class TextPipeline
     internal const long ShapeCacheBytes = 8L << 20;
     internal const int WordCacheEntries = 32768;
     internal const long WordCacheBytes = 16L << 20;
+    internal const int RtlRunEntries = 32768;
+    internal const long RtlRunBytes = 16L << 20;
     internal const long LayoutCacheBytes = 4L << 20;
     internal const long WidthCacheBytes = 4L << 20;
     internal const int WrapRangeEntries = 4096;
@@ -99,6 +115,7 @@ public sealed class TextPipeline
     // What each holds now, for the tests that hold them to their bounds.
     internal (int Entries, long Bytes) ShapeCacheUse => (_shapeCache.Count, _shapeCache.Weight);
     internal (int Entries, long Bytes) WordCacheUse => (_wordShapeCache.Count, _wordShapeCache.Weight);
+    internal (int Entries, long Bytes) RtlRunCacheUse => (_rtlRunCache.Count, _rtlRunCache.Weight);
     internal (int Entries, long Bytes) LayoutCacheUse => (_cache.Count, _cache.Weight);
     internal (int Entries, long Bytes) WrapRangeUse => (_wrapRanges.Count, _wrapRanges.Weight);
     internal (int Entries, long Bytes) WidthCacheUse => _widths is { } w ? (w.Cache.Count, w.Cache.Weight) : (0, 0);
@@ -153,24 +170,61 @@ public sealed class TextPipeline
         return 16 * glyphs;
     }
 
-    // Digit fast path. All-digit segments (row ids, counters) are each unique,
-    // so they miss every string-level cache forever and pay a full shaper call.
-    // For fonts that provably shape digits context-free, compose them from a
-    // per-(font,size) advance table instead — and skip the word cache entirely,
-    // so unique ids stop churning its LRU.
-    // Prove-then-enable: at first use the font+size shapes every digit and all
-    // 100 digit pairs once; any multi-glyph result, nonzero Y, kerning
-    // adjustment, or contextual substitution disqualifies it (entry = null) and
-    // digits take the normal shaper path. Never enabled on assumption.
+    // Digit fast path. Number segments (row ids, counters, sizes, times, signed values) are each
+    // unique, so they miss every string-level cache forever and pay a full shaper call. For fonts
+    // that provably shape them context-free, compose them from a per-(font,size) advance table
+    // instead — and skip the word cache entirely, so unique numbers stop churning its LRU.
+    // Prove-then-enable: at the first digits a font+size meets, it shapes every digit and all 100
+    // digit pairs once; any multi-glyph result, nonzero offset, kerning adjustment or contextual
+    // substitution disqualifies it (entry = null) and numbers take the normal shaper path. The
+    // number punctuation (NumberMarks) is proven one mark at a time, the first time a segment has
+    // it (ProveMark, docs/plans/19-run-shaping.md): alone, in pairs, and in every digit–mark–digit
+    // triple, because a contextual alternate that needs a digit on each side (a colon raised
+    // between figures) passes every pair. A mark that fails is refused alone; the digits and the
+    // other marks keep composing. Never enabled on assumption.
     private readonly Dictionary<DigitKey, DigitTable?> _digitTables = new();
 
     private readonly record struct DigitKey(IResolvedFont Font, float FontSize);
 
+    /// <summary>The number punctuation a digit table composes once proven, after the ten digits:
+    /// slot 10 + i is <c>NumberMarks[i]</c> (<see cref="Slot"/>).</summary>
+    internal const string NumberMarks = "-+.,:/%\u2212";
+
     private sealed class DigitTable
     {
-        public readonly uint[] GlyphIds = new uint[10];
-        public readonly float[] Advances = new float[10];
+        public readonly uint[] GlyphIds = new uint[10 + NumberMarks.Length];
+        public readonly float[] Advances = new float[10 + NumberMarks.Length];
+
+        // Bit i: NumberMarks[i] passed its proof (Proven) or failed it (Refused); in neither, the
+        // mark has not been met yet.
+        public int Proven, Refused;
     }
+
+    /// <summary>
+    /// When false, only all-digit segments are composed from the digit table: the reference. When
+    /// true (the default), so is a number with punctuation from <see cref="NumberMarks"/> in it
+    /// (<c>-38913</c>, <c>1,234.56</c>, <c>12:30</c>, <c>50%</c>), once each of its marks has passed
+    /// its proof. Tests hold the two to the same glyphs, within the digit proof's tolerance.
+    /// </summary>
+    internal bool ComposesNumberPunctuation { get; init; } = true;
+
+    /// <summary>A character's slot in a digit table: 0–9 for a digit, 10 + its place in
+    /// <see cref="NumberMarks"/> for a mark, -1 for anything else.</summary>
+    internal static int Slot(char c) => c switch
+    {
+        >= '0' and <= '9' => c - '0',
+        '-' => 10,
+        '+' => 11,
+        '.' => 12,
+        ',' => 13,
+        ':' => 14,
+        '/' => 15,
+        '%' => 16,
+        '\u2212' => 17,
+        _ => -1,
+    };
+
+    private static char SlotChar(int slot) => slot < 10 ? (char)('0' + slot) : NumberMarks[slot - 10];
 
     public IFontCollection Fonts => _fonts;
     public ITextShaper Shaper => _shaper;
@@ -185,6 +239,22 @@ public sealed class TextPipeline
     // The shaper, when it can say where a run can be cut (RunCuts): a long word is shaped with its
     // cuts, and a prefix table reads that word cut short from them.
     private readonly IShapesWithCuts? _cutShaper;
+
+    /// <summary>
+    /// How many strings this pipeline has handed its shaper: with <c>SkiaTextShaper</c>, one
+    /// HarfBuzz call each. It only counts up; read it before and after what is measured, on the
+    /// thread that lays text out. An instrument (docs/plans/19-run-shaping.md, item 4): it says at
+    /// once whether text came out of the caches or was shaped, and where the shaping went.
+    /// </summary>
+    public long ShaperCalls { get; private set; }
+
+    // Every string the pipeline shapes goes through here, or through the cut shaper beside it
+    // (ShapeNewWord), so that ShaperCalls counts each.
+    private ShapedRun CallShaper(string text, IResolvedFont font, float fontSize, bool rtl = false)
+    {
+        ShaperCalls++;
+        return _shaper.Shape(text, font, fontSize, rtl);
+    }
 
     /// <summary>
     /// When false, a prefix of a word that a prefix table cuts short is shaped as a string of its
@@ -1783,8 +1853,13 @@ public sealed class TextPipeline
                 ItemizeRange(text, i, b, eff, Kept(_lineRuns));
                 foreach (var (runStart, runEnd, font) in _lineRuns)
                 {
-                    var shaped = ShapeWithSpacing(text[runStart..runEnd], font, eff.FontSize, eff.LetterSpacing,
-                        rtl: (level & 1) == 1);
+                    // Right-to-left runs bypass the word cache and digit fast path: their
+                    // space-split assumptions are unproven for RTL (Arabic joining does not
+                    // cross spaces, but "likely sound" is not proven — docs/plans/14-bidi.md).
+                    // They are shaped whole, and kept whole (RtlRun).
+                    var shaped = (level & 1) == 1
+                        ? Spaced(RtlRun(text, runStart, runEnd - runStart, font, eff.FontSize), eff.LetterSpacing)
+                        : ShapeWithSpacing(text[runStart..runEnd], font, eff.FontSize, eff.LetterSpacing);
                     shaped.Level = level;
                     lineRuns.Add(shaped);
                     maxAscent = Math.Max(maxAscent, Math.Abs(font.Ascent) * eff.FontSize);
@@ -3009,7 +3084,7 @@ public sealed class TextPipeline
         float advance = 0f;
         for (int c = ' '; c <= '~'; c++)
         {
-            var alone = _shaper.Shape(AsciiChars[c - ' '], font, fontSize);
+            var alone = CallShaper(AsciiChars[c - ' '], font, fontSize);
             if (alone.Glyphs.Length != 1 || alone.Glyphs[0].Advance != alone.Width
                 || (c > ' ' && alone.Width != advance))
                 return 0f;
@@ -3025,7 +3100,7 @@ public sealed class TextPipeline
         float tolerance = advance * AsciiAdvanceTolerance;
         foreach (var piece in AsciiPairPieces)
         {
-            var run = _shaper.Shape(piece, font, fontSize);
+            var run = CallShaper(piece, font, fontSize);
             if (run.Glyphs.Length != piece.Length)
                 return 0f;
             foreach (var glyph in run.Glyphs)
@@ -3137,11 +3212,7 @@ public sealed class TextPipeline
         float width;
         int glyphs;
         if (rtl)
-        {
-            var run = _shaper.Shape(text[from..to], font, fontSize, rtl: true);
-            width = run.Width;
-            glyphs = run.Glyphs.Length;
-        }
+            (width, glyphs) = MeasureRtlRun(text, from, to - from, font, fontSize);
         else if (text.AsSpan(from, to - from).IndexOf(' ') < 0)
         {
             var word = ShapeSegment(text, from, to - from, font, fontSize, WordCache.FontHash(font, fontSize));
@@ -3166,20 +3237,16 @@ public sealed class TextPipeline
         return letterSpacing == 0f || glyphs == 0 ? width : width + letterSpacing * glyphs;
     }
 
-    // Shapes a run, then applies letter spacing by widening each glyph's advance
-    // and shifting the following glyphs. Returns the shaper's result unchanged
-    // when spacing is zero (the common case), so there is no allocation cost.
-    private ShapedRun ShapeWithSpacing(string text, IResolvedFont font, float fontSize, float letterSpacing,
-        bool rtl = false)
+    // Shapes a left-to-right run, then applies letter spacing (Spaced). Spacing moves every
+    // glyph, so a spaced run needs its glyphs now.
+    private ShapedRun ShapeWithSpacing(string text, IResolvedFont font, float fontSize, float letterSpacing) =>
+        Spaced(ShapeByWords(text, font, fontSize, composeNow: letterSpacing != 0f), letterSpacing);
+
+    // Applies letter spacing by widening each glyph's advance and shifting the following glyphs.
+    // Returns the run unchanged when spacing is zero (the common case), so there is no
+    // allocation cost.
+    private static ShapedRun Spaced(ShapedRun run, float letterSpacing)
     {
-        // RTL runs bypass the word cache and digit fast path in stage 1: correctness
-        // first, and the caches' space-split assumptions are unproven for RTL
-        // (Arabic joining does not cross spaces, but "likely sound" is not proven —
-        // docs/plans/14-bidi.md). LTR text keeps every cache untouched.
-        // Spacing moves every glyph, so a spaced run needs its glyphs now.
-        var run = rtl
-            ? _shaper.Shape(text, font, fontSize, rtl: true)
-            : ShapeByWords(text, font, fontSize, composeNow: letterSpacing != 0f);
         if (letterSpacing == 0f || run.Glyphs.Length == 0)
             return run;
 
@@ -3336,8 +3403,8 @@ public sealed class TextPipeline
     internal bool ComposeGlyphsWhenRead { get; init; } = true;
 
     /// <summary>
-    /// A space or non-space segment of a run, shaped: the word cache's run for it, or, for an
-    /// all-digit segment in a font that passed the digit proof, the font's digit table — whose
+    /// A space or non-space segment of a run, shaped: the word cache's run for it, or, for a
+    /// number segment the font's digit table composes (DigitTableFor), that table — whose
     /// glyphs are composed only where glyphs are wanted. <see cref="Width"/> and
     /// <see cref="Glyphs"/> (the glyph count) are the segment's either way.
     /// </summary>
@@ -3374,32 +3441,83 @@ public sealed class TextPipeline
     {
         float x = 0;
         foreach (char c in segment)
-            x += digits.Advances[c - '0'];
+            x += digits.Advances[Slot(c)];
         return new WordShape(null, digits, start, x, segment.Length);
+    }
+
+    // The width and glyph count of text[start..start + length], a right-to-left run, shaped whole as
+    // the shaper shapes it: from the run cache, looked up by the span, else shaped as a string of its
+    // own and kept under it.
+    private (float Width, int Glyphs) MeasureRtlRun(string text, int start, int length, IResolvedFont font, float fontSize)
+    {
+        ShapedRun run;
+        if (!MemoizesRtlRuns)
+            run = CallShaper(text.Substring(start, length), font, fontSize, rtl: true);
+        else
+        {
+            int fontHash = WordCache.FontHash(font, fontSize);
+            if (!_rtlRunCache.TryGet(text.AsSpan(start, length), font, fontSize, fontHash, out run))
+                run = NewRtlRun(text.Substring(start, length), font, fontSize, fontHash);
+        }
+        return (run.Width, run.Glyphs.Length);
+    }
+
+    // text[start..start + length], a right-to-left run, shaped whole, as a run of its own: the
+    // cache's run is never handed out (layout sets a run's offset and level), its string and glyphs
+    // are, as the word cache's are — nothing writes to a run's glyph array once it is made. A run
+    // found makes no string.
+    private ShapedRun RtlRun(string text, int start, int length, IResolvedFont font, float fontSize)
+    {
+        if (!MemoizesRtlRuns)
+            return CallShaper(text.Substring(start, length), font, fontSize, rtl: true);
+        int fontHash = WordCache.FontHash(font, fontSize);
+        if (!_rtlRunCache.TryGet(text.AsSpan(start, length), font, fontSize, fontHash, out var run))
+            run = NewRtlRun(text.Substring(start, length), font, fontSize, fontHash);
+        return new ShapedRun(run.Text, font, fontSize, run.Width, run.Glyphs);
+    }
+
+    private ShapedRun NewRtlRun(string text, IResolvedFont font, float fontSize, int fontHash)
+    {
+        var run = CallShaper(text, font, fontSize, rtl: true);
+        _rtlRunCache.Put(text, font, fontSize, fontHash, run, WordBytes(text, run));
+        return run;
     }
 
     private ShapedRun ShapeNewWord(string word, IResolvedFont font, float fontSize, int fontHash, bool withCuts = false)
     {
         if (withCuts && _cutShaper is not null && word.Length >= MinCutWord && PrefixesFromCuts)
         {
+            ShaperCalls++;
             var cutRun = _cutShaper.Shape(word, font, fontSize, out var cuts);
             _wordShapeCache.Put(word, font, fontSize, fontHash, cutRun, WordBytes(word, cutRun) + (cuts?.Bytes ?? 0), cuts);
             return cutRun;
         }
-        var run = _shaper.Shape(word, font, fontSize);
+        var run = CallShaper(word, font, fontSize);
         _wordShapeCache.Put(word, font, fontSize, fontHash, run, WordBytes(word, run));
         return run;
     }
 
-    // The proven digit table for an all-digit segment, or null when the segment isn't pure
-    // digits / the font+size failed the proof (which runs at the first digits it meets).
+    // The proven digit table for a number segment: digits only, or (ComposesNumberPunctuation)
+    // digits with marks from NumberMarks, at least one digit. Null for any other segment, when the
+    // font+size failed the digit proof (which runs at the first digits it meets), or when a mark in
+    // the segment failed its own (which runs the first time a segment has the mark). A segment of
+    // marks alone ("-", "...") is a word like any other: it proves nothing.
     private DigitTable? DigitTableFor(ReadOnlySpan<char> segment, IResolvedFont font, float fontSize)
     {
         if (segment.Length == 0)
             return null;
+        int marks = 0;
+        bool digit = false;
         foreach (char c in segment)
-            if (c is < '0' or > '9')
+        {
+            int slot = Slot(c);
+            if (slot < 0)
                 return null;
+            if (slot < 10) digit = true;
+            else marks |= 1 << (slot - 10);
+        }
+        if (!digit || (marks != 0 && !ComposesNumberPunctuation))
+            return null;
 
         var key = new DigitKey(font, fontSize);
         if (!_digitTables.TryGetValue(key, out var table))
@@ -3407,10 +3525,14 @@ public sealed class TextPipeline
             table = ProveDigitsContextFree(font, fontSize);
             _digitTables[key] = table;
         }
-        return table;
+        if (table is null || (marks & ~table.Proven) == 0)
+            return table;
+        for (int untried = marks & ~(table.Proven | table.Refused); untried != 0; untried &= untried - 1)
+            ProveMark(table, System.Numerics.BitOperations.TrailingZeroCount(untried), font, fontSize);
+        return (marks & table.Refused) == 0 ? table : null;
     }
 
-    // Writes the glyphs of the all-digit text[start..start + length] into glyphs from index at,
+    // Writes the glyphs of the number text[start..start + length] into glyphs from index at,
     // each at the advances before it in the segment plus x (the segment's place in its run), and
     // returns the index after them.
     private static int ComposeDigits(string text, int start, int length, DigitTable table, float x,
@@ -3419,12 +3541,15 @@ public sealed class TextPipeline
         float advanced = 0;
         for (int i = start; i < start + length; i++)
         {
-            int d = text[i] - '0';
+            int d = Slot(text[i]);
             glyphs[at++] = new GlyphPosition(table.GlyphIds[d], advanced + x, 0, table.Advances[d]);
             advanced += table.Advances[d];
         }
         return at;
     }
+
+    // How far a shaped glyph may sit from where the table composes it, in pixels.
+    private const float DigitTolerance = 0.01f;
 
     // One-time proof per font+size (110 shaper calls): every digit must shape
     // to exactly one zero-offset glyph, and every digit pair must shape to the
@@ -3433,41 +3558,87 @@ public sealed class TextPipeline
     // kerning is all a GPOS table can apply to a digit run).
     private DigitTable? ProveDigitsContextFree(IResolvedFont font, float fontSize)
     {
-        const float Tol = 0.01f;
         var table = new DigitTable();
 
         for (int d = 0; d < 10; d++)
-        {
-            var run = _shaper.Shape(((char)('0' + d)).ToString(), font, fontSize);
-            if (run.Glyphs.Length != 1)
+            if (!AloneComposes(table, d, font, fontSize))
                 return null;
-            var g = run.Glyphs[0];
-            if (Math.Abs(g.X) > Tol || Math.Abs(g.Y) > Tol)
-                return null;
-            table.GlyphIds[d] = g.GlyphId;
-            table.Advances[d] = run.Width;
-        }
 
         for (int a = 0; a < 10; a++)
-        {
             for (int b = 0; b < 10; b++)
-            {
-                var run = _shaper.Shape($"{(char)('0' + a)}{(char)('0' + b)}", font, fontSize);
-                if (run.Glyphs.Length != 2
-                    || run.Glyphs[0].GlyphId != table.GlyphIds[a]
-                    || run.Glyphs[1].GlyphId != table.GlyphIds[b]
-                    || Math.Abs(run.Glyphs[0].X) > Tol
-                    || Math.Abs(run.Glyphs[0].Y) > Tol
-                    || Math.Abs(run.Glyphs[1].Y) > Tol
-                    || Math.Abs(run.Glyphs[1].X - table.Advances[a]) > Tol
-                    || Math.Abs(run.Width - (table.Advances[a] + table.Advances[b])) > Tol)
-                {
+                if (!PairComposes(table, a, b, font, fontSize))
                     return null;
-                }
-            }
-        }
 
         return table;
+    }
+
+    // The proof of NumberMarks[m] in a table whose digits passed theirs (122 shaper calls, and two
+    // more for each mark proven before it): the mark alone one glyph at no offset; beside itself,
+    // each digit and each mark proven before it, both ways round, at the summed advances; and
+    // between every two digits, the three glyphs at the summed advances. Pairs among the proven
+    // marks are each checked when the later of the two is proven.
+    private void ProveMark(DigitTable table, int m, IResolvedFont font, float fontSize)
+    {
+        int slot = 10 + m;
+        bool ok = AloneComposes(table, slot, font, fontSize) && PairComposes(table, slot, slot, font, fontSize);
+        for (int d = 0; ok && d < 10; d++)
+            ok = PairComposes(table, d, slot, font, fontSize) && PairComposes(table, slot, d, font, fontSize);
+        for (int p = 0; ok && p < NumberMarks.Length; p++)
+            if ((table.Proven & (1 << p)) != 0)
+                ok = PairComposes(table, 10 + p, slot, font, fontSize) && PairComposes(table, slot, 10 + p, font, fontSize);
+        for (int a = 0; ok && a < 10; a++)
+            for (int b = 0; ok && b < 10; b++)
+                ok = TripleComposes(table, a, slot, b, font, fontSize);
+        if (ok) table.Proven |= 1 << m;
+        else table.Refused |= 1 << m;
+    }
+
+    // The character in `slot` shaped alone: one glyph at no offset, whose id and advance go into
+    // the table.
+    private bool AloneComposes(DigitTable table, int slot, IResolvedFont font, float fontSize)
+    {
+        var run = CallShaper(SlotChar(slot).ToString(), font, fontSize);
+        if (run.Glyphs.Length != 1)
+            return false;
+        var g = run.Glyphs[0];
+        if (Math.Abs(g.X) > DigitTolerance || Math.Abs(g.Y) > DigitTolerance)
+            return false;
+        table.GlyphIds[slot] = g.GlyphId;
+        table.Advances[slot] = run.Width;
+        return true;
+    }
+
+    // The characters in slots a and b shaped together: their own glyphs, the second at the first's
+    // advance, the width the two advances.
+    private bool PairComposes(DigitTable table, int a, int b, IResolvedFont font, float fontSize)
+    {
+        var run = CallShaper(new string([SlotChar(a), SlotChar(b)]), font, fontSize);
+        return run.Glyphs.Length == 2
+            && run.Glyphs[0].GlyphId == table.GlyphIds[a]
+            && run.Glyphs[1].GlyphId == table.GlyphIds[b]
+            && Math.Abs(run.Glyphs[0].X) <= DigitTolerance
+            && Math.Abs(run.Glyphs[0].Y) <= DigitTolerance
+            && Math.Abs(run.Glyphs[1].Y) <= DigitTolerance
+            && Math.Abs(run.Glyphs[1].X - table.Advances[a]) <= DigitTolerance
+            && Math.Abs(run.Width - (table.Advances[a] + table.Advances[b])) <= DigitTolerance;
+    }
+
+    // The characters in slots a, m and b shaped together: their own glyphs at the summed advances.
+    private bool TripleComposes(DigitTable table, int a, int m, int b, IResolvedFont font, float fontSize)
+    {
+        var run = CallShaper(new string([SlotChar(a), SlotChar(m), SlotChar(b)]), font, fontSize);
+        if (run.Glyphs.Length != 3)
+            return false;
+        float x = 0;
+        int[] slots = [a, m, b];
+        for (int i = 0; i < 3; i++)
+        {
+            var g = run.Glyphs[i];
+            if (g.GlyphId != table.GlyphIds[slots[i]] || Math.Abs(g.X - x) > DigitTolerance || Math.Abs(g.Y) > DigitTolerance)
+                return false;
+            x += table.Advances[slots[i]];
+        }
+        return Math.Abs(run.Width - x) <= DigitTolerance;
     }
 
     // Adjusts a line's ascent/leading so its total height equals an explicit

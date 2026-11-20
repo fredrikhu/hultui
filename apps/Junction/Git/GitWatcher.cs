@@ -542,8 +542,8 @@ public sealed class GitWatcher : IDisposable
     }
 
     /// <summary>20 bytes, or 32 when the repository's objects are SHA-256
-    /// (<c>extensions.objectFormat</c>).</summary>
-    private static int ObjectIdLength(string gitDir)
+    /// (<c>extensions.objectFormat</c> in the config under <paramref name="gitDir"/>).</summary>
+    internal static int ObjectIdLength(string gitDir)
     {
         try
         {

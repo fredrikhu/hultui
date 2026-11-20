@@ -27,7 +27,8 @@ static partial class Scenarios
             });
 
         yield return new Scenario("text/create 2,000 unique labels",
-            "2,000 labels no cache has seen (unique numbers in each): shaping and measuring cold",
+            "2,000 labels no cache has seen (a new word and new numbers in each): one word a label shaped cold, "
+            + "the numbers composed from the digit table, every label measured cold",
             ctx =>
             {
                 var column = Flex.Column().FlexShrink(0);
@@ -40,7 +41,7 @@ static partial class Scenarios
                     {
                         var labels = new Element[2_000];
                         for (int i = 0; i < labels.Length; i++)
-                            labels[i] = Text.New($"Item {next++} — {next * 7919 % 100_003} units").FontSize(13f);
+                            labels[i] = Text.New(ColdLabel(next++)).FontSize(13f);
                         column.ReplaceChildren(labels);
                     },
                 };
@@ -63,10 +64,49 @@ static partial class Scenarios
                         for (int i = 0; i < labels.Length; i++)
                         {
                             var set = i % 2 == 0 ? BmpEmoji : SequenceEmoji;
-                            labels[i] = Text.New($"{set[i % set.Length]} Item {next++} — {next * 7919 % 100_003} units {set[i / 2 % set.Length]}")
+                            labels[i] = Text.New($"{set[i % set.Length]} {ColdLabel(next++)} {set[i / 2 % set.Length]}")
                                 .FontSize(13f);
                         }
                         column.ReplaceChildren(labels);
+                    },
+                };
+            });
+
+        // Cold words several to a run, which the label rows above, with one cold word each, do not
+        // have: what a first layout of text read for the first time pays HarfBuzz (plan 19).
+        yield return new Scenario("text/create 200 paragraphs of unseen words",
+            "200 wrapped paragraphs of 40 words, two in three a word no cache has seen and every third a common one: "
+            + "the first layout of text read for the first time",
+            ctx =>
+            {
+                var column = Flex.Column(gap: 6).FlexShrink(0).Padding(12);
+                ctx.Mount(ScrollView.New().FlexGrow(1).Children(column));
+                int next = 0;
+                string[] common = ["the", "of", "and", "a", "to", "in", "is", "for", "that", "with", "on", "as"];
+                string[] syllables = ["ka", "ren", "to", "mil", "sa", "dor", "ve", "lin", "qu", "ash", "pe", "ri", "ston", "gal", "fe", "nu"];
+                var sb = new System.Text.StringBuilder();
+                return new Op
+                {
+                    Reset = _ => column.ReplaceChildren(),
+                    Run = _ =>
+                    {
+                        var paragraphs = new Element[200];
+                        for (int p = 0; p < paragraphs.Length; p++)
+                        {
+                            sb.Clear();
+                            for (int w = 0; w < 40; w++)
+                            {
+                                if (w > 0) sb.Append(' ');
+                                if (w % 3 == 1) { sb.Append(common[(p + w) % common.Length]); continue; }
+                                // A syllable, then the running count in letters: never the same word twice.
+                                sb.Append(syllables[(next * 7 + w) % syllables.Length]);
+                                for (int n = next++; n > 0; n /= 16) sb.Append("bcdfghjklmnprstv"[n % 16]);
+                                if (w % 7 == 6) sb.Append(',');
+                            }
+                            sb.Append('.');
+                            paragraphs[p] = Text.New(sb.ToString()).FontSize(13f).LineHeight(19f);
+                        }
+                        column.ReplaceChildren(paragraphs);
                     },
                 };
             });
@@ -108,6 +148,34 @@ static partial class Scenarios
                 for (int i = 0; i < rows.Length; i++)
                     rows[i] = Flex.Row(gap: 8).FlexShrink(0).Padding(new Thickness(2, 8)).Children(
                         Text.New(Ui.BidiParagraph(ctx.Rng, 14)).FontSize(13f).MaxLines(1)
+                            .TextOverflow(TextOverflow.Ellipsis).FlexGrow(1).FlexShrink(1),
+                        Text.New($"{i}").FontSize(12f).TextColor(Ui.Muted).FlexShrink(0));
+                var pane = Flex.Column().Width(Dimension.Percent(50)).FlexShrink(0).Children(rows);
+                ctx.Mount(ScrollView.New().FlexGrow(1).Children(pane));
+                return new Op { Run = step => ctx.Window.SetClientSize(Ui.DragWidth(step), 760) };
+            });
+
+        yield return new Scenario("text/rtl wrap 150 Hebrew paragraphs resize",
+            "text/bidi wrap in Hebrew alone: every line one right-to-left run, which changes where the line's breaks do",
+            ctx =>
+            {
+                var column = Flex.Column(gap: 10).FlexShrink(0).Padding(16);
+                var paragraphs = new Element[150];
+                for (int i = 0; i < paragraphs.Length; i++)
+                    paragraphs[i] = Text.New(Ui.HebrewParagraph(ctx.Rng, 60)).FontSize(13f).LineHeight(19f);
+                column.ReplaceChildren(paragraphs);
+                ctx.Mount(ScrollView.New().FlexGrow(1).Children(column));
+                return new Op { Run = step => ctx.Window.SetClientSize(Ui.DragWidth(step), 760) };
+            });
+
+        yield return new Scenario("text/rtl ellipsis 1,000 Hebrew labels resize",
+            "text/bidi ellipsis in Hebrew alone: 1,000 labels, each one right-to-left run, truncated again at each width",
+            ctx =>
+            {
+                var rows = new Element[1_000];
+                for (int i = 0; i < rows.Length; i++)
+                    rows[i] = Flex.Row(gap: 8).FlexShrink(0).Padding(new Thickness(2, 8)).Children(
+                        Text.New(Ui.HebrewParagraph(ctx.Rng, 14)).FontSize(13f).MaxLines(1)
                             .TextOverflow(TextOverflow.Ellipsis).FlexGrow(1).FlexShrink(1),
                         Text.New($"{i}").FontSize(12f).TextColor(Ui.Muted).FlexShrink(0));
                 var pane = Flex.Column().Width(Dimension.Percent(50)).FlexShrink(0).Children(rows);
@@ -445,6 +513,24 @@ static partial class Scenarios
 
     private const int ViewerLines = 400;
     private const int PlainLabelLines = 2_000;
+
+    // A label of the two text/create rows: one word no cache has seen, of letters, so it is shaped
+    // (one HarfBuzz call a label), and two numbers the digit table composes. Until plan 19 item 2
+    // (2026-11-19) the label was `Item {n} — {(n + 1) * 7919 % 100_003} units`: the product overflowed
+    // int, so the second number came out negative (`-38913`) and its minus sign made it the label's
+    // one cold word, by accident; once the digit table took signed numbers (item 1) the rows shaped
+    // nothing.
+    private static string ColdLabel(int n) => $"Item {n} {ColdWord(n)} — {(int)((long)n * 7919 % 100_003)} units";
+
+    // n in base 26, a to z, lowest letter first: five letters, different for every n from 456,976 to
+    // 11,881,375 (the rows count up from 1,000,000 in each session).
+    private static string ColdWord(int n)
+    {
+        Span<char> word = stackalloc char[7];
+        int length = 0;
+        do { word[length++] = (char)('a' + n % 26); n /= 26; } while (n > 0);
+        return new string(word[..length]);
+    }
 
     // Emoji of the Basic Multilingual Plane that ask for emoji presentation on their own:
     // ⭐ ✅ ☕ ⚡ ❌ ⌛ ⛔ ⚽. Nothing in them sends a label to the BiDi path.

@@ -48,6 +48,15 @@ public class WebView2MappingTests
     }
 
     [Fact]
+    public void ANotch_ScrollsWindowsLinesAtAThirdOf100PixelsEach_AndAPageOrNothingKeeps100()
+    {
+        Assert.Equal(100f, WebView2View.NotchPixels(3));          // the default, and what 157 measured
+        Assert.Equal(500f / 3f, WebView2View.NotchPixels(5), 3);
+        Assert.Equal(100f, WebView2View.NotchPixels(0));
+        Assert.Equal(100f, WebView2View.NotchPixels(uint.MaxValue));   // WHEEL_PAGESCROLL
+    }
+
+    [Fact]
     public void HeldButtonsAndModifiers_BecomeVirtualKeys()
     {
         var input = new WebPointerInput(WebPointerAction.Move, 0, 0,

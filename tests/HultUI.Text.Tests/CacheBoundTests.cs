@@ -59,13 +59,37 @@ public class CacheBoundTests
     }
 
     [Fact]
+    public void ALongRightToLeftDocument_LeavesTheRunMemoWithinItsBound()
+    {
+        // 3,000 lines of ~1,000 Hebrew characters: each line one right-to-left run, kept whole
+        // (16 bytes a glyph), and its words measured as runs of their own. By its count alone the
+        // memo would keep ~50 MB of lines.
+        var pipeline = new TextPipeline(new StubFontCollection(), new StubTextShaper());
+        var rng = new Random(7);
+        for (int i = 0; i < 3_000; i++)
+        {
+            var line = new System.Text.StringBuilder();
+            while (line.Length < 1_000)
+                line.Append((char)(0x05D0 + rng.Next(27))).Append(rng.Next(6) == 0 ? " " : "");
+            pipeline.Layout(line.ToString(), Style, float.PositiveInfinity, 1);
+        }
+
+        var (entries, bytes) = pipeline.RtlRunCacheUse;
+        Assert.True(bytes <= TextPipeline.RtlRunBytes, $"the run memo holds {bytes:N0} bytes, over its {TextPipeline.RtlRunBytes:N0}");
+        Assert.True(bytes > TextPipeline.RtlRunBytes / 2, $"the run memo holds only {bytes:N0} bytes of {TextPipeline.RtlRunBytes:N0}");
+        Assert.True(entries <= TextPipeline.RtlRunEntries, $"the run memo kept {entries:N0} entries");
+    }
+
+    [Fact]
     public void AnEntrysWeight_IsAtLeastTheGlyphsItKeeps()
     {
         // The estimate is what the bound counts: a line of 1,000 glyphs must weigh 16 KB or
         // more in each cache it lands in, or a document could fill memory under the bound.
         var pipeline = new TextPipeline(new StubFontCollection(), new StubTextShaper());
         string line = string.Concat(Enumerable.Repeat("word ", 199)) + "words";
-        string csv = string.Join(',', Enumerable.Range(0, 250).Select(i => i.ToString("000")));
+        // A word, not a number: numbers with commas are composed from the digit table and
+        // never reach the word cache.
+        string csv = string.Join(',', Enumerable.Range(0, 250).Select(i => "x" + i.ToString("00")));
 
         pipeline.Layout(line, Style, float.PositiveInfinity, 1);
         Assert.InRange(pipeline.ShapeCacheUse.Bytes, 16 * line.Length, 24 * line.Length + 1_000);

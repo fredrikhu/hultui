@@ -134,7 +134,99 @@ public class OptimisticStagingTests
         });
     }
 
+    // ── A reload the index moves under ───────────────────────────────────
+    //
+    // A load reads the staged list and the working tree with separate git commands, and a
+    // staging command can land between them: a click's `git add` runs while the reload of the
+    // click before is still reading. These run one load here, on the test's thread, and move the
+    // index from a hook in front of one of its commands; the background loads the session starts
+    // run their commands on other threads, which the hooks leave alone.
+
+    /// <summary>A file staged between the staged list and the working tree is in one list, not
+    /// neither. The load that landed listed it nowhere: its row vanished until the next reload,
+    /// the selection on it was pruned, and the optimistic move had no row to carry.</summary>
+    [Fact]
+    public void AFileStagedBetweenTheReadsOfALoad_IsInOneList_NotNeither()
+    {
+        Hosted((session, app, repo) =>
+        {
+            int thread = Environment.CurrentManagedThreadId, staged = 0;
+            using var hook = GitProcess.BeforeRun(repo.Path, args =>
+            {
+                // The working tree's diff, read after the staged list.
+                if (Environment.CurrentManagedThreadId == thread && args is ["diff", "--raw", ..]
+                    && Interlocked.Exchange(ref staged, 1) == 0)
+                    Assert.True(GitProcess.Run(repo.Path, "add", "--", "work.txt").Success);
+            });
+
+            var data = LoadChanges(app, repo.Path);
+
+            Assert.Equal(1, staged);
+            Assert.Contains("work.txt", Section(data, "Staged"));
+            Assert.DoesNotContain("work.txt", Section(data, "Unstaged"));
+        });
+    }
+
+    /// <summary>A status the summary ran before a file was staged is not the load's: the file was
+    /// in the staged list and, by that status, still untracked, so it was listed twice.</summary>
+    [Fact]
+    public void AStatusRunBeforeAFileWasStaged_IsNotTheLoads()
+    {
+        Hosted((session, app, repo) =>
+        {
+            repo.Write("new.txt", "new\n");
+            var shared = SharedStatus(new GitRepository(repo.Path));
+            shared.GetType().GetProperty("Result")!.GetValue(shared);   // the summary's run
+            repo.Git("add", "new.txt");
+
+            var data = LoadChanges(app, repo.Path, shared);
+
+            Assert.Contains("new.txt", Section(data, "Staged"));
+            Assert.DoesNotContain("new.txt", Section(data, "Unstaged"));
+        });
+    }
+
+    /// <summary>A load the index keeps moving under gives up after three reads rather than land
+    /// one of them: it throws, and the loader keeps what is on screen until the next reload.</summary>
+    [Fact]
+    public void ALoadTheIndexKeepsMovingUnder_GivesUpRatherThanLandATornRead()
+    {
+        Hosted((session, app, repo) =>
+        {
+            int thread = Environment.CurrentManagedThreadId, moves = 0;
+            using var hook = GitProcess.BeforeRun(repo.Path, args =>
+            {
+                if (Environment.CurrentManagedThreadId != thread || args is not ["diff", "--raw", ..]) return;
+                var move = ++moves % 2 == 1 ? new[] { "add", "--", "work.txt" } : ["reset", "-q", "--", "work.txt"];
+                Assert.True(GitProcess.Run(repo.Path, move).Success);
+            });
+
+            Assert.Throws<InvalidOperationException>(() => LoadChanges(app, repo.Path));
+            Assert.Equal(3, moves);
+        });
+    }
+
     // ── Reaching the app's state ─────────────────────────────────────────
+
+    /// <summary>One load of the working tree (the producer behind the Changes view's loader), run
+    /// on this thread.</summary>
+    private static object LoadChanges(JunctionApp app, string path, object? shared = null)
+    {
+        try
+        {
+            return typeof(JunctionApp).GetMethod("LoadChanges", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(app, [path, false, shared, null])!;
+        }
+        catch (TargetInvocationException e) when (e.InnerException is { } inner)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(inner);
+            throw;
+        }
+    }
+
+    /// <summary>A status shared by the summary and the Changes load of one generation.</summary>
+    private static object SharedStatus(GitRepository repo) =>
+        Activator.CreateInstance(typeof(JunctionApp).GetNestedType("SharedStatus", BindingFlags.NonPublic)!, repo, 0)!;
 
     /// <summary>A staging move whose git command is <paramref name="command"/>, the way the app
     /// asks for one (optimistic overlay first, the command on the staging chain).</summary>

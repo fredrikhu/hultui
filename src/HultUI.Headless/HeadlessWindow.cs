@@ -102,6 +102,15 @@ public sealed partial class HeadlessWindow
     public int AccessibilityTreesBuilt => Window.AccessibilityTreesBuilt;
 
     /// <summary>
+    /// How many strings the window's text pipeline has handed its shaper, one HarfBuzz call each
+    /// (<see cref="HultUI.Text.TextPipeline.ShaperCalls"/>). The session's windows share one
+    /// pipeline (those with <see cref="HeadlessOptions.PinnedText"/> another), so read it before and
+    /// after what is measured: the difference is the text shaped in between, and 0 means every
+    /// string came out of the caches.
+    /// </summary>
+    public long TextShaperCalls => _platform.Text.Pipeline.ShaperCalls;
+
+    /// <summary>
     /// Installs a recording accessibility bridge, turning on the window's real
     /// per-frame a11y build/diff path (normally gated on an assistive
     /// technology being attached). Pump a frame afterwards to get the initial

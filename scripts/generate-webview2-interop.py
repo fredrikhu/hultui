@@ -59,6 +59,7 @@ WANTED = {
         "ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler",
         "ICoreWebView2CreateCoreWebView2CompositionControllerCompletedHandler",
         "ICoreWebView2ExecuteScriptCompletedHandler",
+        "ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler",
         "ICoreWebView2NavigationStartingEventHandler",
         "ICoreWebView2NavigationCompletedEventHandler",
         "ICoreWebView2SourceChangedEventHandler",

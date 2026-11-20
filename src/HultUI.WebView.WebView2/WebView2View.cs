@@ -159,6 +159,7 @@ internal sealed unsafe partial class WebView2View : IWebEngineView, IReleasesGpu
             Com.Check(Com.Call(_controller3, ICoreWebView2Controller3.put_ShouldDetectMonitorScaleChanges, 0), "put_ShouldDetectMonitorScaleChanges");
 
             ApplySettings();
+            AddDocumentScripts();
 
             _capture = new VisualCapture(_host!.Pixels, _host.RequestRepaint) { Mode = _renderer!.Mode };
             Com.Check(Com.Call(_composition, ICoreWebView2CompositionController.put_RootVisualTarget, _capture.RootVisual), "put_RootVisualTarget");
@@ -203,6 +204,34 @@ internal sealed unsafe partial class WebView2View : IWebEngineView, IReleasesGpu
         }
         finally { Com.Release(ref settings); }
         MapContentFolder();
+    }
+
+    /// <summary>
+    /// Run first in every document, in every frame: a middle press is cancelled, so Chromium never
+    /// starts an autoscroll of its own. The window's runs instead (the element is an
+    /// <c>IAutoScrollable</c>), with the ring and cursor every list in the app shows. Chromium's
+    /// showed nothing here — in visual hosting WebView2 reports no cursor at all while a button is
+    /// held, and only cursors it cannot name once a click has started one (measured on 157) — and
+    /// left running, both would scroll the page at once.
+    /// </summary>
+    /// <remarks>Cancelling the press is the page's own way to turn it off; no browser switch does
+    /// in WebView2 (<c>--disable-features</c> and <c>--disable-blink-features</c> with
+    /// <c>MiddleClickAutoscroll</c> both reached the browser and changed nothing). The page still
+    /// sees a middle click's press (cancelled), release and <c>auxclick</c>, and a link still opens.</remarks>
+    internal const string NoEngineAutoscroll =
+        "addEventListener('mousedown', e => { if (e.button === 1) e.preventDefault(); }, true);";
+
+    private void AddDocumentScripts()
+    {
+        ComHandler? handler = null;
+        handler = ComHandler.ForResult(ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler.IID, (_, _) => handler!.Release());
+        // Registered before the first navigation, which the controller holds until Ready.
+        int hr = Com.CallString(_webview, ICoreWebView2.AddScriptToExecuteOnDocumentCreated, NoEngineAutoscroll, handler.Pointer);
+        if (hr < 0)
+        {
+            handler.Release();
+            Com.Check(hr, "AddScriptToExecuteOnDocumentCreated");
+        }
     }
 
     /// <summary>
@@ -593,6 +622,25 @@ internal sealed unsafe partial class WebView2View : IWebEngineView, IReleasesGpu
             _ => (0, 0),
         };
     }
+
+    /// <summary>
+    /// Chromium on Windows scrolls a notch by Windows' lines per notch at a third of 100 pixels
+    /// each — 100 at the default three, as measured on WebView2 157 (and the horizontal wheel by
+    /// the characters setting, also three by default; one figure serves both).
+    /// </summary>
+    public float PixelsPerWheelNotch
+    {
+        get
+        {
+            uint lines = 3;
+            Native.SystemParametersInfoW(Native.SPI_GETWHEELSCROLLLINES, 0, &lines, 0);
+            return NotchPixels(lines);
+        }
+    }
+
+    /// <summary>A notch's pixels for Windows' lines per notch. A page per notch, or none, is not a
+    /// distance; those keep the default's 100.</summary>
+    internal static float NotchPixels(uint lines) => lines is 0 or > 100 ? 100f : lines * 100f / 3f;
 
     internal static int VirtualKeys(in WebPointerInput input)
     {
