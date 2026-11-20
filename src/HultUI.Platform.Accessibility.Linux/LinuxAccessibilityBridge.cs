@@ -42,7 +42,8 @@ namespace HultUI.Platform.Accessibility.Linux;
 /// <see cref="AccessibilityClients.Force"/> (<c>HULTUI_ACCESSIBILITY=1</c>) says so, for clients
 /// that never set the status: a plain pyatspi script, <c>samples/AtSpiVerify</c>. When the status
 /// turns on, the window builds the tree afresh and the bridge publishes all of it (cache-add for
-/// every object, cache-remove for any it published before that is gone now); when it turns off,
+/// every object, cache-remove for any it published before that is gone now) and takes the focus the
+/// tree marks, with no signal, so the next move is told; when it turns off,
 /// nothing is built or sent.
 /// </para>
 /// </remarks>
@@ -105,10 +106,14 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
     // (AccessibilityFocus), the current item of the node that holds the focus where it is a list, a
     // menu or a menu bar that has one, or of a list that takes its focus; else that node's.
     private string? _focusedPath;
-    // The node that holds the focus, as the window last told it: its element (default for none), or
-    // the window's root node. UI thread.
+    // The node that holds the focus, as the window last told it, or as a tree built from nothing marks
+    // it: its element (default for none), or the window's root node. UI thread.
     private ElementId _holderId;
     private bool _holderIsRoot;
+    // The focus was taken from a tree built from nothing, and no signal has told it yet: a move the
+    // window tells in that frame (one that landed before the tree, on an element with no node then)
+    // is told even onto the node the tree marked. UI thread.
+    private bool _focusUntold;
     // The lists whose current item stands for the focus of an element above them
     // (AccessibilityNode.FocusHolder): that element's id → the list's. Kept by the apply's walk; an
     // entry whose list has gone, or names another holder now, is read as none. UI thread.
@@ -327,8 +332,8 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
         bool firstBuild = !_hasBuilt;
         _hasBuilt = true;
 
-        // The object the bridge last marked focused may be gone too: the window names the focused
-        // one with the next move.
+        // The object the bridge last marked focused may be gone too: the focus is the one the new
+        // tree marks.
         if (published is not null)
         {
             foreach (var acc in published)
@@ -337,14 +342,25 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
                 _signals.EmitCacheRemove(acc.Path);
                 DebugSignalsEmitted++;
             }
-            _focusedPath = null;
-            // And the node that held the focus: the tree marks the one that has it, as the client finds
-            // it, and the window tells the next move.
-            _holderId = default;
-            _holderIsRoot = false;
+            // The node that holds the focus is the one the tree marks, as the client finds it (Orca, as it
+            // starts, looks for the focused object in the active window), taken as it is, with no signal,
+            // as UI Automation's bridge takes it: a reader attached, or the status turned on, after the
+            // focus last moved. The window tells only a move onto an element that had no node. With no
+            // holder, nothing about the focus was told until it moved again: a walk in the list that had
+            // it sent no focused state, and a selection move only its selected states (plan 17, round 17).
+            var holder = FocusedNode(diff);
+            string? was = _focusedPath;
+            _holderId = holder?.ElementId ?? default;
+            _holderIsRoot = holder is { Parent: null };
+            _focusedPath = holder is null ? null : TargetPath();
+            _focusUntold = _focusedPath is not null;
+            // An object took its focused state from its node; an item served on demand has none, and the
+            // one the client was told had the focus before kept it.
+            if (was is not null && was != _focusedPath && was != AtSpiConstants.RootPath) SetFocused(was, false);
         }
         // The objects took their focused state from the tree, which marks the node that holds the
-        // focus: the reader's focus is its current item while it has one, as the client was told.
+        // focus: the reader's focus is its current item while it has one, as the client was told (or,
+        // on a tree from nothing, as the client finds it).
         if (_focusedPath is { } told && told != AtSpiConstants.RootPath) SetFocused(told, true);
         KeepHolderUnfocused(_focusedPath);
 
@@ -642,10 +658,11 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
     public void NotifyChangesApplied(AccessibilityNode root)
     {
         if (!_registered || _signals is null) return;
-        bool moved = _holderMoved, again = _activated;
+        bool moved = _holderMoved, again = _activated || (_focusUntold && moved);
         string? previousPath = _previousHint;
         _holderMoved = false;
         _activated = false;
+        _focusUntold = false;
         _previousHint = null;
         if (!moved && _holderId == default && !_holderIsRoot) return;
         string? newPath = _holderId == default && !_holderIsRoot ? null : TargetPath();
@@ -665,7 +682,8 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
         // attached after the focus last moved).
         if (previousLost && previousPath != was)
             _signals.EmitStateChanged(previousPath!, "focused", active: false);
-        // The window came to the front: the focus is told again, as on a move, where it is.
+        // The window came to the front: the focus is told again, as on a move, where it is. So is a
+        // move the window told as the tree was built from nothing, onto the node the tree marked.
         if (newPath is not null && (newPath != was || again))
             _signals.EmitStateChanged(newPath, "focused", active: true);
         _focusedPath = newPath;
@@ -700,6 +718,16 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, ITreeDiffBo
     // marked focused before the first of those moves, which the client may not have been told of. UI thread.
     private bool _holderMoved;
     private string? _previousHint;
+
+    /// <summary>The node a tree built from nothing marks focused, the first in its order; null for
+    /// none. The diff adds every node of such a tree.</summary>
+    private static AccessibilityNode? FocusedNode(TreeDiff diff)
+    {
+        var added = diff.Added;
+        for (int i = 0; i < added.Count; i++)
+            if (added[i].Node.IsFocused) return added[i].Node;
+        return null;
+    }
 
     /// <summary>The node that holds the focus, in the applied tree: its object's node.</summary>
     private AccessibilityNode? HolderNode() =>

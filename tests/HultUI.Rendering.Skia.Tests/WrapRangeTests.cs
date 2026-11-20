@@ -22,7 +22,7 @@ public class WrapRangeTests
         FontFamily: "sans-serif", FontSize: 13f, FontWeight: FontWeight.Regular,
         TextColor: new(0, 0, 0, 255), TextDirection: TextDirection.Ltr, Cursor: CursorType.Default);
 
-    private static readonly ResolvedInheritedStyle[] Styles =
+    internal static readonly ResolvedInheritedStyle[] Styles =
     [
         Base with { FontFamily = FontFamilies.Monospace, FontSize = 11.5f },   // Vesper's reader
         Base,
@@ -44,7 +44,7 @@ public class WrapRangeTests
     ];
 
     // Lines of TODO.md and of the ledger archive, as Vesper's reader measures them (one a row).
-    private static readonly string[] Latin =
+    internal static readonly string[] Latin =
     [
         """- **Repeating tweens** — `TweenBuilder.Repeat(n)` / `.Loop()` / `.Yoyo()`. The cycle and its phase are derived from elapsed time rather than accumulated per cycle, so a repeat holds its period: a restart that dropped the frame's overshoot would quantise every cycle up to a whole number of frames, and a spinner built that way visibly slows down and drifts. A finite repeat ends on its end value; a loop never renders the terminal frame at all. Junction's Fetch/Pull/Push buttons are the first consumer.""",
         """- **IME composition** — `SDL_EVENT_TEXT_EDITING` plumbed through `EventTranslator → TextEditingEvent`. `TextInputElement` and `TextAreaElement` render the preedit inline at the caret with a thin underline across the whole preedit and a thick underline on the active IME segment. `SDL_SetTextInputArea` is called each frame on the focused input so OS candidate windows snap to the caret; `SDL_ClearComposition` fires on blur. Custom candidate-list rendering is deliberately skipped — the OS-native window is used instead. New `ITextInputHost` abstraction in `HultUI.Core.Platform`; `SDL3TextInputHost` is the implementation. 9 unit tests covering the state machine.""",
@@ -90,7 +90,7 @@ public class WrapRangeTests
         }
     }
 
-    private static readonly string[] Texts = [.. Latin, .. Cjk()];
+    internal static readonly string[] Texts = [.. Latin, .. Cjk()];
 
     [Fact]
     public void AKeptWrap_IsTheReferenceLayout_AtEveryWidthOfADrag()
@@ -205,7 +205,7 @@ public class WrapRangeTests
 
     // A resize drag: whole, fractional (a physical pixel at 150 %) and 4 px steps narrower, 2.5 px steps
     // wider, a jump and back.
-    private static IEnumerable<float> Drag(float start)
+    internal static IEnumerable<float> Drag(float start)
     {
         float w = start;
         yield return w;

@@ -252,6 +252,14 @@ The rule now, as a WPF list box's item has the keyboard focus:
 - **AT-SPI:** the same target; `state-changed:focused` 0 on the old target and 1 on the new one, the
   item's object says focused (and keeps it across applies, the holder's object does not), items are
   focusable. Orca is unchecked.
+- **A reader that attaches late hears the next move, on both bridges.** A tree built from nothing (a
+  UIA client's first ask; a Linux reader that starts, or `org.a11y.Status` turning on, after the app
+  had the focus) marks the focused node, and the bridge takes it as the holder, as the client takes
+  the tree, with no event: Orca, as it starts, looks for the focused object in the active window
+  itself. Until plan 17's round 17 the AT-SPI bridge cleared the holder there and waited for the
+  window's next move, which a key in the list that had the focus never is: a cursor walk sent no
+  focused state, and a selection move only its selected states, until the user tabbed away
+  (`A11yAtSpiLateAttachTests`).
 - A real element inside an open row (`OpenRow`) holds the focus itself, and is the target, as before.
 - **Apps:** Junction's History list holds the focus while nothing else does (named "History", a Tab
   stop with no ring, as Meridian's History); Vesper's Detail list takes its pane's focus.
@@ -736,7 +744,8 @@ Files:
     603-node form cost 385 KB against 3.2 KB with no bridge. When the status
     turns on, the window builds the tree afresh and the bridge publishes all of
     it (a cache-add per object, a cache-remove for anything published before that
-    went while it was off); when it turns off, nothing is built or sent.
+    went while it was off) and takes the focus the tree marks, with no signal
+    (2026-11-19); when it turns off, nothing is built or sent.
     `HULTUI_ACCESSIBILITY=1` (`AccessibilityClients.Force`) turns it on for a
     client that never sets the status — a plain pyatspi script, `samples/AtSpiVerify`.
   - `ApplyChanges(diff)`:

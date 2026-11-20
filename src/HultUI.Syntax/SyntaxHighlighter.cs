@@ -221,7 +221,9 @@ public static class SyntaxHighlighter
     /// up), but a diff needs nothing below its last line, and of the lines above it only that
     /// state. So each side stops at its last shown line; a line nobody shows is walked for its
     /// state and leaves no spans to keep (a diff's lines are a few in a hundred); and the lines
-    /// both versions start with are walked once. A line shown gets the spans
+    /// both versions start with are walked once. So are the stretches they share between hunks:
+    /// a line of the old version with the text of one of the new version's, starting in the state
+    /// that one started in, takes the state it left and its spans. A line shown gets the spans
     /// <see cref="TokenizeLines(string, string, int, CancellationToken, TimeProvider?)"/> gives it,
     /// and each side is held to the same limits: a text too long for that gets none here.
     ///
@@ -311,17 +313,25 @@ public static class SyntaxHighlighter
                 }
                 if (w.Stage == 1)
                 {
+                    // What the new version's own lines leave, for the old version's to take; only
+                    // when both have lines of their own.
+                    if (w.NewLeft is null && newLines.Count > shared && oldLines.Count > shared)
+                        w.NewLeft = new LinesLeft(shared, newLines.Count - shared);
+                    walk.Record = w.NewLeft;
                     walk.Run(newLines, w.At, newLines.Count, ref w.State, ref newSide, ref Side.None);
+                    walk.Record = null;
                     // Each version has its whole budget, as it would alone, less the walk they shared.
                     walk.Started = clock.GetTimestamp() - Ticks(w.SharedSpent, clock);
                     (w.Stage, w.At, w.State) = (2, shared, w.SharedState);
                 }
+                if (w.NewLeft is not null) walk.Take = new LineTaker(newLines, w.SharedState, w.NewLeft, w.NewResult!);
                 walk.Run(oldLines, w.At, oldLines.Count, ref w.State, ref oldSide, ref Side.None);
             }
             catch (OperationCanceledException)
             {
                 // Keep where it got to, for a call with these texts. The lines before walk.At are
-                // done, and w.State is the state the last of them left.
+                // done, and w.State is the state the last of them left. The taker's index of line
+                // texts is not kept: a walk that goes on makes it again.
                 (w.At, w.Spent) = (walk.At, clock.GetElapsedTime(walk.Started));
                 if (w.Stage > 0 || w.At > 0) DiffWalks.AddOrUpdate(held, w);
                 throw;
@@ -360,6 +370,10 @@ public static class SyntaxHighlighter
         /// but the system's).</summary>
         public TimeSpan Spent, SharedSpent;
 
+        /// <summary>What the new version's own lines left, once its walk has started on them;
+        /// null when either version has no lines of its own.</summary>
+        public LinesLeft? NewLeft;
+
         public bool Continues(Language l, string? o, IReadOnlyList<LineRange> os, string? n, IReadOnlyList<LineRange> ns,
             TimeProvider c) =>
             ReferenceEquals(l, language) && ReferenceEquals(o, oldText) && ReferenceEquals(n, newText)
@@ -373,6 +387,125 @@ public static class SyntaxHighlighter
             return true;
         }
     }
+
+    /// <summary>The new version's own lines as its walk left them, for the old version's walk to
+    /// take (see <see cref="LineTaker"/>): the state each line left and what it can give, 9 B a
+    /// line, kept with a cancelled walk.</summary>
+    private sealed class LinesLeft(int first, int count)
+    {
+        /// <summary>The first of the lines: the first the two versions do not share.</summary>
+        public readonly int First = first;
+
+        /// <summary>The state line <see cref="First"/> + k left.</summary>
+        public readonly IStateStack?[] State = new IStateStack?[count];
+
+        /// <summary>What line <see cref="First"/> + k can give: <see cref="LineWalk.Nothing"/>,
+        /// <see cref="LineWalk.StateOnly"/> or <see cref="LineWalk.StateAndSpans"/>.</summary>
+        public readonly byte[] Gives = new byte[count];
+
+        /// <summary>The line the old version's next line is expected to take: the one after the
+        /// last taken.</summary>
+        public int Expected = first;
+    }
+
+    /// <summary>
+    /// For a line of the old version, finds a line of the new version's own that it can take: one
+    /// with the same text that started in the state the old line starts in. A line's tokens and the
+    /// state it leaves are made of nothing else, so the old line leaves the state the new one left
+    /// and has its spans, without a tokenize. Two versions share the stretches between their hunks,
+    /// and the old version's walk used to tokenize each of them again (plan 17 round 17).
+    ///
+    /// <para>It tries the line after the last one taken first, the next of a stretch; then the
+    /// lines of the same text nearest to that one, after it and then before, at most
+    /// <see cref="Tries"/> of them, since a lone brace or a blank line has hundreds. The index it
+    /// finds them in, 8 B a line, is made at the first line the expected one does not give, and
+    /// goes with the call.</para>
+    /// </summary>
+    private sealed class LineTaker(List<ReadOnlyMemory<char>> lines, IStateStack? firstState, LinesLeft left,
+        IReadOnlyList<TextSpan>[] spans)
+    {
+        private const int Tries = 16;
+
+        // The lines that can give anything, by the hash of their text and then by number:
+        // hash << 32 | line.
+        private long[]? _index;
+        private int _indexed;
+
+        /// <summary>Takes a line for one of <paramref name="text"/> that starts in
+        /// <paramref name="state"/>: sets the state it left, and its spans when
+        /// <paramref name="needSpans"/>.</summary>
+        public bool TryTake(ReadOnlySpan<char> text, bool needSpans, ref IStateStack? state,
+            out IReadOnlyList<TextSpan>? taken)
+        {
+            int expected = left.Expected;
+            if (expected < lines.Count && Try(expected, text, needSpans, ref state, out taken)) return true;
+
+            taken = null;
+            var index = _index ??= Index();
+            int hash = string.GetHashCode(text), tries = 0;
+            int at = Array.BinarySearch(index, 0, _indexed, (long)hash << 32 | (uint)expected);
+            if (at < 0) at = ~at;
+            for (int k = at; k < _indexed && tries < Tries && (int)(index[k] >> 32) == hash; k++)
+            {
+                if ((int)index[k] == expected) continue;   // tried
+                tries++;
+                if (Try((int)index[k], text, needSpans, ref state, out taken)) return true;
+            }
+            for (int k = at - 1; k >= 0 && tries < Tries && (int)(index[k] >> 32) == hash; k--)
+            {
+                tries++;
+                if (Try((int)index[k], text, needSpans, ref state, out taken)) return true;
+            }
+            return false;
+        }
+
+        private bool Try(int line, ReadOnlySpan<char> text, bool needSpans, ref IStateStack? state,
+            out IReadOnlyList<TextSpan>? taken)
+        {
+            taken = null;
+            int k = line - left.First;
+            byte gives = left.Gives[k];
+            if (gives == LineWalk.Nothing || needSpans && gives != LineWalk.StateAndSpans) return false;
+            if (!lines[line].Span.SequenceEqual(text) || !SameState(k == 0 ? firstState : left.State[k - 1], state))
+                return false;
+            state = left.State[k];
+            if (needSpans) taken = spans[line];
+            left.Expected = line + 1;
+            return true;
+        }
+
+        private long[] Index()
+        {
+            var index = new long[left.Gives.Length];
+            for (int k = 0; k < left.Gives.Length; k++)
+                if (left.Gives[k] != LineWalk.Nothing)
+                    index[_indexed++] = (long)string.GetHashCode(lines[left.First + k].Span) << 32 | (uint)(left.First + k);
+            Array.Sort(index, 0, _indexed);
+            return index;
+        }
+    }
+
+    /// <summary>Whether a line started in <paramref name="a"/> is tokenized as one started in
+    /// <paramref name="b"/>. TextMateSharp's <c>Equals</c> compares the rules open, what their
+    /// ends captured and their scopes, but not whether each rule's begin matched to the end of its
+    /// line, which decides whether <c>\G</c> matches at the start of the next: that is compared
+    /// here (VS Code's tokenizer, whose comparison this is, leaves it out). States of another kind
+    /// are compared by their own <c>Equals</c>.</summary>
+    internal static bool SameState(IStateStack? a, IStateStack? b)
+    {
+        if (ReferenceEquals(a, b)) return true;
+        if (a is null || b is null || !a.Equals(b)) return false;
+        for (StateStack? x = a as StateStack, y = b as StateStack; x is not null && y is not null; x = x.Parent, y = y.Parent)
+        {
+            if (ReferenceEquals(x, y)) return true;
+            if (BeginRuleCapturedEol(x) != BeginRuleCapturedEol(y)) return false;
+        }
+        return true;
+    }
+
+    // Internal in TextMateSharp 2.0.5; a test pins it.
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_BeginRuleCapturedEOL")]
+    private static extern bool BeginRuleCapturedEol(StateStack state);
 
     /// <summary>Throws unless <paramref name="shown"/> is what <see cref="LineRange"/> asks of a
     /// side's lines. The walk reads a side's last line from its last range, and steps through the
@@ -900,6 +1033,18 @@ public static class SyntaxHighlighter
         /// <summary>The line <see cref="Run"/> is on: when a cancel stops it, the first not walked.</summary>
         public int At;
 
+        /// <summary>Where <see cref="Run"/> records what each line left, or null.</summary>
+        public LinesLeft? Record;
+
+        /// <summary>Where <see cref="Run"/> looks for a line to take before it tokenizes one, or null.</summary>
+        public LineTaker? Take;
+
+        /// <summary>What a line walked can give a line of another version with its text that
+        /// starts in an equal state (see <see cref="LineTaker"/>): nothing, when what it left is not
+        /// made of its text and state alone (its budget or the file's ran out, a rule broke); the
+        /// state it left; or that and its spans, when it is shown.</summary>
+        public const byte Nothing = 0, StateOnly = 1, StateAndSpans = 2;
+
         // TextMateSharp measures a line's budget on the wall clock only; MaxValue is none.
         private readonly TimeSpan _lineBudget = clock == TimeProvider.System ? LineBudget : TimeSpan.MaxValue;
         private readonly int _longLine = LongLineFor(grammar.GetScopeName());
@@ -915,51 +1060,69 @@ public static class SyntaxHighlighter
             {
                 At = i;
                 cancellationToken.ThrowIfCancellationRequested();
-                if (clock.GetElapsedTime(Started) > FileBudget) continue;
-                Lines++;
-
-                bool inFirst = first.Shows(i), inSecond = second.Shows(i);
-                var line = lines[i];
-                // A long line is tokenized on its first characters only and, like a line
-                // stopped at its budget, leaves the state it started in. Walked for that state
-                // alone, it needs no tokenize at all.
-                bool whole = line.Length <= _longLine;
-                if (!whole)
-                {
-                    if (!inFirst && !inSecond) continue;
-                    line = line[..(char.IsHighSurrogate(line.Span[_longLine - 1]) ? _longLine - 1 : _longLine)];
-                }
-                long lineStarted = Stopwatch.GetTimestamp();
-                ITokenizeLineResult2 tokenized;
-                try { tokenized = grammar.TokenizeLine2(new LineText(line), state, _lineBudget); }
-                catch { continue; }   // a broken grammar rule shouldn't kill the whole file
-                if (whole && Finished(lineStarted)) state = tokenized.RuleStack;
-                if (!inFirst && !inSecond) continue;   // walked for its state alone
-
-                // Two numbers a token: where it starts, and its attributes, which carry the colour
-                // the theme gives it (see Palette). A token ends where the next one starts, the
-                // last at the end of the line.
-                var tokens = tokenized.Tokens;
-                int count = tokens.Length / 2, lineLength = line.Length;
-                _spans.Clear();
-                for (int k = 0; k < count; k++)
-                {
-                    int s = Math.Clamp(tokens[2 * k], 0, lineLength);
-                    int e = Math.Clamp(k + 1 < count ? tokens[2 * k + 2] : lineLength, s, lineLength);
-                    if (e <= s) continue;
-                    if (colours.For(EncodedTokenAttributes.GetForeground(tokens[2 * k + 1])) is not { } color) continue;
-
-                    // Merge contiguous same-color tokens so the renderer draws fewer segments.
-                    if (_spans.Count > 0 && _spans[^1].End == s && _spans[^1].Color == color)
-                        _spans[^1] = _spans[^1] with { Length = _spans[^1].Length + (e - s) };
-                    else
-                        _spans.Add(new TextSpan(s, e - s, color));
-                }
-                if (_spans.Count == 0) continue;
-                var spans = _spans.ToArray();
-                if (inFirst) first.Result![i] = spans;
-                if (inSecond) second.Result![i] = spans;
+                byte gives = Line(lines[i], i, ref state, ref first, ref second);
+                if (Record is { } record) (record.State[i - record.First], record.Gives[i - record.First]) = (state, gives);
             }
+        }
+
+        /// <summary>Walks line <paramref name="i"/>, or takes it; says what it can give.</summary>
+        private byte Line(ReadOnlyMemory<char> line, int i, ref IStateStack? state, ref Side first, ref Side second)
+        {
+            if (clock.GetElapsedTime(Started) > FileBudget) return Nothing;
+
+            bool inFirst = first.Shows(i), inSecond = second.Shows(i);
+            if (Take is not null && Take.TryTake(line.Span, inFirst || inSecond, ref state, out var taken))
+            {
+                if (inFirst) first.Result![i] = taken!;
+                if (inSecond) second.Result![i] = taken!;
+                return inFirst || inSecond ? StateAndSpans : StateOnly;
+            }
+            Lines++;
+
+            // A long line is tokenized on its first characters only and, like a line stopped at
+            // its budget, leaves the state it started in. Walked for that state alone, it needs no
+            // tokenize at all.
+            bool whole = line.Length <= _longLine;
+            if (!whole)
+            {
+                if (!inFirst && !inSecond) return StateOnly;
+                line = line[..(char.IsHighSurrogate(line.Span[_longLine - 1]) ? _longLine - 1 : _longLine)];
+            }
+            long lineStarted = Stopwatch.GetTimestamp();
+            ITokenizeLineResult2 tokenized;
+            try { tokenized = grammar.TokenizeLine2(new LineText(line), state, _lineBudget); }
+            catch { return Nothing; }   // a broken grammar rule shouldn't kill the whole file
+            bool finished = Finished(lineStarted);
+            if (whole && finished) state = tokenized.RuleStack;
+            // A line stopped at its budget has the colours it found before the stop, and, when it
+            // is whole, the state it started in for want of the one it would leave.
+            byte gives = finished ? StateAndSpans : whole ? Nothing : StateOnly;
+            if (!inFirst && !inSecond) return Math.Min(gives, StateOnly);   // walked for its state alone
+
+            // Two numbers a token: where it starts, and its attributes, which carry the colour
+            // the theme gives it (see Palette). A token ends where the next one starts, the
+            // last at the end of the line.
+            var tokens = tokenized.Tokens;
+            int count = tokens.Length / 2, lineLength = line.Length;
+            _spans.Clear();
+            for (int k = 0; k < count; k++)
+            {
+                int s = Math.Clamp(tokens[2 * k], 0, lineLength);
+                int e = Math.Clamp(k + 1 < count ? tokens[2 * k + 2] : lineLength, s, lineLength);
+                if (e <= s) continue;
+                if (colours.For(EncodedTokenAttributes.GetForeground(tokens[2 * k + 1])) is not { } color) continue;
+
+                // Merge contiguous same-color tokens so the renderer draws fewer segments.
+                if (_spans.Count > 0 && _spans[^1].End == s && _spans[^1].Color == color)
+                    _spans[^1] = _spans[^1] with { Length = _spans[^1].Length + (e - s) };
+                else
+                    _spans.Add(new TextSpan(s, e - s, color));
+            }
+            if (_spans.Count == 0) return gives;
+            var spans = _spans.ToArray();
+            if (inFirst) first.Result![i] = spans;
+            if (inSecond) second.Result![i] = spans;
+            return gives;
         }
 
         // A line stopped at its budget hands back the state it stopped in, part-way through

@@ -423,6 +423,140 @@ public class ChromePartTests
         });
     }
 
+    /// <summary>Each view tab is a part of its own, lit by a Computed of View: a switch, by its key
+    /// or a click on its tab, builds the tab that goes dark and the one that lights up — two part
+    /// builds, and no build of the toolbar, whose git actions show nothing of the view (it built
+    /// whole on every switch when it read View itself). Wide and compact.</summary>
+    [Theory]
+    [InlineData(1440)]
+    [InlineData(1200)]
+    public void AViewSwitch_BuildsTheTwoTabsWhoseLightMoved_AndNoMoreOfTheToolbar(int width)
+    {
+        Hosted(fx =>
+        {
+            var s = fx.Session;
+            s.Window.SetClientSize(width, 900);
+            Settle(fx);
+            var toolbar = Get<HultUI.Core.Components.Part>(fx.App, "_toolbarPart");
+            int last = Array.IndexOf(TabLabels, "History");
+            foreach (bool click in new[] { false, true })
+                foreach (int to in new[] { 0, 2, 3, 4, 5, 6, 1 })
+                {
+                    string how = $"{(click ? "a click on" : "the key of")} {TabLabels[to]} at {width}";
+                    if (click) s.PumpFrame(TimeSpan.FromSeconds(1));   // no double-click with the last one
+                    var tabs = Get<HultUI.Core.Components.Part?[]>(fx.App, "_viewTabParts");
+                    var before = tabs.Select(p => p!.Builds).ToArray();
+                    int bar = toolbar.Builds, chrome = fx.App.ChromeBuilds;
+                    if (click) s.Window.Click(Tab(fx, TabLabels[to]));
+                    else s.Window.PressKey(TabKeys[to]);
+                    Settle(fx);
+                    Assert.True(toolbar.Builds == bar, $"{how} built the toolbar");
+                    var built = Enumerable.Range(0, tabs.Length).Where(i => tabs[i]!.Builds != before[i]).ToArray();
+                    Assert.True(built.SequenceEqual(new[] { last, to }.Order()),
+                        $"{how} built the tabs [{string.Join(", ", built.Select(i => TabLabels[i]))}], not {TabLabels[last]} and {TabLabels[to]}");
+                    Assert.True(fx.App.ChromeBuilds - chrome == 2, $"{how}: {fx.App.ChromeBuilds - chrome} part builds");
+                    last = to;
+                }
+            AssertChromeIsAFullBuild(fx);
+        });
+    }
+
+    /// <summary>After every switch exactly one tab is lit, the view's, and every tab is named as
+    /// its texts read ("Changes 4 1": its badge counts the working tree's one change) — by the
+    /// tab's own name in the compact chrome, which shows no texts. Kept through view-only keys
+    /// and equal to a full build. A tab reading View untracked would keep its light.</summary>
+    [Theory]
+    [InlineData(1440)]
+    [InlineData(1200)]
+    public void AfterASwitch_TheViewsTabAloneIsLit_AndEveryTabKeepsItsName(int width)
+    {
+        Hosted(fx =>
+        {
+            var s = fx.Session;
+            int gen = DataGen(fx.App, fx.A.Path);
+            fx.A.Write("three.txt", "three\nfour\n");
+            s.PumpUntil(() => DataGen(fx.App, fx.A.Path) > gen && ChangesBadge(fx) == "1", Wait);
+            s.Window.SetClientSize(width, 900);
+            Settle(fx);
+            bool compact = width < 1406;
+            foreach (bool click in new[] { false, true })
+                foreach (int to in new[] { 0, 2, 3, 4, 5, 6, 1 })
+                {
+                    string how = $"{(click ? "a click on" : "the key of")} {TabLabels[to]} at {width}";
+                    if (click) s.PumpFrame(TimeSpan.FromSeconds(1));
+                    if (click) s.Window.Click(Tab(fx, TabLabels[to]));
+                    else s.Window.PressKey(TabKeys[to]);
+                    Settle(fx);
+                    Assert.Equal(Enum.Parse<JunctionView>(TabLabels[to]), fx.App.View);
+                    var lit = TabLabels.Where(l => Tab(fx, l).BorderColor == Nocturne.Accent).ToArray();
+                    Assert.True(lit.SequenceEqual(new[] { TabLabels[to] }), $"after {how} the lit tabs are [{string.Join(", ", lit)}]");
+                    for (int i = 0; i < TabLabels.Length; i++)
+                    {
+                        string name = $"{TabLabels[i]} {i + 1}{(TabLabels[i] == "Changes" ? " 1" : "")}";
+                        var tab = Tab(fx, TabLabels[i]);
+                        string read = compact ? tab.AccessibleName ?? ""
+                            : string.Join(" ", Descendants(tab).OfType<TextElement>().Select(t => t.Content));
+                        Assert.True(read == name, $"after {how} the {TabLabels[i]} tab reads \"{read}\", not \"{name}\"");
+                    }
+                }
+            KeyViewOnly(fx);
+            Assert.Equal(Nocturne.Accent, Tab(fx, "History").BorderColor);
+            AssertChromeIsAFullBuild(fx);
+        });
+    }
+
+    /// <summary>The tabs are the same elements before and after a switch, a full build and a
+    /// crossing of the compact breakpoint: their parts patch them in place, so the tab under the
+    /// pointer stays hovered and a reader's node for each tab stays the node it was. The pointer
+    /// rests on the tab it clicked, which lit up under it.</summary>
+    [Fact]
+    public void TheTabs_StayTheSameElements_AndTheOneUnderThePointerStaysHovered()
+    {
+        Hosted(fx =>
+        {
+            var s = fx.Session;
+            Element[] Tabs() => TabLabels.Select(l => (Element)Tab(fx, l)).ToArray();
+            void Same(Element[] was, string after)
+            {
+                var now = Tabs();
+                for (int i = 0; i < was.Length; i++)
+                    Assert.True(ReferenceEquals(was[i], now[i]), $"the {TabLabels[i]} tab is a new element after {after}");
+            }
+            var tabs = Tabs();
+            var tags = Tab(fx, "Tags");
+            var box = tags.Layout.AbsoluteBorderBox;
+            s.Window.MoveMouse(box.X + box.Width / 2, box.Y + box.Height / 2);
+            s.PumpFrames(2);
+            Assert.True(tags.IsHovered);
+            s.Window.PressKey(KeyCode.Digit5);
+            Settle(fx);
+            Same(tabs, "a switch by key");
+            Assert.True(tags.IsHovered, "the hovered tab lost its hover in a switch");
+
+            s.PumpFrame(TimeSpan.FromSeconds(1));
+            s.Window.Click(tags);
+            Settle(fx);
+            Same(tabs, "a click on a tab");
+            Assert.True(tags.IsHovered && tags.BorderColor == Nocturne.Accent, "the clicked tab is not lit under the pointer");
+
+            FullRebuild(fx.App);
+            s.PumpFrames(3);
+            Same(tabs, "a full build");
+            Assert.True(tags.IsHovered, "the hovered tab lost its hover in a full build");
+
+            s.Window.SetClientSize(1200, 900);
+            Settle(fx);
+            s.Window.SetClientSize(1440, 900);
+            Settle(fx);
+            Same(tabs, "the compact chrome and back");
+        });
+    }
+
+    private static readonly string[] TabLabels = ["Overview", "History", "Commit", "Changes", "Branches", "Tags", "Files"];
+
+    private static readonly KeyCode[] TabKeys =
+        [KeyCode.Digit1, KeyCode.Digit2, KeyCode.Digit3, KeyCode.Digit4, KeyCode.Digit5, KeyCode.Digit6, KeyCode.Digit7];
+
     /// <summary>The active repository: its name in the title bar, its row lit in the sidebar.</summary>
     [Fact]
     public void TheRepositoryOnScreen_FollowsASwitch()

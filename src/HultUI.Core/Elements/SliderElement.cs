@@ -212,8 +212,38 @@ public class SliderElement : Element, IRangeValueElement
     internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx) =>
         new(160f, Math.Max(20f, ThumbRadius * 2));
 
-    /// <summary>Unbounded: the thumb and its focus ring reach past the ends of the track.</summary>
-    public override Rect? PaintBounds(IRenderContext ctx) => null;
+    /// <summary>
+    /// The box, the track and the thumb with its focus ring, which reach past the track's ends and
+    /// can stand taller than the box: the square <c>ThumbRadius + 4</c> around the thumb's centre
+    /// (the ring sits 3 out and is stroked inside that, plus a pixel of antialiasing), at the
+    /// value's place, focused or not. Everything <see cref="Render"/> draws lies inside. Without
+    /// it a faded panel holding a slider (a video player's bar) was drawn through a window-sized
+    /// layer (plan 17, round 17).
+    /// </summary>
+    public override Rect? PaintBounds(IRenderContext ctx)
+    {
+        var box = Layout.AbsoluteContentBox;
+        float cy = box.Y + box.Height / 2;
+        float trackWidth = box.Width - 2 * ThumbRadius;
+        var bounds = Layout.AbsoluteBorderBox;
+        if (trackWidth > 0)
+            bounds = bounds.Union(new Rect(box.X + ThumbRadius, cy - TrackHeight / 2, trackWidth, TrackHeight));
+        float reach = ThumbRadius + 4f;
+        float thumbX = ThumbX(box);
+        return bounds.Union(new Rect(thumbX - reach, cy - reach, reach * 2, reach * 2));
+    }
+
+    /// <summary>The thumb's centre: along the track by the value, which is clamped to the range.</summary>
+    private float ThumbX(in Rect box)
+    {
+        double range = _max - _min;
+        float t = range > 0 ? (float)((_value - _min) / range) : 0f;
+        return box.X + ThumbRadius + (box.Width - 2 * ThumbRadius) * t;
+    }
+
+    /// <summary>The track and the thumb are drawn from the value and keep nothing. Not a
+    /// subclass: its <see cref="Render"/> may do more.</summary>
+    internal override bool RenderOnlyPaints => GetType() == typeof(SliderElement);
 
     public override void Render(IRenderContext ctx)
     {

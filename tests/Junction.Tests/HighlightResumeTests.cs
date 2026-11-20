@@ -67,6 +67,43 @@ public class HighlightResumeTests
         });
     }
 
+    /// <summary>A walk that kept texts gives its memory back once the worker rests: one aggressive
+    /// collection, after <see cref="JunctionApp.HighlightIdleCollect"/>, and not again until texts are
+    /// kept again. The texts stay, and coming back still goes on with the walk. Without it the window
+    /// held 202.7 MB working set after a walk through bigrepo's big files, against 154.0 MB with no
+    /// texts kept; with it 134.0 MB (plan 17 round 17).</summary>
+    [Fact]
+    public void AWalkThatKeptTexts_IsFollowedByOneCollectionWhenTheWorkerRests_AndTheTextsStay()
+    {
+        Hosted((session, app, repo) =>
+        {
+            app.HighlightIdleCollect = TimeSpan.FromMilliseconds(200);
+            int read = Open(session, app, "src/Huge.cs");
+            string key = (string)Field(app, "_highlightShown")!;
+            LeavePartWay(session, app, key, read);
+            session.PumpUntil(() => app.HighlightIdleCollections > 0, TimeSpan.FromSeconds(10));
+            int collections = app.HighlightIdleCollections;
+            Rest(session, 600);
+            Assert.Equal(collections, app.HighlightIdleCollections);   // once a rest
+            Assert.True(KeptTexts(app).Contains(key), "the collection took the kept texts");
+            int reads = app.HighlightFileReads, lines = app.HighlightLinesTokenized;
+
+            session.Window.PressKey(KeyCode.Up);   // back to Huge.cs
+            session.PumpUntil(() => Highlights(app).Contains(key), TimeSpan.FromSeconds(60));
+            Assert.Equal(reads, app.HighlightFileReads);
+            Assert.InRange(app.HighlightLinesTokenized - lines, 1, Whole(repo, Highlights(app)[key]!).LinesWalked - 1);
+
+            Rest(session, 600);   // landed, nothing kept since the collection: none more
+            Assert.Equal(collections, app.HighlightIdleCollections);
+        });
+
+        static void Rest(HeadlessSession session, int ms)
+        {
+            var until = DateTime.UtcNow.AddMilliseconds(ms);
+            while (DateTime.UtcNow < until) { session.PumpFrame(); Thread.Sleep(5); }
+        }
+    }
+
     /// <summary>The texts kept are held to their bound in bytes, the file touched longest ago
     /// going first; a pair larger than the bound is not kept at all.</summary>
     [Fact]
@@ -102,6 +139,26 @@ public class HighlightResumeTests
         }
 
         static List<string> Order(JunctionApp app) => (List<string>)Field(app, "_highlightTextsOrder")!;
+    }
+
+    /// <summary>What a kept pair counts: two bytes a character and a line's array slot of eight on
+    /// each side, and with both versions the nine a line of the new one that the walk keeps for the
+    /// old one's to take; a version alone keeps no such line.</summary>
+    [Fact]
+    public void AKeptPair_CountsWhatTheWalkKeepsALine()
+    {
+        string old = "a\nbb\n", @new = "a\nbb\nccc\n";   // 3 and 4 lines, the empty one after the last break counted
+
+        Assert.Equal(2 * 5 + 8 * 3 + 2 * 9 + (8 + 9) * 4, Bytes(old, @new));
+        Assert.Equal(2 * 9 + 8 * 4, Bytes(null, @new));
+        Assert.Equal(2 * 5 + 8 * 3, Bytes(old, null));
+
+        static long Bytes(string? old, string? @new)
+        {
+            var type = typeof(JunctionApp).GetNestedType("HighlightTexts", All)!;
+            var texts = Activator.CreateInstance(type, old, old is not null, @new, @new is not null)!;
+            return (long)type.GetProperty("Bytes")!.GetValue(texts)!;
+        }
     }
 
     // ── Harness ──────────────────────────────────────────────────────────

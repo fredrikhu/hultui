@@ -198,6 +198,10 @@ public class BoxElement : Element
         return bounds;
     }
 
+    /// <summary>A plain box paints its fill, border, shadows and outline and keeps nothing. Not a
+    /// subclass: its <see cref="Render"/> may do more.</summary>
+    internal override bool RenderOnlyPaints => GetType() == typeof(BoxElement);
+
     /// <summary>A plain box that only fills its background paints one shape, so it fades by
     /// filling in a fainter colour. Not a subclass: its <see cref="Render"/> may add more.</summary>
     internal override bool RenderWithOpacity(IRenderContext ctx, float opacity)

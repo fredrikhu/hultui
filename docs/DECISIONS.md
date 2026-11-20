@@ -1171,6 +1171,49 @@ back. A GL window whose write-combined memory or DXGI non-local grows over its f
 be run for fifty or more before it is called a leak. Not tried: swap interval 1 during tweens (the
 interval stays 0 by design; see THREADING.md).
 
+### Junction's kept texts give the walk's memory back by one collection at rest, not by keeping less (round 17)
+
+Since round 16 (80e94eeb) Junction keeps the texts of big files whose colours a key cancelled (up to
+16 MB), which takes away the re-reads and the gen-2 collections they brought when the reader comes
+back. Expert 8 found the window holding +48 MB working set for it. Plan 17's round 17 step 2 measured
+the ways out in real windows (NativeAOT, the 4K at 150 % (DPI 144), 120 Hz; expert 8's jbig
+scene on bigrepo: the Commit view's file walk, 12 first visits and 12 revisits at 400 ms, 40 held
+keys; one build at HEAD with the choice switched in-process, so "keep" is 80e94eeb's behaviour and
+"none" f76cb440's; two holds, the order reversed in the second; 0 foreground takes). Working set,
+private and committed MB at the scene's end (28.5 s, 5.5 s after the last key), then after a forced
+compacting full collection; the revisit pass's all-thread MB and gen-2 collections; gen-2s in the
+scene:
+
+| Choice | End ws / committed | After a full GC ws / committed | Revisits MB, gen-2 | Scene gen-2 |
+|---|---|---|---|---|
+| keep (80e94eeb) | 202.7, 202.5 / 92.3, 92.4 | 183.2, 179.9 / 72.8, 69.7 | 367.5, 369.4 / 0, 0 | 3, 3 |
+| none (f76cb440) | 154.0, 157.3 / 43.7, 46.8 | 144.7, 147.6 / 34.4, 37.1 | 377.8, 372.3 / 4, 4 | 10, 9 |
+| **one aggressive collection 1 s into a rest** | **134.0, 134.1 / 23.7, 23.8** | 134.8, 134.6 / 24.5, 24.3 | 369.3, 366.8 / 0, 0 | 4, 4 |
+| one compacting gen-2 (large heap compacted) at rest | 182.2, 179.1 / 72.2, 69.0 | 182.9, 179.6 / 72.8, 69.5 | 362.1, 367.8 / 0, 0 | 4, 4 |
+| `DOTNET_GCConserveMemory=5` | 175.4, 175.7 / 64.8, 65.4 | 159.2, 155.4 / 48.5, 45.0 | 369.2, 365.9 / 2, 2 | 8, 8 |
+| a 6 MB bound (two pairs) | 165.0, 158.9 / 54.6, 48.8 | 151.8, 147.5 / 41.3, 37.3 | 371.6, 376.3 / 3, 3 | 8, 8 |
+| drop the texts 1 s into a rest | 202.7, 172.8 / 92.3, 62.6 | 169.0, 172.1 / 58.6, 61.8 | 368.1, 366.0 / 0, 0 | 3, 4 |
+| keep them as UTF-8 (one run) | 183.9 / 73.5 | 155.6 / 45.1 | 397.0 / 2 | 7 |
+
+Expert 8's own builds of the two commits read the same (80e94eeb 202.3 / 92.0 here; f76cb440 154.3
+in the survey). The aggressive collection paused the UI thread 8.1 and 12.0 ms, 3.5 s after the
+last key. The others fail one way or another: a compacting gen-2 frees the heap and keeps the
+committed memory (the collector sizes it from the budgets the walk set), ConserveMemory and a smaller
+bound bring back gen-2 collections and the revisits' bytes and keep 20–40 MB more, dropping the texts
+frees nothing until a collection, and UTF-8 texts lose the kept walk (its key is the string) and so
+cost more than keeping nothing. Pooled buffers were not tried: SyntaxHighlighter takes strings and
+keeps the walk by the string.
+
+Built (the commit after 34606bab): once the worker has stood idle 2 s after a walk that kept texts,
+one `GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true)` on the UI thread.
+A third hold, with the scene followed by a second pass of 12 keys and a rest, alternated with keep and
+none: 134.0 / 134.0 MB at 28.5 s (keep 202.5 / 202.6, none 154.5 / 154.7), 141.6 / 141.8 after the
+second pass and its own collection (keep 186.7 / 186.4, none 163.3 / 163.8); revisits 369.4 / 371.7
+MB with 0 gen-2 (none 377.3 / 377.2, 4); the second pass 382.2 / 385.8 MB, 0 gen-2 (keep 381.3 /
+379.9, 1; none 392.5 / 392.7, 4); pauses 9.6 / 10.5 and 7.6 / 7.7 ms, with no frame and no key
+between the last frame (25.5 s) and the next key (29.0 s). `ConserveMemory` would also change every
+other app, and the apps leave it unset.
+
 ### A ref's lock file alone is a working-tree event, not dropped (round 13)
 
 Plan 17's round 13, step 1 stopped Junction's repository watcher from reading a ref transaction

@@ -1104,10 +1104,12 @@ public partial class JunctionApp : Component, IDisposable
         if (_popover != null) Overlay("popover", BuildPopover(_popover));
         if (_modal != null) Overlay("modal", BuildModal(_modal));
 
-        // A caret move or a comment's edit that no review list read in this build (another view
-        // on screen) says nothing about the build after it, which weaves as any other would.
+        // A caret move, a comment's edit or a colours landing that no review list read in this
+        // build (another view on screen) says nothing about the build after it, which weaves as
+        // any other would.
         _reviewCaretMove = false;
         _reviewDraftEdited = null;
+        _reviewColoursLanded = false;
 
         // Last, so the visible view's own load was scheduled first (see _preload).
         RunPendingPreload();
@@ -1946,6 +1948,7 @@ public partial class JunctionApp : Component, IDisposable
         _retryPending.Clear();   // a pending retry finds nothing to do
         _highlightNext = null;
         _highlightCancel?.Cancel();
+        _collectWhenIdle = false;   // an idle collection on its way finds nothing to do
         _detailRest?.Dispose();
         DisposeMarkdown();
     }

@@ -78,7 +78,7 @@ internal static class DialogFadeProbe
             app.RunFrame(Frame, forceRender: true);
     }
 
-    private static string Skia(Application app)
+    internal static string Skia(Application app)
     {
         const System.Reflection.BindingFlags Private = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
         var platformWindow = typeof(Window).GetProperty("PlatformWindow", Private)!.GetValue(app.PrimaryWindow)!;
@@ -108,7 +108,7 @@ internal static class DialogFadeProbe
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(com), slot * IntPtr.Size));
 
     /// <summary>Local (dedicated) video memory this process uses, summed over the adapters, in MB; NaN off Windows.</summary>
-    private static double LocalMB()
+    internal static double LocalMB()
     {
         if (!OperatingSystem.IsWindows()) return double.NaN;
         var iidFactory1 = new Guid("770aae78-f26f-4dba-a829-253c83d1b387");

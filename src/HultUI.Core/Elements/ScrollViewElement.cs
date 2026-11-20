@@ -336,6 +336,16 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     internal virtual void UpdateContentSize() => UpdateScrollExtent();
 
     /// <summary>
+    /// Whether a parent measuring this view measures it as a leaf: its own size, padding and
+    /// border, without its children (LayoutEngine.MeasureSize). False for a plain view, which is as
+    /// big as its content wherever nothing sets or stretches its size. <see cref="VirtualListElement{T}"/>
+    /// says true: its children are only the rows realized for its viewport, so they never were its
+    /// content's size, and measuring through them laid every visible row out at each width an
+    /// ancestor measured at, though the list lays its rows out at its own width.
+    /// </summary>
+    internal virtual bool MeasuredAsLeaf => false;
+
+    /// <summary>
     /// Asked by the walks that read the accessibility tree, as they reach this view and before they
     /// read it: what the tree takes from elements that drawing makes is made here. A plain view's
     /// content is there already; <see cref="VirtualListElement{T}"/> overrides it.

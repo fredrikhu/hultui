@@ -195,4 +195,47 @@ public class SliderElementTests
         Assert.Equal(5, r.SmallChange);
         Assert.False(r.IsReadOnly);
     }
+
+    /// <summary>Records the rects the slider draws.</summary>
+    private sealed class DrawnRects : HultUI.Core.Tests.Elements.NullRenderContext
+    {
+        public readonly List<HultUI.Core.Primitives.Rect> Rects = [];
+        public override void DrawRoundedRect(HultUI.Core.Primitives.Rect rect, HultUI.Core.Primitives.CornerRadius radius,
+            HultUI.Core.Primitives.Color fill, HultUI.Core.Primitives.Color stroke, HultUI.Core.Primitives.Thickness strokeWidth) =>
+            Rects.Add(rect);
+    }
+
+    /// <summary>
+    /// Everything it draws lies inside its paint bounds: the track, the thumb at either end of it,
+    /// the focus ring that stands 3 outside the thumb, in a box laid out at its own height, in one
+    /// squeezed flatter than the thumb, and in one narrower than the thumb is wide. The bounds
+    /// were null, so a faded bar holding a slider drew through a window-sized layer.
+    /// </summary>
+    [Theory]
+    [InlineData(200f, 20f)]
+    [InlineData(200f, 6f)]
+    [InlineData(10f, 20f)]
+    public void EverythingItDraws_LiesInsideItsPaintBounds(float width, float height)
+    {
+        foreach (double value in new[] { 0d, 37d, 100d })
+        {
+            var s = SliderElement.New(value, 0, 100);
+            s.ShowHoverFill = true;
+            s.Segments = [25d, 50d];
+            new HultUI.Core.Layout.LayoutEngine(new StubMeasureContext()).PerformLayout(s, width, height);
+            HultUI.Core.Events.EventDispatcher.DispatchDirect(new HultUI.Core.Events.FocusEvent(), s);   // the ring
+            var ctx = new DrawnRects();
+            s.Render(ctx);
+
+            var bounds = s.PaintBounds(ctx);
+            Assert.NotNull(bounds);
+            Assert.True(ctx.Rects.Count >= 2, $"drew {ctx.Rects.Count} rects");   // the thumb and its ring at least
+            foreach (var r in ctx.Rects)
+                Assert.True(r.X >= bounds!.Value.X && r.Y >= bounds.Value.Y && r.Right <= bounds.Value.Right && r.Bottom <= bounds.Value.Bottom,
+                    $"at {value} in {width}x{height}: {r} is outside the paint bounds {bounds}");
+            // Not the window: no more than the thumb's reach past the box.
+            var box = s.Layout.AbsoluteBorderBox;
+            Assert.True(bounds!.Value.Width <= MathF.Max(box.Width, 2 * s.ThumbRadius) + 2 * (s.ThumbRadius + 4f) + 0.01f, $"{bounds}");
+        }
+    }
 }

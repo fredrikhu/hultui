@@ -616,7 +616,11 @@ public sealed partial class LayoutEngine
                 break;
             }
         }
-        if (!hasFlow)
+        // So is a virtual list (ScrollViewElement.MeasuredAsLeaf): its children are the rows realized
+        // for its viewport, laid out at its own width when it is laid out. Measured through them, as
+        // a column, every visible row was laid out again at each width an ancestor's flex measured
+        // the list at: Junction's diff rows at four widths a resize step, three never drawn.
+        if (!hasFlow || element is ScrollViewElement { MeasuredAsLeaf: true })
             return MeasureLeafSize(element, constraint.AvailableWidth, constraint.AvailableHeight, forcedWidth, forcedHeight);
 
         // A column that scrolls down lays its children out against unbounded height

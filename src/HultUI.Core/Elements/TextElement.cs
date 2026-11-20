@@ -646,6 +646,12 @@ public class TextElement : Element
             is Rect ink ? box.Union(ink) : null;
     }
 
+    /// <summary>A label that nothing hit-tests only paints. A selectable one, or one with links,
+    /// keeps the lines it drew for a click to read (<see cref="Render"/>). Not a subclass: its
+    /// <see cref="Render"/> may do more.</summary>
+    internal override bool RenderOnlyPaints =>
+        GetType() == typeof(TextElement) && !_selectable && _links is not { Count: > 0 };
+
     /// <summary>
     /// Whether this is a label of one line ending in an ellipsis, truncated in a box narrower
     /// than the ellipsis itself. It draws nothing then: the text shows as much of itself as

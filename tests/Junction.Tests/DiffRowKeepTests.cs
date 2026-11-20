@@ -1,8 +1,11 @@
 using System.Reflection;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
+using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
+using HultUI.Core.Rendering;
+using HultUI.Core.Styling;
 using HultUI.Headless;
 using Junction.Theme;
 using Xunit;
@@ -64,28 +67,79 @@ public class DiffRowKeepTests
         });
     }
 
-    /// <summary>The first build asks for the colours and draws plain; the tokenize landing is a
-    /// new highlight, and the rows on screen are made again with it. The rows of the list are not:
-    /// they hold no colour.
+    /// <summary>The first build asks for the colours and draws plain; when they land, the rows on
+    /// screen are kept and their code labels take the colours: no row is made, no text is measured
+    /// (colours are paint), nothing is flattened, and the frame is the one the rows made afresh
+    /// draw. Changes and Commit, unified and split, wrapped or not (plan 17 round 17: the landing
+    /// made every row on screen again, 34 rows and 264 text measures of a Commit view stop).
     ///
     /// <para>The colours are held until the plain rows are on screen. Left to land when they
     /// would, they came within the harness's frames wherever git starts in a few milliseconds
     /// (Fedora: 17–30 ms after the plain rows) or the frames are slow (Windows, the test alone in
     /// its process), and the rows the test then counted were already the coloured ones.</para></summary>
-    [Fact]
-    public void TheHighlightLanding_MakesTheRowsOnScreenAgainInColour()
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(false, true, true)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, false)]
+    public void TheHighlightLanding_RecoloursTheRowsOnScreen_AndMakesNone(bool commitView, bool split, bool wrap)
     {
         // Asynchronously: the tokenize goes on on the pool, not inside SetResult on this thread.
         var colours = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Hosted((session, app) =>
         {
+            if (split) Invoke(app, "SetDiffSplit", true);
+            if (wrap) Invoke(app, "ToggleDiffWrap");
+            DiffScrollTests.Quiet(session, app);
             Assert.False(Coloured(app), "the rows were coloured before the colours were let land");
             Assert.True(app.DiffRowsMade > 0, "no row was drawn plain");
-            int flattens = app.DiffFlattens, made = app.DiffRowsMade;
+            var rows = Rows(app);
+            int flattens = app.DiffFlattens, made = app.DiffRowsMade, passes = app.DiffHeightPasses;
+            var measures = MeasureCounter.Install(session);
+
             colours.SetResult();
             session.PumpUntil(() => Coloured(app), TimeSpan.FromSeconds(20));
+            session.PumpFrames(2);
+
+            Assert.True(app.DiffRowsMade == made, $"{app.DiffRowsMade - made} rows made of {rows.Count} by the colours");
+            Assert.True(measures.Calls == 0, $"{measures.Calls} text measures by the colours");
+            Assert.Equal(passes, app.DiffHeightPasses);
             Assert.Equal(flattens, app.DiffFlattens);
-            Assert.True(app.DiffRowsMade > made, "the rows were not made again");
+            Assert.Equal(rows, Rows(app));   // the same row elements, in the same places
+
+            // What the rows made afresh in colour draw.
+            var recoloured = Pixels(session);
+            ListOrNull(app)!.GetType().GetMethod("InvalidateRows")!.Invoke(ListOrNull(app), null);
+            Rebuild(app);
+            session.PumpFrames(3);
+            Assert.True(app.DiffRowsMade > made, "the rows were not made afresh");
+            Assert.True(recoloured.AsSpan().SequenceEqual(Pixels(session)), "the rows recoloured in place draw other pixels than rows made in colour");
+        }, holdColours: colours.Task, commitView: commitView);
+    }
+
+    /// <summary>A change to what a row is made from, in the build the colours land in (here the tab
+    /// width), still makes the rows again: only a build in which the colours alone moved keeps them.</summary>
+    [Fact]
+    public void TheHighlightLandingWithATabWidthChange_MakesTheRowsAgain()
+    {
+        var colours = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Hosted((session, app) =>
+        {
+            var settings = Get<JunctionSettingsData>(app, "_settings");
+            int width = settings.Appearance.TabWidth;
+            Assert.Contains(new string(' ', width) + "int tabbed = 2;", AllTexts(app));
+            int made = app.DiffRowsMade, posted = app.HighlightsPosted;
+
+            // The colours on their way to the UI thread, then the tab width: one build sees both.
+            colours.SetResult();
+            Assert.True(SpinWait.SpinUntil(() => app.HighlightsPosted > posted, TimeSpan.FromSeconds(20)), "the colours never came");
+            settings.Appearance.TabWidth = width + 3;
+            Invoke(app, "InvalidateCodeMetrics");
+            session.PumpFrames(3);
+
+            Assert.True(Coloured(app), "the colours did not land");
+            Assert.True(app.DiffRowsMade - made >= Rows(app).Count, $"{app.DiffRowsMade - made} rows made of {Rows(app).Count}");
+            Assert.Contains(new string(' ', width + 3) + "int tabbed = 2;", AllTexts(app));
         }, holdColours: colours.Task);
     }
 
@@ -374,6 +428,52 @@ public class DiffRowKeepTests
         foreach (var child in element.Children)
             foreach (var d in Descendants(child))
                 yield return d;
+    }
+
+    private static byte[] Pixels(HeadlessSession session)
+    {
+        using var image = session.Window.CapturePixels();
+        using var pixmap = image.PeekPixels();
+        return pixmap.GetPixelSpan().ToArray();
+    }
+
+    /// <summary>Counts the text the window's layout engine measures, by wrapping its measure context.</summary>
+    private sealed class MeasureCounter(IMeasureContext inner) : IMeasureContext
+    {
+        public int Calls;
+
+        public static MeasureCounter Install(HeadlessSession session)
+        {
+            var engine = typeof(HultUI.Window).GetField("_layoutEngine", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .GetValue(session.Window.Window)!;
+            var field = engine.GetType().GetField("_measureContext", BindingFlags.NonPublic | BindingFlags.Instance)!;
+            var counter = new MeasureCounter((IMeasureContext)field.GetValue(engine)!);
+            field.SetValue(engine, counter);
+            return counter;
+        }
+
+        public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+            TextOverflow overflow = TextOverflow.Clip)
+        { Calls++; return inner.MeasureText(text, style, maxWidth, maxLines, overflow); }
+
+        public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+            TextOverflow overflow, IReadOnlyList<TextSpan>? spans)
+        { Calls++; return inner.MeasureText(text, style, maxWidth, maxLines, overflow, spans); }
+
+        public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+            TextOverflow overflow, IReadOnlyList<TextSpan>? spans, out float sameFromWidth)
+        { Calls++; return inner.MeasureText(text, style, maxWidth, maxLines, overflow, spans, out sameFromWidth); }
+
+        public float MinContentTextWidth(string text, ResolvedInheritedStyle style, IReadOnlyList<TextSpan>? spans = null)
+        { Calls++; return inner.MinContentTextWidth(text, style, spans); }
+
+        public FontMetrics MeasureFont(ResolvedInheritedStyle style) => inner.MeasureFont(style);
+
+        public bool HasGlyph(ResolvedInheritedStyle style, int codePoint) => inner.HasGlyph(style, codePoint);
+
+        public float MeasureFirstBaseline(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+            TextOverflow overflow = TextOverflow.Clip, IReadOnlyList<TextSpan>? spans = null) =>
+            inner.MeasureFirstBaseline(text, style, maxWidth, maxLines, overflow, spans);
     }
 
     private static string Notes(Func<int, string> line, string tabbed) =>

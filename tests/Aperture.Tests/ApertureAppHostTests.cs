@@ -547,6 +547,46 @@ public class ApertureAppHostTests
             limit: TimeSpan.FromSeconds(seconds + 5));
     }
 
+    /// <summary>
+    /// A film playing with nobody touching anything: the transport bar hides and fades in a layer
+    /// of its own size, and once it has gone it is not drawn at all. Its sliders and glyphs could not
+    /// say where they paint, so the fade drew through a layer the window's size, whose texture Skia
+    /// kept for the window's life, and the hidden bar was drawn at opacity 0 on every video frame
+    /// (plan 17, round 17).
+    /// </summary>
+    [Fact]
+    public void ThePlayersBar_FadesInALayerOfItsOwnSize_AndIsNotDrawnOnceGone()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(167) };
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            session.Window.FindByAutomationId("resume-m2")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+            var bar = session.Window.FindByAutomationId("video-controls")!.Element;
+
+            var groups = new List<string>();
+            int framesHidden = 0, groupsHidden = 0;
+            session.Window.RenderLog.Clear();
+            PlayQuietly(session, backend, 4.0, () =>
+            {
+                var drawn = session.Window.RenderLog.Named("PushOpacity").Select(op => op.ToString().Trim()).ToList();
+                if (bar.Opacity == 0f && session.Window.RenderLog.Count > 0) { framesHidden++; groupsHidden += drawn.Count; }
+                else groups.AddRange(drawn);
+                session.Window.RenderLog.Clear();
+            });
+
+            Assert.Equal(0f, bar.Opacity);
+            Assert.NotEmpty(groups);                      // the fade
+            var box = bar.Layout.AbsoluteBorderBox;
+            string own = FormattableString.Invariant($"bounds=({box.X:0.##},{box.Y:0.##} {box.Width:0.##}x{box.Height:0.##})");
+            Assert.All(groups, g => Assert.EndsWith(own, g));
+            Assert.True(framesHidden > 0, "no frame was drawn with the bar gone");
+            Assert.Equal(0, groupsHidden);
+        }, () => backend, options: new HeadlessOptions { RecordDrawCalls = true });
+    }
+
     private static int Count(FakeMediaLibrary library, string prefix) =>
         library.Calls.Count(c => c.StartsWith(prefix, StringComparison.Ordinal));
 

@@ -830,7 +830,25 @@ public sealed class VideoPlayer : Component
 
     // Canvas coordinates are relative to the canvas: the context adds its own origin.
 
-    private static Element PauseGlyph(Color color) => Canvas.New(ctx =>
+    /// <summary>
+    /// A glyph drawn inside its own box: rectangles in it and 2-wide lines whose ends lie on its
+    /// edges, so nothing reaches more than a pixel past it, and 2 covers that with the
+    /// antialiasing. A plain canvas says it cannot tell, which drew the whole bar's fade through a
+    /// window-sized layer (plan 17, round 17: 2.19 Mpx a fade frame at 1920x1140, and a texture
+    /// that size kept for the window's life).
+    /// </summary>
+    private sealed class GlyphCanvas : CanvasElement
+    {
+        public override Rect? PaintBounds(IRenderContext ctx) => Layout.AbsoluteBorderBox.Inflate(new Thickness(2f));
+
+        // As a plain canvas: the callback only paints, and the patch copies only paint.
+        internal override bool RenderOnlyPaints => true;
+        private protected override bool PatchMarksOwnLayout => true;
+    }
+
+    private static Element Glyph(Action<ICanvasDrawingContext> draw) => new GlyphCanvas { Draw = draw };
+
+    private static Element PauseGlyph(Color color) => Glyph(ctx =>
     {
         float w = ctx.Bounds.Width, h = ctx.Bounds.Height;
         float bar = w * 0.3f;
@@ -840,7 +858,7 @@ public sealed class VideoPlayer : Component
     }).Width(16f).Height(16f);
 
     /// <summary>Two chevrons, pointing back or forward.</summary>
-    private static Element ChevronsGlyph(Color color, bool back) => Canvas.New(ctx =>
+    private static Element ChevronsGlyph(Color color, bool back) => Glyph(ctx =>
     {
         float w = ctx.Bounds.Width, h = ctx.Bounds.Height;
         float span = w * 0.42f;
@@ -854,7 +872,7 @@ public sealed class VideoPlayer : Component
         }
     }).Width(18f).Height(14f);
 
-    private static Element SpeakerGlyph(Color color, bool muted) => Canvas.New(ctx =>
+    private static Element SpeakerGlyph(Color color, bool muted) => Glyph(ctx =>
     {
         float x = 0, y = 0, w = ctx.Bounds.Width, h = ctx.Bounds.Height;
         // Body and cone.

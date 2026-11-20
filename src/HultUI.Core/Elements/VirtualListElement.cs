@@ -672,6 +672,10 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         if (KeepsRows) InvalidateItems(keepLabels: true);
     }
 
+    /// <summary>Measured without its rows: a parent's measurement of the list is its own size, and
+    /// the rows are laid out once, at the list's width (ScrollViewElement.MeasuredAsLeaf).</summary>
+    internal override bool MeasuredAsLeaf => true;
+
     internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx)
     {
         _childLayoutEngine ??= new LayoutEngine(ctx);

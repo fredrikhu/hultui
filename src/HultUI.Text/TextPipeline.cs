@@ -620,9 +620,113 @@ public sealed class TextPipeline
         if (overflow == TextOverflow.Clip && KeepsWrapRanges && ReuseAcrossWidths
             && fitsFrom <= maxWidth && maxWidth < fitsBelow)
             _wrapRanges.Put(wrapKey.IsMade ? wrapKey : new WrapKey(text, style, maxLines),
-                new WrapRange(layout, fitsFrom, fitsBelow, shaped.HasNewline ? float.NaN : shaped.TotalWidth), bytes);
+                new WrapRange(layout, fitsFrom, fitsBelow, shaped.HasNewline ? float.NaN : shaped.TotalWidth, layout.Size), bytes);
         return layout;
     }
+
+    // ── Sizes of wrapped text, without the layout ──
+    //
+    // A list of wrapped rows asks every row's height to place the rows it does not show
+    // (TextMeasure.MeasureWrapped), and shows a few of them: Junction's wrapped diff asks all of its 200
+    // rows at each width of a drag and draws ~16. A layout made for its height alone was let go of at once,
+    // its lines with it: 42 of a 64 KB step. So the ask of a paragraph not drawn breaks the text as Layout
+    // does, the same decisions over the same widths, and adds up each line's width and height as the
+    // layout's lines would, to the bit, without making a line. Its range of widths is kept as a layout's is,
+    // with the size and no layout: an ask of the size anywhere in it is answered, and an ask of the layout
+    // breaks the text again. Which paragraphs are drawn is read off the layout kept: a line's runs are made
+    // when a draw first reads them (WantsLayout). Not for spans that change metrics or text on the BiDi
+    // path, nor where the layout path keeps no range: those take Layout and read its size.
+
+    /// <summary>The size <see cref="Layout(string, ResolvedInheritedStyle, float, int?, TextOverflow,
+    /// IReadOnlyList{Core.Rendering.TextSpan}?)"/> gives <paramref name="text"/> at
+    /// <paramref name="maxWidth"/>, any number of lines, clipped, with the layout made only where it is likely
+    /// asked for next (see above).</summary>
+    internal Size WrappedSize(string text, ResolvedInheritedStyle style, float maxWidth,
+        IReadOnlyList<Core.Rendering.TextSpan>? spans)
+    {
+        if (string.IsNullOrEmpty(text) || !KeepsWrapRanges || !ReuseAcrossWidths || !ComposeRunsWhenRead
+            || AnyMetricAffecting(spans) || NeedsBidi(text, style, PlainPathForLtr))
+            return Layout(text, style, maxWidth, null, TextOverflow.Clip, spans).Size;
+        BeginParagraph(text);
+
+        // As Layout: the kept range before shaping, the one line that fits, the kept range, the width's layout.
+        var shapeKey = new ShapeKey(text, style.FontFamily, style.FontSize, style.FontWeight,
+            style.FontSlant, style.LineHeight, style.LetterSpacing);
+        WrapKey wrapKey = default;
+        bool rangeAsked = false;
+        if (!_shapeCache.TryGet(shapeKey, out var shaped))
+        {
+            if (KeptRange(text, style, maxWidth, null, TextOverflow.Clip, ref wrapKey) is { } keptBeforeShaping)
+                return keptBeforeShaping.Size;
+            rangeAsked = true;
+            shaped = ComputeShaping(text, style);
+            _shapeCache.Put(shapeKey, shaped, ShapedBytes(text, shaped));
+        }
+        if (!shaped.HasNewline && shaped.TotalWidth <= maxWidth + OneLineFitTolerance)
+            return shaped.SingleLine!.Size;
+        if (!rangeAsked && KeptRange(text, style, maxWidth, null, TextOverflow.Clip, ref wrapKey) is { } kept)
+            return kept.Size;
+        var key = new MeasurementKey(text, style.FontFamily, style.FontSize, style.FontWeight,
+            style.FontSlant, maxWidth, -1, TextOverflow.Clip, style.LineHeight, style.LetterSpacing);
+        if (_cache.TryGet(key, out var cached))
+            return cached.Size;
+        // The layout is made now, as Layout makes it, where it is likely asked for next: for a paragraph not seen
+        // before (a view's first measure, whose rows on screen are drawn next) and one whose kept layout was drawn
+        // (a row on screen during a drag). Only a paragraph whose last layout was not drawn, or that was only sized,
+        // is added up; a row that was drawn and is not any more is laid out once more, then added up.
+        if (WantsLayout(wrapKey))
+            return Layout(text, style, maxWidth, null, TextOverflow.Clip).Size;
+
+        // ComputeWrapped's break, its lines added up and not made.
+        var sizes = _keptSizes ?? new LineSizes();
+        _keptSizes = null;
+        var lines = RentLines();   // filled by none: BreakIntoLines takes it as Layout's break does
+        var outer = (_fitsFrom, _fitsBelow);
+        (_fitsFrom, _fitsBelow) = (float.NegativeInfinity, float.PositiveInfinity);
+        var size = BreakIntoLines(lines, text, style, maxWidth, null, BreakSegmentsOf(shaped, text), sizes: sizes);
+        var (fitsFrom, fitsBelow) = (_fitsFrom, _fitsBelow);
+        (_fitsFrom, _fitsBelow) = outer;
+        GiveBackLines(lines);
+        _keptSizes = sizes;
+
+        if (!shaped.HasNewline)
+            fitsBelow = Math.Min(fitsBelow, shaped.TotalWidth);
+        if (fitsFrom <= maxWidth && maxWidth < fitsBelow)
+            _wrapRanges.Put(wrapKey.IsMade ? wrapKey : new WrapKey(text, style, null),
+                new WrapRange(null, fitsFrom, fitsBelow, shaped.HasNewline ? float.NaN : shaped.TotalWidth, size),
+                300 + 4 * text.Length);
+        return size;
+    }
+
+    // Whether a paragraph has no range kept, or its kept layout was drawn: a line's runs are made when a draw
+    // first reads them.
+    private bool WantsLayout(WrapKey key)
+    {
+        if (!key.IsMade || !_wrapRanges.TryGet(key, out var kept))
+            return true;
+        if (kept.Layout is not { } layout)
+            return false;
+        var lines = layout.Lines;
+        for (int i = 0; i < lines.Count; i++)
+            if (lines[i].RunsMade)
+                return true;
+        return false;
+    }
+
+    // What the lines of a break add up to, as a layout's size: the widest line, and the lines' heights added
+    // in order (BreakIntoLines with sizes). Kept between asks; one made in the middle of another's is its own.
+    private sealed class LineSizes
+    {
+        public float Width, Height;
+
+        public void Add(float width, float height)
+        {
+            Height += height;
+            Width = Math.Max(Width, width);
+        }
+    }
+
+    private LineSizes? _keptSizes;
 
     // ── Wrapped layouts kept for a range of widths ──
     //
@@ -639,7 +743,8 @@ public sealed class TextPipeline
     // width-keyed cache above keeps answering widths seen before.
     // OneLine is the text's own width (NaN with a newline): a width it fits within OneLineFitTolerance
     // is the one-line fast path's, even below the text's own width, where the range still runs.
-    private readonly record struct WrapRange(TextLayout Layout, float From, float Below, float OneLine);
+    // Size is the layout's; a range kept by WrappedSize has the size alone, and no layout (null).
+    private readonly record struct WrapRange(TextLayout? Layout, float From, float Below, float OneLine, Size Size);
 
     // A paragraph's key in _wrapRanges: a layout cache key with no width, and its hash. A layout makes
     // it once, for its ask and the put after a miss: a long paragraph is hashed once, not four times
@@ -662,22 +767,29 @@ public sealed class TextPipeline
         public override int GetHashCode() => _hash;
     }
 
-    // The layout kept for text at maxWidth, or null; key is made here if it is not yet.
+    // The layout kept for text at maxWidth, or null; key is made here if it is not yet. A range kept with
+    // a size alone (WrappedSize) has none.
     private TextLayout? KeptWrap(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
-        TextOverflow overflow, ref WrapKey key)
+        TextOverflow overflow, ref WrapKey key) =>
+        KeptRange(text, style, maxWidth, maxLines, overflow, ref key, layout: true)?.Layout;
+
+    // The range kept for text that holds maxWidth (and with a layout, when one is asked for), or null.
+    private WrapRange? KeptRange(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+        TextOverflow overflow, ref WrapKey key, bool layout = false)
     {
         if (overflow != TextOverflow.Clip || !KeepsWrapRanges || !ReuseAcrossWidths)
             return null;
         if (!key.IsMade)
             key = new WrapKey(text, style, maxLines);
-        if (!_wrapRanges.TryGet(key, out var kept) || !(kept.From <= maxWidth && maxWidth < kept.Below))
+        if (!_wrapRanges.TryGet(key, out var kept) || !(kept.From <= maxWidth && maxWidth < kept.Below)
+            || (layout && kept.Layout is null))
             return null;
         // One line by the fast path's own test, written as it is so that float rounding cannot tell the
         // two apart: asked before shaping, a kept wrap must not answer where the shaped text would not wrap.
         if (kept.OneLine <= maxWidth + OneLineFitTolerance)
             return null;
         WrapRangeHits++;
-        return kept.Layout;
+        return kept;
     }
 
     /// <summary>
@@ -827,7 +939,7 @@ public sealed class TextPipeline
     /// </summary>
     private int SplitByCharacter(string text, int from, int to, ResolvedInheritedStyle style,
         float maxWidth, List<TextLine> lines, int? maxLines, bool keptTable = false,
-        PrefixWidths? measureOnly = null)
+        PrefixWidths? measureOnly = null, LineSizes? sizes = null)
     {
         while (from < to && (!maxLines.HasValue || lines.Count < maxLines.Value))
         {
@@ -837,9 +949,12 @@ public sealed class TextPipeline
             // character per line is the sane floor, and what a browser does.
             if (fit <= from) fit = NextCodePoint(text, from);
             if (fit >= to) break;             // what is left fits a line of its own
-            lines.Add(measureOnly is null
-                ? ShapeLineText(text, from, fit, style, start: from)
-                : MeasureLineText(text, from, fit, style, measureOnly));
+            if (sizes is not null)
+                SizeLineText(text, from, fit, style, sizes);
+            else
+                lines.Add(measureOnly is null
+                    ? ShapeLineText(text, from, fit, style, start: from)
+                    : MeasureLineText(text, from, fit, style, measureOnly));
             from = fit;
         }
         return from;
@@ -3580,10 +3695,13 @@ public sealed class TextPipeline
     // The lines of text, broken greedily, into `lines` (empty), each placed under the one before;
     // returns the size of a layout of them. measureOnly, the whole text's prefix widths, makes
     // every line a measured one (MeasureLineText) for EllipsizeMeasuredLine: the same pass,
-    // nothing shaped.
+    // nothing shaped. sizes, with no maxLines, adds the lines up into it (SizeLineText) for
+    // WrappedSize and makes none: the same pass and the same size.
     private Size BreakIntoLines(List<TextLine> lines, string text, ResolvedInheritedStyle style, float maxWidth,
-        int? maxLines, BreakSegments? segments, PrefixWidths? measureOnly = null)
+        int? maxLines, BreakSegments? segments, PrefixWidths? measureOnly = null, LineSizes? sizes = null)
     {
+        if (sizes is not null)
+            (sizes.Width, sizes.Height) = (0f, 0f);
         int textOffset = 0;
 
         var allBreaks = segments?.Offsets ?? BreakOffsets(text);
@@ -3600,7 +3718,7 @@ public sealed class TextPipeline
             if (isNewline)
             {
                 // Emit current line
-                lines.Add(NewLine(textOffset, allBreaks[s - 1]));
+                AddLine(textOffset, allBreaks[s - 1]);
                 textOffset = segEnd;
                 lineWidth = 0;
                 if (maxLines.HasValue && lines.Count >= maxLines.Value)
@@ -3614,7 +3732,7 @@ public sealed class TextPipeline
             if (lineWidth > 0 && Over(lineWidth + segWidth, maxWidth))
             {
                 // Break here — emit line up to previous segment
-                lines.Add(NewLine(textOffset, allBreaks[s - 1]));
+                AddLine(textOffset, allBreaks[s - 1]);
                 textOffset = allBreaks[s - 1];
                 lineWidth = 0;
                 if (maxLines.HasValue && lines.Count >= maxLines.Value)
@@ -3627,7 +3745,7 @@ public sealed class TextPipeline
             if (lineWidth == 0 && Over(segWidth, maxWidth))
             {
                 textOffset = SplitByCharacter(text, allBreaks[s - 1], segEnd, style, maxWidth, lines, maxLines,
-                    measureOnly: measureOnly);
+                    measureOnly: measureOnly, sizes: sizes);
                 if (maxLines.HasValue && lines.Count >= maxLines.Value)
                     break;
                 lineWidth = MeasureRange(text, textOffset, segEnd, style);
@@ -3655,12 +3773,15 @@ public sealed class TextPipeline
             if (lastLineTable)
                 FillPrefixTable(text, textOffset, text.Length, style, _prefixRuns, _prefixSegments);
             textOffset = SplitByCharacter(text, textOffset, text.Length, style, maxWidth, lines, maxLines, lastLineTable,
-                measureOnly);
+                measureOnly, sizes);
             if (lastLineTable)
                 ReleasePrefixScratch();
             if (textOffset < text.Length && (!maxLines.HasValue || lines.Count < maxLines.Value))
-                lines.Add(NewLine(textOffset, text.Length));
+                AddLine(textOffset, text.Length);
         }
+
+        if (sizes is not null)
+            return new Size(sizes.Width, sizes.Height);
 
         // Position lines vertically
         float totalHeight = 0;
@@ -3673,6 +3794,12 @@ public sealed class TextPipeline
         }
 
         return new Size(maxLineWidth, totalHeight);
+
+        void AddLine(int from, int to)
+        {
+            if (sizes is not null) SizeLineText(text, from, to, style, sizes);
+            else lines.Add(NewLine(from, to));
+        }
 
         TextLine NewLine(int from, int to) => measureOnly is null
             ? ShapeLineText(text, from, to, style, start: from)
@@ -3914,5 +4041,20 @@ public sealed class TextPipeline
         float width = from == 0 ? PrefixWidth(prefixes, end, style) : MeasureRuns(text, fontRuns, style);
         fontRuns.Clear();   // the runs' faces are not kept alive by the scratch list
         return new TextLine([], width, ascent, descent, leading) { Start = from, Length = to - from };
+    }
+
+    // ShapeLineText(text, from, to) with its runs made when read, added into sizes and not made: the
+    // line's width and height (Ascent + Descent + Leading, as TextLine.Height adds them) from the same
+    // font runs, measured the same way.
+    private void SizeLineText(string text, int from, int to, ResolvedInheritedStyle style, LineSizes sizes)
+    {
+        int end = to;
+        while (end > from && char.IsWhiteSpace(text[end - 1])) end--;
+        var fontRuns = Kept(_lineRuns);
+        ItemizeRange(text, from, end, style, fontRuns);
+        var (ascent, descent, leading) = LineMetrics(fontRuns, style);
+        float width = fontRuns.Count > 0 ? MeasureRuns(text, fontRuns, style) : 0f;
+        fontRuns.Clear();   // the runs' faces are not kept alive by the scratch list
+        sizes.Add(width, ascent + descent + leading);
     }
 }

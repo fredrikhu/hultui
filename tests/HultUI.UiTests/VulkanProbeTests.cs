@@ -33,7 +33,7 @@ public sealed class VulkanProbeTests
             : null);
 
     /// <summary>Skips unless UI tests are on and a Vulkan loader is installed.</summary>
-    private sealed class VulkanUiFactAttribute : FactAttribute
+    internal sealed class VulkanUiFactAttribute : FactAttribute
     {
         public VulkanUiFactAttribute() => Skip = VulkanSkip;
     }

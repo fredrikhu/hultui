@@ -126,6 +126,8 @@ static partial class Scenarios
             {
                 var pane = new ColumnsWalk(Models(ctx.Rng, 100_000));
                 ctx.Mount(pane.Mount());
+                pane.FocusList();
+                ctx.Session.PumpFrame();
                 int madeBefore = 0;
                 return new Op
                 {
@@ -931,6 +933,9 @@ sealed class ColumnsWalk(List<RowItem> items) : Component
 
     /// <summary>Cells the template has made.</summary>
     public int RowsMade { get; private set; }
+
+    /// <summary>Gives the mounted list the focus, so the walk's key presses reach its handler.</summary>
+    public void FocusList() => _list.Current?.Focus();
 
     public override Element Build()
     {

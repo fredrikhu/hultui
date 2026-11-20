@@ -88,13 +88,16 @@ public class TokenizeDiffTests
     }
 
     [Fact]
-    public void TwoVersionsWithNothingInCommon_WalkAlone()
+    public void TwoVersionsThatStartWithNothingInCommon_WalkFromTheirFirstLines()
     {
         string other = "\n" + Old;
         LineRange[] shown = [new(20, 20)];
         var result = Tokenize(other, shown, New, shown);
 
-        Assert.Equal(40, result.LinesWalked);
+        // Of the old version's lines, its first two; from its third, it takes the new version's
+        // line above, which has its text and started in its state; but its 20th it shows, and the
+        // new version's 19th has no spans to take.
+        Assert.Equal(20 + 3, result.LinesWalked);
         Same(Whole(other), result.Old!, shown);
         Same(Whole(New), result.New!, shown);
     }
@@ -180,7 +183,9 @@ public class TokenizeDiffTests
 
         Same(Whole(crlf), result.Old!, shown);
         Same(Whole(New), result.New!, shown);
-        Assert.Equal(Changed * 2, result.LinesWalked);   // not one line in common
+        // Not one line in common, but the same texts once the carriage returns are cut: the old
+        // version takes all of the new version's but the one that differs.
+        Assert.Equal(Changed + 1, result.LinesWalked);
     }
 
     [Fact]

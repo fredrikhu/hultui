@@ -21,9 +21,10 @@ public partial class JunctionApp
     // part keeps its elements while the app rebuilds around it, and builds again when
     // something it shows changes:
     //
-    //  - a signal or a loader it reads — View; each repository's summary and worktrees; the
-    //    GitLab project, pipelines, merge requests and to-dos: its own build reads them, so its
-    //    own effect hears them, whether the app rebuilds or not;
+    //  - a signal or a loader it reads — View (the view tabs, each a part inside the toolbar's:
+    //    see ViewTabPart); each repository's summary and worktrees; the GitLab project,
+    //    pipelines, merge requests and to-dos: its own build reads them, so its own effect
+    //    hears them, whether the app rebuilds or not;
     //  - anything else — the active repository and workspace, the settings, the compact
     //    breakpoint, the remote command running, the sidebar's drag, the theme, the display
     //    scale: _chromeRevision, which every MarkDirty and Rerender in the app bumps.
@@ -68,6 +69,44 @@ public partial class JunctionApp
         bar.Key = "toolbar";
         return bar;
     }, own: _chromeRevision);
+
+    // The seven view tabs are parts of their own inside the toolbar's, one a tab. A tab is lit
+    // by a Computed of View that moves only when its own light does, so a view switch builds the
+    // tab going dark and the one lighting up: not the five others, the git actions or the rest of
+    // the toolbar, which a switch built whole when the toolbar read View itself (52.6 KB a switch,
+    // the tabs 34 KB of it). Each tab takes _chromeRevision as the toolbar does, so whatever
+    // builds the toolbar builds the tabs too; only the Changes tab reads the summary, for its badge.
+    private static readonly (JunctionView View, string Label, string Glyph, string Num)[] s_viewTabs =
+    [
+        (JunctionView.Overview, "Overview", Icons.SquaresFour, "1"),
+        (JunctionView.History, "History", Icons.GitCommit, "2"),
+        (JunctionView.Commit, "Commit", Icons.GitDiff, "3"),
+        (JunctionView.Changes, "Changes", Icons.Pencil, "4"),
+        (JunctionView.Branches, "Branches", Icons.GitBranch, "5"),
+        (JunctionView.Tags, "Tags", Icons.Tag, "6"),
+        (JunctionView.Files, "Files", Icons.Folders, "7"),
+    ];
+
+    private HultUI.Core.Components.Part?[]? _viewTabParts;
+
+    private HultUI.Core.Components.Part ViewTabPart(int i)
+    {
+        _viewTabParts ??= new HultUI.Core.Components.Part?[s_viewTabs.Length];
+        if (_viewTabParts[i] is { } part) return part;
+        var (view, label, glyph, num) = s_viewTabs[i];
+        var lit = new HultUI.Core.Reactivity.Computed<bool>(() => View == view);
+        return _viewTabParts[i] = new(_chromeParts, () =>
+        {
+            if (view != JunctionView.Changes) return ViewTab(view, label, glyph, num, lit.Value, 0);
+            // The Changes tab is where an unfinished operation is resolved, so its badge counts
+            // the conflicts — in the danger colour — rather than the working-tree total while
+            // one is in flight. Same tab, same place, but it now reads as something to go to.
+            var sum = HasActiveRepo ? SummaryFor(_activeRepoPath) : RepoSummary.Pending;
+            return sum.InSequencer && sum.Conflicts > 0
+                ? ViewTab(view, label, glyph, num, lit.Value, sum.Conflicts, alarm: true)
+                : ViewTab(view, label, glyph, num, lit.Value, sum.Dirty);
+        }, own: _chromeRevision);
+    }
 
     // One part per shape: the host is the sidebar's identity in the body, so a toggle replaces
     // the expanded list with the rail instead of patching one into the other.
@@ -225,27 +264,17 @@ public partial class JunctionApp
             .Padding(new Thickness(0, compact ? 10 : 16, 0, compact ? 10 : 16))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
 
-        // Segmented view tabs. FlexShrink(0) so the row never compresses the tabs
-        // (which would let each tab's shortcut-number badge creep into its label);
-        // the compact breakpoint switches them to icon-only before they'd overflow.
+        // Segmented view tabs, each a part of its own (see ViewTabPart). FlexShrink(0) so the
+        // row never compresses the tabs (which would let each tab's shortcut-number badge creep
+        // into its label); the compact breakpoint switches them to icon-only before they'd overflow.
         var seg = Flex.Row(gap: 2).FlexShrink(0)
             .Padding(new Thickness(3))
             .Background(Nocturne.Surface)
             .BorderColor(Nocturne.Divider).BorderWidth(1f)
             .CornerRadius(Nocturne.RadiusMd)
             .AlignItems(AlignItems.Center);
-        seg.AddChild(ViewTab(JunctionView.Overview, "Overview", Icons.SquaresFour, "1", 0));
-        seg.AddChild(ViewTab(JunctionView.History, "History", Icons.GitCommit, "2", 0));
-        seg.AddChild(ViewTab(JunctionView.Commit, "Commit", Icons.GitDiff, "3", 0));
-        // The Changes tab is where an unfinished operation is resolved, so its badge counts
-        // the conflicts — in the danger colour — rather than the working-tree total while
-        // one is in flight. Same tab, same place, but it now reads as something to go to.
-        seg.AddChild(sum.InSequencer && sum.Conflicts > 0
-            ? ViewTab(JunctionView.Changes, "Changes", Icons.Pencil, "4", sum.Conflicts, alarm: true)
-            : ViewTab(JunctionView.Changes, "Changes", Icons.Pencil, "4", sum.Dirty));
-        seg.AddChild(ViewTab(JunctionView.Branches, "Branches", Icons.GitBranch, "5", 0));
-        seg.AddChild(ViewTab(JunctionView.Tags, "Tags", Icons.Tag, "6", 0));
-        seg.AddChild(ViewTab(JunctionView.Files, "Files", Icons.Folders, "7", 0));
+        for (int i = 0; i < s_viewTabs.Length; i++)
+            seg.AddChild(ViewTabPart(i).Mount().FlexShrink(0));
         bar.AddChild(seg);
 
         bar.AddChild(Box.New().FlexGrow(1));
@@ -364,10 +393,9 @@ public partial class JunctionApp
         return b.HoverBg(Nocturne.Alpha(fg, primary ? 0.12 : 0.07), Color.Transparent);
     }
 
-    private Element ViewTab(JunctionView view, string label, string glyph, string num, int badge,
+    private Element ViewTab(JunctionView view, string label, string glyph, string num, bool active, int badge,
         bool alarm = false)
     {
-        var active = View == view;
         var fg = active ? Nocturne.Accent : Nocturne.On(0.60);
         bool compact = _compactChrome;
 

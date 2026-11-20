@@ -6,7 +6,7 @@ using HultUI.Text;
 
 namespace HultUI.Rendering.Skia;
 
-public sealed class SkiaMeasureContext : IMeasureContext
+public sealed class SkiaMeasureContext : IMeasureContext, IWrappedSizeContext
 {
     private readonly TextPipeline _pipeline;
 
@@ -49,6 +49,10 @@ public sealed class SkiaMeasureContext : IMeasureContext
         var layout = _pipeline.Layout(text, style, maxWidth, maxLines, overflow, spans, out sameFromWidth);
         return layout.Size;
     }
+
+    Size IWrappedSizeContext.MeasureWrapped(string text, ResolvedInheritedStyle style, float maxWidth,
+        IReadOnlyList<TextSpan>? spans) =>
+        string.IsNullOrEmpty(text) ? Size.Zero : _pipeline.WrappedSize(text, style, maxWidth, spans);
 
     public float MinContentTextWidth(string text, ResolvedInheritedStyle style,
         IReadOnlyList<TextSpan>? spans = null)

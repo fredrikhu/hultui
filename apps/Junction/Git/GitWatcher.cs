@@ -137,11 +137,15 @@ public sealed class GitWatcher : IDisposable
         _gitDirWatcher.Created += OnGitDirChanged;
         _gitDirWatcher.Renamed += OnGitDirRenamed;
 
-        // Watch refs/ recursively — branches, tags, remote tracking refs
+        // Watch refs/ recursively — branches, tags, remote tracking refs. A folder made is told
+        // as a ref moving: on Linux the watch on a new folder starts only after the watcher hears
+        // the folder made, and git has written the ref in it by then, so `git branch feature/x`
+        // with no feature/ yet (a fetch's first slashed branch, a tag in a new folder) was never
+        // heard at all and the branches kept what they had.
         var refsDir = Path.Combine(gitDir, "refs");
         _refsWatcher = new FileSystemWatcher(refsDir)
         {
-            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName,
+            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.DirectoryName,
             EnableRaisingEvents = true,
             IncludeSubdirectories = true,
         };
@@ -398,10 +402,10 @@ public sealed class GitWatcher : IDisposable
     // nothing creates the lock and deletes it, and the folder that held it reports a Changed of
     // its own: every `git fetch` takes refs/remotes/<remote>/HEAD.lock to check the remote's
     // HEAD, so a fetch that brought nothing new read the log, the branches and the tags again.
-    // A lock or a folder alone is told as a working-tree event, not dropped: a move that writes
-    // only a reflog entry (`merge --abort`'s reset, `reflog expire`) shows the watcher nothing
-    // else, and the reflog keys on the data generation for it. The ref's own rename or delete
-    // is the ref moving.
+    // A lock or a folder's Changed alone is told as a working-tree event, not dropped: a move
+    // that writes only a reflog entry (`merge --abort`'s reset, `reflog expire`) shows the watcher
+    // nothing else, and the reflog keys on the data generation for it. The ref's own rename or
+    // delete is the ref moving, and so is a folder made or removed (see the constructor).
     private void OnFileChanged(object sender, FileSystemEventArgs e)
     {
         bool lockOnly = e.Name?.EndsWith(".lock", StringComparison.Ordinal) == true

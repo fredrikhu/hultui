@@ -49,6 +49,13 @@ public static class ElementRenderer
             !element.Layout.AbsoluteBorderBox.Translate(offsetX, offsetY).IntersectsWith(clip))
             return; // fully outside the visible clip region — skip the subtree
 
+        // At opacity 0 the group would show nothing, so a subtree that only paints is left out as a
+        // culled one is: a video player's hidden bar was drawn on every video frame (plan 17, round
+        // 17: 24 elements a frame). One that does more in Render is drawn (Element.RenderOnlyPaints).
+        float opacity = element.RenderOpacity;
+        if (opacity <= 0f && OnlyPaints(element))
+            return;
+
         using var _trace = tracer is null ? default : tracer.BeginElement("Render", element);
 
         // A transform rotates/scales the element and its subtree about its centre.
@@ -66,7 +73,6 @@ public static class ElementRenderer
         // the whole window or viewport for every faded element. It is pushed inside the
         // transform, so its bounds are in the element's own coordinates and the surface maps
         // them through the transform. A lone shape needs no group at all: it fades itself.
-        float opacity = element.RenderOpacity;
         bool hasOpacity = false;
         if (opacity < 1f)
         {
@@ -153,6 +159,16 @@ public static class ElementRenderer
 
         if (hasTransform)
             ctx.Pop();
+    }
+
+    /// <summary>Whether nothing in the subtree does more in Render than paint.</summary>
+    private static bool OnlyPaints(Element element)
+    {
+        if (!element.RenderOnlyPaints) return false;
+        var children = element.Children;
+        for (int i = 0; i < children.Count; i++)
+            if (!OnlyPaints(children[i])) return false;
+        return true;
     }
 
     private static Matrix3x2 TransformMatrix(Element element)
