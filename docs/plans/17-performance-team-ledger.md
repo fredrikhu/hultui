@@ -4,18 +4,30 @@ State of [the performance team](17-performance-team.md). The orchestrator update
 file after every step and commits it with the step's work. Full survey reports are in
 [`17-reports/`](17-reports/).
 
-- **Round:** 17
-- **Phase:** release — round 17 (session 35903ed7). The full suite passed at 45cbde7b (main merged in); merge into main
-  and push per memory `merge-race-shared-checkout`, wait for CI, record the merge and CI here, then Round → 18, Phase
-  survey in a fresh context. Open for the user: question 72b (step 11 waits). Steps 9 and 10 stay queued for round 18's
-  survey. To resume in a fresh context, run in this worktree: `/loop Run the next step of the performance team: follow
-  docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md. Read both once per session
-  (afterwards only the ledger's Phase and the part the step needs), do the step the ledger's Phase calls for, record it
-  in the ledger, and commit.` Round 17's files are in session 35903ed7's scratchpad (briefs `brief-r17*.md`, agent ids
-  `r17-agents.txt`, probes `r17-<area>\` and `r17b<N>\`, `archive_r17.py`, `merge_r17.py`, `land_r17.py`,
-  `fullsuite-r17.sh` with `fedora-r17.sh`). Older rounds are in [the archive](17-performance-team-ledger-archive.md)
-  (search it, don't read it whole). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a
-  pre-push hook refuses pushes built on the old history).
+- **Round:** 18
+- **Phase:** survey — round 18, to start in a fresh context, **after the weekly usage reset (2026-11-22 03:00 UTC)**:
+  round 17 ended at 85 % of the week, and a survey and build cost ~25 points. Round 17 RELEASED 2026-11-20: main
+  e799c23b (merge, tree identical to the tested branch but the ledger; origin/main 3c6d6a5b was in the branch), CI run
+  44653899561 green on the first attempt (test, test-linux, docs, both meridian-keyring jobs) and "Push on main"
+  44653898406 green. Round 17's files: the survey brief `brief-r17-survey.md`, build briefs `brief-r17b<N>.md` and
+  `brief-r17fix.md`, agent ids `r17-agents.txt`, probes `r17-<area>\` and `r17b<N>\`, `archive_r17.py`, `merge_r17.py`,
+  `land_r17.py`, `edits_log.py`, `fullsuite-r17.sh` with `fedora-r17.sh` (the model for round 18's full suite), all in
+  session 35903ed7's scratchpad `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\35903ed7-ff10-416d-84e9-b6c09675ab6b\scratchpad\`.
+  For round 18's start: move round 16's Landed rows, round 17's build order (first copy its untaken steps 9 and 10 into
+  Waiting, with their evidence) and the answered questions 69–72 (72b stays while open) to the archive, as
+  `archive_r17.py` did; the survey reviews round 17's build, `git log 0df5e3ea..e799c23b` (the archive commit to the
+  round 17 release), with main's 18 commits outside plan 17 that 45cbde7b merged (plan 19 items 1–4: the digit table
+  with punctuation 781a857f, the cold-label rows ba15d841, right-to-left runs kept whole 78a69ee5, shaper call counts
+  52acb2f2; Junction's Changes load under index moves 3490ba67; WebView middle-click autoscroll e66ead9f), and anything
+  main gains after. The Jellyfin account to browse as is in memory `aperture-jellyfin` (never in committed docs). Read
+  the desk at the start and before every hold (the 4K came and went during round 17). Open for the user: question 72b
+  (step 11 waits). To resume in a fresh context, run in this worktree: `/loop Run the next step of the performance team:
+  follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md. Read both once per
+  session (afterwards only the ledger's Phase and the part the step needs), do the step the ledger's Phase calls for,
+  record it in the ledger, and commit.` Before resuming, `git fetch` and merge main if it moved; build steps use
+  `scripts/perf/step-ab.ps1`. Older rounds are in [the archive](17-performance-team-ledger-archive.md) (search it, don't
+  read it whole). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a pre-push hook refuses
+  pushes built on the old history).
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`)
 - **Review commits since:** round 17's survey reviews round 16's build, 32c85e81..b131ae85 (the last survey report to the round 16 release; 50 commits not merges), with main's 8 commits outside plan 17 that its merges 666e6486 and 5e180d17 brought in (266d6aee, 4917f40d, 23b552d8, 38ec9773, b8a3dcf5, d3e40ecb, 22c6e002, 791d1a44); main gained nothing after b131ae85. Earlier: round 16's survey reviewed round 15's build, 587f1767..75f2288a (the last survey report to the round 15 release; the one merge is round 15's own into main), and main's 41 commits outside plan 17 since that release, `git log --no-merges 75f2288a..3038f82b ^9550ecec` (42 with the ledger's cc093b50) (SkiaSharp 4 043f5b38, SDL 3.5.0 fd0cccb7, the app team's fixes; the screen-reader fix counts as reviewed). Earlier: round 15's survey reviewed round 14's build, 06d4db59..5b2985be (the last survey report to the round 14 release; the one merge is round 14's own into main). Earlier: round 14's survey reviewed round 13's build, 8f01b6fd..e432c224 (the last survey report to the round 13 release; its two merges are round 13's own into main). Round 13's survey reviewed round 12's build, 5f1744ca..afc1ed40 (the last survey report to the round 12 release; the one merge is round 12's own into main). Round 12's survey reviewed round 11's build, 5731ee58..b0dd1954 (the last survey report to the
   round 11 release; it includes the .NET 11 upgrade's step 0 only as already reviewed). Earlier: round 11's survey reviewed round 10's build and the .NET 11 upgrade, f4d6050d..868e2ffc
@@ -1253,3 +1265,12 @@ From 2026-11-18 (round 16's survey); earlier entries are in the archive ([to 202
   (Junction 1,188 in 10 m 5 s, Core 5,212, Headless 1,822, Text 324, Skia 471); Fedora the slnf (22 projects) and
   Junction 1,188, Meridian 680, Aperture 370, Reel 53 each in a private D-Bus session, 0 failures; docfx 0 warnings, 0
   errors. Phase → release.
+- 2026-11-20: round 17 RELEASED. Merged into main e799c23b and pushed (origin/main 3c6d6a5b in the branch, tree identical
+  to the tested branch but the ledger; the primary checkout fast-forwarded behind the guard). CI run 44653899561 green on
+  the first attempt (test, test-linux, docs, meridian-keyring on Ubuntu and macOS); "Push on main" green. Round 17 in
+  sum: 8 build steps landed, a Junction Linux watcher bug fixed on the way, steps 9–10 queued and step 11 waiting for
+  question 72b. Real-app results: a wrapped Junction resize step about a quarter of round 16's (steps 1 and 8), a save
+  that leaves a diff's texts as they were keeps its colours (288.7 → 9.4 MB an event), Junction's big-file working set
+  202.6 → 134.1 MB, big multi-hunk diffs coloured with 32–45 % fewer lines walked, first file visits −29…−35 %, view
+  switches −27…−47 %, the player bar's first fade 12–32 → 0–2 MB of GPU memory. Usage 65 → 85 % of the week. Round → 18,
+  Phase survey, in a fresh context after the weekly reset.
