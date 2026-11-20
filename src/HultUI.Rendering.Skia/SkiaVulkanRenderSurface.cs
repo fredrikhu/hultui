@@ -232,6 +232,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         _ownsText = text is null;
         _text = text ?? new SkiaTextServices();
         _renderContext.SetPipeline(_text.Pipeline);
+        _renderContext.SetGpuContext(_grContext);
 
         // Offered unconditionally; whether it is taken up is decided per frame by
         // SupportsExternalGL, which is the only thing that knows whether this host can

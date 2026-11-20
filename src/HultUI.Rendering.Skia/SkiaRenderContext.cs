@@ -44,6 +44,17 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
     private readonly List<HeldFrame> _heldFrames = new();
     private readonly record struct HeldFrame(IPixelImageSource Source, PixelFrame Frame, SKImage Image);
 
+    // On a GPU surface, the texture each pixel source's frame was last uploaded to, and the source's
+    // Version then. A redraw that finds the version unchanged draws the texture and borrows nothing:
+    // drawing the borrowed bytes instead uploaded the whole frame on every redraw, so a pointer
+    // moving over a still remote desktop cost as much as one whose whole screen changed (a 4K
+    // frame, about half a core). Kept only while drawn: one not drawn in a frame goes at its end,
+    // with its reference to the source. Null on the raster surface, which reads the borrowed bytes
+    // where they are and has nothing to upload.
+    private GRContext? _gpu;
+    private readonly Dictionary<IPixelImageSource, Uploaded> _uploaded = new();
+    private readonly record struct Uploaded(SKImage Image, long Version, PixelFormat Format, uint Frame);
+
     // The GL surface this context draws for, when it is one; the raster surface leaves
     // it null and IGpuImageSources then fall back to their pixel path. Wrapped
     // textures are kept per source and rebuilt only when the frame's texture, size or
@@ -353,6 +364,8 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
         _deviceMatrixKnown = false;
     }
     internal void SetGLSurface(ISkiaExternalSurface surface) => _glSurface = surface;
+    /// <summary>The GPU context the surface draws with: pixel frames are uploaded to it once per version.</summary>
+    internal void SetGpuContext(GRContext context) => _gpu = context;
     internal void SetPipeline(TextPipeline pipeline) => _pipeline = pipeline;
     internal SKCanvas Canvas => _canvas ?? throw new InvalidOperationException("No canvas set. Call BeginFrame first.");
 
@@ -384,6 +397,13 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
     {
         Canvas.Flush();
         ReleaseHeldFrames();
+        // Every frame draws the whole tree, so a source not drawn in this one has left the screen.
+        foreach (var (source, uploaded) in _uploaded)
+        {
+            if (uploaded.Frame == _frame) continue;
+            uploaded.Image.Dispose();
+            _uploaded.Remove(source);
+        }
     }
 
     private void ReleaseHeldFrames()
@@ -1827,9 +1847,25 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
     /// Borrows <paramref name="source"/>'s current frame and wraps it as an image without
     /// copying. The borrow is held until the frame has been flushed — see
     /// <see cref="_heldFrames"/> — so the caller only draws the image and never releases it.
+    /// On a GPU surface the frame is uploaded once per version and the texture drawn until the
+    /// next (<see cref="_uploaded"/>).
     /// </summary>
     private bool TryWrapPixelFrame(IPixelImageSource source, out SKImage image, out PixelFormat format)
     {
+        // Read before the borrow, so the frame borrowed is this version or a later one: a kept
+        // texture is never older than the version it is kept under says.
+        long version = source.Version;
+        bool haveUploaded = _uploaded.TryGetValue(source, out var uploaded);
+        // Uploaded in this frame counts as current too: a sink lends a second element of the
+        // same frame the frame it lent the first, however many it has published since.
+        if (haveUploaded && (uploaded.Version == version || uploaded.Frame == _frame))
+        {
+            _uploaded[source] = uploaded with { Frame = _frame };
+            image = uploaded.Image;
+            format = uploaded.Format;
+            return true;
+        }
+
         image = null!;
         format = default;
         if (!source.TryAcquire(out var frame))
@@ -1859,6 +1895,15 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
         _heldFrames.Add(new HeldFrame(source, frame, wrapped));
         image = wrapped;
         format = frame.Format;
+
+        // Skia copies the bytes into the texture here; the borrow is still held until EndFrame,
+        // as before. A texture it cannot make leaves the wrapper to upload at flush, as before.
+        if (_gpu is not null && wrapped.ToTextureImage(_gpu, mipmapped: false) is { } texture)
+        {
+            if (haveUploaded) uploaded.Image.Dispose();
+            _uploaded[source] = new Uploaded(texture, version, frame.Format, _frame);
+            image = texture;
+        }
         return true;
     }
 
@@ -2508,6 +2553,9 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
         _disposed = true;
         GC.SuppressFinalize(this);
         ReleaseHeldFrames();
+        // Before the surface disposes the GPU context the textures belong to.
+        foreach (var uploaded in _uploaded.Values) uploaded.Image.Dispose();
+        _uploaded.Clear();
         foreach (var wrapped in _wrappedTextures.Values) wrapped.Image.Dispose();
         _wrappedTextures.Clear();
         ClearRunBlobCache();

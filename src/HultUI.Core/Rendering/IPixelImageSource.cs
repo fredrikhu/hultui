@@ -21,7 +21,7 @@ public enum PixelFormat : byte
     /// One byte per pixel, a grey level from black (0) to white (255); opaque. What a
     /// monochrome image is after its grey-level mapping — a black-and-white photograph, a
     /// thermal camera frame, a scanned page. A quarter of the bytes of the four-byte formats,
-    /// so a quarter of the upload on every draw, which is the point for a large image
+    /// so a quarter of the upload for every new frame, which is the point for a large image
     /// whose levels change interactively.
     /// </summary>
     Gray8,
@@ -97,18 +97,19 @@ public readonly record struct PixelFrame(
 /// element is removed while a frame is on screen — and its <see cref="Release"/> must
 /// then still be safe to call; it must not free the borrowed buffer before that call.</para>
 ///
-/// <para><b>Cost.</b> The renderer wraps the borrowed bytes as an image for the one
-/// frame and lets the wrapper go at release, so every draw uploads the frame again.
-/// That is what a playing video needs anyway; a paused one repainting behind a
-/// tooltip pays about a millisecond per 1080p frame. Content that changes rarely
-/// belongs in a static image source.</para>
+/// <para><b>Cost.</b> A GPU renderer uploads a frame once per <see cref="Version"/>
+/// and draws that texture until the version changes, borrowing nothing meanwhile, so
+/// a still picture repainting behind a moving pointer or a tooltip uploads nothing.
+/// The software renderer reads the borrowed bytes in place on every draw, which is
+/// no upload at all.</para>
 /// </remarks>
 public interface IPixelImageSource : IImageSource
 {
     /// <summary>
-    /// Incremented by the producer on every new frame, never reset. The renderer does
-    /// not need it (it re-reads on every draw); it is recorded in the headless render
-    /// log so a test can assert that a given frame was painted.
+    /// Incremented by the producer on every new frame, never reset. A GPU renderer
+    /// keeps the frame it uploaded until this changes, so a producer must not change
+    /// published pixels without incrementing it. It is also recorded in the headless
+    /// render log so a test can assert that a given frame was painted.
     /// </summary>
     long Version { get; }
 

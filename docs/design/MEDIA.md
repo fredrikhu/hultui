@@ -74,6 +74,8 @@ forces alpha to one, and the raster test checks the destination alpha.
 - `SkiaRenderContext.DrawImage` grows a second branch: when the source is an
   `IPixelImageSource`, wrap the acquired slot with `SKImage.FromPixels` (no copy)
   and draw; Skia uploads to the GPU on the GL backend and blits on the raster one.
+  Since 2026-11-20 a GPU surface uploads it once per `Version` and draws that texture
+  until the version changes, so a redraw with no new frame uploads nothing.
 - `RecordingRenderContext` records `Version` so a headless test can assert that
   frame *n* was painted.
 - `ImageElement` already re-measures when `Source` changes and `Fit` handles

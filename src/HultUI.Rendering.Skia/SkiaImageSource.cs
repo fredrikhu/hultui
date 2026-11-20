@@ -69,7 +69,7 @@ public sealed class SkiaImageSource : IImageSource, IDisposable
     /// A copy of raw pixels — four bytes each, or one for <see cref="PixelFormat.Gray8"/>: content
     /// made in memory rather than decoded from a file, such as a terminal's pictures or a
     /// thumbnail of a monochrome image. Drawn as a still image, uploaded once (an
-    /// <see cref="IPixelImageSource"/> is uploaded again on every draw, for content that changes).
+    /// <see cref="IPixelImageSource"/> is uploaded again for every new frame, for content that changes).
     /// </summary>
     /// <param name="pixels">The pixels, top row first.</param>
     /// <param name="width">Width in pixels.</param>
