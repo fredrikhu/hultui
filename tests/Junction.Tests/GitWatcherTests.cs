@@ -49,6 +49,27 @@ public class GitWatcherTests
         Assert.True(File.GetLastWriteTimeUtc(Path.Combine(repo.Path, ".git", "index")) > index, "status did not write the index");
     }
 
+    /// <summary>A ref made in a folder that was not there (<c>git branch feature/x</c> with no
+    /// feature/ yet, a fetch's first slashed branch, a tag in a folder of its own). On Linux the
+    /// watch on a new folder starts only once the watcher has heard the folder made, and git has
+    /// written the ref in it by then, so the ref was never heard and Junction's branches kept what
+    /// they had (plan 17 round 17: <c>JunctionAppHostTests.TheBranchesViewShowsABranchCreatedOnDisk</c>
+    /// failed on Fedora). The folder made is the ref moving. Windows hears the ref itself.</summary>
+    [Fact]
+    public void ARefMadeInANewFolder_IsToldAsARefMoving()
+    {
+        using var repo = TempRepo.CreateWithInitialCommit();
+        using var session = HeadlessSession.Create(400, 300);
+        var seen = new List<bool>();
+        using var watcher = new GitWatcher(repo.Path, refs => seen.Add(refs), debounceMs: 100);
+        var after = Observer(session, seen);
+
+        Assert.Equal([true], after(() => repo.Git("branch", "feature/delta"), false));
+        Assert.Equal([true], after(() => repo.Git("branch", "user/a/epsilon"), false));
+        Assert.Equal([true], after(() => repo.Git("tag", "release/v1"), false));
+        Assert.Equal([true], after(() => repo.Git("branch", "-D", "feature/delta"), false));
+    }
+
     /// <summary>A reftable repository keeps every ref, HEAD's branch included, in .git/reftable:
     /// HEAD and refs/heads are stubs that never change. A branch made, a checkout and a reset
     /// reached the watcher only through the working-tree files they changed, if any, and were
