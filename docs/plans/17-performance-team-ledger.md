@@ -5,8 +5,9 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 17
-- **Phase:** build — round 17, step 11 next (the last; steps 9 and 10 stay queued for round 18's survey)
-  (session 35903ed7). The survey is merged (reports `17-reports/r17-*`, the
+- **Phase:** build — round 17's full suite (session 35903ed7): the build order is done (steps 9 and 10 stay queued for
+  round 18's survey; step 11 stopped before any change and waits for question 72b). `fullsuite-r17.sh` runs the Windows
+  solution, Fedora (the slnf and the four app projects in private D-Bus sessions) and docfx; then Phase `release`. The survey is merged (reports `17-reports/r17-*`, the
   build order below, questions 69–72 asked and answered). Each step runs one agent in this worktree with a brief `brief-r17b<N>.md`
   in session 35903ed7's scratchpad, step-ab from the commit before the step. Step 1 (a) fixes the suite row that makes
   every full suite run exit 1 (step-ab refuses such a run), so it lands before anything else is measured. Questions 69
@@ -217,6 +218,11 @@ steps come from a Win32 timer callback on the UI thread (`dragrelT`).
    expert 8's real window 32.9 KB). Never pair a file with itself: no ring there, F3 does what it does with no partner.
    First check that F3 with no partner opens the file as usual (if it does not, stop and report); show the ring before
    and after in headless frames. Small; app; no API.
+   **Stopped before any change** (r17b11, 2026-11-20): F3 is "Compare files (diff)" (the viewer is Shift+F3); with no
+   partner `DiffPartner` (CommanderApp.Diff.cs:254) falls back to `<otherDir>\<name>` and the diff opens in its Missing
+   state ("Right file missing", a "Copy left → right" button; `DiffViewTests.WithNothingToPairAgainstTheMissing…`). In
+   the self-pair layout that fallback is the cursor's own file, so F3 shows "Files are identical"; the no-partner path
+   would call an existing file "not found" and offer to copy it into its own folder. → question 72b.
 
 Steps 9 and 10 (measure-first leads) were not taken in round 17: the weekly usage budget was at 81 % after step 8,
 kept for step 11, the full suite and the release. They stay queued for round 18's survey to re-rank.
@@ -332,6 +338,10 @@ Re-ranked by the next survey.
 - **window-setroot-component-not-mounted** (6, lead; r17b6) — `Window.SetRoot(component.Mount())` never mounts the
   component, so its `OnMount` never runs (step 6's probe hit it; a box around it works). A framework gap or a documented
   rule; for the next survey.
+- **vesper-file-not-its-own-partner** (6; **(user)** question 72b; round 17 step 11 stopped) — with both panes on one
+  folder and the other cursor on ".." or a folder, F3 ("Compare files") pairs the cursor's file with itself ("Files are
+  identical"), rings it and moves the ring with every key, so each key builds the window (29.5 → 2.2 KB a key once
+  fixed). Built when the user picks a way in question 72b.
 - **text-wrap-ranges-per-width** (5; r17-5 Candidate; after step 1) — keep up to 4 wrap ranges a paragraph instead of 1,
   so a label laid out at several widths a frame keeps one range per width: before step 1, Junction C# unified 72.0 →
   46.0 KB a step (−36 %), split ledger 99.1 → 52.9 (−47 %), second drag 85.1 → 38.3; 0 of 4,857,450 drag layouts
@@ -967,6 +977,13 @@ Round 17 questions (from the survey, 2026-11-19). Recommendations in brackets.
     real window 32.9 KB). Comparing a file with itself shows no difference. (a) Keep it so. (b) Never pair a file with
     itself: no ring there, and F3 does what it does with no partner. [(b), if F3 with no partner opens the file as
     usual; the build agent checks that first and shows the before/after ring.] → **(b)** (2026-11-19, the user; step 11).
+72b. **The same, now that F3 is known** (step 11 stopped, 2026-11-20): F3 is "Compare files", and with no partner it
+    opens the diff as "Right file missing" with a "Copy left → right" button, so (b)'s condition does not hold; in the
+    self-pair layout F3 today shows "Files are identical". Which instead? (1) Drop only the ring there (F3 keeps showing
+    "Files are identical"; the ring then no longer always marks what F3 opens). (2) F3 does nothing there, as on a
+    folder, and nothing is ringed (the rule stays "a ring marks what F3 compares"). (3) F3 opens the viewer there (new
+    behaviour). (4) Keep it as it is. Each of (1)–(3) also removes the per-key build (29.5 → 2.2 KB a key).
+    [(2): comparing a file with itself is never useful, and it keeps the ring's meaning.]
 
 Reminder (expert 8): Aperture signed in to jellyfin.home as device "aperture-survey" in earlier rounds, as "aperture-r13" in round 13 (and twice in round 15), and once in
 round 12 as "aperture-r12" (again in round 15); the user should remove those devices and revoke the API key when the work is done.
@@ -1226,3 +1243,8 @@ From 2026-11-18 (round 16's survey); earlier entries are in the archive ([to 202
   it hears it made and the refs watcher dropped folder events; it now asks for them. Junction.Tests 1,183 of 1,183 on
   Fedora and Windows. For PERFORMANCE.md (testing): a test that waits on the file watcher can pass on Windows and race
   on Linux; run a Fedora failure alone three times at the last commit known to pass before bisecting. Next: step 11.
+- 2026-11-20: round 17 step 11 stopped before any change, as its brief said: F3 is "Compare files", and with no partner
+  it opens the diff as "Right file missing" with a copy button, not the file, so question 72's (b) cannot be built as
+  asked. Question 72b put to the user with three ways (drop only the ring; F3 does nothing there; F3 opens the viewer)
+  [(2)]; step 11 waits (Waiting vesper-file-not-its-own-partner). Round 17's build order is done (8 steps landed, the
+  watcher fix, steps 9–10 queued for round 18). Phase → the full suite.
