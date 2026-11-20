@@ -85,9 +85,13 @@ element, call `MarkStyleDirty()`.
   cheap to ask again at a new width while the text keeps its lines: a wrapped layout is kept for
   every width that breaks it into the same lines, so a list that measures every row's height at
   each step of a resize lays out only the rows whose lines change (Vesper Commander's reader over a
-  602,000-character file: 2.2 MB to 44 KB a 1 px step). That holds for plain text clipped; text with
-  bold, italic or resized spans, text that can need bidirectional layout (right-to-left scripts,
-  emoji, combining marks) and `TextOverflow.Ellipsis` are laid out again at each width.
+  602,000-character file: 2.2 MB to 44 KB a 1 px step). It makes no layout either: plain text is
+  broken into lines and their sizes added up, and only the size and its range of widths are kept, so
+  measuring the rows a list does not show allocates nothing (Junction's wrapped diff of 200 long
+  lines: 63.6 to 21.7 KB a 6 px step); a row that is drawn is laid out when it is. That holds for
+  plain text clipped; text with bold, italic or resized spans, text that can need bidirectional
+  layout (right-to-left scripts, emoji, combining marks) and `TextOverflow.Ellipsis` are laid out
+  again at each width.
 - **Glyph coverage.** `HasGlyph(style, codePoint)` says whether the face itself has a glyph, not a
   fallback font. A character grid draws a missing one on its own, since a fallback glyph's advance
   need not be the cell's.

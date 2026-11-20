@@ -58,7 +58,10 @@ public static class TextMeasure
         IReadOnlyList<TextSpan>? spans = null)
     {
         if (Context is null || maxWidth <= 0) return Size.Zero;
-        return Context.MeasureText(text ?? "", style, maxWidth, null, TextOverflow.Clip, spans);
+        // A context that can answer the size without the layout does (IWrappedSizeContext).
+        return Context is IWrappedSizeContext sizes
+            ? sizes.MeasureWrapped(text ?? "", style, maxWidth, spans)
+            : Context.MeasureText(text ?? "", style, maxWidth, null, TextOverflow.Clip, spans);
     }
 
     /// <summary>
