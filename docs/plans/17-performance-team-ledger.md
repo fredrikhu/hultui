@@ -5,17 +5,15 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 17
-- **Phase:** build — round 17's full suite (session 35903ed7): the build order is done (steps 9 and 10 stay queued for
-  round 18's survey; step 11 stopped before any change and waits for question 72b). `fullsuite-r17.sh` runs the Windows
-  solution, Fedora (the slnf and the four app projects in private D-Bus sessions) and docfx; then Phase `release`. The survey is merged (reports `17-reports/r17-*`, the
-  build order below, questions 69–72 asked and answered). Each step runs one agent in this worktree with a brief `brief-r17b<N>.md`
-  in session 35903ed7's scratchpad, step-ab from the commit before the step. Step 1 (a) fixes the suite row that makes
-  every full suite run exit 1 (step-ab refuses such a run), so it lands before anything else is measured. Questions 69
-  (step 6 (b)) and 70 (step 4 (a)) wait for the user; the rest of those steps goes ahead. To resume in a fresh context,
-  run in this worktree: `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md,
-  with state in docs/plans/17-performance-team-ledger.md. Read both once per session (afterwards only the ledger's Phase
-  and the part the step needs), do the step the ledger's Phase calls for, record it in the ledger, and commit.` (agent
-  ids in `r17-agents.txt` beside the briefs). Older rounds are in [the archive](17-performance-team-ledger-archive.md)
+- **Phase:** release — round 17 (session 35903ed7). The full suite passed at 45cbde7b (main merged in); merge into main
+  and push per memory `merge-race-shared-checkout`, wait for CI, record the merge and CI here, then Round → 18, Phase
+  survey in a fresh context. Open for the user: question 72b (step 11 waits). Steps 9 and 10 stay queued for round 18's
+  survey. To resume in a fresh context, run in this worktree: `/loop Run the next step of the performance team: follow
+  docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md. Read both once per session
+  (afterwards only the ledger's Phase and the part the step needs), do the step the ledger's Phase calls for, record it
+  in the ledger, and commit.` Round 17's files are in session 35903ed7's scratchpad (briefs `brief-r17*.md`, agent ids
+  `r17-agents.txt`, probes `r17-<area>\` and `r17b<N>\`, `archive_r17.py`, `merge_r17.py`, `land_r17.py`,
+  `fullsuite-r17.sh` with `fedora-r17.sh`). Older rounds are in [the archive](17-performance-team-ledger-archive.md)
   (search it, don't read it whole). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a
   pre-push hook refuses pushes built on the old history).
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`)
@@ -1248,3 +1246,10 @@ From 2026-11-18 (round 16's survey); earlier entries are in the archive ([to 202
   asked. Question 72b put to the user with three ways (drop only the ring; F3 does nothing there; F3 opens the viewer)
   [(2)]; step 11 waits (Waiting vesper-file-not-its-own-partner). Round 17's build order is done (8 steps landed, the
   watcher fix, steps 9–10 queued for round 18). Phase → the full suite.
+- 2026-11-20: main had moved by 18 commits (plan 19: the digit table with punctuation, right-to-left runs kept whole,
+  the pipeline's shaper call counts; Junction's Changes load under index moves; WebView middle-click autoscroll); merged
+  into the branch as 45cbde7b, no conflicts (TextPipeline.cs, GitWatcher.cs, JunctionApp.cs, DECISIONS.md auto-merged),
+  the merged tree built. Round 17's full suite at 45cbde7b, 02:10–02:28: Windows `HultUI.slnx` 30 projects, 0 failures
+  (Junction 1,188 in 10 m 5 s, Core 5,212, Headless 1,822, Text 324, Skia 471); Fedora the slnf (22 projects) and
+  Junction 1,188, Meridian 680, Aperture 370, Reel 53 each in a private D-Bus session, 0 failures; docfx 0 warnings, 0
+  errors. Phase → release.
