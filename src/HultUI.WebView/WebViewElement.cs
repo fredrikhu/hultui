@@ -82,7 +82,7 @@ public partial class WebViewElement : Element, IAccessibleContentSource, IAutoSc
     internal bool IsListening => _listening;
 
     /// <summary>Engines that take forwarded keys need the window's text input (and IME) while focused.</summary>
-    internal override bool WantsTextInput => ForwardsKeys;
+    protected internal override bool WantsTextInput => ForwardsKeys;
 
     /// <summary>The page's own accessibility tree, where the engine keeps one.</summary>
     internal override NativeAccessibleContent NativeAccessibleContent => _controller?.View.AccessibleContent ?? default;
