@@ -20,8 +20,8 @@ file after every step and commits it with the step's work. Full survey reports a
   with punctuation 781a857f, the cold-label rows ba15d841, right-to-left runs kept whole 78a69ee5, shaper call counts
   52acb2f2; Junction's Changes load under index moves 3490ba67; WebView middle-click autoscroll e66ead9f), and anything
   main gains after. The Jellyfin account to browse as is in memory `aperture-jellyfin` (never in committed docs). Read
-  the desk at the start and before every hold (the 4K came and went during round 17). Open for the user: question 72b
-  (step 11 waits). To resume in a fresh context, run in this worktree: `/loop Run the next step of the performance team:
+  the desk at the start and before every hold (the 4K came and went during round 17). Question 72b answered (2): build step 11 as a decided item
+  at the head of round 18's build order. To resume in a fresh context, run in this worktree: `/loop Run the next step of the performance team:
   follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md. Read both once per
   session (afterwards only the ledger's Phase and the part the step needs), do the step the ledger's Phase calls for,
   record it in the ledger, and commit.` Before resuming, `git fetch` and merge main if it moved; build steps use
@@ -348,10 +348,12 @@ Re-ranked by the next survey.
 - **window-setroot-component-not-mounted** (6, lead; r17b6) — `Window.SetRoot(component.Mount())` never mounts the
   component, so its `OnMount` never runs (step 6's probe hit it; a box around it works). A framework gap or a documented
   rule; for the next survey.
-- **vesper-file-not-its-own-partner** (6; **(user)** question 72b; round 17 step 11 stopped) — with both panes on one
+- **vesper-file-not-its-own-partner** (6; question 72b: (2), the user 2026-11-20; round 17 step 11 stopped; decided, at
+  the head of round 18's build order) — with both panes on one
   folder and the other cursor on ".." or a folder, F3 ("Compare files") pairs the cursor's file with itself ("Files are
   identical"), rings it and moves the ring with every key, so each key builds the window (29.5 → 2.2 KB a key once
-  fixed). Built when the user picks a way in question 72b.
+  fixed). The user chose (2): F3 does nothing there, as on a folder, and nothing is ringed; `PartnerStays`
+  (CommanderApp.cs:1517) and `DiffTargetPath` (the ring, Pane.cs:807/982) follow the same rule.
 - **text-wrap-ranges-per-width** (5; r17-5 Candidate; after step 1) — keep up to 4 wrap ranges a paragraph instead of 1,
   so a label laid out at several widths a frame keeps one range per width: before step 1, Junction C# unified 72.0 →
   46.0 KB a step (−36 %), split ledger 99.1 → 52.9 (−47 %), second drag 85.1 → 38.3; 0 of 4,857,450 drag layouts
@@ -993,7 +995,8 @@ Round 17 questions (from the survey, 2026-11-19). Recommendations in brackets.
     "Files are identical"; the ring then no longer always marks what F3 opens). (2) F3 does nothing there, as on a
     folder, and nothing is ringed (the rule stays "a ring marks what F3 compares"). (3) F3 opens the viewer there (new
     behaviour). (4) Keep it as it is. Each of (1)–(3) also removes the per-key build (29.5 → 2.2 KB a key).
-    [(2): comparing a file with itself is never useful, and it keeps the ring's meaning.]
+    [(2): comparing a file with itself is never useful, and it keeps the ring's meaning.] → **(2)** (2026-11-20, the
+    user: "b", the second way): F3 does nothing there, as on a folder, and nothing is ringed.
 
 Reminder (expert 8): Aperture signed in to jellyfin.home as device "aperture-survey" in earlier rounds, as "aperture-r13" in round 13 (and twice in round 15), and once in
 round 12 as "aperture-r12" (again in round 15); the user should remove those devices and revoke the API key when the work is done.
@@ -1274,3 +1277,6 @@ From 2026-11-18 (round 16's survey); earlier entries are in the archive ([to 202
   202.6 → 134.1 MB, big multi-hunk diffs coloured with 32–45 % fewer lines walked, first file visits −29…−35 %, view
   switches −27…−47 %, the player bar's first fade 12–32 → 0–2 MB of GPU memory. Usage 65 → 85 % of the week. Round → 18,
   Phase survey, in a fresh context after the weekly reset.
+- 2026-11-20: the user answered question 72b: (2), "b" — with both panes on one folder, F3 does nothing on a file whose
+  only partner is itself (as on a folder) and nothing is ringed. Step 11 goes at the head of round 18's build order as a
+  decided item (Waiting vesper-file-not-its-own-partner).
