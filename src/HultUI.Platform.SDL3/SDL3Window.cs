@@ -949,6 +949,19 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// moved, rotated or re-scaled; cleared by the platform as it re-lists the monitors.</summary>
     internal static bool DisplaysChanged { get; set; }
 
+    /// <summary>Set by <see cref="PollAllEvents"/> when SDL reported a change of the desktop's
+    /// theme; cleared by the platform as it raises <see cref="IDesktopSettingsSource.Changed"/>.</summary>
+    internal static bool DesktopSettingsChanged { get; set; }
+
+    /// <summary>SDL's reading of the desktop's light or dark preference (the portal's
+    /// <c>color-scheme</c> on Linux); NoPreference before video init and when SDL cannot tell.</summary>
+    internal static ColorScheme ToColorScheme(SDL_SystemTheme theme) => theme switch
+    {
+        SDL_SystemTheme.SDL_SYSTEM_THEME_DARK => ColorScheme.Dark,
+        SDL_SystemTheme.SDL_SYSTEM_THEME_LIGHT => ColorScheme.Light,
+        _ => ColorScheme.NoPreference,
+    };
+
     /// <summary>
     /// Polls all SDL events and routes them to the correct window.
     /// Input events are dispatched via each window's EventTranslator.
@@ -985,6 +998,11 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
                     // drained. Not routed to a window: a display event's id is a display's, and
                     // it sits where a window event keeps its window id.
                     DisplaysChanged = true;
+                    break;
+
+                case (uint)SDL_EventType.SDL_EVENT_SYSTEM_THEME_CHANGED:
+                    // Like a display change: the platform tells the app once the queue is drained.
+                    DesktopSettingsChanged = true;
                     break;
 
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_CLOSE_REQUESTED:

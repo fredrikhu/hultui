@@ -51,6 +51,12 @@ public sealed class HeadlessOptions
     public HeadlessWindowsFrame? WindowsFrame { get; set; }
 
     /// <summary>
+    /// The desktop's light or dark preference the session starts with; NoPreference by default.
+    /// <see cref="HeadlessSession.SetColorScheme"/> changes it.
+    /// </summary>
+    public Core.Platform.ColorScheme ColorScheme { get; set; }
+
+    /// <summary>
     /// Recording enabled with cross-platform deterministic text measurement:
     /// the configuration for snapshot baselines committed to a repo that CI
     /// runs on a different OS.

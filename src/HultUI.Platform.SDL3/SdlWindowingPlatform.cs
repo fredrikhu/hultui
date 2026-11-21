@@ -12,7 +12,7 @@ namespace HultUI.Platform.SDL3;
 /// The real-display windowing platform: SDL3 windows with GL-backed Skia
 /// surfaces, driven by SDL's event queue.
 /// </summary>
-public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform, IMonitorSource
+public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform, IMonitorSource, IDesktopSettingsSource
 {
     // The event type Wake pushes. SDL hands types out from a counter it never
     // rewinds, so this is registered once per process and shared by every
@@ -124,6 +124,11 @@ public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform, IMonitorSo
                 _monitors = null;
                 MonitorsChanged?.Invoke();
             }
+            if (SDL3Window.DesktopSettingsChanged)
+            {
+                SDL3Window.DesktopSettingsChanged = false;
+                Changed?.Invoke();
+            }
             return running;
         }
         finally
@@ -144,6 +149,17 @@ public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform, IMonitorSo
 
     /// <inheritdoc/>
     public event Action? MonitorsChanged;
+
+    /// <inheritdoc/>
+    /// <remarks>SDL reads it at video init and keeps it current (on Linux the XDG desktop
+    /// portal's <c>org.freedesktop.appearance</c> <c>color-scheme</c>).</remarks>
+    public ColorScheme ColorScheme => SDL3Window.ToColorScheme(SDL_GetSystemTheme());
+
+    /// <inheritdoc/>
+    /// <remarks>On Linux SDL reads the portal's change signal only as it pumps events, and
+    /// <see cref="WaitForEvents"/> waits on the display connection alone: an idle app is told with
+    /// the window's next event.</remarks>
+    public event Action? Changed;
 
     /// <summary>
     /// Idle-frame wait. A null event peeks without popping: whatever arrives stays

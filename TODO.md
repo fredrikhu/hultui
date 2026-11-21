@@ -1,6 +1,14 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **The desktop's light or dark preference** — `Application.DesktopColorScheme` (`ColorScheme`:
+  `NoPreference`, `Light`, `Dark`) reads it through SDL (on Linux the XDG desktop portal's
+  `org.freedesktop.appearance` `color-scheme`), and `Application.DesktopSettingsChanged` is raised
+  from the event pump when it changes; HultUI never switches `Application.Theme` itself. A platform
+  offers it by implementing `IDesktopSettingsSource`, as `IMonitorSource` offers monitors (the
+  WinForms host does not: `NoPreference`). Headless: `HeadlessOptions.ColorScheme` and
+  `HeadlessSession.SetColorScheme`. On Linux an idle app is told with its window's next event: SDL
+  pumps D-Bus only as it pumps events. See `docs/THEMES.md`.
 - **Virtual lists that flow into columns** — `VirtualListElement.Flow = ListFlow.Columns` (with
   `ColumnWidth`) lays items out in columns that scroll sideways, a file manager's Brief view:
   rows per column follow the height (less the horizontal bar's room when the columns overflow),

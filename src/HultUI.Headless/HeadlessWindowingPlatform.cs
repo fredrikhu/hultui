@@ -8,15 +8,18 @@ namespace HultUI.Headless;
 /// The display-free windowing platform: creates <see cref="HeadlessPlatformWindow"/>s
 /// and supplies the session's virtual clock. There is no native event queue —
 /// input arrives only through explicit injection, so <see cref="PumpEvents"/>
-/// never requests quit; the one thing it delivers is a change to the simulated
-/// monitors (<see cref="SetMonitors"/>), as a real platform delivers a hot-plug.
+/// never requests quit; what it delivers is a change to the simulated monitors
+/// (<see cref="SetMonitors"/>), as a real platform delivers a hot-plug, and to the
+/// desktop's colour scheme (<see cref="SetColorScheme"/>).
 /// </summary>
-internal sealed class HeadlessWindowingPlatform : IWindowingPlatform, IMonitorSource, ISideBySidePlatform
+internal sealed class HeadlessWindowingPlatform : IWindowingPlatform, IMonitorSource, IDesktopSettingsSource, ISideBySidePlatform
 {
     private readonly HeadlessTimeProvider _time;
     private readonly List<HeadlessPlatformWindow> _windows = [];
     private IReadOnlyList<MonitorInfo> _monitors = [];
     private bool _monitorsChangedPending;
+    private ColorScheme _colorScheme;
+    private bool _desktopSettingsChangedPending;
 
     // One set of text services for every window, as on the real platforms: built with the
     // first window that needs it, given back when the session ends. Pinned windows measure in
@@ -40,6 +43,7 @@ internal sealed class HeadlessWindowingPlatform : IWindowingPlatform, IMonitorSo
         {
             _options = value;
             _monitors = value?.Monitors is { Count: > 0 } m ? [.. m] : [];
+            _colorScheme = value?.ColorScheme ?? ColorScheme.NoPreference;
         }
     }
     private HeadlessOptions? _options;
@@ -51,6 +55,21 @@ internal sealed class HeadlessWindowingPlatform : IWindowingPlatform, IMonitorSo
 
     /// <inheritdoc/>
     public event Action? MonitorsChanged;
+
+    /// <inheritdoc/>
+    public ColorScheme ColorScheme => _colorScheme;
+
+    /// <inheritdoc/>
+    public event Action? Changed;
+
+    /// <summary>Changes the simulated desktop's light or dark preference, announced from the next
+    /// <see cref="PumpEvents"/> as SDL's theme event is; the value it already has announces nothing.</summary>
+    internal void SetColorScheme(ColorScheme scheme)
+    {
+        if (scheme == _colorScheme) return;
+        _colorScheme = scheme;
+        _desktopSettingsChangedPending = true;
+    }
 
     public IPlatformWindow CreateWindow(string title, int width, int height, WindowStyle style)
     {
@@ -86,7 +105,7 @@ internal sealed class HeadlessWindowingPlatform : IWindowingPlatform, IMonitorSo
     internal bool QuitAsked { get; set; }
 
     /// <summary>Takes the queued wake, as a real platform's pump takes its wake event, and
-    /// announces a pending change of the simulated monitors; requests quit only when a test asked
+    /// announces a pending change of the simulated monitors or colour scheme; requests quit only when a test asked
     /// (<see cref="QuitAsked"/>).</summary>
     public bool PumpEvents(Action<IPlatformWindow>? onWindowClose)
     {
@@ -109,6 +128,11 @@ internal sealed class HeadlessWindowingPlatform : IWindowingPlatform, IMonitorSo
         {
             _monitorsChangedPending = false;
             MonitorsChanged?.Invoke();
+        }
+        if (_desktopSettingsChangedPending)
+        {
+            _desktopSettingsChangedPending = false;
+            Changed?.Invoke();
         }
         return true;
     }
