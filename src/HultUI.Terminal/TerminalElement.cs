@@ -82,7 +82,7 @@ public sealed partial class TerminalElement : Element
         new TerminalElement { Controller = controller }.WithOrigin(file, line);
 
     /// <summary>Typing needs the window's text input and its input method while focused.</summary>
-    internal override bool WantsTextInput => true;
+    protected internal override bool WantsTextInput => true;
 
     internal bool IsListening => _listening;
 

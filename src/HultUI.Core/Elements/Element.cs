@@ -623,9 +623,13 @@ public abstract class Element
     /// Whether the platform's text input (the IME, and on SDL the text-input events at
     /// all) should be armed while this element has focus. Text boxes say yes; so does any
     /// other element that types, such as a number field. Without it a real window sends
-    /// key downs only, and typed characters never arrive.
+    /// key downs only, and typed characters never arrive. A control outside the framework that
+    /// takes the keyboard says yes too, a remote desktop view for one: on Windows a key's
+    /// <see cref="Events.KeyDownEvent.Text"/> is known only while text input is armed, and
+    /// with it AltGr, in <see cref="Events.KeyDownEvent.ModifierKeys"/> and
+    /// <see cref="Events.KeyDownEvent.LayoutKey"/>.
     /// </summary>
-    internal virtual bool WantsTextInput => false;
+    protected internal virtual bool WantsTextInput => false;
 
     /// <summary>
     /// Whether a key typed while this element has the keyboard types text into it, so a letter is
