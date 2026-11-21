@@ -63,7 +63,8 @@ public class GridCursorTests
 
             Assert.Equal(builds + 1, app.Builds);
             Assert.Equal(cards, Cards(session));
-            Assert.Equal(["card-m002"], cards.Where(c => c.AccessibleDescription is null).Select(c => c.AutomationId));
+            // And the first card, made as the grid's Tab stop before the cursor was anywhere.
+            Assert.Equal(["card-m000", "card-m002"], cards.Where(c => c.AccessibleDescription is null).Select(c => c.AutomationId));
             AssertRingAndKeyboardOnTheCursor(session, app);
 
             Keys(session, KeyCode.Right);

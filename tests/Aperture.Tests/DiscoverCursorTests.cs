@@ -65,7 +65,8 @@ public class DiscoverCursorTests
 
             Assert.Equal(builds + 1, app.Builds);
             Assert.Equal(cards, Cards(session));
-            Assert.Equal([cards[2].AutomationId], cards.Where(c => c.AccessibleDescription is null).Select(c => c.AutomationId));
+            // And the first card, made as the shelves' Tab stop before the cursor was anywhere.
+            Assert.Equal([cards[0].AutomationId, cards[2].AutomationId], cards.Where(c => c.AccessibleDescription is null).Select(c => c.AutomationId));
             AssertRingAndKeyboardOnTheCursor(session, app);
 
             // The ring moves on the live cards again after the build.

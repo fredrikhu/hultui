@@ -1786,6 +1786,10 @@ public abstract class Element
         else _inherited?.CopyFrom(InheritedStyle.Default);
         IsFocusable = source.IsFocusable;
         TabIndex = source.TabIndex;
+        // With the two above: an element patched from a build that asks for the ring kept the
+        // one it was made with. Aperture's first library button, patched from the rail's spacer
+        // once the libraries loaded, took Tab with no ring (2026-11-21).
+        ShowsFocusVisual = source.ShowsFocusVisual;
         Draggable = source.Draggable;
         IsWindowDragRegion = source.IsWindowDragRegion;
         IsWindowMaximizeButton = source.IsWindowMaximizeButton;

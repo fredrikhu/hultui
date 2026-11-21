@@ -18,7 +18,7 @@ namespace Aperture.Tests;
 /// pressing Play tells the server what Jellyfin's own clients tell it, and that stopping
 /// puts the resume point where the viewer left off.
 /// </summary>
-public class ApertureAppHostTests
+public partial class ApertureAppHostTests
 {
     private static FakeMediaLibrary Library()
     {

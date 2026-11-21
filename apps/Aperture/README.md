@@ -37,7 +37,32 @@ Connect  ──►  Home ──► Library grid ──► Item page ──► Pl
   Paging follows the viewport: the row that scrolls in asks for the page that
   would hold it.
 - **The player** is a sheet over whatever you were looking at, so stopping a film
-  puts you back where you started it with the navigation stack intact.
+  puts you back where you started it with the history intact.
+
+## History and the keyboard
+
+Every page you open goes into a history, kept the way a browser keeps one: **Back** is
+Alt+←, Escape, Backspace or the mouse's back button, and **Forward** is Alt+→ or the
+forward button. Opening a page drops whatever was ahead of you; Home is a page like any
+other, so Back from it returns to where you were. Each page remembers where the cursor was,
+so Back lands on the card you opened, and a page opened again from the rail starts where
+you left it. The side buttons do nothing over a playing film.
+
+Everything is reachable without a pointer:
+
+| Keys | What they do |
+|---|---|
+| Tab, Shift+Tab | the title bar's account button, the rail, then the page's controls |
+| Arrows, Home, End, Page Up/Down | walk the cards on a page; cards the arrows walk are one Tab stop between them |
+| Enter | open the card under the cursor, or press the focused button |
+| Space | play the card under the cursor (a series opens instead), or press the focused button |
+| Menu key, Shift+F10 | the card's menu |
+| 1, 2–9, 0, / | Home, the libraries in rail order, Favourites, Search |
+| F5 | refresh |
+
+An item's page hands its first verb (Play, Resume, Request) the keyboard as it opens, so
+Enter on a card and Enter again plays it. Over a film the player's own keys apply, with
+Escape, Space, F, C, Q and Page Up/Down as listed in `Shortcuts.cs`.
 
 ## Signing in
 

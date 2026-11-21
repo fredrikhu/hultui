@@ -402,4 +402,25 @@ public class FocusTraversalTests
         fm.ClearFocus();
         Assert.False(d.IsFocused);
     }
+
+    /// <summary>
+    /// Reconciliation carries an element's focus settings from the incoming build onto the element it
+    /// keeps — the ring with them. It copied IsFocusable and TabIndex but not ShowsFocusVisual, so a
+    /// box patched from a build that asked for the ring took Tab with none: Aperture's first library
+    /// button, patched from the rail's spacer once the libraries loaded.
+    /// </summary>
+    [Fact]
+    public void PatchFrom_CarriesTheFocusRingWithTheFocusSettings()
+    {
+        var live = new BoxElement();
+        var incoming = new BoxElement { IsFocusable = true, TabIndex = 2, ShowsFocusVisual = true };
+
+        live.PatchFrom(incoming);
+        Assert.True(live.IsFocusable);
+        Assert.Equal(2, live.TabIndex);
+        Assert.True(live.ShowsFocusVisual);
+
+        live.PatchFrom(new BoxElement());
+        Assert.False(live.ShowsFocusVisual);
+    }
 }

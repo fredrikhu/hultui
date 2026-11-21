@@ -2,6 +2,7 @@ using Aperture.Theme;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
@@ -105,11 +106,51 @@ public static class Ui
             .CornerRadius(Halide.Radius1)
             .Cursor(CursorType.Pointer)
             .Tooltip(tooltip)
-            .AccessibleRole(AccessibilityRole.Button).AccessibleName(tooltip);
+            .AccessibleRole(AccessibilityRole.Button).AccessibleName(tooltip)
+            .Pressable();
         if (automationId != null) b.AutomationId(automationId);
         b.AddChild(Icon(glyph, size, color ?? Halide.TextDim));
         b.OnClick(_ => onClick());
         return b.HoverBg(Halide.Raised);
+    }
+
+    /// <summary>
+    /// Makes a box that answers a click answer the keyboard as a button does: a Tab stop that
+    /// wears the focus ring, which Enter and Space press, and whose menu, when it has one, the
+    /// menu key or Shift+F10 opens. Without it a box with a click handler is the mouse's alone —
+    /// only the framework's <see cref="ButtonElement"/> presses on a key — and the rail, the
+    /// filter chips and an item's toggles could not be reached from the keyboard at all.
+    /// </summary>
+    /// <remarks>The press is a click sent to the box itself, placed under its bottom-left corner,
+    /// so a chip whose click opens a menu at the click opens it under the chip.</remarks>
+    public static T Pressable<T>(this T el) where T : BoxElement
+    {
+        el.IsFocusable = true;
+        el.ShowsFocusVisual = true;
+        el.On(PressOnKey);
+        return el;
+    }
+
+    /// <summary>One handler for every pressable box, reading the box it is on from the event: a
+    /// handler that closed over the box would press the build's copy, not the one on screen.</summary>
+    private static readonly Action<KeyDownEvent> PressOnKey = OnPressKey;
+
+    private static void OnPressKey(KeyDownEvent e)
+    {
+        // Its own keys: one pressed on a button inside it is that button's.
+        if (e.Handled || !ReferenceEquals(e.Target, e.CurrentTarget) || e.CurrentTarget is not BoxElement box) return;
+        var held = e.Modifiers & (KeyModifiers.Ctrl | KeyModifiers.Alt | KeyModifiers.Super | KeyModifiers.Shift);
+        var bounds = box.WindowBorderBox;
+        var under = new Point(bounds.X, bounds.Y + bounds.Height);
+        if (held == 0 && e.Key is KeyCode.Enter or KeyCode.NumpadEnter or KeyCode.Space)
+            EventDispatcher.DispatchDirect(new ClickEvent { Position = under }, box);
+        else if (box.ContextMenuItems is not null && box.OverlayHost is HultUI.Window window
+            && (held == 0 && e.Key == KeyCode.Menu || held == KeyModifiers.Shift && e.Key == KeyCode.F10))
+            window.OpenContextMenu(box, under);
+        else
+            return;
+        e.Handled = true;
+        e.StopPropagation = true;
     }
 
     /// <summary>"APERTURE" at the letterform's tracking — the title bar and the front door.</summary>

@@ -18,7 +18,7 @@ namespace Aperture;
 /// <summary>Where the window is: signing in, or browsing a signed-in server.</summary>
 public enum ApertureStage { Connect, Browsing }
 
-/// <summary>A place in the app. The stack of these is the back button.</summary>
+/// <summary>A place in the app. The history of these is Back and Forward.</summary>
 /// <param name="Id">The library or item the view is about; null for Home and Search. For a
 /// discovery title it is the title's key, <c>movie:603</c> or <c>tv:1399</c>.</param>
 public sealed record Route(ApertureView View, string? Id = null, string? Title = null);
@@ -83,9 +83,6 @@ public sealed partial class ApertureApp : Component, IDisposable
     /// path — every async load lands through here. Same arrangement as the other apps.</summary>
     private readonly Signal<int> _revision = new(0);
 
-    /// <summary>Where we are. Never empty while browsing: the bottom is always Home.</summary>
-    private readonly List<Route> _stack = [new Route(ApertureView.Home)];
-
     private ApertureStage _stage = ApertureStage.Connect;
 
     public ApertureApp(Application app, Window window, ApertureSettings? settings = null,
@@ -133,6 +130,8 @@ public sealed partial class ApertureApp : Component, IDisposable
 
         // Global keys land on the host when nothing is focused.
         Mount().OnPassive<KeyDownEvent>(OnRootKeyDown);
+        // The mouse's back and forward buttons, anywhere in the window (ApertureApp.History.cs).
+        Mount().OnPassive<PointerDownEvent>(OnRootPointerDown);
     }
 
     /// <summary>The root hears every key passively and asks for the frame an ordinary handler's key
@@ -150,8 +149,6 @@ public sealed partial class ApertureApp : Component, IDisposable
     internal PosterCache Posters => _posters;
     internal ApertureSettings Settings => _settings;
     internal ApertureStage Stage => _stage;
-    internal Route Current => _stack[^1];
-    internal IReadOnlyList<Route> Stack => _stack;
 
     private void Rerender()
     {
@@ -186,6 +183,7 @@ public sealed partial class ApertureApp : Component, IDisposable
     {
         FocusCursorCard();
         FocusPendingSearchField();
+        FocusArrival();
         LetGoOfLeftCursorCard();
     }
 
@@ -250,6 +248,7 @@ public sealed partial class ApertureApp : Component, IDisposable
         var row = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
         row.AddChild(RailPart.Place().FlexShrink(0));
 
+        _cursorListSet = false;
         var view = Current.View switch
         {
             ApertureView.Library => BuildLibraryView(Current),
@@ -273,6 +272,9 @@ public sealed partial class ApertureApp : Component, IDisposable
             ApertureView.Issue => BuildIssueView(Current),
             _ => BuildHomeView(),
         };
+        // A view with no cards (an item's page, Settings) walks nothing: left as it was, the arrows
+        // walked the last view's cards out of sight, and Enter and Space opened and played them.
+        if (!_cursorListSet) SetCursorList("", [], 1);
         view.Key = "view-" + Current.View;
         row.AddChild(view.FlexGrow(1));
         return row;
@@ -311,7 +313,8 @@ public sealed partial class ApertureApp : Component, IDisposable
                 .Tooltip($"Signed in as {signedIn.User.Name} — settings")
                 .AccessibleRole(AccessibilityRole.Button)
                 .AccessibleName($"Signed in as {signedIn.User.Name}")
-                .AutomationId("titlebar-user");
+                .AutomationId("titlebar-user")
+                .Pressable();
             who.AddChild(Ui.Icon(Icons.User, 14f, Halide.TextMuted));
             who.AddChild(Ui.Line(signedIn.User.Name, 12f, Halide.TextDim));
             who.OnClick(_ => Navigate(new Route(ApertureView.Settings)));
@@ -335,7 +338,8 @@ public sealed partial class ApertureApp : Component, IDisposable
 
     private BoxElement WinButton(string glyph, string tooltip, Action onClick, Color hoverBg)
     {
-        // No pointer cursor — Windows caption buttons keep the arrow.
+        // No pointer cursor — Windows caption buttons keep the arrow. Nor a Tab stop, as a
+        // native window's are not: the system's keys (Alt+F4, Win+↑/↓) do what they do.
         var b = Flex.Row(gap: 0).Width(46).Height(Halide.TitleBarHeight)
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
             .Tooltip(tooltip)
@@ -440,7 +444,8 @@ public sealed partial class ApertureApp : Component, IDisposable
             .Tooltip(name)
             .AccessibleRole(AccessibilityRole.Button)
             .AccessibleName(name)
-            .AutomationId("rail-" + label.ToLowerInvariant().Replace(' ', '-'));
+            .AutomationId("rail-" + label.ToLowerInvariant().Replace(' ', '-'))
+            .Pressable();
         if (active) b.Background(Halide.Tint(Halide.Accent));
         b.AddChild(Ui.Icon(glyph, 18f, fg));
         if (key.Length > 0)
@@ -461,38 +466,6 @@ public sealed partial class ApertureApp : Component, IDisposable
         b.OnClick(_ => onClick());
         if (!active) b.HoverBg(Halide.Raised);
         return b;
-    }
-
-    // ── Navigation ───────────────────────────────────────────────────────
-
-    /// <summary>Pushes a view. Re-entering the view you are already on is a no-op rather
-    /// than a second stack entry, so Back never walks through repeats.</summary>
-    internal void Navigate(Route route)
-    {
-        if (Current == route) return;
-        // Search is a view whose whole content is one field: arriving there means typing.
-        if (route.View == ApertureView.Search) _pendingSearchFocus = true;
-        // Home is the floor: navigating to it clears rather than stacks.
-        if (route.View == ApertureView.Home) { GoHome(); return; }
-        _stack.Add(route);
-        Rerender();
-    }
-
-    internal void GoHome()
-    {
-        _stack.Clear();
-        _stack.Add(new Route(ApertureView.Home));
-        Rerender();
-    }
-
-    /// <summary>Back. At the bottom of the stack it does nothing — there is nowhere
-    /// further back than Home, and quitting on Escape is a surprise, not a shortcut.</summary>
-    internal bool GoBack()
-    {
-        if (_stack.Count <= 1) return false;
-        _stack.RemoveAt(_stack.Count - 1);
-        Rerender();
-        return true;
     }
 
     // ── Keys ─────────────────────────────────────────────────────────────
@@ -516,6 +489,9 @@ public sealed partial class ApertureApp : Component, IDisposable
                 }
                 return;
             }
+            // A key something over the film took: Escape that closed the chapter list, Space or
+            // Enter that pressed a button or a row. It stopped the film, or paused it, as well.
+            if (e.Handled) return;
             // Matched exactly (see Shortcuts): these answered to any modifier, so Ctrl+F made
             // the film full screen and Ctrl+Q opened the queue.
             switch (Shortcuts.Find(e, "Player")?.Id)
@@ -560,8 +536,9 @@ public sealed partial class ApertureApp : Component, IDisposable
         if (_stage == ApertureStage.Connect) return;
 
         // The shelves take the arrows, Enter and Space — but only when the keyboard is not
-        // in a text field, where they mean what they always mean.
-        if (e.Target is not TextInputElement && HandleCursorKey(e))
+        // in a text field, where they mean what they always mean, and only a key nothing else
+        // took: Space on a button pressed the button and played the card under the cursor too.
+        if (!e.Handled && !e.TargetTakesText && e.Target is not TextInputElement && HandleCursorKey(e))
         {
             e.Handled = true;
             return;
@@ -574,6 +551,9 @@ public sealed partial class ApertureApp : Component, IDisposable
                 // as well, out of Search or away from a half-written reply. Escape still goes back.
                 if (e.Key == KeyCode.Backspace && e.Target is TextInputElement or TextAreaElement) return;
                 if (GoBack()) e.Handled = true;
+                return;
+            case "browse.forward":
+                if (GoForward()) e.Handled = true;
                 return;
             case "browse.search":
                 Navigate(new Route(ApertureView.Search));

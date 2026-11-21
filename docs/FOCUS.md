@@ -88,7 +88,10 @@ Down drive its list that way. Two things say what the field did with one:
   and Super chords, function keys, Escape and Enter still do.
 - `Handled` is set on the keys a text field or area acted on: its caret's moves,
   Backspace, Delete, Enter in an area, Ctrl+A, the clipboard and undo. They bubble on; a
-  handler that would act on the same key checks `e.Handled` and leaves it.
+  handler that would act on the same key checks `e.Handled` and leaves it. A button sets it
+  on the Enter or Space that pressed it, and a check box or radio button on its Space (since
+  2026-11-21): before, Space on a focused button in Aperture pressed the button and the
+  root then played the card under the cursor as well.
 
 A text area leaves Enter with Ctrl or Alt to the app (a send, a submit): it types no
 newline, where it typed one before the app's handler sent the text with it.

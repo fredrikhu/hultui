@@ -148,7 +148,7 @@ public sealed partial class ApertureApp
             DiscoverItem item => ShownRequestArtwork(RequestImages.Poster, item.PosterPath, Halide.PosterWidth),
             _ => null,
         };
-        var state = new DiscoverCardState(entry, index, IsCursor(index), picture, _settings.Data.ShowCardTitles, Ui.DisplayScale);
+        var state = new DiscoverCardState(entry, index, MarkOf(index), picture, _settings.Data.ShowCardTitles, Ui.DisplayScale);
         string key = DiscoverCardKey(entry);
         if (cards.TryKeep(key, state, out var kept)) return kept;
         return cards.Made(key, state, entry switch
@@ -161,7 +161,7 @@ public sealed partial class ApertureApp
 
     /// <summary>What a card on a Discover shelf shows; see <see cref="DiscoverShelfCard"/>. The entry is a
     /// record, compared by value.</summary>
-    private readonly record struct DiscoverCardState(object Entry, int Index, bool Cursor,
+    private readonly record struct DiscoverCardState(object Entry, int Index, CardMark Mark,
         HultUI.Core.Rendering.IImageSource? Picture, bool Titles, float Scale);
 
     /// <summary>A card's key on its shelf, which holds one kind of card.</summary>
@@ -266,6 +266,8 @@ public sealed partial class ApertureApp
             TrackCursor(card, cursorIndex);
             if (IsCursor(cursorIndex)) card.Outline = CursorRing;
         }
+        // A card no list walks is a button of its own: Enter and Space open it.
+        else card.Pressable();
 
         if (picture is not null)
         {
@@ -393,6 +395,8 @@ public sealed partial class ApertureApp
             TrackCursor(card, cursorIndex);
             if (IsCursor(cursorIndex)) card.Outline = CursorRing;
         }
+        // A card no list walks is a button of its own: Enter and Space open it.
+        else card.Pressable();
 
         if (picture is not null)
         {
@@ -654,6 +658,8 @@ public sealed partial class ApertureApp
             TrackCursor(card, cursorIndex);
             if (IsCursor(cursorIndex)) card.Outline = CursorRing;
         }
+        // A card no list walks is a button of its own: Enter and Space open it.
+        else card.Pressable();
 
         var art = Box.New()
             .Width(width).Height(height).FlexShrink(0)
@@ -1032,10 +1038,12 @@ public sealed partial class ApertureApp
                 .FontSize(11.5f).TextColor(spent ? Halide.StatusWarn : Halide.TextMuted)
                 .AutomationId("discover-quota"));
             AddDecisions(row, detail, user);
+            MarkArrivalFocus(row);
             return column;
         }
 
         AddDecisions(row, detail, user);
+        MarkArrivalFocus(row);
         return row;
     }
 
@@ -1269,7 +1277,8 @@ public sealed partial class ApertureApp
             .Cursor(CursorType.Pointer)
             .AccessibleRole(AccessibilityRole.Button)
             .AccessibleName(person.Role is { Length: > 0 } r ? $"{person.Name} as {r}" : person.Name)
-            .AutomationId($"cast-{person.TmdbId}");
+            .AutomationId($"cast-{person.TmdbId}")
+            .Pressable();
         // A name opens everything they are in — the library's cast row does the same.
         card.OnClick(_ => Navigate(new Route(ApertureView.DiscoverPerson,
             person.TmdbId.ToString(System.Globalization.CultureInfo.InvariantCulture), person.Name)));
