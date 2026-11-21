@@ -66,7 +66,8 @@ public class HomeCursorTests
             Assert.Equal(builds + 1, app.Builds);
             Assert.Equal(cards, Cards(session));
             var walk = Walk(session);
-            Assert.Equal([walk[2].AutomationId], cards.Where(c => c.AccessibleDescription is null).Select(c => c.AutomationId));
+            // And the first card of the walk, made as the shelf's Tab stop before the cursor was anywhere.
+            Assert.Equal([walk[0].AutomationId, walk[2].AutomationId], cards.Where(c => c.AccessibleDescription is null).Select(c => c.AutomationId));
             Assert.True(walk[2].Outline.Width > 0);
             Assert.Same(walk[2], session.Window.Window.FocusedElement);
             Assert.Contains(cards, c => c.AutomationId == "resume-m003");

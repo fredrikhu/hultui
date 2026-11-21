@@ -134,7 +134,7 @@ public sealed partial class ApertureApp
         _stage = ApertureStage.Browsing;
         _connectFailure = null;
         _dataGeneration++;
-        GoHome();
+        ResetHistory();
 
         if (remember && !_settings.Remember(library.Server, library.User))
             Flash("Signed in, but this machine has nowhere to keep the token — you'll sign in again next launch.",

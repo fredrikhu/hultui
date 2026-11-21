@@ -177,7 +177,8 @@ public sealed partial class ApertureApp
                 .Cursor(CursorType.Pointer)
                 .AccessibleRole(AccessibilityRole.Button)
                 .AccessibleName(playing ? $"{item.Name}, playing now" : item.Name)
-                .AutomationId($"queue-{index}");
+                .AutomationId($"queue-{index}")
+                .Pressable();
             if (playing) row.Background(Halide.Tint(Halide.Accent));
 
             row.AddChild(Artwork(item, ImageKind.Primary, 84f, 48f, Halide.Radius1));

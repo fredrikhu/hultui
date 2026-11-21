@@ -161,6 +161,7 @@ public sealed partial class ApertureApp
             .AccessibleRole(AccessibilityRole.ComboBox)
             .AccessibleName($"{label}: {value}")
             .AutomationId(automationId)
+            .Pressable()
             .ContextMenu(menu);
         chip.AddChild(Ui.Line(label, 11.5f, Halide.TextMuted));
         chip.AddChild(Ui.Line(value, 11.5f, Halide.Text));

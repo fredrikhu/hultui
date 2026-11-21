@@ -323,6 +323,7 @@ public sealed partial class ApertureApp
             .AccessibleRole(HultUI.Core.Accessibility.AccessibilityRole.ComboBox)
             .AccessibleName($"Quality: {QualityLabel(current)}")
             .AutomationId("settings-quality")
+            .Pressable()
             .ContextMenu(QualityMenu)
             .Children(Ui.Line(QualityLabel(current), 11.5f, Halide.TextDim));
         chip.OnClick(e => _window.OpenContextMenu(e.CurrentTarget, e.Position));

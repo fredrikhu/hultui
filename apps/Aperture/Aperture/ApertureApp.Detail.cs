@@ -228,6 +228,7 @@ public sealed partial class ApertureApp
             item.IsFavorite ? "In favourites" : "Add to favourites",
             item.IsFavorite, () => ToggleFavorite(item), "detail-favorite"));
         if (MissingSeasonsButton(item) is { } missing) row.AddChild(missing);
+        MarkArrivalFocus(row);
         return row;
     }
 
@@ -256,7 +257,8 @@ public sealed partial class ApertureApp
             .Cursor(CursorType.Pointer)
             .Tooltip(label)
             .AccessibleRole(AccessibilityRole.Button).AccessibleName(label)
-            .AutomationId(automationId);
+            .AutomationId(automationId)
+            .Pressable();
         b.AddChild(Ui.Icon(glyph, 15f, on ? Halide.Accent : Halide.TextDim));
         b.OnClick(_ => onClick());
         return b;
@@ -303,7 +305,8 @@ public sealed partial class ApertureApp
             .Cursor(CursorType.Pointer)
             .AccessibleRole(AccessibilityRole.Button)
             .AccessibleName(AccessibleNameFor(episode))
-            .AutomationId("episode-" + episode.Id);
+            .AutomationId("episode-" + episode.Id)
+            .Pressable();
 
         row.AddChild(Artwork(episode, ImageKind.Primary, 160f, 90f, Halide.Radius1));
 
@@ -392,7 +395,8 @@ public sealed partial class ApertureApp
             .AccessibleRole(AccessibilityRole.Button)
             .AccessibleName(person.Role is { Length: > 0 } role ? $"{person.Name} as {role}" : person.Name)
             .AutomationId("person-" + person.Id)
-            .Tooltip(person.Role is { Length: > 0 } r ? $"{person.Name} — {r}" : person.Name);
+            .Tooltip(person.Role is { Length: > 0 } r ? $"{person.Name} — {r}" : person.Name)
+            .Pressable();
 
         // Round, so a face reads as a person and not as another poster on the shelf.
         var portrait = Box.New()

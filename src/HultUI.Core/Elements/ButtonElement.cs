@@ -155,6 +155,9 @@ public class ButtonElement : BoxElement
             {
                 // Synthesize a click event for keyboard activation
                 EventDispatcher.DispatchDirect(new ClickEvent { Position = Point.Zero }, this);
+                // Pressed: an app's root that acts on Enter or Space (a list's open, a player's
+                // play) leaves a key the button took, as it leaves one a text field took.
+                evt.Handled = true;
             }
         });
     }

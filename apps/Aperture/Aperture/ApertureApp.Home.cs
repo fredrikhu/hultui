@@ -54,14 +54,14 @@ public sealed partial class ApertureApp
         var picture = still
             ? ShownPicture(item, ImageKind.Backdrop, Halide.StillWidth, Halide.StillHeight)
             : ShownPicture(item, ImageKind.Primary, Halide.PosterWidth, MathF.Round(Halide.PosterWidth * 1.5f));
-        var state = new HomeCardState(item, index, IsCursor(index), picture, _settings.Data.ShowCardTitles, Ui.DisplayScale);
+        var state = new HomeCardState(item, index, MarkOf(index), picture, _settings.Data.ShowCardTitles, Ui.DisplayScale);
         if (cards.TryKeep(item.Id, state, out var kept)) return kept;
         return cards.Made(item.Id, state,
             still ? StillCard(item, index, picture) : PosterCard(item, Halide.PosterWidth, index, picture));
     }
 
     /// <summary>What a card on a shelf shows; see <see cref="HomeCard"/>.</summary>
-    private readonly record struct HomeCardState(MediaItem Item, int Index, bool Cursor,
+    private readonly record struct HomeCardState(MediaItem Item, int Index, CardMark Mark,
         HultUI.Core.Rendering.IImageSource? Picture, bool Titles, float Scale);
 
     /// <summary>Each shelf's cards, by the shelf's key: an item can be on two shelves. The watchlist's
