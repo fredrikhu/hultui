@@ -1,6 +1,15 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Large documents: a `long`-range scrollbar and canvas text lines** — `ScrollbarElement`
+  (`Scrollbar.Vertical`/`Horizontal`) stands beside what it scrolls over a range of up to
+  `long.MaxValue` units, a byte offset or a row index, and looks and behaves like ScrollView's
+  bars (drag once a frame, track click, wheel, keys when focusable, the `ScrollBar` role with a
+  range value on UIA and AT-SPI). `ICanvasDrawingContext.DrawTextLine` draws one unwrapped line
+  through the label pipeline (shaping, fallback, spans, backgrounds, decorations), and
+  `CanvasElement.TextSource` serves a custom-drawn document's text to screen readers. The bar's
+  paint is shared through `Scrollbar.PaintAt`; ScrollView's and TextArea's bars draw as before
+  (`ScrollbarRegressionTests`). ELEMENTS.md §7 and §29; three perf rows.
 - **Buttons and check boxes: & mnemonics** — `ButtonElement.UseMnemonic` and
   `CheckboxElement.UseMnemonic` make an `&` in the label mark its mnemonic (`&&` an ampersand):
   shown and read out as `DisplayLabel`, the letter as `Mnemonic`, underlined only while Alt is held

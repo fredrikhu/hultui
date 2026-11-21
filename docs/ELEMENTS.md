@@ -940,6 +940,7 @@ Canvas.New()       // Without draw callback (set Draw property later)
 | Property | Type |
 |---|---|
 | `Draw` | `Action<ICanvasDrawingContext>?` |
+| `TextSource` | `IAccessibleTextSource?`: the text a screen reader reads on the canvas (below) |
 
 **ICanvasDrawingContext methods:**
 
@@ -958,6 +959,7 @@ Canvas.New()       // Without draw callback (set Draw property later)
 | `DrawImage(source, dest, sourceRect, sampling)` | A rectangle of an image (in its own pixels) over `dest`, resampled per `ImageSampling` (`Nearest`, `Linear`, `Cubic`, or `Default`); frame sources are cut too |
 | `FillPolygon(points, fill)` / `DrawPolyline(points, color, width)` | Antialiased polygon fill and open polyline |
 | `PushClip(rect)` / `PushTransform(matrix)` / `Pop()` | Clip and transform until the matching `Pop`; the matrix is in canvas coordinates |
+| `DrawTextLine(text, origin, style, spans)` | One line of text, never wrapped, top-left at `origin`, through the label pipeline: shaping, font fallback, the style's face, colour spans, backgrounds and decorations; returns its advance width |
 
 A clip or transform the callback leaves open is undone when it returns (`PopAll`), so it never
 leaks into the elements painted after the canvas.
@@ -966,6 +968,26 @@ leaks into the elements painted after the canvas.
 the canvas's box meets the visible area of the scroll view or clipping box around it; a box of
 no size meets nothing. Work that must follow the canvas's size goes in `.OnLayoutChanged`
 (Events, above), not in `Draw`.
+
+**Text lines.** `DrawTextLine` is how a document too large to lay out is drawn: a file viewer, a
+log, a hex dump, each visible line one call. It draws as a label does, through the same shaping,
+fallback, caches and span painter (`TextSpan` colours, backgrounds for a selection or a search
+hit, decorations), and it never wraps: what a line is, is the app's to say. The line runs
+rightward from `origin` whatever the style's alignment or direction, and the advance width it
+returns, trailing blanks included, places the next piece after it. Keep each visible line's string between frames: layouts
+are cached by content, so a redraw of the same strings shapes nothing, and a scroll through a huge
+file does not grow the caches. Keep a call under 4,096 characters. Measure the cell and the line
+height with `TextMeasure.MeasureFont(style)` (`FontMetrics`), clip a panned line with `PushClip`
+or a clipping parent box, and set size-dependent state (how many lines fit) in `.OnLayoutChanged`,
+not in the callback. A context that does not implement it draws the text through `DrawText`.
+
+**Text for a screen reader.** `TextSource` (`IAccessibleTextSource?`) is the text a screen reader
+reads and moves through on the canvas, by character, word and line (UIA's Text pattern, AT-SPI's
+Text), with its caret and selection. With `.AccessibleRole(AccessibilityRole.Document)` the canvas
+reads as the terminal does. The bridges read it on their own threads, so it returns immutable
+`AccessibleText` snapshots; give its geometry in window coordinates (`WindowContentBox` is the
+canvas's origin there). Call `NotifyTextSourceChanged()` when the text, the caret or the selection
+changes; a rebuild that hands the canvas a different source object tells it without a call.
 
 **Showing an image under your own zoom, pan and rotation.** `DrawImage` with a source
 rectangle is the zoom and pan, `PushTransform` around it the rotation or mirror, and the
@@ -2920,3 +2942,105 @@ private Element Shelf(IReadOnlyList<MediaItem> items)
 - **The state is what the element shows and does:** its item, the cursor on it, its picture as the
   cache has it, and a setting every element shows (or `Clear()` when it moves). Its handlers are the
   old build's, so what they capture belongs in the state too.
+
+---
+
+## 29. ScrollbarElement
+
+A scrollbar standing on its own over a logical range of up to `long.MaxValue` units: the bar beside
+a document too large to lay out, drawn a screen at a time on a `CanvasElement`, whose position is a
+byte offset or a row index rather than a pixel offset. A `ScrollViewElement` keeps its offset in
+`float`, exact to about 16.7 M px; this bar keeps the app's own unit, exact at 50 GB of bytes or
+3 G rows. It looks and behaves like `ScrollViewElement`'s bars: the same colours, widths, hover
+widening and pill ends, a drag, a track click that centres the thumb under the pointer, and the
+wheel.
+
+**Builders:**
+
+```csharp
+Scrollbar.Vertical(value, contentLength, viewportLength)
+Scrollbar.Horizontal(value, contentLength, viewportLength)
+ScrollbarElement.New(ScrollbarAxis.Vertical)   // the lengths and value set later
+```
+
+**Properties:**
+
+| Property | Type | Description |
+|---|---|---|
+| `Axis` | `ScrollbarAxis` | `Vertical` (the default) or `Horizontal` |
+| `ContentLength` | `long` | The whole document; negative is 0 |
+| `ViewportLength` | `long` | How much of it shows; negative is 0 |
+| `MaxValue` | `long` | `ContentLength - ViewportLength`, at least 0 (read-only) |
+| `Value` | `long` | The first unit shown, clamped to [0, `MaxValue`] |
+| `SmallChange` | `long` | An arrow key's step, at least 1; a wheel notch moves three (default 1) |
+| `LargeChange` | `long` | Page Up/Down's step; 0, the default, is `ViewportLength` |
+| `OnChanged` | `Action<long>?` | Called with the new value on a user gesture (drag, track, wheel, keys, assistive technology), never when a build sets `Value` |
+| `IsDragging` | `bool` | Whether the thumb is being dragged (read-only) |
+| `TrackColor`, `ThumbColor`, `TrackHoverColor` | `Color`, `Color`, `Color?` | As `ScrollViewElement`'s `Scrollbar*` colours |
+| `BarWidth`, `BarRadius` | `float` | The resting width (6) and the corner radius (-1: half the drawn width, a pill) |
+| `ExpandOnHover`, `ExpandedBarWidth`, `ExpandDuration` | `bool`, `float`, `float` | The widening under the pointer: on, to 12, over 0.12 s |
+
+The element is as wide (or, horizontal, as tall) as the expanded bar, so there is something to
+reach for at rest, and stretches along its axis in a flex container. With nothing to scroll
+(`MaxValue` 0) it draws nothing.
+
+**The value is controlled**, as a slider's is: a build sets `Value`, a gesture sets it and calls
+`OnChanged`, and the owner writes it back on its next build. A rebuild during a drag keeps the
+dragged value, so a build with an older `Value` does not throw the thumb back. A drag follows the
+pointer once a frame. Every fraction is worked out in `double`, so the thumb is placed to well
+under a pixel for any range and a drag to the end reads back `MaxValue` exactly. One pixel of a
+1,000 px track over 50 GB is about 50 MB: the pointer does the coarse positioning, and the wheel,
+the keys and the app's own Go to do the fine.
+
+**Keyboard.** Not focusable by default, as platform scrollbars are not: the document it scrolls
+owns the keyboard. Set `IsFocusable` and it takes the arrows of its axis (`SmallChange`), Page
+Up/Down (`LargeChange`) and Home/End.
+
+**Accessibility.** Its role is `AccessibilityRole.ScrollBar` (UIA's ScrollBar control, AT-SPI's
+scroll bar) with a range value: a reader hears the position and can set it, which calls
+`OnChanged`.
+
+**Example:** a document of `LineCount` lines that the component reads on demand.
+
+```csharp
+protected override Element Build()
+{
+    var style = TextMeasure.StyleFor(13f, FontFamilies.Monospace) with { TextColor = Fg };
+    float lineHeight = MathF.Ceiling(TextMeasure.MeasureFont(style)?.LineHeight ?? 16f);
+    long visible = Math.Max(1, (long)(ViewportHeight / lineHeight));
+
+    // The canvas's size is known after layout: Draw is no after-layout hook.
+    var canvas = Canvas.New(ctx =>
+        {
+            for (int row = 0; row * lineHeight < ctx.Bounds.Height; row++)
+            {
+                var line = _document.LineText(TopLine + row);    // the app's cache of decoded strings
+                if (line is null)
+                    break;
+
+                ctx.DrawTextLine(line.Text, new Point(-_panX, row * lineHeight), style, line.Spans);
+            }
+        })
+        .FlexGrow(1)
+        .OnLayoutChanged(e => { if (e.SizeChanged) ViewportHeight = e.Box.Height; })   // a [Reactive] float
+        .AccessibleRole(AccessibilityRole.Document)
+        .AccessibleName(_document.Name)
+        .WithRef(_canvasRef);
+    canvas.IsFocusable = true;
+    canvas.TextSource = _visibleText;                             // the app's IAccessibleTextSource
+    canvas.On<KeyDownEvent>(OnKey);
+    canvas.On<ScrollEvent>(OnWheel);
+
+    var bar = Scrollbar.Vertical(TopLine, _document.LineCount, visible);
+    bar.SmallChange = 1;
+    bar.OnChanged = v => TopLine = v;
+
+    // The clipping box keeps a panned line inside the text column.
+    var body = Box.New().FlexGrow(1).OverflowX(Overflow.Hidden).OverflowY(Overflow.Hidden).Children(canvas);
+    return Flex.Row().FlexGrow(1).Children(body, bar);
+}
+```
+
+`Scrollbar` here is the builder in `HultUI.Core.Builders`. An assembly that sees HultUI.Core's
+internals and imports `HultUI.Core.Elements` too finds the internal painter of the same name
+there; it names the builder with an alias (`using ScrollbarBuilder = HultUI.Core.Builders.Scrollbar;`).

@@ -839,6 +839,7 @@ public static partial class AccessibilityTreeBuilder
         TextInputElement => AccessibilityRole.TextInput,
         TextAreaElement => AccessibilityRole.TextInput,
         SliderElement => AccessibilityRole.Slider,
+        ScrollbarElement => AccessibilityRole.ScrollBar,
         CheckboxElement => AccessibilityRole.Checkbox,
         ToggleSwitchElement => AccessibilityRole.Switch,
         ProgressBarElement => AccessibilityRole.ProgressBar,

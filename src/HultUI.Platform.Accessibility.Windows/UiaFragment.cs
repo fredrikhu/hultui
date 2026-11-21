@@ -178,7 +178,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
                 && _value is not null && _value != Node.Name
                 => new UiaValueProvider(_bridge, ElementId, readOnly: true),
             // A progress bar exposes the same pattern read-only; the bridge refuses SetValue.
-            (AccessibilityRole.Slider or AccessibilityRole.ProgressBar or AccessibilityRole.SpinButton) when patternId == UiaInterop.UIA_RangeValuePatternId
+            (AccessibilityRole.Slider or AccessibilityRole.ProgressBar or AccessibilityRole.SpinButton or AccessibilityRole.ScrollBar) when patternId == UiaInterop.UIA_RangeValuePatternId
                 => new UiaRangeValueProvider(_bridge, ElementId),
             // Scroll views and (scrollable) lists expose the Scroll pattern.
             (AccessibilityRole.ScrollView or AccessibilityRole.List) when patternId == UiaInterop.UIA_ScrollPatternId
@@ -452,6 +452,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         AccessibilityRole.Application => UiaInterop.UIA_WindowControlTypeId,
         AccessibilityRole.Link => UiaInterop.UIA_HyperlinkControlTypeId,
         AccessibilityRole.Slider => UiaInterop.UIA_SliderControlTypeId,
+        AccessibilityRole.ScrollBar => UiaInterop.UIA_ScrollBarControlTypeId,
         AccessibilityRole.ProgressBar => UiaInterop.UIA_ProgressBarControlTypeId,
         AccessibilityRole.SpinButton => UiaInterop.UIA_SpinnerControlTypeId,
         AccessibilityRole.ComboBox => UiaInterop.UIA_ComboBoxControlTypeId,

@@ -509,6 +509,124 @@ static partial class Scenarios
                             : null),
                 };
             });
+
+        yield return new Scenario("text/canvas lines 60x160, scroll a line",
+            $"A canvas draws {CanvasLines.Rows} monospace lines of {CanvasLines.Columns} characters, each with 4 paint spans (one a background), "
+            + "as a file viewer too large to lay out draws its screen (ICanvasDrawingContext.DrawTextLine): each step moves the top down a line, "
+            + "so one line is a string not seen before. Compare text/selectable viewer, an element per line",
+            ctx =>
+            {
+                var lines = new CanvasLines(ctx);
+                return new Op
+                {
+                    Run = step => lines.Top = step + 1,
+                    Check = step => lines.Drawn(step + 1),
+                };
+            });
+
+        yield return new Scenario("text/canvas lines 60x160, jump",
+            $"The canvas of text/canvas lines, jumped somewhere it has not been each step: all {CanvasLines.Rows} lines are new strings, shaped cold",
+            ctx =>
+            {
+                var lines = new CanvasLines(ctx);
+                static long At(int step) => 1_000_000L + step * 10_007L;
+                return new Op
+                {
+                    Run = step => lines.Top = At(step),
+                    Check = step => lines.Drawn(At(step)),
+                };
+            });
+    }
+
+    /// <summary>
+    /// A document too large to lay out, drawn a screen at a time on a canvas: what
+    /// <c>ScrollbarElement</c> and <c>DrawTextLine</c> are for. Line <c>n</c> is an address and
+    /// 50 hex bytes made from <c>n</c>, kept in a ring of strings as a viewer keeps its visible lines,
+    /// so a line drawn again is the string drawn before.
+    /// </summary>
+    internal sealed class CanvasLines
+    {
+        public const int Rows = 60, Columns = 160;
+        private const float LineHeight = 12f;
+        private const int Ring = 2 * Rows;
+
+        private readonly long[] _keys = new long[Ring];
+        private readonly string?[] _ring = new string?[Ring];
+        private readonly ResolvedInheritedStyle _style =
+            TextMeasure.StyleFor(10f, FontFamilies.Monospace) with { TextColor = new Color(220, 220, 220) };
+        private long _top;
+        private long _drawnTop = -1;
+        private int _drawn;
+
+        // Paint only: the address, two byte runs in colours of their own, and a highlighted one.
+        private static readonly TextSpan[] Spans =
+        [
+            new(0, 12, new Color(120, 160, 220)),
+            new(14, 24, new Color(220, 180, 100)),
+            new(41, 12, Color.Transparent, new Color(60, 90, 140)),
+            new(110, 30, new Color(140, 200, 140)),
+        ];
+
+        public CanvasElement Canvas { get; }
+
+        public CanvasLines(Ctx ctx, bool mount = true)
+        {
+            Array.Fill(_keys, -1);
+            Canvas = NewCanvas();
+            if (mount) ctx.Mount(Flex.Column().FlexGrow(1).Children(Canvas));
+        }
+
+        /// <summary>A canvas drawing these lines, for a component's build.</summary>
+        public CanvasElement NewCanvas() =>
+            HultUI.Core.Builders.Canvas.New(Draw).FlexGrow(1).Background(new Color(30, 30, 30));
+
+        /// <summary>The first line drawn, set by a scenario between frames: the mounted canvas draws
+        /// again.</summary>
+        public long Top
+        {
+            get => _top;
+            set { _top = value; Canvas.MarkPaintDirty(); }
+        }
+
+        /// <summary>The first line drawn, set by a build: the canvas it makes draws from there.</summary>
+        public long TopLine { set => _top = value; }
+
+        public string Line(long n)
+        {
+            int slot = (int)(n % Ring);
+            if (_keys[slot] == n) return _ring[slot]!;
+            _keys[slot] = n;
+            return _ring[slot] = string.Create(Columns, n, static (chars, n) =>
+            {
+                n.TryFormat(chars, out _, "X12");
+                chars[12] = ':';
+                ulong x = (ulong)n * 0x9E3779B97F4A7C15UL;
+                for (int i = 13; i < chars.Length; i++)
+                {
+                    if ((i - 13) % 3 == 0) { chars[i] = ' '; continue; }
+                    x ^= x >> 29; x *= 0xBF58476D1CE4E5B9UL;
+                    chars[i] = "0123456789abcdef"[(int)(x >> 60)];
+                }
+            });
+        }
+
+        private void Draw(ICanvasDrawingContext ctx)
+        {
+            int drawn = 0;
+            for (int row = 0; row < Rows && row * LineHeight < ctx.Bounds.Height; row++)
+            {
+                ctx.DrawTextLine(Line(_top + row), new Point(4, row * LineHeight), _style, Spans);
+                drawn++;
+            }
+            _drawnTop = _top;
+            _drawn = drawn;
+        }
+
+        /// <summary>Null when the last frame drew every row from <paramref name="top"/>.</summary>
+        public string? Drawn(long top) =>
+            _drawnTop != top ? $"the canvas drew from line {_drawnTop}, not {top}"
+            : _drawn != Rows ? $"the canvas drew {_drawn} lines, not {Rows}"
+            : null;
     }
 
     private const int ViewerLines = 400;

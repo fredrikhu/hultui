@@ -21,6 +21,7 @@ public class AtSpiConstantsTests
     [InlineData(AccessibilityRole.Image, 27u, "image")]
     [InlineData(AccessibilityRole.ScrollView, 49u, "scroll pane")]
     [InlineData(AccessibilityRole.Slider, 51u, "slider")]
+    [InlineData(AccessibilityRole.ScrollBar, 48u, "scroll bar")]
     [InlineData(AccessibilityRole.ProgressBar, 42u, "progress bar")]
     [InlineData(AccessibilityRole.SpinButton, 52u, "spin button")]
     [InlineData(AccessibilityRole.Switch, 62u, "toggle button")]
