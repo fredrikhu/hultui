@@ -151,4 +151,23 @@ public sealed class ControlGoldenTests
         session.PumpFrame(TimeSpan.FromMilliseconds(500));
         GoldenImage.Match(session.Window, "menubar-expander-table");
     }
+
+    /// <summary>A menu opened from the keyboard underlines its items' mnemonics, and highlights its
+    /// first item.</summary>
+    [Fact]
+    public void ContextMenu_OpenedFromTheKeyboard_ShowsItsMnemonics()
+    {
+        using var session = Session(240, 160);
+        var target = Box.New().Width(80).Height(24).ContextMenu(() =>
+        [
+            new ContextMenuItem { Label = "&Rename…", UseMnemonic = true },
+            new ContextMenuItem { Label = "&Duplicate", UseMnemonic = true },
+            new ContextMenuItem { Label = "Save &as…", UseMnemonic = true },
+        ]);
+        session.Window.SetRoot(Flex.Column().Padding(new Thickness(16)).Children(target));
+        session.PumpFrame();
+        session.Window.Window.OpenContextMenu(target);
+        session.PumpFrames(3);
+        GoldenImage.Match(session.Window, "context-menu-mnemonics");
+    }
 }

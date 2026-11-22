@@ -26,21 +26,7 @@ public sealed record MenuBarItem(string Title, Func<IReadOnlyList<ContextMenuIte
 
     internal int MnemonicIndex => Parse(Title).Index;
 
-    private static (string Label, int Index) Parse(string title)
-    {
-        var label = new System.Text.StringBuilder(title.Length);
-        int index = -1;
-        for (int i = 0; i < title.Length; i++)
-        {
-            if (title[i] == '&' && i + 1 < title.Length)
-            {
-                i++;
-                if (title[i] != '&' && index < 0) index = label.Length;
-            }
-            label.Append(title[i]);
-        }
-        return (label.ToString(), index);
-    }
+    private static (string Label, int Index) Parse(string title) => Mnemonics.Parse(title);
 }
 
 /// <summary>
@@ -155,7 +141,13 @@ public sealed class MenuBar : Component
     /// bar took it.</summary>
     public bool HandleKeyUp(KeyUpEvent e)
     {
-        if (e.Key is not (KeyCode.AltLeft or KeyCode.AltRight)) return false;
+        if (e.Key is not (KeyCode.AltLeft or KeyCode.AltRight))
+        {
+            // A key pressed with Alt that an open menu took (its mnemonic) never reached HandleKey;
+            // its release does reach here.
+            _altAlone = false;
+            return false;
+        }
         SetAltHeld(false);
         if (!_altAlone) return false;
         _altAlone = false;
@@ -202,6 +194,8 @@ public sealed class MenuBar : Component
     {
         if (generation != _generation) return;   // replaced by another menu, or closed by Close
         _open = -1;
+        // Closed by an Alt+letter the menu took: releasing that Alt is not Alt pressed alone.
+        _altAlone = false;
         // Escape steps back to the titles; anything else is the end of using the bar.
         if (reason == MenuCloseReason.Escape) Activate(_highlight);
         else Deactivate();

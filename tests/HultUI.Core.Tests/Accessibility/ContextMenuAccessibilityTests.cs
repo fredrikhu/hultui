@@ -64,6 +64,15 @@ public class ContextMenuAccessibilityTests
         Assert.Equal("Copy, Ctrl C", tree.Children[0].Name);
     }
 
+    /// <summary>An item marking its mnemonic is read out as it is shown, without the mark.</summary>
+    [Fact]
+    public void AnItemWithAMnemonic_IsNamedByItsDisplayLabel()
+    {
+        var tree = BuildLaidOut(Menu(new ContextMenuItem { Label = "&Copy", UseMnemonic = true, ShortcutHint = "Ctrl+C" }));
+
+        Assert.Equal("Copy, Ctrl+C", tree.Children[0].Name);
+    }
+
     [Fact]
     public void InvokingAnItemRunsItsAction()
     {

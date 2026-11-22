@@ -205,4 +205,66 @@ public sealed class MenuBarTests
         Assert.Equal((0, 1), (span.Start, span.Length));
         Assert.Equal(HultUI.Core.Styling.TextDecoration.Underline, span.Decoration);
     }
+
+    /// <summary>An item chosen with Alt and its mnemonic in the bar's open menu: letting go of that
+    /// Alt is not Alt pressed alone, so the bar does not take the keyboard.</summary>
+    [Fact]
+    public void ChoosingWithAltAndAMnemonic_ThenLettingGoOfAlt_LeavesTheBar()
+    {
+        using var session = HeadlessSession.Create(600, 400);
+        var ran = new List<string>();
+        var bar = new MenuBar([new("&File", [new ContextMenuItem { Label = "&Save", UseMnemonic = true, Action = () => ran.Add("save") }])]);
+        var document = TextInput.New("");
+        var root = Flex.Column(gap: 0).Children(bar.Mount(), document);
+        root.On<KeyDownEvent>(e => { if (bar.HandleKey(e)) e.StopPropagation = true; });
+        root.On<KeyUpEvent>(e => bar.HandleKeyUp(e));
+        session.Window.SetRoot(root);
+        session.PumpFrame();
+        document.Focus();
+        bar.Open(0);
+        session.PumpFrames(2);
+
+        session.Window.KeyDown(KeyCode.AltLeft, KeyModifiers.Alt);
+        session.Window.KeyDown(KeyCode.S, KeyModifiers.Alt, layoutKey: 's', text: "");
+        session.PumpFrames(2);
+        session.Window.KeyUp(KeyCode.AltLeft);
+        session.PumpFrames(2);
+
+        Assert.Equal(["save"], ran);
+        Assert.False(bar.IsActive);
+        Assert.Same(document, session.Window.Window.FocusedElement);
+    }
+
+    /// <summary>The same with two items sharing the letter, in a menu opened with Alt and its title's
+    /// letter: the menu stays open on the next one, and letting go of Alt leaves the bar as it was,
+    /// its title current and the keyboard its.</summary>
+    [Fact]
+    public void AnAltMnemonicTwoItemsShare_ThenLettingGoOfAlt_KeepsTheBarAsItWas()
+    {
+        using var session = HeadlessSession.Create(600, 400);
+        var bar = new MenuBar([new("&File",
+        [
+            new ContextMenuItem { Label = "&Save", UseMnemonic = true },
+            new ContextMenuItem { Label = "&Send", UseMnemonic = true },
+        ])]);
+        var root = Flex.Column(gap: 0).Children(bar.Mount(), TextInput.New(""));
+        root.On<KeyDownEvent>(e => { if (bar.HandleKey(e)) e.StopPropagation = true; });
+        root.On<KeyUpEvent>(e => bar.HandleKeyUp(e));
+        session.Window.SetRoot(root);
+        session.PumpFrame();
+        session.Window.KeyDown(KeyCode.AltLeft, KeyModifiers.Alt);
+        session.Window.PressKey(KeyCode.F, KeyModifiers.Alt, layoutKey: 'f', text: "");
+        session.Window.KeyUp(KeyCode.AltLeft);
+        session.PumpFrames(2);
+        Assert.Equal(0, bar.HighlightIndex);
+
+        session.Window.KeyDown(KeyCode.AltLeft, KeyModifiers.Alt);
+        session.Window.PressKey(KeyCode.S, KeyModifiers.Alt, layoutKey: 's', text: "");
+        session.Window.KeyUp(KeyCode.AltLeft);
+        session.PumpFrames(2);
+
+        Assert.Equal(0, bar.OpenIndex);
+        Assert.Equal(0, bar.HighlightIndex);
+        Assert.Single(session.Window.OverlayContents.OfType<ContextMenuElement>());
+    }
 }

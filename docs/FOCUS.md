@@ -271,6 +271,17 @@ of its own.
 
 ---
 
+## Menus take keys, not focus
+
+An open context menu takes ↑ ↓ ← → Home End Enter Space Esc Backspace Tab and typed characters
+without moving the focus: `FocusedElement` stays where it was, and nothing blurs. Characters are the
+menu's whether they match or not, and their text is not delivered. Function keys, and Ctrl and
+Super chords of any other key, still reach the focused element. The keys that open a menu are
+`Window.ContextMenuKeys` (Menu and Shift+F10); a handler that stops them keeps them. Assistive
+technology's focus follows the menu's highlight.
+
+---
+
 ## Text input follows focus
 
 When focus lands on a `TextInputElement` or `TextAreaElement` the window arms the

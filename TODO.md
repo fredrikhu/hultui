@@ -1,6 +1,15 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Context menus from the keyboard** — the Menu key and Shift+F10 open the focused element's
+  context menu when nothing took the key (`Window.ContextMenuKeys`, `Window.OpenContextMenu(element)`),
+  under `Element.ContextMenuAnchor` (a list's current row or cell), on its first item. An open menu
+  takes Home, End, PageUp, PageDown, Space, Backspace, Tab and typed characters without taking the
+  focus: `ContextMenuItem.UseMnemonic` mnemonics (underlined once the keyboard is used), else
+  type-ahead, and the text of a key it took reaches no element. `MenuBarItem` and menu items share
+  one `&` parser. Tests: `MnemonicsTests` (8), `ContextMenuKeyboardTests` (unit 19, headless 26),
+  `MenuBarTests` (2 more) and `ContextMenuAccessibilityTests` (1 more), the
+  `context-menu-mnemonics` golden. See `docs/ELEMENTS.md` "Menus from the keyboard".
 - **The desktop's light or dark preference** — `Application.DesktopColorScheme` (`ColorScheme`:
   `NoPreference`, `Light`, `Dark`) reads it through SDL (on Linux the XDG desktop portal's
   `org.freedesktop.appearance` `color-scheme`), and `Application.DesktopSettingsChanged` is raised

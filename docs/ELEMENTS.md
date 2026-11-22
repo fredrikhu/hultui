@@ -1997,6 +1997,37 @@ means the item is not a choice. A label that begins `"• "` is read out as punc
 the spaces its unchecked siblings need in order to line up are read out with them; a checked
 state is announced as a state and exposed through UIA's Toggle pattern and AT-SPI's `checked`.
 
+**Menus from the keyboard.** The Menu key and Shift+F10 open the focused element's context menu
+(its own, or its nearest ancestor's) when no handler took the key, under
+`Element.ContextMenuAnchor` — the element's box, or a list's current row — with the first item
+highlighted. `Window.ContextMenuKeys` sets the keys (empty turns this off), and
+`Window.OpenContextMenu(element)` opens a menu the same way from a command of the app's own.
+`ContextMenuItem.UseMnemonic` makes an `&` in `Label` mark its mnemonic (`"&Rename…"`, `&&` for an
+ampersand), underlined once the menu is used from the keyboard; it is opt-in because a label that
+comes from data (a file name) means its ampersands. An open menu takes its keys without taking the
+focus:
+
+| Key | Does |
+|---|---|
+| ↑ ↓ | Previous, next enabled item, round the ends |
+| Home, PageUp / End, PageDown | First / last enabled item |
+| → | Opens the highlighted item's submenu on its first item; on a leaf, hands → to the owner (a menu bar's next menu) |
+| ← | Closes the innermost submenu; in the root menu hands ← to the owner |
+| Esc | Closes the innermost submenu, else the menu |
+| Enter, keypad Enter | Runs the highlighted item; a submenu opens on its first item |
+| Space | Part of the type-ahead text while typing ahead; otherwise as Enter |
+| A character, without Ctrl or Super | Mnemonic, else type-ahead. Always the menu's, matched or not |
+| Alt with a character | The mnemonic only; when no item has it, the key goes on (a menu bar's Alt+letter) |
+| Backspace | Takes the last character off the type-ahead text |
+| Tab, Shift+Tab, Menu, Shift+F10 | Taken; nothing happens |
+| Anything else (function keys; Ctrl and Super chords of other keys) | Goes on to the focused element |
+
+A character with no type-ahead going on is a mnemonic first: one item with it runs, several take
+the highlight in turn, none starts type-ahead. Type-ahead highlights the first item whose label
+starts with the text typed, and runs nothing; a run of one character walks the items starting with
+it, and a pause of a second starts a new run. Menus, dropdown lists and popovers close when the
+window loses the foreground.
+
 **A row that is not one thing.** Drive a wrap grid through the list — one item per *row*
 of cards — and that model inverts: the list would publish one node per row, named after
 all the cards in it, and every card's own name, role and automation id would vanish from
