@@ -44,6 +44,24 @@ public interface IMediaLibrary : IDisposable
     /// </summary>
     Task<ApertureResult<MediaItem?>> GetNextEpisodeAsync(MediaItem episode, CancellationToken ct = default);
 
+    /// <summary>
+    /// Series, by when an episode last arrived under them, newest first — lean: no artwork, no
+    /// overview, but <see cref="MediaItem.DateLastMediaAdded"/> and the provider ids. The season
+    /// watch's first question each time it looks: has anything arrived since the last look?
+    /// </summary>
+    Task<ApertureResult<ItemPage>> GetSeriesByEpisodeAddedAsync(int startIndex, int limit,
+        CancellationToken ct = default) =>
+        Task.FromResult(ApertureResult<ItemPage>.Success(ItemPage.Empty));
+
+    /// <summary>
+    /// Seasons, lean — number, series, <see cref="MediaItem.FileCount"/>, how many unwatched, date
+    /// added — every season the user can see (a page at a time) or, with <paramref name="seriesId"/>,
+    /// one series'. What the season watch compares with what it saw last time.
+    /// </summary>
+    Task<ApertureResult<ItemPage>> GetSeasonsAsync(string? seriesId, int startIndex, int limit,
+        CancellationToken ct = default) =>
+        Task.FromResult(ApertureResult<ItemPage>.Success(ItemPage.Empty));
+
     /// <summary>Recently added items in a library, newest first.</summary>
     Task<ApertureResult<IReadOnlyList<MediaItem>>> GetLatestAsync(string libraryId, int limit = 16, CancellationToken ct = default);
 

@@ -117,6 +117,7 @@ public sealed partial class ApertureApp : Component, IDisposable
             // A request server handed in the same way (tests, the driver) is simply in use.
             _requestServer = requests;
             if (requests is not null) StartArrivalWatch();
+            StartSeasonWatch();
         }
         else
         {
@@ -244,6 +245,9 @@ public sealed partial class ApertureApp : Component, IDisposable
         EnsurePendingCount();
         EnsureIssueCounts();
         EnsureMyIssues();
+        // New seasons of series watched through: on whatever page is open, so the row is ready
+        // when Home is next drawn (ApertureApp.NewSeasons.cs).
+        EnsureSeasonWatch();
 
         var row = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
         row.AddChild(RailPart.Place().FlexShrink(0));
@@ -591,6 +595,8 @@ public sealed partial class ApertureApp : Component, IDisposable
         _dataGeneration++;
         _gridItems.Clear();
         _gridKey = null;
+        // F5 is also "look for new seasons now", before the watch's first look is due.
+        _seasonLookArmed = _library is not null;
         Rerender();
     }
 
@@ -618,6 +624,7 @@ public sealed partial class ApertureApp : Component, IDisposable
         StopQuickConnectTimer();
         StopProgressTimer();
         StopArrivalWatch();
+        StopSeasonWatch();
         _quickConnectCts?.Cancel();
         _quickConnectCts?.Dispose();
         _quickConnectCts = null;

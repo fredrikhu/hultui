@@ -263,6 +263,9 @@ public sealed partial class ApertureApp
                 Action = () => Navigate(new Route(ApertureView.Detail, seriesId, item.SeriesName)),
             });
         }
+
+        // The first episode of a new season on Home's row: Dismiss, and Stop watching the series.
+        if (NoticeFor(item) is { } notice) AddNewSeasonMenu(items, notice);
         return items;
     }
 

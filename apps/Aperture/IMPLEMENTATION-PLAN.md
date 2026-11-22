@@ -304,6 +304,47 @@ read with titles, and the first page's cards open in the library.
 
 **Still open:** nothing on the Discover page; every row of the server's layout is drawn.
 
+## Slice 8 — new seasons of series watched through (**8a done**, 2026-11-22)
+
+Designed first and confirmed: a Home row from Jellyfin alone; the request server's "Season 4 is
+out, not in your library" is a later add-on to the same row.
+
+| 8a — done | |
+|---|---|
+| The watch | `Aperture.Core/SeasonWatch.cs`: a pure detector (`NewSeasons`, `StillNew`) and one look (`LookAsync`) over two lean calls on `IMediaLibrary` — series by "date episode added" (`DateLastContentAdded`, field `DateLastMediaAdded`, provider ids) and seasons with `RecursiveItemCount`, `DateCreated` and user data |
+| Cost | one probe call per look, plus one per changed or carded series; the first look and a re-scan (all 25 probed series changed) read every series and season a thousand to a page; a server that sends no dates is read in full each time |
+| The row | "New seasons" after the "what now" rows; the card is the new season's first episode with a "New season" mark; Dismiss, Stop watching (card menu), Clear all (row menu); Dismiss keeps the cursor in its place |
+| Muting | for good: matched on the Jellyfin id or the TMDB or TVDB id, so a re-added library does not unmute; Settings lists them with Watch again |
+| State | notices, dismissed (200 newest) and muted in `ApertureSettingsData.SeasonWatch`, per server **and user**; the baseline in `season-watch-<server>-<user>.json` beside the settings |
+| When | 30 s after the library opens, every 30 min, F5, and after a film (the data generation); marking a card's episode watched looks at once |
+
+Decisions worth knowing before touching it:
+
+1. **Season numbers, not dates, decide "new".** A re-scan or a re-added library rewrites dates;
+   numbers do not move. A series the last look never saw is the baseline, not news — which is
+   also why a re-added library (all new ids) brings no burst of cards.
+2. **The series counters are not used.** Jellyfin's series `UnplayedItemCount` includes the
+   specials and cannot say which season is unwatched; the watch reads seasons.
+3. **Dismissed and carded seasons may stay unwatched.** Without that, a dismissed Season 3 left
+   untouched would block Season 4 from ever counting as news.
+4. **The look applies over what the user did meanwhile.** It runs off the UI thread with a copy
+   of the notices; a Dismiss or a mute made while it looked wins.
+5. **A gap filled in is not news.** Found on the lab server: a series with season 5 watched in
+   January and seasons 1–3 downloaded a week ago read as "Seasons 1–3 are new". A new season has to
+   be numbered above every season already watched; one below it is a backfill, and while it stays
+   unwatched the series is not caught up either.
+
+**Verified live, read-only** (`LiveServerTests.TheSeasonWatchReadsWhatItNeedsAndASecondLookIsOneCall`,
+which prints what it saw; it needs `APERTURE_LIVE_SERVER`, a key and `APERTURE_USER`): all 19
+series carry `DateLastMediaAdded` and a TMDB or TVDB id and come back newest first; seasons carry
+`RecursiveItemCount` (equal to the children count), an unwatched count within it, and a date added.
+The first look is 3 calls in 65–120 ms; a second with nothing changed is 1 call. Not exercised: a
+series without season folders (the lab server has none), and a sweep of hundreds of series.
+
+**Next (8b, 8c):** a toast once per new season (held while a film plays, not doubled with the
+arrival toast), a line and a mark on the series page, Next up leaving out an episode the row
+shows; then the request server's seasons that are out but not in the library.
+
 ## Things deliberately not done
 
 - **A device profile, by default.** Aperture tells the server it can direct-play and

@@ -252,6 +252,7 @@ public sealed partial class ApertureApp
             page.AddChild(session);
 
             page.AddChild(RequestServerCard());
+            page.AddChild(NewSeasonsSettingsCard());
         }
 
         var storage = Card("Where things are kept");
@@ -260,6 +261,9 @@ public sealed partial class ApertureApp
             ? "Windows Credential Manager"
             : "not stored on this platform — you sign in each launch"));
         storage.AddChild(Row("Artwork", $"in memory, {_posters.PendingCount} loading"));
+        if (_library is { } signedIn)
+            storage.AddChild(Row("Seasons seen", new SeasonBaselineStore(_settings.Folder, signedIn.Server.Id,
+                signedIn.User.Id.ToString("N")).Path));
         page.AddChild(storage);
 
         var playback = Card("Playback");
