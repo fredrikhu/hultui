@@ -1081,6 +1081,22 @@ public abstract class Element
     private void AddHandler<TEvent>(EventPhase phase, Action<TEvent> handler, bool owned, bool passive = false) where TEvent : ElementEvent =>
         AddEntry(new EventHandlerEntry(EventKind<TEvent>.Instance, handler, phase, owned, passive));
 
+    /// <summary>
+    /// Makes room for <paramref name="more"/> handlers after the ones the element has, in an array
+    /// of exactly that many slots, for an element about to add several at once: added one at a
+    /// time, the array is made at 2, 4 and then 8 slots on its way to 6. Replaces the array rather
+    /// than writing to it, as every change does (a dispatch may be walking it).
+    /// </summary>
+    private protected void ReserveHandlers(int more)
+    {
+        var items = _handlers;
+        int count = items is null ? 0 : CountOf(items);
+        if (items is not null && items.Length - count >= more) return;
+        var copy = new EventHandlerEntry[count + more];
+        if (count > 0) Array.Copy(items!, copy, count);
+        _handlers = copy;
+    }
+
     internal bool HasEventHandler<TEvent>() where TEvent : ElementEvent => Listens(_handlers, typeof(TEvent));
 
     internal bool HasAnyEventHandlers => _handlers is not null;
