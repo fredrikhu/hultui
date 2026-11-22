@@ -1221,3 +1221,5 @@ From 2026-11-19 (round 17's survey); earlier entries are in the archive ([to 202
   with both panes on one folder and the other cursor on ".." or a folder a cursor key builds nothing (29.2 → 1.2 KB a
   key) and F3 does nothing there, as on a folder (question 72b (2)). The agent also treats the other cursor resting on
   the same file as a self-pair (a walk over it builds twice, 2.0 → 6.5 KB a key over 10 keys). Next: step 2.
+- 2026-11-22: the user on step 1's extra call: "keep the self-pair walk as it is" (the other cursor resting on the same
+  file stays a self-pair: no ring, F3 does nothing; a walk over it builds on the key onto it and the key off it).
