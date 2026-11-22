@@ -10,8 +10,9 @@ public sealed class TextPipeline
 {
     private readonly IFontCollection _fonts;
     private readonly ITextShaper _shaper;
-    // Fully laid-out results, keyed on width (used only when the text must wrap).
-    private readonly LruCache<MeasurementKey, TextLayout> _cache = new(capacity: 2048, maxWeight: LayoutCacheBytes);
+    // Fully laid-out results, keyed on width (used only when the text must wrap), each with the range of
+    // widths it was kept for (WidthLayout).
+    private readonly LruCache<MeasurementKey, WidthLayout> _cache = new(capacity: 2048, maxWeight: LayoutCacheBytes);
     // Wrapped plain layouts keyed without their width, each with the widths that break the text into
     // the same lines (WrapRange, below).
     private readonly LruCache<WrapKey, WrapRange> _wrapRanges = new(capacity: WrapRangeEntries,
@@ -501,14 +502,14 @@ public sealed class TextPipeline
             style.FontSlant, maxWidth, maxLines ?? -1, overflow, style.LineHeight,
             style.LetterSpacing, digest, needsBidi ? style.TextDirection : TextDirection.Ltr);
         if (_cache.TryGet(key, out var cached))
-            return cached;
+            return cached.Layout;
 
         var memo = MemoOf(text, style, spans, digest, bidi: needsBidi);
         var layout = needsBidi
             ? ComputeWrappedBidi(text, style, maxWidth, maxLines, overflow, memo, spans)
             : ComputeWrappedStyled(text, style, spans!, maxWidth, maxLines, overflow, memo);
         (_laidOutMemo, _laidOutKey) = (null, default);
-        _cache.Put(key, layout, LayoutBytes(text, layout));
+        _cache.Put(key, new WidthLayout(layout), LayoutBytes(text, layout));
         return layout;
     }
 
@@ -544,11 +545,11 @@ public sealed class TextPipeline
                 style.FontSlant, maxWidth, maxLines ?? -1, overflow, style.LineHeight,
                 style.LetterSpacing, 0, style.TextDirection);
             if (_cache.TryGet(bidiKey, out var cachedBidi))
-                return cachedBidi;
+                return cachedBidi.Layout;
             var bidiLayout = ComputeWrappedBidi(text, style, maxWidth, maxLines, overflow,
                 MemoOf(text, style, spans: null, spanDigest: 0, bidi: true));
             (_laidOutMemo, _laidOutKey) = (null, default);
-            _cache.Put(bidiKey, bidiLayout, LayoutBytes(text, bidiLayout));
+            _cache.Put(bidiKey, new WidthLayout(bidiLayout), LayoutBytes(text, bidiLayout));
             return bidiLayout;
         }
 
@@ -589,7 +590,7 @@ public sealed class TextPipeline
         var key = new MeasurementKey(text, style.FontFamily, style.FontSize, style.FontWeight,
             style.FontSlant, maxWidth, maxLines ?? -1, overflow, style.LineHeight, style.LetterSpacing);
         if (_cache.TryGet(key, out var cached))
-            return cached;
+            return cached.Layout;
 
         TextLayout layout;
         float fitsFrom = float.NaN, fitsBelow = float.NaN;
@@ -612,13 +613,14 @@ public sealed class TextPipeline
         else
             layout = ComputeWrapped(text, style, maxWidth, maxLines, overflow, shaped, out fitsFrom, out fitsBelow);
         int bytes = LayoutBytes(text, layout);
-        _cache.Put(key, layout, bytes);
         // The widths the break pass's decisions hold for; below the text's own width only, as from
         // there it is one line. NaN (from a NaN width or one not laid out by the break pass) keeps nothing.
         if (!shaped.HasNewline)
             fitsBelow = Math.Min(fitsBelow, shaped.TotalWidth);
-        if (overflow == TextOverflow.Clip && KeepsWrapRanges && ReuseAcrossWidths
-            && fitsFrom <= maxWidth && maxWidth < fitsBelow)
+        bool keepsRange = overflow == TextOverflow.Clip && KeepsWrapRanges && ReuseAcrossWidths
+            && fitsFrom <= maxWidth && maxWidth < fitsBelow;
+        _cache.Put(key, keepsRange ? new WidthLayout(layout, fitsFrom, fitsBelow, bytes) : new WidthLayout(layout), bytes);
+        if (keepsRange)
             _wrapRanges.Put(wrapKey.IsMade ? wrapKey : new WrapKey(text, style, maxLines),
                 new WrapRange(layout, fitsFrom, fitsBelow, shaped.HasNewline ? float.NaN : shaped.TotalWidth, layout.Size), bytes);
         return layout;
@@ -669,7 +671,16 @@ public sealed class TextPipeline
         var key = new MeasurementKey(text, style.FontFamily, style.FontSize, style.FontWeight,
             style.FontSlant, maxWidth, -1, TextOverflow.Clip, style.LineHeight, style.LetterSpacing);
         if (_cache.TryGet(key, out var cached))
-            return cached.Size;
+        {
+            // A width laid out before, out of the range kept: the view is back at a width it was laid out at (the
+            // one it opened at, after a drag). The layout's own range is put back, so the next width of a drag is
+            // answered from it rather than broken again, as from the range of the far end of the last drag.
+            if (cached.From <= maxWidth && maxWidth < cached.Below)
+                _wrapRanges.Put(wrapKey.IsMade ? wrapKey : new WrapKey(text, style, null),
+                    new WrapRange(cached.Layout, cached.From, cached.Below,
+                        shaped.HasNewline ? float.NaN : shaped.TotalWidth, cached.Layout.Size), cached.Bytes);
+            return cached.Layout.Size;
+        }
         // The layout is made now, as Layout makes it, where it is likely asked for next: for a paragraph not seen
         // before (a view's first measure, whose rows on screen are drawn next) and one whose kept layout was drawn
         // (a row on screen during a drag). Only a paragraph whose last layout was not drawn, or that was only sized,
@@ -745,6 +756,16 @@ public sealed class TextPipeline
     // is the one-line fast path's, even below the text's own width, where the range still runs.
     // Size is the layout's; a range kept by WrappedSize has the size alone, and no layout (null).
     private readonly record struct WrapRange(TextLayout? Layout, float From, float Below, float OneLine, Size Size);
+
+    // A layout in the width-keyed cache, with the range of widths it was kept for in _wrapRanges and the bytes it
+    // was counted for there (NaN: none). A size asked at its width, out of the range kept since, puts its range
+    // back (WrappedSize): a paragraph keeps one range, so after a drag every row of a view held the range of the
+    // drag's far end, and a return to the width the view opened at was answered here and left them so; the next
+    // drag broke every row again at its first width. Only a size ask puts it back: a row on screen is laid out at
+    // two widths a frame in Junction's split diff, and a layout's hit putting its range back sent the range to and
+    // fro between them (the first sweep of a drag 33.0 -> 81.8 KB a step).
+    private readonly record struct WidthLayout(TextLayout Layout, float From = float.NaN, float Below = float.NaN,
+        int Bytes = 0);
 
     // A paragraph's key in _wrapRanges: a layout cache key with no width, and its hash. A layout makes
     // it once, for its ask and the put after a miss: a long paragraph is hashed once, not four times
