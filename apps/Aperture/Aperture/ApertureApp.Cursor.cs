@@ -1,5 +1,6 @@
 using Aperture.Core;
 using Aperture.Core.Requests;
+using Aperture.Theme;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Reactivity;
@@ -74,6 +75,7 @@ public sealed partial class ApertureApp
     private void SetCursorList(string key, IReadOnlyList<object> items, int perRow, int total = 0)
     {
         _cursorListSet = true;
+        _cursorShelves.Clear();   // a view of shelves adds them after (AddCursorShelf)
         _cursorItems = items;
         _cursorPerRow = Math.Max(1, perRow);
         _cursorTotal = Math.Max(total, items.Count);
@@ -100,6 +102,61 @@ public sealed partial class ApertureApp
     /// <summary>Whether the view being built registered a list (<see cref="SetCursorList"/>); one
     /// that did not is given an empty one.</summary>
     private bool _cursorListSet;
+
+    /// <summary>
+    /// One shelf of the list the arrows walk: where it starts in the walk, how many cards it holds,
+    /// how wide they are, and the row id its page is kept under (<see cref="ShelfPage"/>). A view
+    /// of shelves — Home, Discover, a title's "More like this" — registers each after its list.
+    /// </summary>
+    private readonly record struct CursorShelf(int Start, int Count, float CardWidth, string RowId);
+
+    /// <summary>The shelves of the list the arrows walk, in the order drawn; empty for a grid,
+    /// a wrap or a list, whose rows are <see cref="_cursorPerRow"/> wide.</summary>
+    private readonly List<CursorShelf> _cursorShelves = [];
+
+    /// <summary>Called from a view's build, after <see cref="SetCursorList"/>, for each shelf in it.</summary>
+    private void AddCursorShelf(int start, int count, float cardWidth, string rowId) =>
+        _cursorShelves.Add(new CursorShelf(start, count, cardWidth, rowId));
+
+    /// <summary>
+    /// Up and Down on shelves: to the shelf above or below, onto the card on its shown page that sits
+    /// under the cursor's — by where it is across the screen, as stills and posters are different
+    /// widths. Down from the first still lands on the next shelf's first card. They used to add a
+    /// poster row's worth of places to the cursor, as on a grid: from the first of four stills that
+    /// was the seventh card along the walk, past the next shelf and off its page.
+    /// </summary>
+    private bool MoveCursorAcrossShelves(int by)
+    {
+        int from = -1;
+        for (int i = 0; i < _cursorShelves.Count; i++)
+        {
+            var s = _cursorShelves[i];
+            if (_cursorIndex >= s.Start && _cursorIndex < s.Start + s.Count) { from = i; break; }
+        }
+        // Nowhere yet: as from nowhere along a row, down starts at the top and up at the bottom.
+        if (from < 0) return MoveCursorTo(ShownCard(_cursorShelves[by > 0 ? 0 : _cursorShelves.Count - 1], 0));
+
+        int to = Math.Clamp(from + by, 0, _cursorShelves.Count - 1);
+        if (to == from) return true;   // the top or the bottom shelf: the key is still ours
+
+        // The cursor's column on its own page, which the shelf shows or is about to (TurnShelfTo).
+        var here = _cursorShelves[from];
+        ShelfPage(here.RowId, here.Count, here.CardWidth, out int perPage);
+        int column = (_cursorIndex - here.Start) % perPage;
+        float centre = column * (here.CardWidth + Halide.PosterGap) + here.CardWidth / 2f;
+        var there = _cursorShelves[to];
+        return MoveCursorTo(ShownCard(there, (int)(centre / (there.CardWidth + Halide.PosterGap))));
+    }
+
+    /// <summary>The place in the walk of the card in <paramref name="column"/> of the page
+    /// <paramref name="shelf"/> shows, the last one shown when the page is shorter.</summary>
+    private int ShownCard(CursorShelf shelf, int column)
+    {
+        int page = ShelfPage(shelf.RowId, shelf.Count, shelf.CardWidth, out int perPage);
+        int first = page * perPage;
+        int shown = Math.Min(perPage, shelf.Count - first);
+        return shelf.Start + first + Math.Clamp(column, 0, Math.Max(0, shown - 1));
+    }
 
     /// <summary>True when this card is the one the arrows are on — the ring, and the
     /// element that takes focus.</summary>
@@ -269,7 +326,7 @@ public sealed partial class ApertureApp
             _cursorCardIndex = _cursorIndex;
         }
         if (build) return false;
-        FocusCursorCard();
+        FocusCursorCard(laidOut: true);
         return true;
     }
 
@@ -288,12 +345,14 @@ public sealed partial class ApertureApp
         {
             case KeyCode.Right: return MoveCursor(1);
             case KeyCode.Left: return MoveCursor(-1);
-            case KeyCode.Down: return MoveCursor(_cursorPerRow);
-            case KeyCode.Up: return MoveCursor(-_cursorPerRow);
+            // On shelves a row is a shelf (MoveCursorAcrossShelves); on a grid, a wrap or a list,
+            // the cards across.
+            case KeyCode.Down: return _cursorShelves.Count > 0 ? MoveCursorAcrossShelves(1) : MoveCursor(_cursorPerRow);
+            case KeyCode.Up: return _cursorShelves.Count > 0 ? MoveCursorAcrossShelves(-1) : MoveCursor(-_cursorPerRow);
             case KeyCode.Home: return MoveCursorTo(0);
             case KeyCode.End: return MoveCursorToEnd();
-            case KeyCode.PageDown: return MoveCursor(_cursorPerRow * 3);
-            case KeyCode.PageUp: return MoveCursor(-_cursorPerRow * 3);
+            case KeyCode.PageDown: return _cursorShelves.Count > 0 ? MoveCursorAcrossShelves(3) : MoveCursor(_cursorPerRow * 3);
+            case KeyCode.PageUp: return _cursorShelves.Count > 0 ? MoveCursorAcrossShelves(-3) : MoveCursor(-_cursorPerRow * 3);
 
             case KeyCode.Enter when CursorEntry is { } entry:
                 OpenEntry(entry);
@@ -350,13 +409,56 @@ public sealed partial class ApertureApp
     /// its rows in the frame, after this: the ref still holds the card the cursor left, so the
     /// card the cursor reached is asked again once the frame is drawn (it used to stay with the
     /// card left, which kept the keyboard, or with nothing once that one scrolled away).</summary>
-    private void FocusCursorCard()
+    /// <param name="laidOut">True for a move made on the live cards (<see cref="MoveRingWithoutBuild"/>),
+    /// whose card has been laid out; false after a build, whose card may be new.</param>
+    private void FocusCursorCard(bool laidOut = false)
     {
         // A list still loading has no card yet: the build that brings them hands it over.
         if (!_pendingCursorFocus || _cursorItems.Count == 0) return;
         _pendingCursorFocus = false;
-        if (_cursorCardIndex == _cursorIndex) _cursorCard.Current?.Focus();
+        if (_cursorCardIndex == _cursorIndex)
+        {
+            _cursorCard.Current?.Focus();
+            RevealCursorCard(laidOut);
+        }
         else if (_fitGridStride > 0f) _window.RequestPostFrameCallback(FocusCursorCardMadeInTheFrame);
+    }
+
+    /// <summary>How much above the cursor's card is shown with it: a shelf's heading and the gap
+    /// under it, so the card comes into view with the name of the row it is on.</summary>
+    private const float RevealAbove = 40f;
+
+    private Action? _revealCursorCard;
+
+    /// <summary>
+    /// Scrolls the view so the cursor's card is on screen, with its shelf's heading — the least
+    /// scroll that does. The library grid scrolls its own rows (<see cref="RevealGridCursor"/>);
+    /// every other view's cards are in a scroll view of the page. A card a build made is laid out
+    /// by the frame, so it is revealed after it. A cursor used to walk down Home out of sight, the
+    /// keyboard on a card no one could see.
+    /// </summary>
+    private void RevealCursorCard(bool laidOut)
+    {
+        if (Current.View == ApertureView.Library) return;
+        if (laidOut) RevealCursorCardNow();
+        else _window.RequestPostFrameCallback(_revealCursorCard ??= RevealCursorCardNow);
+    }
+
+    private void RevealCursorCardNow()
+    {
+        if (_cursorCardIndex != _cursorIndex || _cursorCard.Current is not { IsHosted: true } card) return;
+        for (var e = card.Parent; e is not null; e = e.Parent)
+        {
+            if (e is not ScrollViewElement scroll) continue;
+            // Layout positions are unscrolled: the card's gap from the viewport's top is its place in
+            // the content (ScrollViewElement.ScrollIntoView).
+            var box = card.Layout.AbsoluteBorderBox;
+            float top = box.Y - scroll.Layout.AbsoluteContentBox.Y;
+            // Near the top, all the way: the first shelf comes back where the page starts, not short of it.
+            float from = top - RevealAbove < RevealAbove ? 0f : top - RevealAbove;
+            scroll.ScrollRangeIntoView(from, top - from + box.Height + Halide.S3);
+            return;
+        }
     }
 
     /// <summary>The card the cursor is on, once the frame that made it is drawn: still on screen, as
