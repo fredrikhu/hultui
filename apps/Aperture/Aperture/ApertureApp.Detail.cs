@@ -189,9 +189,14 @@ public sealed partial class ApertureApp
         {
             var resumeAt = item.ResumePosition;
             var label = resumeAt is { } at ? $"Resume {Ui.Runtime(at)} in" : "Play";
-            row.AddChild(Ui.Button(ButtonVariant.Primary, label,
+            var play = Ui.Button(ButtonVariant.Primary, label,
                 () => Play(item, resumeAt ?? TimeSpan.Zero), "detail-play",
-                resumeAt is null ? Icons.Play : Icons.Resume));
+                resumeAt is null ? Icons.Play : Icons.Resume);
+            // What a screen reader says as the page opens, this button having the keyboard: the film
+            // with the verb. The label says the verb alone, under the title it sits below; read out
+            // alone it named nothing ("Play, button").
+            play.AccessibleName = resumeAt is { } from ? $"Resume {item.Name}, {Ui.Runtime(from)} in" : $"Play {item.Name}";
+            row.AddChild(play);
 
             if (resumeAt is not null)
                 row.AddChild(Ui.Button(ButtonVariant.Secondary, "From the start",

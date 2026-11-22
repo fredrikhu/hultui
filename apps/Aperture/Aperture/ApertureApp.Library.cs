@@ -85,8 +85,22 @@ public sealed partial class ApertureApp
         _ = _gridPage.Value;
 
         var items = GridItems;
-        // What the arrows walk in this view, and how many fit across.
-        SetCursorList(cursorKey, items, perRow, GridTotal);
+        // A grid opening where its visit left it shows the rows there; its first card on screen is the
+        // first of the first whole one.
+        float openAt = _gridList.Current is not { IsHosted: true } ? _gridArrivalScrollY : -1f;
+        int firstOnScreen = openAt > 0 ? (int)MathF.Ceiling(openAt / rowStride - 0.01f) * perRow : 0;
+        // What the arrows walk in this view, and how many fit across; Back or Forward with no cursor
+        // starts it on that card.
+        SetCursorList(cursorKey, items, perRow, GridTotal, firstOnScreen);
+        // A cursor its visit left out of sight (the wheel took the grid away from it before a card was
+        // clicked) comes to that card too: Back hands the keyboard to a card the page shows, and a key
+        // walks on from where the grid is, not from where it was.
+        if (openAt >= 0 && items.Count > 0 && CursorIndex >= 0
+            && (CursorIndex / perRow * rowStride >= openAt + viewportHeight || (CursorIndex / perRow + 1) * rowStride <= openAt))
+        {
+            _cursorIndex = Math.Min(firstOnScreen, items.Count - 1);
+            _pendingCursorFocus = true;
+        }
 
         if (items.Count == 0)
         {
@@ -134,10 +148,18 @@ public sealed partial class ApertureApp
         return column;
     }
 
-    /// <summary>Keeps the cursor on screen as the arrows walk past the realized window.</summary>
-    private void RevealGridCursor(int perRow, float rowStride)
+    /// <summary>
+    /// Keeps the cursor on screen as the arrows walk past the realized window. A build reveals it only
+    /// when it moved, or its row did (another number of columns), since the grid last showed it
+    /// (<paramref name="always"/>: a window that changed under it): the wheel takes the grid away from
+    /// the cursor, and the builds that come while it does (a page asked for, a picture landing) used to
+    /// pull it back. A cursor Back put on the first card on screen is one a mouse user never moved.
+    /// </summary>
+    private void RevealGridCursor(int perRow, float rowStride, bool always = false)
     {
-        if (_gridList.Current is not { } mounted || CursorIndex < 0) return;
+        if (_gridList.Current is not { IsHosted: true } mounted || CursorIndex < 0) return;
+        if (!always && _gridCursorShown == (CursorIndex, perRow, rowStride)) return;
+        _gridCursorShown = (CursorIndex, perRow, rowStride);
         int cursorRow = CursorIndex / perRow;
         mounted.ScrollRangeIntoView(cursorRow * rowStride, rowStride);
         // A page that landed took the cursor past the rows the list has laid out (End on its
@@ -146,6 +168,10 @@ public sealed partial class ApertureApp
         if ((cursorRow + 1) * rowStride > mounted.ContentHeight)
             _window.RequestPostFrameCallback(() => _gridList.Current?.ScrollRangeIntoView(cursorRow * rowStride, rowStride));
     }
+
+    /// <summary>The cursor, and the columns and row height it was revealed in, as the grid last showed it
+    /// (<see cref="RevealGridCursor"/>, <see cref="OpenGridWhereItWasLeft"/>).</summary>
+    private (int Cursor, int PerRow, float Stride) _gridCursorShown = (-1, 0, 0f);
 
     /// <summary>How far the grid of the page arrived at was scrolled when that visit was left
     /// (<see cref="Visit.GridScrollY"/>), until a list made for it opens there; -1 for none.</summary>
@@ -178,8 +204,14 @@ public sealed partial class ApertureApp
                     if (_gridList.Current is { IsHosted: true } shown) shown.ScrollOffsetY = at;
                 });
         }
-        else if (at >= 0) list.ScrollOffsetY = at;
-        else if (CursorIndex >= 0) list.ScrollRangeIntoView(CursorIndex / perRow * rowStride, rowStride);
+        else
+        {
+            if (at >= 0) list.ScrollOffsetY = at;
+            else if (CursorIndex >= 0) list.ScrollRangeIntoView(CursorIndex / perRow * rowStride, rowStride);
+            // The cursor is on screen as the list opens, or nowhere: the builds after leave the grid
+            // where it is until a key moves it.
+            _gridCursorShown = (CursorIndex, perRow, rowStride);
+        }
         if (!GridHasMore || rowCount * rowStride >= at + viewportHeight) _gridArrivalScrollY = -1;
     }
 

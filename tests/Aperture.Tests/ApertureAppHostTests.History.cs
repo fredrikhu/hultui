@@ -294,6 +294,142 @@ public partial class ApertureAppHostTests
             Assert.Equal(ApertureView.Library, app.Current.View);
             Assert.Equal(wheeled, LibraryGrid(session)!.ScrollOffsetY);
             Assert.NotNull(session.Window.FindByAutomationId(id));
+
+            // No cursor was set: the first card on screen takes it and the keyboard, so a key walks
+            // on from there, building nothing, rather than from the first film at the top.
+            grid = LibraryGrid(session)!;
+            var focused = Assert.IsAssignableFrom<BoxElement>(FocusedElement(session));
+            Assert.Equal("card-" + app.CursorItem!.Id, focused.AutomationId);
+            Assert.True(focused.Outline.Width > 0, "the card with the keyboard has no ring");
+            Assert.True(focused.WindowBorderBox.Y >= grid.WindowBorderBox.Y
+                && focused.WindowBorderBox.Bottom <= grid.WindowBorderBox.Bottom,
+                $"the card with the keyboard is at {focused.WindowBorderBox}, out of the grid at {grid.WindowBorderBox}");
+            int builds = app.Builds, cursor = app.CursorIndex;
+            Press(session, KeyCode.Right);
+            Assert.Equal((cursor + 1, builds), (app.CursorIndex, app.Builds));
+            Assert.Equal(wheeled, LibraryGrid(session)!.ScrollOffsetY);
+
+            // The wheel takes the grid on from that card, and the builds that come as it does (a page
+            // asked for as rows near the loaded end come into view) leave the grid where the wheel
+            // took it rather than pulling it back to the cursor.
+            float notch = wheeled / 15;
+            for (int i = 0; i < 6; i++)
+            {
+                session.Window.Wheel(box.X + box.Width / 2, box.Y + box.Height / 2, 0, -4);
+                session.PumpFrame();
+            }
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.True(app.Builds > builds, "no build came while wheeling");
+            Assert.Equal(wheeled + 6 * notch, LibraryGrid(session)!.ScrollOffsetY);
+        });
+    }
+
+    /// <summary>The mouse's second round trip: Back put the cursor on the first card on screen, the
+    /// wheel took the grid on past it and a card there is clicked; Back lands where the wheel left it,
+    /// with the cursor brought to the first card on screen there, not left out of sight.</summary>
+    [Fact]
+    public void BackToAGridWheeledPastItsCursor_BringsTheCursorOnScreen()
+    {
+        Host(ManyFilms(), (session, app) =>
+        {
+            OpenManyFilms(session);
+            var box = LibraryGrid(session)!.Layout.AbsoluteContentBox;
+            Press(session, KeyCode.Right);   // the cursor on the first film, at the top
+            for (int i = 0; i < 15; i++)
+            {
+                session.Window.Wheel(box.X + box.Width / 2, box.Y + box.Height / 2, 0, -4);
+                session.PumpFrame();
+            }
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            var grid = LibraryGrid(session)!;
+            float wheeled = grid.ScrollOffsetY;
+            Assert.True(wheeled > 1000, $"the wheel took the grid to {wheeled}, or a build pulled it back");
+            Assert.Equal(0, app.CursorIndex);
+            var clicked = AllOf(grid).OfType<BoxElement>()
+                .First(e => e.AutomationId?.StartsWith("card-", StringComparison.Ordinal) == true
+                    && e.WindowBorderBox.Y > grid.WindowBorderBox.Y + 200);
+            session.Window.Click(clicked);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.Equal(ApertureView.Detail, app.Current.View);
+
+            Press(session, KeyCode.Escape);
+            grid = LibraryGrid(session)!;
+            Assert.Equal(wheeled, grid.ScrollOffsetY);
+            var focused = Assert.IsAssignableFrom<BoxElement>(FocusedElement(session));
+            Assert.Equal("card-" + app.CursorItem!.Id, focused.AutomationId);
+            Assert.True(app.CursorIndex > 0 && focused.Outline.Width > 0, $"the cursor is on {app.CursorIndex}, unringed");
+            Assert.True(focused.WindowBorderBox.Y >= grid.WindowBorderBox.Y
+                && focused.WindowBorderBox.Bottom <= grid.WindowBorderBox.Bottom,
+                $"the card with the keyboard is at {focused.WindowBorderBox}, out of the grid at {grid.WindowBorderBox}");
+        });
+    }
+
+    /// <summary>
+    /// Escape from a library opened from the rail goes Back to Home, whose cursor was never set: Home's
+    /// first card takes the cursor and the keyboard, and a screen reader is told so. The keyboard went
+    /// nowhere, so no focus event went out and a reader stayed on an element of the page that was gone
+    /// (plan 17 round 18, question 76).
+    /// </summary>
+    [Fact]
+    public void EscapeToAPageWithNoCursor_HandsItsFirstCardTheKeyboard()
+    {
+        Host(Library(), (session, app) =>
+        {
+            HeadlessUiaReader? reader = OperatingSystem.IsWindows() ? HeadlessUiaReader.Install(session.Window) : null;
+            try
+            {
+                OpenFilms(session);
+                Press(session, KeyCode.Right);
+                Press(session, KeyCode.Enter);
+                Assert.Equal(ApertureView.Detail, app.Current.View);
+                Press(session, KeyCode.Escape);
+                Assert.Equal(ApertureView.Library, app.Current.View);
+
+                int before = reader?.Raised.Count ?? 0;
+                Press(session, KeyCode.Escape);
+                Assert.Equal(ApertureView.Home, app.Current.View);
+                Assert.Equal(0, app.CursorIndex);
+                // Home's first shelf is Continue watching, whose cards are "resume-<id>".
+                var card = Assert.IsAssignableFrom<BoxElement>(FocusedElement(session));
+                Assert.Equal("resume-" + app.CursorItem!.Id, card.AutomationId);
+                Assert.True(card.IsHosted && card.Outline.Width > 0, "Home's first card is not ringed on screen");
+                if (reader is not null && OperatingSystem.IsWindows())
+                {
+                    var focusEvents = reader.Raised.Skip(before)
+                        .Where(e => e.Kind == HeadlessUiaEventKind.Event && e.Id == HeadlessUiaReader.FocusChangedEvent)
+                        .ToList();
+                    var told = Assert.Single(focusEvents).Element!.Value;
+                    Assert.Equal(card.Id, told);
+                    Assert.NotNull(reader.Node(told));
+                    Assert.False(string.IsNullOrEmpty(reader.Name(told)), "the card a reader is told of has no name");
+                }
+
+                // A key walks on from it, as from a card Tab reached.
+                Press(session, KeyCode.Right);
+                Assert.Equal(1, app.CursorIndex);
+            }
+            finally { reader?.Dispose(); }
+        });
+    }
+
+    /// <summary>Play's name says the film, so a reader hears what Enter on a card opened ("Play
+    /// Stalker", not "Play"); Resume's the same. The labels on screen stay the verbs alone.</summary>
+    [Fact]
+    public void PlayAndResume_NameTheFilm_ForAScreenReader()
+    {
+        Host(Library(), (session, app) =>
+        {
+            app.Navigate(new Route(ApertureView.Detail, "m1", "Stalker"));
+            PumpUntilShown(session, "Stalker is a fixture.");
+            var play = session.Window.FindByAutomationId("detail-play")!.Element;
+            Assert.Equal("Play Stalker", play.AccessibleName);
+            Assert.Contains(AllOf(play).OfType<TextElement>(), t => t.Content == "Play");
+
+            app.Navigate(new Route(ApertureView.Detail, "m2", "Solaris"));
+            PumpUntilShown(session, "Solaris");
+            var resume = session.Window.FindByAutomationId("detail-play")!.Element;
+            Assert.Equal("Resume Solaris, 58 m in", resume.AccessibleName);
+            Assert.Contains(AllOf(resume).OfType<TextElement>(), t => t.Content == "Resume 58 m in");
         });
     }
 

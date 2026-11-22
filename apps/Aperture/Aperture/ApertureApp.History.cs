@@ -92,7 +92,7 @@ public sealed partial class ApertureApp
         if (!CanGoBack) return false;
         Leave();
         _at--;
-        Arrive(_history[_at]);
+        Arrive(_history[_at], alongTheHistory: true);
         Rerender();
         return true;
     }
@@ -103,7 +103,7 @@ public sealed partial class ApertureApp
         if (!CanGoForward) return false;
         Leave();
         _at++;
-        Arrive(_history[_at]);
+        Arrive(_history[_at], alongTheHistory: true);
         Rerender();
         return true;
     }
@@ -167,8 +167,14 @@ public sealed partial class ApertureApp
     /// library's grid where it was scrolled (<see cref="OpenGridWhereItWasLeft"/>); a page with no
     /// cursor of its own, or one arrived at fresh, starts with none. A page whose verbs lead (an
     /// item's) hands its first verb the keyboard once it has loaded.
+    /// <para>Back and Forward (<paramref name="alongTheHistory"/>) always hand the page the keyboard:
+    /// what had it went with the page left. With the cursor nowhere it starts on the page's first
+    /// card, ringed, as Tab onto that card starts it (<see cref="SetCursorList"/>): Escape from a
+    /// library opened from the rail went Back to Home, whose cursor was never set, and the keyboard
+    /// went nowhere, so no focus event went out and a screen reader stayed on an element that was
+    /// gone. A page that leads with verbs hands them the keyboard instead, and Search its field.</para>
     /// </summary>
-    private void Arrive(Visit visit)
+    private void Arrive(Visit visit, bool alongTheHistory = false)
     {
         _cursorKey = visit.CursorKey;
         _cursorIndex = visit.CursorIndex;
@@ -184,6 +190,8 @@ public sealed partial class ApertureApp
         // Search is a view whose whole content is one field: arriving there means typing —
         // unless coming back to a result the cursor was on, which takes the keyboard instead.
         if (visit.Route.View == ApertureView.Search && _cursorIndex < 0) _pendingSearchFocus = true;
+        _pendingFirstCard = alongTheHistory && _cursorIndex < 0 && !_pendingArrivalFocus
+            && visit.Route.View != ApertureView.Search;
     }
 
     // ── The page's first verb ────────────────────────────────────────────

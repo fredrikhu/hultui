@@ -70,8 +70,10 @@ public sealed partial class ApertureApp
     /// Called from a view's build: this is what the arrows are walking now. Changing the
     /// key resets the cursor, because "the third poster" means nothing in a different list.
     /// <paramref name="total"/> is how many the list holds in all when only part has loaded.
+    /// <paramref name="firstCard"/> is the list's first card on screen: its first, unless the view
+    /// opens scrolled (a library returned to where it was scrolled).
     /// </summary>
-    private void SetCursorList(string key, IReadOnlyList<object> items, int perRow, int total = 0)
+    private void SetCursorList(string key, IReadOnlyList<object> items, int perRow, int total = 0, int firstCard = 0)
     {
         _cursorListSet = true;
         _cursorItems = items;
@@ -90,12 +92,29 @@ public sealed partial class ApertureApp
             // one is still loading (a library opened again, its place kept from the last visit)
             // or filtered to nothing: the place is kept for the cards to come.
             else if (_cursorIndex >= items.Count && items.Count > 0) _cursorIndex = items.Count - 1;
-            return;
         }
-        _cursorKey = key;
-        _cursorIndex = -1;
-        _cursorToEnd = false;
+        else
+        {
+            _cursorKey = key;
+            _cursorIndex = -1;
+            _cursorToEnd = false;
+        }
+        // Back or Forward to a page whose cursor is nowhere: it starts on the first card on screen,
+        // which takes the keyboard (Arrive). A list still loading waits for its cards.
+        if (_pendingFirstCard && items.Count > 0)
+        {
+            _pendingFirstCard = false;
+            if (_cursorIndex < 0)
+            {
+                _cursorIndex = Math.Clamp(firstCard, 0, items.Count - 1);
+                _pendingCursorFocus = true;
+            }
+        }
     }
+
+    /// <summary>Set by Back or Forward to a page with no cursor (<see cref="Arrive"/>): the next list
+    /// the page registers starts the cursor on its first card on screen.</summary>
+    private bool _pendingFirstCard;
 
     /// <summary>Whether the view being built registered a list (<see cref="SetCursorList"/>); one
     /// that did not is given an empty one.</summary>

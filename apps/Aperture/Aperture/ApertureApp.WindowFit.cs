@@ -59,7 +59,7 @@ public sealed partial class ApertureApp
     /// <summary>What a build of the library does for a window that changed under the cursor.</summary>
     private void FollowWindowWithoutBuild()
     {
-        if (_fitGridStride > 0f) RevealGridCursor(_cursorPerRow, _fitGridStride);
+        if (_fitGridStride > 0f) RevealGridCursor(_cursorPerRow, _fitGridStride, always: true);
     }
 
     private static int CardsAcross(float cardWidth, float windowWidth)
