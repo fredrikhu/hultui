@@ -6,8 +6,8 @@ file after every step and commits it with the step's work. Full survey reports a
 
 - **Round:** 18
 - **Phase:** build — round 18, step 1 next (vesper-file-not-its-own-partner). The survey ran 2026-11-22 in session
-  00f54f03 (reports `17-reports/r18-*`; usage 1 → 8 % of the week, the 5-hour window 7 → 54 %). Questions 73–76 are
-  open; steps 1–10, 11 (a), 13 and 14 need no answer. Round 18's files (the survey brief `brief-r18-survey.md`, build
+  00f54f03 (reports `17-reports/r18-*`; usage 1 → 8 % of the week, the 5-hour window 7 → 54 %). Question 73 waits for the user (images sent; 74 → (c), 75 → (a), 76 → (a)); it is
+  step 11 (b) only; the other steps go ahead. Round 18's files (the survey brief `brief-r18-survey.md`, build
   briefs `brief-r18b<N>.md`, `archive_r18.py`, `merge_r18.py`, `desk.ps1`, agent ids `r18-agents.txt`, probes
   `r18-<area>\` and `r18b<N>\`) are in session 00f54f03's scratchpad
   `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\00f54f03-b511-4949-9273-30fe719e1bbb\scratchpad\`. Round
@@ -1010,6 +1010,16 @@ is not asked: 0f9c8477 and History.cs already promise "back where you were scrol
     the next arrow; (2) Enter on a card opens its page and the reader hears only "Play, button", not the film. (a) Back
     and Escape focus the page's cursor card, or its first card when there is none, and Play's name carries the title
     ("Play <title>"). (b) Leave both. [(a); a small app change that can ride with step 3.]
+    → the user asked for images and the image diff first (2026-11-22): sent the three frames that differ most (f015,
+    f021, f029: 7, 4 and 5 pixels, max 6/255, at the ghost's left edge, the status dot and the right edge) at 3× with
+    the differing pixels marked, and a whole frame for context (`r18-painting\images\`, `ghost_images.py`). Waiting for
+    the decision; step 11 (b) waits.
+    → **(c)** (2026-11-22, the user: "b and do the test"): 2 images for the 8-bit swapchain, and the one guarded HDR
+    drag run in step 12 (an HDR clip on the 4K, a maximized-sized window, modal-loop steps, stop on any stall over 1 s)
+    decides F16.
+    → **(a)** (2026-11-22, the user): no.
+    → **(a)** (2026-11-22; the user's second answer read "75: a", taken as 76: a — correct it if not): it rides with
+    step 3 as its own commit.
 
 Reminder (expert 8): Aperture signed in to jellyfin.home as device "aperture-survey" in earlier rounds, as "aperture-r13" in round 13 (and twice in round 15), and once in
 round 12 as "aperture-r12" (again in round 15); the user should remove those devices and revoke the API key when the work is done.
@@ -1200,3 +1210,7 @@ From 2026-11-19 (round 17's survey); earlier entries are in the archive ([to 202
   Vulkan swapchain every step (stand-ins for a user's drag send the pair); read `Performance` after `EndFrame`, not in
   `FrameRendered`; a picture cache bounded by entries, not bytes, grows with every big picture shown; a component's own
   context-menu provider must survive a patch. Phase → build.
+- 2026-11-22: the user answered question 74 → (c) ("b and do the test": 2 images for the 8-bit swapchain, and the
+  guarded HDR drag run in step 12), 75 → (a), and 76 → (a) (the message said "75: a" twice; the second taken as 76).
+  Question 73: the user asked for the images and the image diff first; the three frames that differ most and a whole
+  frame were sent (`r18-painting\images\`). Step 1 is building (agent on `brief-r18b1.md`).
