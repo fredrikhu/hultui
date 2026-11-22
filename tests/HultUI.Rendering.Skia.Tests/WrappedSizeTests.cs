@@ -190,6 +190,7 @@ public class WrappedSizeTests
         string paragraph = WrapRangeTests.Latin[3];
         var laidOut = pipeline.Layout(paragraph, style, 640f, null);
         Assert.True(pipeline.KeptWrapRange(paragraph, style, null, out float from, out float below));
+        var (_, counted) = pipeline.WrapRangeUse;
         // Sized far from there: the range kept is that width's, a size's.
         pipeline.WrappedSize(paragraph, style, 400f, null);
         Assert.True(pipeline.KeptWrapRange(paragraph, style, null, out float sizedFrom, out float sizedBelow));
@@ -209,6 +210,7 @@ public class WrappedSizeTests
         SameSize(laidOut.Size, size, "back at 640");
         Assert.True(pipeline.KeptWrapRange(paragraph, style, null, out f, out b));
         Assert.Equal((from, below), (f, b));
+        Assert.Equal(counted, pipeline.WrapRangeUse.Bytes);   // counted for what the layout was counted for
         float inside = from < 640f ? from : MathF.BitDecrement(below);
         Assert.NotEqual(640f, inside);
         int hits = pipeline.WrapRangeHits;

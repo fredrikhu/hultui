@@ -619,7 +619,7 @@ public sealed class TextPipeline
             fitsBelow = Math.Min(fitsBelow, shaped.TotalWidth);
         bool keepsRange = overflow == TextOverflow.Clip && KeepsWrapRanges && ReuseAcrossWidths
             && fitsFrom <= maxWidth && maxWidth < fitsBelow;
-        _cache.Put(key, keepsRange ? new WidthLayout(layout, fitsFrom, fitsBelow, bytes) : new WidthLayout(layout), bytes);
+        _cache.Put(key, keepsRange ? new WidthLayout(layout, fitsFrom, fitsBelow) : new WidthLayout(layout), bytes);
         if (keepsRange)
             _wrapRanges.Put(wrapKey.IsMade ? wrapKey : new WrapKey(text, style, maxLines),
                 new WrapRange(layout, fitsFrom, fitsBelow, shaped.HasNewline ? float.NaN : shaped.TotalWidth, layout.Size), bytes);
@@ -670,7 +670,7 @@ public sealed class TextPipeline
             return kept.Size;
         var key = new MeasurementKey(text, style.FontFamily, style.FontSize, style.FontWeight,
             style.FontSlant, maxWidth, -1, TextOverflow.Clip, style.LineHeight, style.LetterSpacing);
-        if (_cache.TryGet(key, out var cached))
+        if (_cache.TryGet(key, out var cached, out int bytes))
         {
             // A width laid out before, out of the range kept: the view is back at a width it was laid out at (the
             // one it opened at, after a drag). The layout's own range is put back, so the next width of a drag is
@@ -678,7 +678,7 @@ public sealed class TextPipeline
             if (cached.From <= maxWidth && maxWidth < cached.Below)
                 _wrapRanges.Put(wrapKey.IsMade ? wrapKey : new WrapKey(text, style, null),
                     new WrapRange(cached.Layout, cached.From, cached.Below,
-                        shaped.HasNewline ? float.NaN : shaped.TotalWidth, cached.Layout.Size), cached.Bytes);
+                        shaped.HasNewline ? float.NaN : shaped.TotalWidth, cached.Layout.Size), bytes);
             return cached.Layout.Size;
         }
         // The layout is made now, as Layout makes it, where it is likely asked for next: for a paragraph not seen
@@ -757,15 +757,15 @@ public sealed class TextPipeline
     // Size is the layout's; a range kept by WrappedSize has the size alone, and no layout (null).
     private readonly record struct WrapRange(TextLayout? Layout, float From, float Below, float OneLine, Size Size);
 
-    // A layout in the width-keyed cache, with the range of widths it was kept for in _wrapRanges and the bytes it
-    // was counted for there (NaN: none). A size asked at its width, out of the range kept since, puts its range
-    // back (WrappedSize): a paragraph keeps one range, so after a drag every row of a view held the range of the
-    // drag's far end, and a return to the width the view opened at was answered here and left them so; the next
-    // drag broke every row again at its first width. Only a size ask puts it back: a row on screen is laid out at
-    // two widths a frame in Junction's split diff, and a layout's hit putting its range back sent the range to and
-    // fro between them (the first sweep of a drag 33.0 -> 81.8 KB a step).
-    private readonly record struct WidthLayout(TextLayout Layout, float From = float.NaN, float Below = float.NaN,
-        int Bytes = 0);
+    // A layout in the width-keyed cache, with the range of widths it was kept for in _wrapRanges (NaN: none); the
+    // entry's weight is the bytes it was counted for there (at most half the layout bound, an eighth of the wrap
+    // ranges'). A size asked at its width, out of the range kept since, puts its range back (WrappedSize): a
+    // paragraph keeps one range, so after a drag every row of a view held the range of the drag's far end, and a
+    // return to the width the view opened at was answered here and left them so; the next drag broke every row
+    // again at its first width. Only a size ask puts it back: a row on screen is laid out at two widths a frame in
+    // Junction's split diff, and a layout's hit putting its range back sent the range to and fro between them (the
+    // first sweep of a drag 33.0 -> 81.8 KB a step). Two floats, not three: every entry's node carries them.
+    private readonly record struct WidthLayout(TextLayout Layout, float From = float.NaN, float Below = float.NaN);
 
     // A paragraph's key in _wrapRanges: a layout cache key with no width, and its hash. A layout makes
     // it once, for its ask and the put after a miss: a long paragraph is hashed once, not four times
