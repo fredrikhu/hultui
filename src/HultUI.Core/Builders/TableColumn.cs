@@ -1,4 +1,5 @@
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
 
 namespace HultUI.Core.Builders;
 
@@ -8,6 +9,33 @@ public enum SortDirection : byte
     Ascending,
     Descending,
 }
+
+/// <summary>Who puts a <see cref="TableView{T}"/>'s rows in order.</summary>
+public enum TableSortMode : byte
+{
+    /// <summary>The table, in <see cref="TableView{T}.Sort"/> (and so in <see cref="TableView{T}.Body"/>),
+    /// by the columns' <see cref="TableColumn{T}.Compare"/>: one key, on the UI thread, remembered
+    /// until the list or the sort changes. The default.</summary>
+    Internal,
+    /// <summary>The app, wherever and however it likes. The table never sorts: the header shows
+    /// the keys the app sets with <see cref="TableView{T}.SetSortKeys"/> and reports a press as a
+    /// <see cref="TableView{T}.SortRequested"/>, changing nothing itself.</summary>
+    External,
+}
+
+/// <summary>One level of a sort: a column and which way.</summary>
+/// <param name="ColumnId">The column's <see cref="TableColumn{T}.Id"/>.</param>
+/// <param name="Direction">Which way.</param>
+public readonly record struct TableSortKey(string ColumnId, SortDirection Direction);
+
+/// <summary>A sort the user asked for from the header: the column pressed, the modifiers held,
+/// and the keys the table would sort by itself (a press sorts by the column, again the other way;
+/// Shift adds it as the next key, or turns it round where it already is one).</summary>
+/// <param name="ColumnId">The column pressed.</param>
+/// <param name="Modifiers">The modifiers held with the press.</param>
+/// <param name="Suggested">The keys the table would sort by, first key first.</param>
+public readonly record struct TableSortRequest(string ColumnId, KeyModifiers Modifiers,
+    IReadOnlyList<TableSortKey> Suggested);
 
 /// <summary>Where a column's cells and header sit across the column: numbers and sizes go to
 /// the end, so their digits line up.</summary>
@@ -62,6 +90,11 @@ public sealed class TableColumn<T>
     /// descending for sizes and dates, where the large and the recent are what is wanted.</summary>
     public SortDirection FirstSort { get; init; } = SortDirection.Ascending;
 
+    /// <summary>Whether the header offers to sort by it when the app sorts the rows
+    /// (<see cref="TableSortMode.External"/>) and gives no <see cref="Compare"/>. Ignored by the
+    /// table's own sort, which needs <see cref="Compare"/>.</summary>
+    public bool CanSort { get; init; }
+
     /// <summary>Whether dragging the divider at its end resizes it. Always false for a
     /// <see cref="Fill"/> column, which takes what is left.</summary>
     public bool Resizable { get; init; } = true;
@@ -72,6 +105,8 @@ public sealed class TableColumn<T>
     /// <summary>Starts hidden, until the user shows it.</summary>
     public bool HiddenByDefault { get; init; }
 
+    /// <summary>Whether the table's own sort can sort by it (it has a <see cref="Compare"/>). See
+    /// <see cref="TableView{T}.CanSortBy"/> for whether the header sorts by it.</summary>
     public bool IsSortable => Compare is not null;
     public bool IsFill => Fill is not null;
 }

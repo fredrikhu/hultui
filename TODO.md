@@ -225,6 +225,14 @@
   content box — the grip in the padding was unreachable; a later sibling wins a press on a shared
   edge; `Array.Sort` insertion-sorts ≤16 items, so stability needs a longer test list. Tests: 9
   model, 6 headless, 1 Fluent, 1 Vesper, AT-SPI role rows; controls (10) each fail their test.
+- **A table the app sorts** — `TableView.SortMode = TableSortMode.External`: the table never sorts,
+  a header press (pointer, Enter/Space, Shift for a next key, an assistive invoke) raises
+  `SortRequested` with the keys the table would have used, and the header shows only what the app
+  sets with `SetSortKeys` (several keys, each header with its place). `TableColumn.CanSort` makes a
+  column sortable with no `Compare`. The pressed header announces the answer once. Internal mode
+  unchanged. Tests: `TableViewExternalSortTests` (unit and headless),
+  `A11yCurrentItemFocusTests.ATSPI_AReSortThatMovesTheCursor_SendsOneFocusMove_AndOneAnnouncement`;
+  perf row `table/TableView 1M external sort` (0 comparisons). See `docs/ELEMENTS.md` §25.
 - **Popover** — `src/HultUI.Core/Builders/Popover.cs` (+ `PopoverTheme`): a non-modal card of any
   content against an anchor. Placement (Below/Above/Right/Left × Start/Center/End) flips when it
   does not fit and the other side has more room, slides to stay in the window, lands on whole

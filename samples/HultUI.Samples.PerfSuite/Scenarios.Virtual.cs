@@ -243,6 +243,30 @@ static partial class Scenarios
                 return new Op { Run = step => ctx.Window.Wheel(500, 400, 0, WheelDirection(step) * 3) };
             });
 
+        yield return new Scenario("table/TableView 1M external sort",
+            "Press the Label header of a 1,000,000-row TableView the app sorts: the request, the app's answer and a frame; the table compares nothing",
+            ctx =>
+            {
+                var bench = new ExternalTableBench(new SyntheticRows(ctx.Rng, 1_000_000));
+                ctx.Mount(bench.Mount());
+                var labelHeader = ctx.Window.FindByAutomationId("column-label")!.Element;
+                return new Op
+                {
+                    Run = _ => ctx.Window.Click(labelHeader),
+                    Figure = () => bench.Compared,
+                    FigureUnit = "comparisons",
+                    Check = step =>
+                    {
+                        var direction = step % 2 == 0 ? SortDirection.Ascending : SortDirection.Descending;
+                        if (bench.Compared != 0) return $"the table compared {bench.Compared} times";
+                        if (bench.Table.SortKeys is not [var key] || key != new TableSortKey("label", direction))
+                            return $"the keys are [{string.Join(", ", bench.Table.SortKeys)}], not label {direction}";
+                        var expected = direction == SortDirection.Ascending ? bench.Source[0] : bench.Source[^1];
+                        return bench.Rows[0] == expected ? null : "the list does not start with the app's answer";
+                    },
+                };
+            });
+
         yield return new Scenario("table/TableView 10k resize column",
             "Drag-resize a TableView column: every visible row re-laid out on the new tracks",
             ctx =>
@@ -973,6 +997,64 @@ sealed class ColumnsWalk(List<RowItem> items) : Component
         return left >= -0.5f && left + cell.Width <= list.Layout.AbsoluteContentBox.Width + 0.5f ? null
             : $"item {_cursor.Value}'s column is not shown whole";
     }
+}
+
+/// <summary>The app's sorted answer over a list it already has: the list read backwards. O(1) to
+/// make, nothing per item.</summary>
+sealed class ReversedRows(IReadOnlyList<RowItem> source) : IReadOnlyList<RowItem>
+{
+    public int Count => source.Count;
+
+    public RowItem this[int index] => source[Count - 1 - index];
+
+    public IEnumerator<RowItem> GetEnumerator()
+    {
+        for (int i = 0; i < Count; i++) yield return this[i];
+    }
+
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+}
+
+/// <summary>
+/// <see cref="TableBench"/>'s table with the app sorting (<see cref="TableSortMode.External"/>): a
+/// press asks, and the answer — the rows ascending or reversed, as the app's background sort would
+/// deliver them, given at once so a step times only the UI side — sets the keys. The label column's
+/// Compare counts its calls, the proof the table never sorts.
+/// </summary>
+sealed class ExternalTableBench : Component
+{
+    public IReadOnlyList<RowItem> Source { get; }
+    public IReadOnlyList<RowItem> Rows { get; private set; }
+    public int Compared { get; private set; }
+    public TableView<RowItem> Table { get; }
+
+    public ExternalTableBench(IReadOnlyList<RowItem> source)
+    {
+        Source = source;
+        Rows = source;
+        Table = new TableView<RowItem>(
+        [
+            new TableColumn<RowItem> { Id = "id", Header = "Id", Width = 80, Text = r => r.Id.ToString(), CanSort = true,
+                Align = ColumnAlign.End },
+            new TableColumn<RowItem> { Id = "label", Header = "Label", Width = 260, Text = r => r.Label, CanSort = true,
+                Compare = (a, b) => { Compared++; return string.CompareOrdinal(a.Label, b.Label); } },
+            new TableColumn<RowItem> { Id = "length", Header = "Length", Width = 90, Text = r => r.Label.Length.ToString(),
+                Align = ColumnAlign.End },
+            new TableColumn<RowItem> { Id = "notes", Header = "Notes", Fill = 1, Text = r => r.Label.ToUpperInvariant() },
+        ], MarkDirty)
+        {
+            SortMode = TableSortMode.External,
+            SortRequested = request =>
+            {
+                Rows = request.Suggested[0].Direction == SortDirection.Ascending ? Source : new ReversedRows(Source);
+                Table.SetSortKeys(request.Suggested);
+                MarkDirty();
+            },
+        };
+    }
+
+    public override Element Build()
+        => Flex.Column(gap: 0).FlexGrow(1).Children(Table.Header(), Table.Body(Rows).FlexGrow(1));
 }
 
 sealed class TableBench : Component

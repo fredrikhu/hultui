@@ -2725,6 +2725,40 @@ Flex.Column(gap: 0).Children(_files.Header(), _files.Body(rows).FlexGrow(1))
   way. `Sort(items)` is stable and memoized on the list's identity. `Group` pins rows whatever the
   direction (a file list's ".." and folders). An app that sorts its own rows (Vesper keeps a sort
   per tab) calls `SetSort` to tell the header, and passes `sort: false` to `Body`.
+- **Sorting by the app:** with `SortMode = TableSortMode.External` the table never sorts — `Sort`
+  and `Body` return the rows as given — and a column sorts when it has a `Compare` or says
+  `CanSort`. A press on a sortable header (pointer, Enter or Space, an assistive invoke) raises
+  `SortRequested` with the column, the modifiers and `Suggested`, the keys the table would have
+  sorted by (the column, the other way round when it is the first key, else its `FirstSort`; with
+  Shift, the keys with the column added after them or turned round where it is one), and changes
+  nothing. The app sorts its rows wherever it likes, then calls `SetSortKeys` with the keys they
+  are in, which the header shows: it always describes the rows' order, never a pending one. With
+  several keys each sorted header draws its place (1, 2, 3) after its chevron. `Restore` leaves
+  the sort alone (the app sets the keys); `SetSort` and `ClearSort` set one key or none. The
+  built-in sort stays single-key: several keys there throw.
+
+  ```csharp
+  _files = new TableView<FileRow>(
+  [
+      new() { Id = "name", Header = "Name", Fill = 1, CanHide = false, CanSort = true, Text = f => f.Name },
+      new() { Id = "size", Header = "Size", Width = 90, Align = ColumnAlign.End, CanSort = true,
+              FirstSort = SortDirection.Descending, Text = f => Size(f) },
+  ], MarkDirty)
+  {
+      SortMode = TableSortMode.External,
+      SortRequested = request => _ = ResortAsync(request.Suggested),
+  };
+
+  async Task ResortAsync(IReadOnlyList<TableSortKey> keys)
+  {
+      int version = ++_sortVersion;
+      var sorted = await Task.Run(() => _listing.SortedBy(keys));   // the app's own keys, off the UI thread
+      if (version != _sortVersion) return;                          // a newer request won
+      _rows = sorted;
+      _files.SetSortKeys(keys);                                     // the header now says what the rows are
+      MarkDirty();
+  }
+  ```
 - **Widths:** drag the grip at a column's edge; a double click puts its own width back. Columns
   before the fill resize from their end edge, columns after it from their start edge — the fixed
   columns after a fill are pinned to the table's end, so their end edge cannot follow a drag.
@@ -2734,9 +2768,12 @@ Flex.Column(gap: 0).Children(_files.Header(), _files.Body(rows).FlexGrow(1))
   `Restore` puts it back and skips columns that no longer exist; `StateChanged` runs when a click
   or a drag settles, not on every move.
 - **Keyboard:** sortable headers are Tab stops unless `HeadersTakeFocus` is off — off for a list
-  that owns Tab itself.
+  that owns Tab itself. Enter or Space on a header sorts by it; in External mode Shift+Enter or
+  Shift+Space asks for it as the next key.
 - **Accessibility:** headers have the new `ColumnHeader` role (UIA header item, AT-SPI table column
-  header), invokable, named with their sort ("Size, sorted descending"). `Body` names each row by
+  header), invokable, named with their sort ("Size, sorted descending"; with several keys "Name,
+  sorted ascending, sort key 1 of 2"). In External mode the pressed header announces the app's
+  answer once, when it comes ("Sorted by Size, descending"). `Body` names each row by
   `RowLabel` ("a.txt, Size 100 B"), which a virtual list needs: its rows reach a screen reader by
   that label alone.
 
