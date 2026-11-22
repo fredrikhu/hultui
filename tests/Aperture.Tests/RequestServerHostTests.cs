@@ -1051,6 +1051,96 @@ public class RequestServerHostTests
         });
     }
 
+    /// <summary>A library caught up on Done Show (two seasons, both watched, still running), and a
+    /// request server that has its third season out — aired five days ago, nobody asking for it.</summary>
+    private static (FakeMediaLibrary, FakeRequestServer) DoneShowWithASeasonOut(
+        RequestPermission permissions = RequestPermission.Request)
+    {
+        var library = Library();
+        library.AddItem(new MediaItem
+        {
+            Id = "done", Name = "Done Show", Kind = MediaKind.Series, TmdbId = 77, SeriesStatus = "Continuing",
+            PrimaryImageTag = "tag-done",
+        }, "shows");
+        library.AddSeason("done", 1, 4, watched: 4, added: library.Made.AddDays(-500));
+        library.AddSeason("done", 2, 4, watched: 4, added: library.Made.AddDays(-200));
+        var requests = Requests(permissions);
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        requests.AddSeries(77, "Done Show", 2020, Availability.PartiallyAvailable, "done", seasons:
+        [
+            // The server has lost track of season 1: a gap the picker would offer too, and this
+            // card must not.
+            new DiscoverSeason(1, "Season 1", 4, 2020, Availability.Unknown, Availability.Unknown) { AirDate = today.AddDays(-700) },
+            new DiscoverSeason(2, "Season 2", 4, 2021, Availability.Available, Availability.Unknown) { AirDate = today.AddDays(-300) },
+            new DiscoverSeason(3, "Season 3", 6, 2026, Availability.Unknown, Availability.Unknown) { AirDate = today.AddDays(-5) },
+        ]);
+        return (library, requests);
+    }
+
+    private static void LookForOut(HeadlessSession session, ApertureApp app)
+    {
+        app.OutLookPace = TimeSpan.Zero;
+        app.LookForOutSeasonsAsync().GetAwaiter().GetResult();
+        Pump(session, 6);
+    }
+
+    [Fact]
+    public void ASeasonOutButNotInTheLibraryHasACard_WhoseMenuAsksForJustThatSeason()
+    {
+        var (library, requests) = DoneShowWithASeasonOut();
+        Host(library, requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            LookForOut(session, app);
+
+            Assert.NotNull(session.Window.FindByAutomationId("out-season-done"));
+            Assert.True(Shows(session, "Season 3 · 6 episodes"));
+            Assert.True(Shows(session, "Not in library"));
+            Assert.Equal(1, app.OutLooks);
+
+            var card = Assert.Single(app.OutSeasonCards);
+            var request = app.CardMenu(card.Series).Single(m => m.Label == "Request Season 3…");
+            request.Action!();
+            Pump(session, 6);
+            Assert.Equal((ApertureView.DiscoverTitle, "tv:77"), (app.Current.View, app.Current.Id));
+            Assert.Equal(new[] { 3 }, app.SeasonPick.Order());
+
+            // Asked for: the card has been acted on, and leaves the row.
+            app.MakeRequest(new NewRequest(DiscoverKind.Tv, 77, [3]), "Done Show");
+            Pump(session, 6);
+            Assert.Empty(app.OutSeasonCards);
+        });
+    }
+
+    [Fact]
+    public void AnOutSeasonDismissedIsNotSaidAgain_AndSomeoneWhoMayNotAskSeesNone()
+    {
+        var (library, requests) = DoneShowWithASeasonOut();
+        Host(library, requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            LookForOut(session, app);
+            var card = Assert.Single(app.OutSeasonCards);
+
+            app.CardMenu(card.Series).Single(m => m.Label == "Dismiss").Action!();
+            Pump(session, 4);
+            Assert.Empty(app.OutSeasonCards);
+            Assert.Null(session.Window.FindByAutomationId("out-season-done"));
+
+            LookForOut(session, app);
+            Assert.Empty(app.OutSeasonCards);
+        });
+
+        var (again, viewOnly) = DoneShowWithASeasonOut(RequestPermission.None);
+        Host(again, viewOnly, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            LookForOut(session, app);
+            Assert.Empty(app.OutSeasonCards);
+            Assert.DoesNotContain(viewOnly.Calls, c => c.StartsWith("GetDetail", StringComparison.Ordinal));
+        });
+    }
+
     // ── The watchlist on Home ────────────────────────────────────────────
 
     [Fact]

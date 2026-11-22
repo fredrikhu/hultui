@@ -266,6 +266,8 @@ public sealed partial class ApertureApp
 
         // The first episode of a new season on Home's row: Dismiss, and Stop watching the series.
         if (NoticeFor(item) is { } notice) AddNewSeasonMenu(items, notice);
+        // A series with seasons out that the library does not have: ask for them, or not.
+        else if (OutCardFor(item) is { } outCard) AddOutSeasonMenu(items, outCard);
         return items;
     }
 

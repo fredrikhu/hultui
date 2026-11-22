@@ -94,6 +94,11 @@ public sealed record MediaItem
     /// <see cref="ChildCount"/> is what a page shows.</summary>
     public int? FileCount { get; init; }
 
+    /// <summary>For a series, whether it is still being made, as the server's metadata has it:
+    /// "Continuing" or "Ended" (null when it does not say). An ended series gets no new seasons, so
+    /// the season watch does not ask the request server about it.</summary>
+    public string? SeriesStatus { get; init; }
+
     /// <summary>Cast and crew, in the order the server lists them — which is billing order
     /// for actors, so the first few are the ones a poster would name. Only ever filled in
     /// for a single item fetched for its detail page; a list query does not ask for it.</summary>

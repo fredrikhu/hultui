@@ -250,6 +250,51 @@ public class LiveRequestServerTests
         Assert.Empty(missing);
     }
 
+    /// <summary>
+    /// The new-season watch's request-server half, read only, against both lab servers: series carry
+    /// their running status, seasons carry air dates, and one look asks the request server about the
+    /// caught-up, running series alone. Prints what it found, for the slice's notes. Needs the live
+    /// Jellyfin variables as well.
+    /// </summary>
+    [LiveRequestServerFact]
+    public async Task TheOutSeasonLookAsksOnlyAboutSeriesWatchedThrough()
+    {
+        if (LiveServer.Address is null)
+        {
+            Console.WriteLine("SKIPPED: no live Jellyfin (APERTURE_LIVE_SERVER).");
+            return;
+        }
+        using var jellyfin = await LiveServer.ConnectAsync(Ct);
+        using var server = await LiveRequestServer.ConnectAsync(jellyfin, Ct);
+
+        var series = await jellyfin.GetSeriesByEpisodeAddedAsync(0, 100, Ct);
+        Assert.True(series.Ok, series.Failure?.Message);
+        var statuses = series.Value.Items.GroupBy(s => s.SeriesStatus ?? "(none)").Select(g => $"{g.Key} {g.Count()}");
+        Console.WriteLine("series status: " + string.Join(", ", statuses));
+        Assert.Contains(series.Value.Items, s => s.SeriesStatus is { Length: > 0 });
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var look = await SeasonWatch.OutLookAsync(jellyfin, server, [], [], [], DateOnly.FromDateTime(DateTime.Now),
+            TimeSpan.FromMilliseconds(200), Ct);
+        Assert.True(look.Ok, look.Failure?.Message);
+        Console.WriteLine($"out look: {look.Value.LibraryCalls} library calls, {look.Value.RequestCalls} request-server calls " +
+                          $"({look.Value.Skipped} not found there), {watch.ElapsedMilliseconds} ms, {look.Value.Findings.Count} found");
+        foreach (var finding in look.Value.Findings)
+        {
+            Console.WriteLine($"  {finding.Series.Name} out: {string.Join(", ", finding.Seasons.Select(s => s.Number))}; " +
+                              "request server: " + string.Join(", ", finding.Detail.Seasons.Select(s =>
+                $"S{s.Number} {s.Availability} {s.EpisodeCount} ep aired {s.AirDate?.ToString("yyyy-MM-dd") ?? "-"}")));
+            var library = await jellyfin.GetSeasonsAsync(finding.Series.Id, 0, 100, Ct);
+            Console.WriteLine($"  {finding.Series.Name} library: " + string.Join(", ", library.Value.Items.Select(s =>
+                $"{s.Name} (#{s.IndexNumber}) {s.FileCount} files {s.UnplayedItemCount} unwatched")));
+        }
+        Assert.All(look.Value.Findings, f => Assert.All(f.Seasons, s =>
+        {
+            Assert.NotNull(s.AirDate);
+            Assert.True(s.AirDate <= DateOnly.FromDateTime(DateTime.Now));
+        }));
+    }
+
     /// <summary>Read only: listing and counting; answering or resolving would change the
     /// household's real reports.</summary>
     [LiveRequestServerFact]

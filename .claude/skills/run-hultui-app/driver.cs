@@ -300,6 +300,15 @@ Aperture.Core.Testing.FakeRequestServer DemoRequests(bool reporter = false)
         new Aperture.Core.Requests.DiscoverSeason(3, "Season 3", 10, 2023, Aperture.Core.Requests.Availability.Unknown, Aperture.Core.Requests.Availability.Unknown),
     ], series, trending);
     for (int i = 0; i < 6; i++) fake.AddSeries(2100 + i, "Series " + (char)('A' + i), 2015 + i, shelves: [series]);
+    // Low Tide, watched through two seasons in the demo library, with a third out and nobody asking:
+    // the New seasons row's "Not in library" card once F5 has looked.
+    var aired = DateOnly.FromDateTime(DateTime.Now);
+    fake.AddSeries(2002, "Low Tide", 2019, Aperture.Core.Requests.Availability.PartiallyAvailable, "s3",
+    [
+        new Aperture.Core.Requests.DiscoverSeason(1, "Season 1", 6, 2019, Aperture.Core.Requests.Availability.Available, Aperture.Core.Requests.Availability.Unknown) { AirDate = aired.AddDays(-1200) },
+        new Aperture.Core.Requests.DiscoverSeason(2, "Season 2", 6, 2022, Aperture.Core.Requests.Availability.Available, Aperture.Core.Requests.Availability.Unknown) { AirDate = aired.AddDays(-600) },
+        new Aperture.Core.Requests.DiscoverSeason(3, "Season 3", 8, 2026, Aperture.Core.Requests.Availability.Unknown, Aperture.Core.Requests.Availability.Unknown) { AirDate = aired.AddDays(-12) },
+    ]);
     fake.AddPendingRequest("movie:1004");
     fake.AddPendingRequest("tv:2102", [1, 2]);
     fake.AddRequest("movie:1003", Aperture.Core.Requests.RequestStatus.Approved);
@@ -381,6 +390,14 @@ Aperture.Core.Testing.FakeMediaLibrary DemoLibrary()
     fake.AddSeason("s2", 1, 8, watched: 8, added: fake.Made.AddDays(-500));
     fake.AddSeason("s2", 2, 8, watched: 8, added: fake.Made.AddDays(-150));
     fake.AddSeason("s2", 3, 10, added: fake.Made.AddDays(-2));
+    // Watched through, still running; with --seerr-demo its third season is out and not here.
+    fake.AddItem(new Aperture.Core.MediaItem
+    {
+        Id = "s3", Name = "Low Tide", Kind = Aperture.Core.MediaKind.Series, TmdbId = 2002, ProductionYear = 2019,
+        SeriesStatus = "Continuing", Overview = "A fixture series with a season out that nobody has fetched.",
+    }, "shows");
+    fake.AddSeason("s3", 1, 6, watched: 6, added: fake.Made.AddDays(-900));
+    fake.AddSeason("s3", 2, 6, watched: 6, added: fake.Made.AddDays(-400));
     fake.ResumeIds.Add("m1");
     fake.ResumeIds.Add("e4");
     // A few hearted, for Home's favourites row.

@@ -606,9 +606,13 @@ public sealed partial class ApertureApp
     {
         if (_requestServer is not { } server) return;
         _ = ApplyRequestAsync(() => server.RequestAsync(request), made =>
-            made.Status == RequestStatus.Approved
+        {
+            // Asked for: its "out, not in your library" card on Home has been acted on.
+            if (request.Kind == DiscoverKind.Tv) ForgetOutSeasons(request.TmdbId);
+            return made.Status == RequestStatus.Approved
                 ? $"Requested {title} — approved, on its way"
-                : $"Requested {title} — waiting for approval");
+                : $"Requested {title} — waiting for approval";
+        });
     }
 
     internal void DecideRequest(MediaRequest request, bool approve)

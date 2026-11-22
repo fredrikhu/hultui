@@ -611,6 +611,7 @@ public sealed class JellyfinLibrary : IMediaLibrary
         DateAdded = dto.DateCreated,
         DateLastMediaAdded = dto.DateLastMediaAdded,
         FileCount = dto.RecursiveItemCount,
+        SeriesStatus = dto.Type == BaseItemDto_Type.Series ? dto.Status : null,
         People = MapPeople(dto.People),
         Chapters = MapChapters(dto.Chapters),
         Trickplay = MapTrickplay(dto.Trickplay),

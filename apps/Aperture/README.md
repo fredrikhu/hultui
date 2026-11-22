@@ -49,8 +49,8 @@ and the row sits right after Continue watching and Next up, since it answers the
 
 - **Caught up** is judged per season from the server's own watched state for whoever is signed in,
   so watching on the television counts: every other numbered season fully watched, the new one not
-  started. The specials count neither way, and a series numbered straight through ("Season
-  Unknown") never qualifies.
+  started. The specials and seasons with no number (extras folders, "Season Unknown") count neither
+  way, so a series numbered straight through never qualifies.
 - **New** means a season with at least one episode file that was not there at the last look.
   Season numbers are compared, not dates, so a re-scan that rewrites "date added" changes nothing;
   dates are used only at the very first look, when a season added in the last 14 days counts. A
@@ -62,6 +62,15 @@ and the row sits right after Continue watching and Next up, since it answers the
   said it), and not at all while the row is hidden: hiding the row is how to stop hearing about it.
   The series' own page says "Season 3 is new · added 2 days ago" and marks the season's card, and
   Next up leaves out an episode the row is showing.
+- **Out, but not in your library.** With a request server connected, and for someone allowed to
+  ask for series, a series you are caught up on that is still running gets a card after the
+  library's own — "Low Tide · Season 3 · 8 episodes · out 12 days ago", marked "Not in library" —
+  for seasons that have aired, nobody has asked for, and are numbered above every season the request
+  server knows the library has (so a gap below is not offered). Enter opens the series' page; the
+  card's menu has **Request Season 3…**, which opens the season picker with just those seasons
+  ticked, and the card leaves once they are asked for. It costs a call per such series, so it looks
+  a minute and a half after the request server opens, every twelve hours and on F5, and says nothing
+  as a toast: a season that is out has not arrived.
 - **A card leaves** once an episode of its season is watched (or marked watched from the card), or
   the season leaves the library. **Dismiss** in the card's menu removes it for that season; **Clear
   all** in the row's menu, every card. **Stop watching … for new seasons** mutes the series for good

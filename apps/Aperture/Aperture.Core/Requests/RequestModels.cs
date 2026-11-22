@@ -279,7 +279,12 @@ public enum DiscoverShelf
 
 /// <summary>One season of a series, and where it stands.</summary>
 public sealed record DiscoverSeason(int Number, string Name, int EpisodeCount, int? Year,
-    Availability Availability, Availability Availability4k);
+    Availability Availability, Availability Availability4k)
+{
+    /// <summary>When its first episode aired (or will), as TMDB has it; null when TMDB has no date
+    /// yet — a season announced and nothing more.</summary>
+    public DateOnly? AirDate { get; init; }
+}
 
 /// <summary>Someone in a title's credits, with TMDB's picture of them.</summary>
 public sealed record DiscoverPerson(int TmdbId, string Name, string? Role, string? ProfilePath);
