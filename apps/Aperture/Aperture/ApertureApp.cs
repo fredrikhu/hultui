@@ -154,11 +154,9 @@ public sealed partial class ApertureApp : Component, IDisposable
     /// <summary>The toast on screen, for tests.</summary>
     internal ToastHost Toasts => _toasts;
 
-    private void Rerender()
-    {
-        _parts.Invalidate();
-        _revision.Value++;
-    }
+    /// <summary>Rebuilds the window: the view, and a part when what it shows moved
+    /// (ApertureApp.Parts.cs).</summary>
+    private void Rerender() => _revision.Value++;
 
     // A monitor change arrives as a resize: retire the icon rasters cached for the old
     // scale, or every icon disappears until the next build. Artwork is fetched at the new
@@ -199,8 +197,6 @@ public sealed partial class ApertureApp : Component, IDisposable
         Builds++;
         // Track the revision signal so Rerender() re-runs Build through the Effect.
         _ = _revision.Value;
-        if (!_viewBuild) _parts.Invalidate();
-        _viewBuild = false;
         StartWindowFit();
 
         var root = Flex.Column(gap: 0)
@@ -212,7 +208,7 @@ public sealed partial class ApertureApp : Component, IDisposable
         // Full screen means the window has no chrome — so neither do we. The app's own
         // title bar is the only chrome there is here, and leaving it up would put a strip
         // of app furniture across the top of a film.
-        if (!_window.IsFullscreen) root.AddChild(TitleBarPart.Place().FlexShrink(0));
+        if (!_window.IsFullscreen) root.AddChild(PlaceTitleBar().FlexShrink(0));
 
         var body = _stage == ApertureStage.Connect ? BuildConnectView() : BuildBrowsing();
         body.Key = "body";
@@ -253,7 +249,7 @@ public sealed partial class ApertureApp : Component, IDisposable
         EnsureSeasonWatch();
 
         var row = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
-        row.AddChild(RailPart.Place().FlexShrink(0));
+        row.AddChild(PlaceRail().FlexShrink(0));
 
         _cursorListSet = false;
         var view = Current.View switch
@@ -289,7 +285,10 @@ public sealed partial class ApertureApp : Component, IDisposable
 
     // ── Title bar ────────────────────────────────────────────────────────
 
-    private Element BuildTitleBar()
+    /// <summary>The wordmark, the server and who is signed in, and the window's buttons. Built
+    /// from <paramref name="shows"/> alone, the value the title bar part compares
+    /// (ApertureApp.Parts.cs).</summary>
+    private Element BuildTitleBar(in TitleBarShows shows)
     {
         var bar = Flex.Row(gap: 0)
             .Height(Halide.TitleBarHeight).FlexShrink(0)
@@ -300,10 +299,10 @@ public sealed partial class ApertureApp : Component, IDisposable
         var left = Flex.Row(gap: Halide.S3).FlexShrink(0).AlignItems(AlignItems.Center)
             .Padding(new Thickness(0, 0, 0, Halide.S4));
         left.AddChild(Ui.Wordmark(12f, Halide.TextMuted));
-        if (_library is { } lib)
+        if (shows.Server is { } server)
         {
             left.AddChild(Text.New("·").FontSize(12f).TextColor(Halide.TextFaint));
-            left.AddChild(Ui.Line(lib.Server.Name, 12f, Halide.TextDim));
+            left.AddChild(Ui.Line(server.Name, 12f, Halide.TextDim));
         }
         left.WindowDrag();
         bar.AddChild(left);
@@ -311,19 +310,19 @@ public sealed partial class ApertureApp : Component, IDisposable
         var right = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Center);
         right.AddChild(Flex.Row(gap: 0).FlexGrow(1).AlignSelf(AlignSelf.Stretch).WindowDrag());
 
-        if (_library is { } signedIn)
+        if (shows.User is { } signedIn)
         {
             var who = Flex.Row(gap: 6).AlignItems(AlignItems.Center)
                 .Padding(new Thickness(3, Halide.S2, 3, Halide.S2))
                 .CornerRadius(Halide.Radius1)
                 .Cursor(CursorType.Pointer)
-                .Tooltip($"Signed in as {signedIn.User.Name} — settings")
+                .Tooltip($"Signed in as {signedIn.Name} — settings")
                 .AccessibleRole(AccessibilityRole.Button)
-                .AccessibleName($"Signed in as {signedIn.User.Name}")
+                .AccessibleName($"Signed in as {signedIn.Name}")
                 .AutomationId("titlebar-user")
                 .Pressable();
             who.AddChild(Ui.Icon(Icons.User, 14f, Halide.TextMuted));
-            who.AddChild(Ui.Line(signedIn.User.Name, 12f, Halide.TextDim));
+            who.AddChild(Ui.Line(signedIn.Name, 12f, Halide.TextDim));
             who.OnClick(_ => Navigate(new Route(ApertureView.Settings)));
             who.HoverBg(Halide.Raised);
             right.AddChild(who);
@@ -362,9 +361,10 @@ public sealed partial class ApertureApp : Component, IDisposable
     /// Home, one button per library, then search and settings at the foot. The libraries
     /// are on the rail rather than behind a menu because a media server has two or three
     /// of them and they are the app's top-level nouns — keys 2… land on them in the order
-    /// the server lists them.
+    /// the server lists them. Built from <paramref name="shows"/> alone, the value the rail part
+    /// compares (ApertureApp.Parts.cs), so nothing it shows can move without that value moving.
     /// </summary>
-    private Element BuildRail()
+    private Element BuildRail(in RailShows shows)
     {
         var rail = Flex.Column(gap: Halide.S1).FlexShrink(0)
             .Width(Halide.RailWidth)
@@ -373,61 +373,57 @@ public sealed partial class ApertureApp : Component, IDisposable
             .Background(Halide.Surface)
             .BorderColor(Halide.Border).BorderWidth(new Thickness(0, 1, 0, 0));
 
-        rail.AddChild(RailButton(Icons.Home, "Home", "1",
-            // Home's rows in full are Home's, as a Discover row in full is Discover's.
-            active: Current.View is ApertureView.Home or ApertureView.ContinueWatching or ApertureView.NextUp,
-            onClick: () => GoHome()));
+        var lit = shows.Lit;
+        rail.AddChild(RailButton(Icons.Home, "Home", "1", active: lit == RailDoor.Home, onClick: () => GoHome()));
 
         int key = 2;
-        foreach (var lib in Libraries)
+        foreach (var lib in shows.Libraries)
         {
             var id = lib.Id;
             string num = key <= 9 ? key.ToString() : "";
             rail.AddChild(RailButton(Icons.ForLibrary(lib.Kind), lib.Name, num,
-                active: Current.View == ApertureView.Library && Current.Id == id,
+                active: lit == RailDoor.Library && shows.LitLibrary == id,
                 onClick: () => Navigate(new Route(ApertureView.Library, id, lib.Name))));
             key++;
         }
 
         // The request server's two doors, under the libraries they fill — and only when one
         // is connected: a rail button that leads to "connect something first" is furniture.
-        if (_requestServer is { } requests)
+        if (shows.Requests is { } user)
         {
             rail.AddChild(Box.New().Height(Halide.S2));
             rail.AddChild(RailButton(Icons.Discover, "Discover", "",
-                active: Current.View is ApertureView.Discover or ApertureView.DiscoverTitle
-                    or ApertureView.DiscoverGenre or ApertureView.DiscoverPerson or ApertureView.DiscoverCompany
-                    or ApertureView.DiscoverAll or ApertureView.DiscoverGenres or ApertureView.DiscoverCompanies,
+                active: lit == RailDoor.Discover,
                 onClick: () => Navigate(new Route(ApertureView.Discover))));
             rail.AddChild(RailButton(Icons.Requests, "Requests", "",
-                active: Current.View == ApertureView.Requests,
+                active: lit == RailDoor.Requests,
                 onClick: () => Navigate(new Route(ApertureView.Requests)),
-                badge: requests.User.CanManageRequests && PendingRequestCount > 0 ? PendingRequestCount : 0));
+                badge: user.CanManageRequests && shows.Waiting > 0 ? shows.Waiting : 0));
             // Everyone's reports are for whoever looks after the library; the badge only for
             // someone who can do something about them.
-            if (requests.User.CanSeeIssues)
+            if (user.CanSeeIssues)
                 rail.AddChild(RailButton(Icons.Report, "Issues", "",
-                    active: Current.View is ApertureView.Issues or ApertureView.Issue,
+                    active: lit == RailDoor.Issues,
                     onClick: () => Navigate(new Route(ApertureView.Issues)),
-                    badge: requests.User.CanManageIssues ? OpenIssueCount : 0, badgeWord: "open"));
+                    badge: user.CanManageIssues ? shows.Open : 0, badgeWord: "open"));
             // Someone who files reports but may not read everyone's: their own, and a
             // badge for the ones answered or resolved since they last looked.
-            else if (CanReportProblems)
+            else if (CanReport(user))
                 rail.AddChild(RailButton(Icons.Report, "Your reports", "",
-                    active: Current.View is ApertureView.Issues or ApertureView.Issue,
+                    active: lit == RailDoor.Issues,
                     onClick: () => Navigate(new Route(ApertureView.Issues)),
-                    badge: MyIssueNewsCount, badgeWord: "new"));
+                    badge: shows.News, badgeWord: "new"));
         }
 
         rail.AddChild(Box.New().FlexGrow(1));
         rail.AddChild(RailButton(Icons.FavoriteOn, "Favourites", "0",
-            active: Current.View == ApertureView.Favourites,
+            active: lit == RailDoor.Favourites,
             onClick: () => Navigate(new Route(ApertureView.Favourites))));
         rail.AddChild(RailButton(Icons.Search, "Search", "/",
-            active: Current.View == ApertureView.Search,
+            active: lit == RailDoor.Search,
             onClick: () => Navigate(new Route(ApertureView.Search))));
         rail.AddChild(RailButton(Icons.Settings, "Settings", "",
-            active: Current.View == ApertureView.Settings,
+            active: lit == RailDoor.Settings,
             onClick: () => Navigate(new Route(ApertureView.Settings))));
         rail.AddChild(Box.New().Height(Halide.S2));
         return rail;

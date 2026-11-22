@@ -563,7 +563,10 @@ Three things decide whether it stays right and stays cheap:
   call `PartGroup.Invalidate()`, so every rebuild builds the parts too, and only the paths that
   change nothing the parts show — selection moves, cursors, typing in a field of the view, search
   boxes — call `MarkViewDirty()` or `RerenderView()`, which do not. Forgetting to opt out costs a
-  build; forgetting to opt in shows a stale toolbar, so make the safe one the default.
+  build; forgetting to opt in shows a stale toolbar, so make the safe one the default. Better
+  still, when what the part shows fits in a small value, compare that value on every build and
+  place the part stale when it moved (`Place(stale:)`, Aperture's title bar and rail below): then
+  no path has to say anything, and nothing is built for a change the part does not show.
   A dialog splits in two (Junction, round 10 step 8): opening it and closing it without acting
   (Escape, Cancel, a click beside it) change only the view, but a confirm runs whatever the card
   was for, which may be the chrome's (a branch checked out, an account signed out), so the confirm
@@ -732,11 +735,26 @@ Aperture's title bar and rail are its first use, and add one lesson: **a build a
 a full one.** A loader that lands builds the app through a signal, with no `MarkDirty()` or
 `Rerender()` to invalidate the group, and what it brought can move a plain field a part reads:
 opening a report marks it read as its loader lands, and that takes a badge off the rail. So the
-app's `Build()` invalidates the group unless the path that asked said view-only, with a flag
-`RerenderView()` and `MarkViewDirty()` set, and `Rerender()` and `MarkDirty()` still invalidate it
-themselves, since a batch can hold a view-only rebuild and a full one. Headless, 600 films, 1440×900,
-a key and two frames, NativeAOT within 1 %: Right 87.3 → 49.2 KB (−44 %), Down 114.1 → 75.9 KB
-(−33 %), a resize across a column count 118.9 → 80.8 KB (−32 %), no part built on any of them.
+app's `Build()` invalidated the group unless the path that asked said view-only, with a flag
+`RerenderView()` and `MarkViewDirty()` set. Headless, 600 films, 1440×900, a key and two frames,
+NativeAOT within 1 %: Right 87.3 → 49.2 KB (−44 %), Down 114.1 → 75.9 KB (−33 %), a resize across a
+column count 118.9 → 80.8 KB (−32 %), no part built on any of them.
+
+That still built both parts, 49 KB, on every page opened, every Back and Forward and every load
+that landed, though most of those move nothing either part shows. Plan 17 round 18 gave each part
+**a value of what it shows** instead: a record struct (the title bar: the server, the user and the
+display scale; the rail: the door lit for the page, the libraries, the request server's user, the
+three badge counts and the scale) that the part's build records and builds from alone, and that
+every build of the app compares with the value now, placing the part with `Place(stale: now !=
+shown)`. No path has to say what it changed, a view-only flag included; only the forced
+`MarkDirty()` still invalidates the group, and PartTests' oracle still checks each part against
+what that full build makes. Read loaders untracked for the comparison
+(`ReactiveScope.Untracked`, with the delegate kept in a field): the part's own effect hears them,
+and a tracked read would build the whole app on each count that lands. Prefer this to a list of
+paths that remember to mark the part. Headless, JIT, 300 films, 1440×900: a film's page opened
+167.4 → 100.8 KB (−40 %; part builds 4 → 1, the rail's light going out), a library's first open
+753.6 → 589.4 (−22 %, 8 → 1), Forward to a film 78.7 → 61.1 (−22 %), Back, Escape, a number key and
+the rail −17.6 KB each (−5 %), a page fetched while wheeling 237.6 → 139.9 (−41 %, 4 → 0).
 
 A worker's progress tick is a view-only change too. Vesper's copy, pack and folder-size workers
 asked for a full rebuild about every 40 ms, so all eleven parts were built some 25 times a second
