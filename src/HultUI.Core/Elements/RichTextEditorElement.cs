@@ -67,9 +67,9 @@ public partial class RichTextEditorElement : BoxElement, IScrollbarDraggable, IA
         OnOwn<PointerMoveEvent>(OnPointerMove);
         OnOwn<PointerUpEvent>(OnPointerUp);
         OnOwn<ScrollEvent>(OnScroll);
-
-        ContextMenuItems = BuildContextMenuItems;
     }
+
+    private protected override Func<IReadOnlyList<ContextMenuItem>>? OwnContextMenuItems() => BuildContextMenuItems;
 
     public static RichTextEditorElement New(RichDocument? document = null,
         [OriginFile] string? file = null, [OriginLine] int line = 0) =>

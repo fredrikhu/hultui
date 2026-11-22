@@ -716,7 +716,42 @@ public abstract class Element
     public string? TooltipText { get; set; }
 
     // ──── Context Menu ────
-    public Func<IReadOnlyList<ContextMenuItem>>? ContextMenuItems { get; set; }
+    /// <summary>
+    /// What the element's right-click menu holds, asked each time it opens; null when the element has
+    /// no menu (the window then asks its ancestors). A text field or a selectable label answers with
+    /// its own menu (Cut, Copy, Paste, Select All) until the app sets one; setting null takes that
+    /// one away too.
+    /// </summary>
+    public Func<IReadOnlyList<ContextMenuItem>>? ContextMenuItems
+    {
+        get
+        {
+            var items = _contextMenuItems;
+            return items is null ? OwnContextMenuItems() : ReferenceEquals(items, NoContextMenu) ? null : items;
+        }
+        set => _contextMenuItems = value ?? NoContextMenu;
+    }
+
+    /// <summary>
+    /// The menu the app set: <see cref="NoContextMenu"/> when it set null, null when it set none.
+    /// The element's own menu is not kept here but asked of the element (<see cref="OwnContextMenuItems"/>),
+    /// so a rebuild, which hands the live element what the build set, leaves it to the live element.
+    /// Kept here, the own menu the build's fresh copy made for itself came across with the patch and
+    /// acted on that copy, out of the window: after one rebuild a field's Cut, Copy and Paste were
+    /// off, and Select All selected the copy.
+    /// </summary>
+    private Func<IReadOnlyList<ContextMenuItem>>? _contextMenuItems;
+
+    /// <summary>What an app's null is kept as: no menu, not even the element's own.</summary>
+    private static readonly Func<IReadOnlyList<ContextMenuItem>> NoContextMenu = () => [];
+
+    /// <summary>The element's own menu, on this element, for when the app set none; null when it has
+    /// none. Asked each time the menu is read.</summary>
+    private protected virtual Func<IReadOnlyList<ContextMenuItem>>? OwnContextMenuItems() => null;
+
+    /// <summary>Drops a menu the app set, so the element's own one is served: a label made selectable
+    /// after the app gave it a menu takes its own, as it always has.</summary>
+    private protected void UseOwnContextMenu() => _contextMenuItems = null;
 
     // ──── Focus ────
     public bool IsFocusable { get; set; }
@@ -1794,7 +1829,8 @@ public abstract class Element
         IsWindowDragRegion = source.IsWindowDragRegion;
         IsWindowMaximizeButton = source.IsWindowMaximizeButton;
         TooltipText = source.TooltipText;
-        ContextMenuItems = source.ContextMenuItems;
+        // The menu the build set, if any; the element's own stays this element's (see _contextMenuItems).
+        _contextMenuItems = source._contextMenuItems;
         _opacity = source._opacity;
         Transform = source.Transform;
         // Interaction config follows the latest build, like event handlers: overrides

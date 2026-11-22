@@ -292,8 +292,11 @@ public class TextElement : Element
         // view. The window clears the group when the user presses outside it.
         OnOwn<BlurEvent>(_ => { if (!InGroup && HasSelection) { ClearSelection(); MarkPaintDirty(); } });
 
-        ContextMenuItems = BuildContextMenuItems;
+        UseOwnContextMenu();
     }
+
+    private protected override Func<IReadOnlyList<ContextMenuItem>>? OwnContextMenuItems() =>
+        _selectionWired ? BuildContextMenuItems : null;
 
     private void ClearSelection() => _anchor = _caret = 0;
 
