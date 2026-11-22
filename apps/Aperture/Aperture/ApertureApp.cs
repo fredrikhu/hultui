@@ -361,8 +361,9 @@ public sealed partial class ApertureApp : Component, IDisposable
     /// Home, one button per library, then search and settings at the foot. The libraries
     /// are on the rail rather than behind a menu because a media server has two or three
     /// of them and they are the app's top-level nouns — keys 2… land on them in the order
-    /// the server lists them. Built from <paramref name="shows"/> alone, the value the rail part
-    /// compares (ApertureApp.Parts.cs), so nothing it shows can move without that value moving.
+    /// the server lists them. Built from <paramref name="shows"/>, the value the rail part
+    /// compares, and its doors, each a part of its own lit by the light (ApertureApp.Parts.cs),
+    /// so nothing it shows can move without one of the two moving.
     /// </summary>
     private Element BuildRail(in RailShows shows)
     {
@@ -373,60 +374,80 @@ public sealed partial class ApertureApp : Component, IDisposable
             .Background(Halide.Surface)
             .BorderColor(Halide.Border).BorderWidth(new Thickness(0, 1, 0, 0));
 
-        var lit = shows.Lit;
-        rail.AddChild(RailButton(Icons.Home, "Home", "1", active: lit == RailDoor.Home, onClick: () => GoHome()));
+        StartDoors();
+        rail.AddChild(PlaceDoor(ref _homeDoor, RailDoor.Home,
+            door => RailButton(Icons.Home, "Home", "1", active: IsLit(door), onClick: () => GoHome())).FlexShrink(0));
 
-        int key = 2;
-        foreach (var lib in shows.Libraries)
-        {
-            var id = lib.Id;
-            string num = key <= 9 ? key.ToString() : "";
-            rail.AddChild(RailButton(Icons.ForLibrary(lib.Kind), lib.Name, num,
-                active: lit == RailDoor.Library && shows.LitLibrary == id,
-                onClick: () => Navigate(new Route(ApertureView.Library, id, lib.Name))));
-            key++;
-        }
+        for (int i = 0; i < shows.Libraries.Count; i++)
+            rail.AddChild(PlaceDoor(LibraryDoor(i), new RailLight(RailDoor.Library, shows.Libraries[i].Id)).FlexShrink(0));
 
         // The request server's two doors, under the libraries they fill — and only when one
         // is connected: a rail button that leads to "connect something first" is furniture.
         if (shows.Requests is { } user)
         {
             rail.AddChild(Box.New().Height(Halide.S2));
-            rail.AddChild(RailButton(Icons.Discover, "Discover", "",
-                active: lit == RailDoor.Discover,
-                onClick: () => Navigate(new Route(ApertureView.Discover))));
-            rail.AddChild(RailButton(Icons.Requests, "Requests", "",
-                active: lit == RailDoor.Requests,
-                onClick: () => Navigate(new Route(ApertureView.Requests)),
-                badge: user.CanManageRequests && shows.Waiting > 0 ? shows.Waiting : 0));
-            // Everyone's reports are for whoever looks after the library; the badge only for
-            // someone who can do something about them.
-            if (user.CanSeeIssues)
-                rail.AddChild(RailButton(Icons.Report, "Issues", "",
-                    active: lit == RailDoor.Issues,
-                    onClick: () => Navigate(new Route(ApertureView.Issues)),
-                    badge: user.CanManageIssues ? shows.Open : 0, badgeWord: "open"));
-            // Someone who files reports but may not read everyone's: their own, and a
-            // badge for the ones answered or resolved since they last looked.
-            else if (CanReport(user))
-                rail.AddChild(RailButton(Icons.Report, "Your reports", "",
-                    active: lit == RailDoor.Issues,
-                    onClick: () => Navigate(new Route(ApertureView.Issues)),
-                    badge: shows.News, badgeWord: "new"));
+            rail.AddChild(PlaceDoor(ref _discoverDoor, RailDoor.Discover, door => RailButton(Icons.Discover, "Discover", "",
+                active: IsLit(door),
+                onClick: () => Navigate(new Route(ApertureView.Discover)))).FlexShrink(0));
+            rail.AddChild(PlaceDoor(ref _requestsDoor, RailDoor.Requests, BuildRequestsDoor).FlexShrink(0));
+            if (user.CanSeeIssues || CanReport(user))
+                rail.AddChild(PlaceDoor(ref _issuesDoor, RailDoor.Issues, BuildIssuesDoor).FlexShrink(0));
         }
 
         rail.AddChild(Box.New().FlexGrow(1));
-        rail.AddChild(RailButton(Icons.FavoriteOn, "Favourites", "0",
-            active: lit == RailDoor.Favourites,
-            onClick: () => Navigate(new Route(ApertureView.Favourites))));
-        rail.AddChild(RailButton(Icons.Search, "Search", "/",
-            active: lit == RailDoor.Search,
-            onClick: () => Navigate(new Route(ApertureView.Search))));
-        rail.AddChild(RailButton(Icons.Settings, "Settings", "",
-            active: lit == RailDoor.Settings,
-            onClick: () => Navigate(new Route(ApertureView.Settings))));
+        rail.AddChild(PlaceDoor(ref _favouritesDoor, RailDoor.Favourites, door => RailButton(Icons.FavoriteOn, "Favourites", "0",
+            active: IsLit(door),
+            onClick: () => Navigate(new Route(ApertureView.Favourites)))).FlexShrink(0));
+        rail.AddChild(PlaceDoor(ref _searchDoor, RailDoor.Search, door => RailButton(Icons.Search, "Search", "/",
+            active: IsLit(door),
+            onClick: () => Navigate(new Route(ApertureView.Search)))).FlexShrink(0));
+        rail.AddChild(PlaceDoor(ref _settingsDoor, RailDoor.Settings, door => RailButton(Icons.Settings, "Settings", "",
+            active: IsLit(door),
+            onClick: () => Navigate(new Route(ApertureView.Settings)))).FlexShrink(0));
         rail.AddChild(Box.New().Height(Halide.S2));
         return rail;
+    }
+
+    /// <summary>A library's door, from the library in its slot as the rail last built. A slot the
+    /// rail has since left builds nothing; the rail builds again in the same pass.</summary>
+    private Element BuildLibraryDoor(RailDoorPart door, int slot)
+    {
+        var libraries = _railShown.Libraries;
+        if (slot >= libraries.Count) return Box.New();
+        var lib = libraries[slot];
+        var id = lib.Id;
+        // 1 is Home; 2… are the libraries in the order the rail lists them.
+        string num = slot + 2 <= 9 ? (slot + 2).ToString() : "";
+        return RailButton(Icons.ForLibrary(lib.Kind), lib.Name, num, active: IsLit(door),
+            onClick: () => Navigate(new Route(ApertureView.Library, id, lib.Name)));
+    }
+
+    private Element BuildRequestsDoor(RailDoorPart door)
+    {
+        if (_railShown.Requests is not { } user) return Box.New();
+        return RailButton(Icons.Requests, "Requests", "",
+            active: IsLit(door),
+            onClick: () => Navigate(new Route(ApertureView.Requests)),
+            badge: user.CanManageRequests && _railShown.Waiting > 0 ? _railShown.Waiting : 0);
+    }
+
+    private Element BuildIssuesDoor(RailDoorPart door)
+    {
+        // Everyone's reports are for whoever looks after the library; the badge only for
+        // someone who can do something about them.
+        if (_railShown.Requests is { CanSeeIssues: true } reader)
+            return RailButton(Icons.Report, "Issues", "",
+                active: IsLit(door),
+                onClick: () => Navigate(new Route(ApertureView.Issues)),
+                badge: reader.CanManageIssues ? _railShown.Open : 0, badgeWord: "open");
+        // Someone who files reports but may not read everyone's: their own, and a
+        // badge for the ones answered or resolved since they last looked.
+        if (_railShown.Requests is { } reporter && CanReport(reporter))
+            return RailButton(Icons.Report, "Your reports", "",
+                active: IsLit(door),
+                onClick: () => Navigate(new Route(ApertureView.Issues)),
+                badge: _railShown.News, badgeWord: "new");
+        return Box.New();
     }
 
     private Element RailButton(string glyph, string label, string key, bool active, Action onClick, int badge = 0,

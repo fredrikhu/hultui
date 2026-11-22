@@ -756,6 +756,14 @@ paths that remember to mark the part. Headless, JIT, 300 films, 1440×900: a fil
 753.6 → 589.4 (−22 %, 8 → 1), Forward to a film 78.7 → 61.1 (−22 %), Back, Escape, a number key and
 the rail −17.6 KB each (−5 %), a page fetched while wheeling 237.6 → 139.9 (−41 %, 4 → 0).
 
+Most of what was left of a page opened was the rail's light: the whole rail, nine doors, built for
+the two whose light moved. Each door is now a part of its own inside the rail's, as Junction's view
+tabs are: the app's build compares the light (the door lit for the page) as it compares the values,
+and when the rest of the rail is unchanged writes the `own:` revision of the door going dark and of
+the one lighting up; whatever builds the rail builds every door with it. Make such parts once and
+keep them, the fixed ones by name and a list's by place, so a list that changes makes and drops none:
+a film's page 100.8 → 72.9 KB (−56 % of the 167.4 before both), Forward 61.1 → 32.9, Back −9 %.
+
 A worker's progress tick is a view-only change too. Vesper's copy, pack and folder-size workers
 asked for a full rebuild about every 40 ms, so all eleven parts were built some 25 times a second
 for the whole copy, though a tick moves only the progress the view shows and, of the parts, the
