@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 18
-- **Phase:** build — round 18, PAUSED by the user until 2026-11-23 00:00 local (a one-time timer in session 00f54f03; if it is gone, resume by hand), then step 7 next (reactivity-aperture-parts-build-on-change). The survey ran 2026-11-22 in session
+- **Phase:** build — round 18, step 7 next (resumed 2026-11-23 00:00 by the user's timer after the pause after step 6) (reactivity-aperture-parts-build-on-change). The survey ran 2026-11-22 in session
   00f54f03 (reports `17-reports/r18-*`; usage 1 → 8 % of the week, the 5-hour window 7 → 54 %). Questions 73–76 are answered (73 → (b), 74 → (c), 75 → (a), 76 → (a)); question 77 (asked at step 3) is open
   (its commit would ride with step 7). Round 18's files (the survey brief `brief-r18-survey.md`, build
   briefs `brief-r18b<N>.md`, `archive_r18.py`, `merge_r18.py`, `desk.ps1`, agent ids `r18-agents.txt`, probes
