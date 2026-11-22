@@ -42,6 +42,8 @@ public class A11yCurrentItemFocusTests
         public void NotifyFocusChanged(AccessibilityNode? focused, AccessibilityNode? previous) => inner.NotifyFocusChanged(focused, previous);
         public void NotifyChangesApplied(AccessibilityNode root) => inner.NotifyChangesApplied(root);
         public void NotifyWindowActivated() => inner.NotifyWindowActivated();
+        public void Announce(AccessibilityNode? source, string text, AnnouncementPoliteness politeness) =>
+            inner.Announce(source, text, politeness);
     }
 
     [SupportedOSPlatform("windows")]
@@ -1640,5 +1642,88 @@ public class A11yCurrentItemFocusTests
         Assert.Same(f.Document, rig.Session.Window.Window.FocusedElement);
         Assert.Equal([f.Document.Id], rig.FocusEvents());
         Assert.Equal(f.Document.Id, rig.GetFocus());
+    }
+
+    // ── A table the app sorts ──
+
+    private sealed class SortedFiles : Component
+    {
+        public readonly TableView<(string Name, long Size)> Table;
+        public readonly HultUI.Core.Reactivity.Ref<VirtualListElement<(string Name, long Size)>> Body = new();
+        public TableSortRequest? Asked;
+        public int Current = 3;
+        // f3 is the eighth largest: sorted by size, largest first, it stands at row 7.
+        public IReadOnlyList<(string Name, long Size)> Rows =
+            [("f0", 100), ("f1", 90), ("f2", 80), ("f3", 35), ("f4", 70), ("f5", 60), ("f6", 50), ("f7", 40), ("f8", 30), ("f9", 20)];
+
+        public SortedFiles()
+        {
+            Table = new TableView<(string Name, long Size)>(
+            [
+                new TableColumn<(string Name, long Size)> { Id = "name", Header = "Name", Fill = 1, Text = r => r.Name, CanSort = true },
+                new TableColumn<(string Name, long Size)> { Id = "size", Header = "Size", Width = 90, Text = r => $"{r.Size}",
+                    CanSort = true, FirstSort = SortDirection.Descending },
+            ], MarkDirty)
+            {
+                SortMode = TableSortMode.External,
+                HeadersTakeFocus = false,
+                SortRequested = request => Asked = request,
+            };
+        }
+
+        /// <summary>The app's answer, keeping the cursor on its item: the rows sorted, the cursor
+        /// moved to the item's new row, in one build.</summary>
+        public void Answer()
+        {
+            var cursor = Rows[Current];
+            Rows = [.. Rows.OrderByDescending(r => r.Size)];
+            Current = Rows.ToList().IndexOf(cursor);
+            Table.SetSortKeys(Asked!.Value.Suggested);
+            MarkDirty();
+        }
+
+        public override Element Build()
+        {
+            var body = Table.Body(Rows);
+            body.IsFocusable = true;
+            body.AccessibleName = "Files";
+            body.CurrentIndex = Current;
+            body.WithRef(Body);
+            return Flex.Column(gap: 0).FlexGrow(1).Children(Table.Header(), body.FlexGrow(1));
+        }
+    }
+
+    /// <summary>
+    /// A re-sort asked for from the Size header while the keyboard focus is in the body, and answered
+    /// keeping the cursor on its item (the app moves CurrentIndex to the item's new row in the build
+    /// that shows the answer), is told as one focus move, from the item's old row to its new one, and
+    /// one announcement of the sort. Pins what a reader is sent; whether a reader speaks both is for a
+    /// listening test.
+    /// </summary>
+    [Fact]
+    public void ATSPI_AReSortThatMovesTheCursor_SendsOneFocusMove_AndOneAnnouncement()
+    {
+        using var rig = new AtSpiRig();
+        var page = new SortedFiles();
+        rig.Session.Window.SetRoot(page.Mount());
+        Settle(rig.Session);
+        var body = page.Body.Current!;
+        body.Focus();
+        Settle(rig.Session);
+        rig.Signals.Lines.Clear();
+
+        // The reader's invoke of the Size header, which leaves the keyboard focus in the body (a
+        // pointer press on a header that takes no focus clears the window's focus).
+        var router = rig.Session.Window.InstallActionRouter();
+        router.InvokeElement(rig.Session.Window.FindByAutomationId("column-size")!.Element.Id);
+        rig.Session.PumpFrame();
+        page.Answer();
+        for (int i = 0; i < 3; i++) rig.Session.PumpFrame(TimeSpan.FromMilliseconds(150));
+
+        Assert.Equal(7, page.Current);
+        Assert.Same(body, page.Body.Current);
+        Assert.Equal([Focused(Item(body, 3), false), Focused(Item(body, 7), true)],
+            rig.Signals.Lines.Where(l => l.StartsWith("state-changed:focused", StringComparison.Ordinal)));
+        Assert.Single(rig.Signals.Lines, l => l.StartsWith("announcement", StringComparison.Ordinal));
     }
 }

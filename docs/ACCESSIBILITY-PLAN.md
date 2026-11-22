@@ -1042,7 +1042,9 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   (2026-10-25, plan 17 round 5), and `expanded` only when that bit changes: only `expanded` was
   sent, so a caching client (libatspi) kept "expandable" for good (seen live in WSL).
 - **Table column headers** — role `ColumnHeader` (UIA HeaderItem, AT-SPI table column header),
-  Invoke/click sorts (`TableView<T>`, 2026-10-05).
+  Invoke/click sorts (`TableView<T>`, 2026-10-05); in External mode it asks the app, the name
+  follows the app's answer (several keys: "sort key 1 of 2"), and the answer is announced once
+  (2026-11-22).
 - **Tabs** — per W3C Core-AAM 1.1 (2026-10-05). Role `TabList` is the strip: UIA `Tab`,
   AT-SPI `page tab list`. Role `Tab` is one tab: UIA `TabItem`, AT-SPI `page tab`; it is
   named from its content, as a button is. Role `TabPanel` is the content shown for a tab:
