@@ -1564,20 +1564,30 @@ public abstract class Element
         // leaving — not those that reappear in the new list.
         if (_children is { Count: > 0 } current)
         {
-            // Asking whether an old child stays costs a search of the new list; a set pays for
-            // itself only when there are many of both. Most calls have no old children at all —
-            // every builder .Children(...) on a fresh element — and made a set anyway: 208 of
-            // the 272–288 bytes such a call allocated.
-            var staying = (long)current.Count * children.Length > SearchBeforeSet ? SetOf(children) : null;
-            foreach (var old in current)
+            // Asking whether an old child stays costs a search of the new list; with many of both
+            // the new children are marked instead, and the marks taken off after. A set of them,
+            // as before, was about 1 KB each time a list's window moved by a row (~40 children
+            // either side): 1.7 KB of a 19.4 KB wheel notch in Vesper's reader (plan 17 round 18).
+            bool marked = (long)current.Count * children.Length > SearchBeforeMarking;
+            if (marked)
+                foreach (var child in children) child._staying = true;
+            try
             {
-                if (!(staying?.Contains(old) ?? Array.IndexOf(children, old) >= 0))
+                foreach (var old in current)
                 {
-                    ClearFocusIfRemoved(old);
-                    old.Unmount();
-                    old.OverlayHost = null; // see RemoveChild
+                    if (!(marked ? old._staying : Array.IndexOf(children, old) >= 0))
+                    {
+                        ClearFocusIfRemoved(old);
+                        old.Unmount();
+                        old.OverlayHost = null; // see RemoveChild
+                    }
+                    old.Parent = null;
                 }
-                old.Parent = null;
+            }
+            finally
+            {
+                if (marked)
+                    foreach (var child in children) child._staying = false;
             }
             current.Clear();
         }
@@ -1603,17 +1613,12 @@ public abstract class Element
     }
 
     /// <summary>Old × new children up to which <see cref="ReplaceChildren"/> searches the new
-    /// list for each old child rather than building a set of it.</summary>
-    internal const int SearchBeforeSet = 64;
+    /// list for each old child rather than marking the new ones.</summary>
+    internal const int SearchBeforeMarking = 64;
 
-    /// <summary>A set of <paramref name="children"/>, filled by index: the set's own constructor
-    /// enumerates an array through its interface, boxing the enumerator.</summary>
-    private static HashSet<Element> SetOf(Element[] children)
-    {
-        var set = new HashSet<Element>(children.Length);
-        for (int i = 0; i < children.Length; i++) set.Add(children[i]);
-        return set;
-    }
+    /// <summary>Set on each of the new children only while <see cref="ReplaceChildren"/> asks which
+    /// old ones stay; false at any other time.</summary>
+    private bool _staying;
 
     /// <summary>
     /// Removes <paramref name="child"/> from its current parent, on its way to

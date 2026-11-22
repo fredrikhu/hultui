@@ -1699,12 +1699,17 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         }
     }
 
+    /// <summary>The array the last window's children were handed over in, made again only when their
+    /// count changes: a wheel notch moves the window by a row or two and keeps the count.</summary>
+    private Element[]? _childArray;
+
     private void SyncVisibleItems()
     {
         if ((_itemTemplate is null && _itemRowTemplate is null && _itemStateTemplate is null) || _items.Count == 0)
         {
             if (Children.Count > 0)
                 ReplaceChildren();
+            _childArray = null;   // it held the rows just let go
             _visibleStart = -1;
             _visibleEnd = -1;
             _heldRow = -1;
@@ -1813,7 +1818,12 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         // items in order, the overlay's box over them
         var host = OverlayShown ? _overlayHost : null;
         int firstRow = held >= 0 ? 3 : 1;
-        var children = new Element[firstRow + (newEnd - newStart) + (host is null ? 0 : 1)];
+        int count = firstRow + (newEnd - newStart) + (host is null ? 0 : 1);
+        // The list's own array again while the count holds: ReplaceChildren copies it into the
+        // child list and keeps nothing of it, and every slot is written below. Taken out of the
+        // field while in use, in case anything the replace runs comes back here.
+        var children = _childArray is { } kept && kept.Length == count ? kept : new Element[count];
+        _childArray = null;
         children[0] = _spacer;
         if (held >= 0)
         {
@@ -1825,6 +1835,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         if (host is not null) children[^1] = host;
 
         ReplaceChildren(children);
+        _childArray = children;
 
         _visibleStart = newStart;
         _visibleEnd = newEnd;
