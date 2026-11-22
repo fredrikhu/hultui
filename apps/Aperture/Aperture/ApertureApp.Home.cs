@@ -50,18 +50,21 @@ public sealed partial class ApertureApp
     /// card finds the one that landed.
     /// </summary>
     private Element HomeCard(KeptElements<HomeCardState> cards, MediaItem item, bool still, int index,
-        SeasonNotice? notice = null)
+        SeasonNotice? notice = null, OutSeasonCard? outCard = null)
     {
         var picture = still
             ? ShownPicture(item, ImageKind.Backdrop, Halide.StillWidth, Halide.StillHeight)
             : ShownPicture(item, ImageKind.Primary, Halide.PosterWidth, MathF.Round(Halide.PosterWidth * 1.5f));
         // A new season's card says when its season arrived ("added 2 days ago"), which moves on
         // with the clock: the line is part of what the card was made with.
-        var note = notice is null ? null : notice.SeriesName + "|" + NewSeasonLine(notice) + "|" + NewSeasonAdded(notice);
+        var note = notice is not null ? notice.SeriesName + "|" + NewSeasonLine(notice) + "|" + NewSeasonAdded(notice)
+            : outCard is not null ? "out|" + OutSeasonLine(outCard) + "|" + OutSeasonAired(outCard)
+            : null;
         var state = new HomeCardState(item, index, MarkOf(index), picture, _settings.Data.ShowCardTitles, Ui.DisplayScale, note);
         if (cards.TryKeep(item.Id, state, out var kept)) return kept;
         return cards.Made(item.Id, state,
             notice is not null ? NewSeasonCard(item, notice, index, picture)
+            : outCard is not null ? OutSeasonCardElement(item, outCard, index, picture)
             : still ? StillCard(item, index, picture) : PosterCard(item, Halide.PosterWidth, index, picture));
     }
 
@@ -262,7 +265,7 @@ public sealed partial class ApertureApp
         for (int i = first; i < end; i++)
         {
             var card = HomeCard(cards, row.Items[i], row.Stills, start + i,
-                newSeasons ? NoticeFor(row.Items[i]) : null);
+                newSeasons ? NoticeFor(row.Items[i]) : null, newSeasons ? OutCardFor(row.Items[i]) : null);
             cardsKept &= card.IsHosted;   // a card handed back is the live one
             shown.Add(card);
         }

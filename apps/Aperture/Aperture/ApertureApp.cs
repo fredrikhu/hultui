@@ -598,8 +598,10 @@ public sealed partial class ApertureApp : Component, IDisposable
         _dataGeneration++;
         _gridItems.Clear();
         _gridKey = null;
-        // F5 is also "look for new seasons now", before the watch's first look is due.
+        // F5 is also "look for new seasons now", before the watch's first look is due — and for
+        // seasons out but not in the library, with a request server connected.
         _seasonLookArmed = _library is not null;
+        if (_requestServer is not null) _ = LookForOutSeasonsAsync();
         Rerender();
     }
 

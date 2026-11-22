@@ -1,4 +1,5 @@
 using Aperture.Core;
+using Aperture.Core.Requests;
 using Aperture.Core.Testing;
 using HultUI.Core.Platform;
 using Xunit;
@@ -113,10 +114,16 @@ public class SeasonWatchTests
     }
 
     [Fact]
-    public void EpisodesInNoNumberedSeasonMeanTheSeriesNeverQualifies()
+    public void ASeasonWithNoNumberCountsNeitherWay_AndASeriesNumberedStraightThroughNeverQualifies()
     {
-        var seasons = new[] { Season(null, 24, 0), Season(1, 8, 8), Season(2, 8, 0) };
-        Assert.Null(SeasonWatch.NewSeasons(seasons, [1], false, Now, []));
+        // As the lab server's anime have them: "NC" and "OVA" folders, one file each, unwatched.
+        var withExtras = new[] { Season(null, 1, 0), Season(null, 1, 0), Season(1, 8, 8), Season(2, 8, 0) };
+        Assert.Equal(new[] { 2 }, Numbers(SeasonWatch.NewSeasons(withExtras, [1], false, Now, [])));
+        Assert.True(SeasonWatch.CaughtUp([Season(null, 1, 0), Season(1, 8, 8)]));
+
+        // Everything in "Season Unknown": no numbered season, so nothing to be caught up on.
+        Assert.Null(SeasonWatch.NewSeasons([Season(null, 24, 24)], [], false, Now, []));
+        Assert.False(SeasonWatch.CaughtUp([Season(null, 24, 24)]));
     }
 
     [Fact]
@@ -318,6 +325,144 @@ public class SeasonWatchTests
         fake.FailWith = new ApertureFailure(ApertureFailureKind.Network, "off");
         var result = SeasonWatch.LookAsync(fake, null, [], [], [], fake.Made).GetAwaiter().GetResult();
         Assert.False(result.Ok);
+    }
+
+    // ── Out, but not in the library (slice 8c) ──────────────────────────
+
+    private static readonly DateOnly Today = DateOnly.FromDateTime(Now.UtcDateTime);
+
+    private static DiscoverDetail Record(params DiscoverSeason[] seasons) => new()
+    {
+        Item = new DiscoverItem { TmdbId = 1, Kind = DiscoverKind.Tv, Title = "A series" },
+        Seasons = seasons,
+    };
+
+    private static DiscoverSeason Tmdb(int number, Availability availability, int airedDaysAgo = 30, int episodes = 8) =>
+        new(number, $"Season {number}", episodes, null, availability, Availability.Unknown)
+        {
+            AirDate = Today.AddDays(-airedDaysAgo),
+        };
+
+    private static readonly SeasonState[] WatchedThrough = [Season(1, 8, 8), Season(2, 8, 8)];
+
+    [Fact]
+    public void AnAiredSeasonNobodyAskedForIsOutForASeriesWatchedThrough()
+    {
+        var record = Record(Tmdb(1, Availability.Available), Tmdb(2, Availability.Available), Tmdb(3, Availability.Unknown),
+            Tmdb(4, Availability.Unknown, airedDaysAgo: 2));
+        Assert.Equal(new[] { 3, 4 }, SeasonWatch.OutSeasons(WatchedThrough, record, Today, [])!.Select(s => s.Number));
+        // Watched only half of season 2: not caught up, nothing to tell.
+        Assert.Null(SeasonWatch.OutSeasons([Season(1, 8, 8), Season(2, 8, 4)], record, Today, []));
+    }
+
+    [Fact]
+    public void ASeasonNotYetAiredEmptyOrAskedForIsNotOut()
+    {
+        Assert.Null(SeasonWatch.OutSeasons(WatchedThrough,
+            Record(Tmdb(1, Availability.Available), Tmdb(2, Availability.Available), Tmdb(3, Availability.Unknown, airedDaysAgo: -10)),
+            Today, []));
+        Assert.Null(SeasonWatch.OutSeasons(WatchedThrough,
+            Record(Tmdb(1, Availability.Available), Tmdb(2, Availability.Available),
+                Tmdb(3, Availability.Unknown) with { AirDate = null }),
+            Today, []));
+        Assert.Null(SeasonWatch.OutSeasons(WatchedThrough,
+            Record(Tmdb(1, Availability.Available), Tmdb(2, Availability.Available), Tmdb(3, Availability.Unknown, episodes: 0)),
+            Today, []));
+        foreach (var asked in new[] { Availability.Pending, Availability.Processing, Availability.Blocklisted })
+            Assert.Null(SeasonWatch.OutSeasons(WatchedThrough,
+                Record(Tmdb(1, Availability.Available), Tmdb(2, Availability.Available), Tmdb(3, asked)), Today, []));
+    }
+
+    [Fact]
+    public void AGapBelowWhatTheLibraryHasIsNotOut_NorADismissedSeason_NorAnythingWhenTheServerKnowsNoneOfIt()
+    {
+        var gap = Record(Tmdb(1, Availability.Available), Tmdb(2, Availability.Available), Tmdb(3, Availability.Unknown),
+            Tmdb(4, Availability.Available));
+        Assert.Null(SeasonWatch.OutSeasons(WatchedThrough, gap, Today, []));
+
+        var three = Record(Tmdb(1, Availability.Available), Tmdb(2, Availability.Available), Tmdb(3, Availability.Unknown));
+        Assert.Null(SeasonWatch.OutSeasons(WatchedThrough, three, Today, [3]));
+
+        var unknown = Record(Tmdb(1, Availability.Unknown), Tmdb(2, Availability.Unknown), Tmdb(3, Availability.Unknown));
+        Assert.Null(SeasonWatch.OutSeasons(WatchedThrough, unknown, Today, []));
+    }
+
+    /// <summary>The <see cref="Shows"/> library, with Done Show running still, and a request server
+    /// that has Done Show's third season out and nobody asking for it.</summary>
+    private static (FakeMediaLibrary, FakeRequestServer) ShowsWithARequestServer()
+    {
+        var fake = Shows();
+        fake.Update(fake.Item("done")! with { SeriesStatus = "Continuing" });
+        var requests = new FakeRequestServer();
+        requests.AddSeries(1, "Done Show", 2020, Availability.PartiallyAvailable, "done", seasons:
+        [
+            Tmdb(1, Availability.Available), Tmdb(2, Availability.Available), Tmdb(3, Availability.Unknown, airedDaysAgo: 5),
+        ]);
+        requests.AddSeries(95396, "Severance", 2022, Availability.PartiallyAvailable, "sev", seasons:
+        [
+            Tmdb(1, Availability.Available), Tmdb(2, Availability.Available), Tmdb(3, Availability.Available),
+            Tmdb(4, Availability.Unknown),
+        ]);
+        return (fake, requests);
+    }
+
+    private static OutLook OutLook(FakeMediaLibrary fake, FakeRequestServer requests, IReadOnlyCollection<string>? skip = null,
+        IReadOnlyCollection<string>? dismissed = null, IReadOnlyList<MutedSeries>? muted = null)
+    {
+        var result = SeasonWatch.OutLookAsync(fake, requests, skip ?? [], dismissed ?? [], muted ?? [], Today, TimeSpan.Zero)
+            .GetAwaiter().GetResult();
+        Assert.True(result.Ok, result.Failure?.Message);
+        return result.Value;
+    }
+
+    [Fact]
+    public void TheRequestServerIsAskedOnlyAboutSeriesWatchedThrough()
+    {
+        var (fake, requests) = ShowsWithARequestServer();
+        var look = OutLook(fake, requests);
+
+        var finding = Assert.Single(look.Findings);
+        Assert.Equal("done", finding.Series.Id);
+        Assert.Equal(new[] { 3 }, finding.Seasons.Select(s => s.Number));
+        // Every series and season read once; then Done Show alone — Severance has a season to
+        // watch, Stalker Hill is half-way, and neither is asked about.
+        Assert.Equal(2, look.LibraryCalls);
+        Assert.Equal(1, look.RequestCalls);
+        Assert.Equal(new[] { "GetDetail(tv:1)" }, requests.Calls.Where(c => c.StartsWith("GetDetail", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void AnEndedMutedSkippedOrDismissedSeriesIsNotAskedAboutOrNotTold()
+    {
+        var (fake, requests) = ShowsWithARequestServer();
+        Assert.Empty(OutLook(fake, requests, skip: ["done"]).Findings);
+        Assert.Empty(OutLook(fake, requests, muted: [new MutedSeries { SeriesId = "other-id", TmdbId = 1 }]).Findings);
+        Assert.Empty(OutLook(fake, requests, dismissed: [SeasonWatch.OutDismissKey("done", 3)]).Findings);
+        // Dismissing the library's own season 3 is another thing: it does not silence this.
+        Assert.Single(OutLook(fake, requests, dismissed: [SeasonWatch.DismissKey("done", 3)]).Findings);
+
+        fake.Update(fake.Item("done")! with { SeriesStatus = "Ended" });
+        var ended = OutLook(fake, requests);
+        Assert.Empty(ended.Findings);
+        Assert.Equal(0, ended.RequestCalls);
+    }
+
+    [Fact]
+    public void OneSeriesTheServerCannotLookUpIsSkipped_AServerThatIsOffStopsTheLook()
+    {
+        var (fake, requests) = ShowsWithARequestServer();
+        // A second caught-up, running series the request server answers with a 500 for, as the lab
+        // server does ("Unable to retrieve series."): Aaa sorts first, so it is asked first.
+        fake.AddItem(new MediaItem { Id = "aaa", Name = "Aaa", Kind = MediaKind.Series, TmdbId = 404404 }, "shows");
+        fake.AddSeason("aaa", 1, 2, watched: 2);
+        requests.FailWith = new ApertureFailure(ApertureFailureKind.Server, "Unable to retrieve series.", 500);
+        var look = OutLook(fake, requests);
+        Assert.Equal(1, look.Skipped);
+        Assert.Equal("done", Assert.Single(look.Findings).Series.Id);
+
+        requests.FailWith = new ApertureFailure(ApertureFailureKind.Network, "off");
+        var off = SeasonWatch.OutLookAsync(fake, requests, [], [], [], Today, TimeSpan.Zero).GetAwaiter().GetResult();
+        Assert.False(off.Ok);
     }
 
     // ── What is kept ────────────────────────────────────────────────────

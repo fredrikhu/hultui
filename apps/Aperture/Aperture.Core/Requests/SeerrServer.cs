@@ -683,7 +683,10 @@ public sealed class SeerrServer : IRequestServer
             {
                 statuses.TryGetValue(s.SeasonNumber, out var st);
                 return new DiscoverSeason(s.SeasonNumber, NullIfEmpty(s.Name) ?? $"Season {s.SeasonNumber}",
-                    s.EpisodeCount ?? 0, YearOf(s.AirDate), MapAvailability(st?.Status), MapAvailability(st?.Status4k));
+                    s.EpisodeCount ?? 0, YearOf(s.AirDate), MapAvailability(st?.Status), MapAvailability(st?.Status4k))
+                {
+                    AirDate = DateOf(s.AirDate),
+                };
             })
             .ToList();
 

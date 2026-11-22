@@ -346,11 +346,15 @@ public sealed partial class ApertureApp
         get
         {
             var notices = NewSeasonNotices;
-            if (notices.Count == 0) return [];
+            var outCards = OutSeasonCards;
+            if (notices.Count == 0 && outCards.Count == 0) return [];
             var cards = _newSeasonCards.Value;
-            var items = new List<MediaItem>(notices.Count);
+            var items = new List<MediaItem>(notices.Count + outCards.Count);
             foreach (var notice in notices)
                 if (cards.TryGetValue(notice.FirstSeasonId, out var episode)) items.Add(episode);
+            // Then what is out but not in the library (ApertureApp.OutSeasons.cs): what can be
+            // played comes first.
+            foreach (var card in outCards) items.Add(card.Series);
             return items;
         }
     }
@@ -414,13 +418,16 @@ public sealed partial class ApertureApp
     }
 
     /// <summary>The accent mark in the artwork's corner: a mark, not a surface, as the watched tick is.</summary>
-    private static Element NewSeasonMark(string text)
+    /// <param name="quiet">A mark for something not here to play — "Not in library" — drawn without
+    /// the accent, so the row's playable news stands out from what can only be asked for.</param>
+    private static Element NewSeasonMark(string text, bool quiet = false)
     {
         var mark = Box.New()
             .Padding(new Thickness(2, 7, 2, 7))
             .CornerRadius(Halide.Radius1)
-            .Background(Halide.Accent);
-        mark.AddChild(Ui.Line(text, 10.5f, new Color(35, 23, 4)));
+            .Background(quiet ? Halide.Bg : Halide.Accent);
+        if (quiet) mark.BorderColor(Halide.Border).BorderWidth(1f);
+        mark.AddChild(Ui.Line(text, 10.5f, quiet ? Halide.TextDim : new Color(35, 23, 4)));
         mark.Position.Type = PositionType.Absolute;
         mark.Position.Left = Dimension.Px(Halide.S2);
         mark.Position.Top = Dimension.Px(Halide.S2);
@@ -447,7 +454,11 @@ public sealed partial class ApertureApp
     internal void DismissNewSeason(SeasonNotice notice) => Dismiss([notice]);
 
     /// <summary>The row's "Clear all".</summary>
-    internal void DismissAllNewSeasons() => Dismiss([.. NewSeasonNotices]);
+    internal void DismissAllNewSeasons()
+    {
+        Dismiss([.. NewSeasonNotices]);
+        DismissOutSeasons([.. OutSeasonCards]);
+    }
 
     private void Dismiss(IReadOnlyList<SeasonNotice> notices)
     {
@@ -473,6 +484,7 @@ public sealed partial class ApertureApp
     {
         if (SeasonWatchState() is not { } watch) return;
         KeepCursorPlaceIfOn([notice]);
+        KeepCursorPlaceIfOnOut([.. _outCards.Where(c => c.Series.Id == notice.SeriesId)]);
         if (!watch.Muted.Any(m => m.Matches(notice.SeriesId, notice.TmdbId, notice.TvdbId)))
             watch.Muted.Add(new MutedSeries
             {
@@ -483,6 +495,7 @@ public sealed partial class ApertureApp
             });
         var muted = watch.Muted;
         watch.Notices.RemoveAll(n => muted.Any(m => m.Matches(n.SeriesId, n.TmdbId, n.TvdbId)));
+        _outCards.RemoveAll(c => muted.Any(m => m.Matches(c.Series.Id, c.Detail.Item.TmdbId, c.Series.TvdbId ?? c.Detail.TvdbId)));
         _settings.Save();
         Flash($"No more new-season news about {(notice.SeriesName.Length > 0 ? notice.SeriesName : "that series")} — Settings can undo it");
         Rerender();

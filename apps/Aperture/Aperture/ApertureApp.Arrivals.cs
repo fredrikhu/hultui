@@ -40,6 +40,8 @@ public sealed partial class ApertureApp
             // The same slow look for answers to a reporter's own problem reports.
             CheckMyIssues();
         }), null, FirstArrivalCheck, ArrivalInterval);
+        // Seasons out but not in the library ride on the same request server, on a slower clock.
+        StartOutWatch();
     }
 
     private void StopArrivalWatch()
@@ -48,6 +50,7 @@ public sealed partial class ApertureApp
         _arrivalTimer = null;
         _seenAvailable = null;
         ForgetMyIssues();
+        StopOutWatch();
     }
 
     /// <summary>One look: this user's available requests, against what has been announced.

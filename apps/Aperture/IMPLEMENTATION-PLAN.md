@@ -350,8 +350,29 @@ series without season folders (the lab server has none), and a sweep of hundreds
 | Series page | "Season 3 is new · added 2 days ago" above the seasons, beside "on its way"; the season's card marked New |
 | Next up | leaves out an episode the New seasons row shows (and so does the combined Up next), unless that row is hidden |
 
-**Next (8c):** the request server's seasons that are out but not in the library, for caught-up
-series that are still running, with Request through the existing season picker.
+### 8c — done (2026-11-22)
+
+| | |
+|---|---|
+| The rule | `SeasonWatch.OutSeasons`: for a caught-up series, the request server's seasons that have aired (`DiscoverSeason.AirDate`, now read), have episodes, are not asked for, and are numbered above every season the server marks available — so the comparison stays inside TMDB's numbering, which is not always the library's, and a gap below is not offered |
+| The look | `SeasonWatch.OutLookAsync`: every series and season read once (two calls), then one `GetDetailAsync` per series that is caught up, still running (Jellyfin's `Status`, now `MediaItem.SeriesStatus`; "Ended" is skipped), has a TMDB id and is neither muted nor on the row; a second apart. A series the server cannot look up is skipped; a server that is off stops the look |
+| When | 90 s after the request server opens, every 12 h, F5; only for someone who may ask for series; kept in memory, no toast |
+| The card | the library's series (fetched for its artwork) after the library's own cards, with a quiet "Not in library" mark; Enter opens the series page; the menu has Request Season N…, Dismiss (kept apart from the library-season dismissals, so the same season arriving later is still news) and Stop watching |
+| Request | opens the season picker with just the out seasons ticked (as many as the allowance covers); a request made for the series takes the card off the row |
+
+Found on the lab servers, read only (`LiveRequestServerTests.TheOutSeasonLookAsksOnlyAboutSeriesWatchedThrough`):
+
+1. **A season with no number is extras, not a numbering.** An anime series there has "NC" and
+   "OVA" seasons with no index; the rule had made any unnumbered season disqualify the series. Now an
+   unnumbered season counts neither way, as the specials do, which still leaves a series numbered
+   straight through unqualified (it has no numbered season at all).
+2. **The request server answers 500 "Unable to retrieve series."** for a TMDB id it cannot find
+   as a series, and that one failure ended the whole look. Now such a series is skipped and
+   counted; only an unreachable, slow or signed-out server stops the look.
+3. 19 series (7 continuing, 12 ended): 2 library calls, 4 request-server calls (1 skipped), about
+   a second at 200 ms apart; one finding — a series whose library has season 2 (watched), whose
+   request-server record has seasons 3 and 4 aired and unasked for, and whose season 1 (also
+   missing) is below what is watched, so it is not offered.
 
 ## Things deliberately not done
 
