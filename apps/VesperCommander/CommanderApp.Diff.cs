@@ -227,9 +227,11 @@ public partial class CommanderApp
         if (cur < 0 || cur >= list.Count || list[cur].IsParent || list[cur].IsDir) return;
         var e = list[cur];
         char other = side == 'L' ? 'R' : 'L';
+        // Its only partner would be itself (both panes on one folder): nothing to compare, as on a folder.
+        if (DiffPartner(other, e) is not { } partner) return;
 
         _diffLeftPath = e.FullPath;
-        _diffRightPath = DiffPartner(other, e);
+        _diffRightPath = partner;
         _diffSide = side;
 
         if (_settings.DiffTool == DiffToolKind.VSCode && File.Exists(_diffRightPath))
@@ -250,11 +252,16 @@ public partial class CommanderApp
     /// folders instead of reporting the other side missing. A same-named hit that resolves
     /// back to the file we started from is no comparison at all, so it defers to the cursor
     /// too. With nothing to pair against, the same-named path is returned anyway, so the
-    /// missing-file report names the path the user expected.</summary>
-    private string DiffPartner(char other, FileEntry e)
+    /// missing-file report names the path the user expected — unless that path is the file
+    /// itself (both panes on one folder, the other cursor on "..", a folder or this very file):
+    /// then there is no partner, null, and F3 does nothing, as on a folder. Comparing a file with
+    /// itself only ever said "Files are identical", and its ring followed every cursor key, which
+    /// built the window each time.</summary>
+    private string? DiffPartner(char other, FileEntry e)
     {
         var sameName = System.IO.Path.Combine(Dir(other), e.Name);
-        if (File.Exists(sameName) && !PathEquals(sameName, e.FullPath)) return sameName;
+        bool itself = PathEquals(sameName, e.FullPath);
+        if (!itself && File.Exists(sameName)) return sameName;
 
         var list = Rows(other);
         int cur = Cursor(other);
@@ -262,12 +269,13 @@ public partial class CommanderApp
             && !PathEquals(partner.FullPath, e.FullPath))
             return partner.FullPath;
 
-        return sameName;
+        return itself ? null : sameName;
     }
 
     /// <summary>
     /// The file F3 would compare the active pane's cursor against right now, or null when F3
-    /// would do nothing (the cursor is on a folder or on "..").
+    /// would do nothing (the cursor is on a folder or on "..", or its only partner would be
+    /// itself).
     ///
     /// <para>Routed through <see cref="DiffPartner"/> rather than reproducing its rule, so the
     /// row the inactive pane rings is the row F3 actually opens. Pairing prefers the

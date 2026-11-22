@@ -1512,7 +1512,11 @@ public partial class CommanderApp : Component, IDisposable
     /// <para>With both panes on one folder the same-named row over there is the cursor's own file,
     /// which F3 never pairs with (<see cref="DiffPartner"/>), so it is passed over and the rule
     /// decides: the other pane's cursor on a file stays the partner, and a key builds nothing
-    /// (a key built the window every time: 17.5 KB against 2.2).</para>
+    /// (a key built the window every time: 17.5 KB against 2.2). With the other cursor on ".." or
+    /// a folder the cursor's file has no partner (it would be itself), so nothing is ringed and
+    /// a key builds nothing either (the file was ringed as its own partner, which followed each
+    /// key: 29 KB a key against 1.2). Only a key onto the other cursor's own file, or off it,
+    /// builds: its ring goes there, as F3 does nothing there.</para>
     /// </summary>
     private bool PartnerStays(char side)
     {
