@@ -102,7 +102,7 @@ public class NumericUpDownElement : Element, IRangeValueElement
     public NumericUpDownElement Changed(Action<double> handler) { OnChanged = handler; return this; }
 
     // Typed characters only arrive while the platform's text input is armed.
-    internal override bool WantsTextInput => true;
+    protected internal override bool WantsTextInput => true;
 
     /// <summary>What the field shows: the text being typed, or the formatted value.</summary>
     public string DisplayText => _typed ?? FormatValue(_value);

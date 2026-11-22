@@ -211,7 +211,8 @@ public sealed partial class ApertureApp
                 .Cursor(CursorType.Pointer)
                 .AccessibleRole(AccessibilityRole.Button)
                 .AccessibleName(here ? $"{chapter.Name}, playing now" : chapter.Name)
-                .AutomationId($"chapter-{index}");
+                .AutomationId($"chapter-{index}")
+                .Pressable();
             if (here) row.Background(Halide.Tint(Halide.Accent));
 
             // The picture the server extracted for the mark, when it has one. A chapter

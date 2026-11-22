@@ -73,6 +73,7 @@ public sealed partial class ApertureApp
     /// </summary>
     private void SetCursorList(string key, IReadOnlyList<object> items, int perRow, int total = 0)
     {
+        _cursorListSet = true;
         _cursorItems = items;
         _cursorPerRow = Math.Max(1, perRow);
         _cursorTotal = Math.Max(total, items.Count);
@@ -85,8 +86,10 @@ public sealed partial class ApertureApp
                 _cursorIndex = items.Count - 1;
                 if (items.Count >= _cursorTotal) _cursorToEnd = false;
             }
-            // The list can shrink under the cursor as pages load or a filter changes.
-            else if (_cursorIndex >= items.Count) _cursorIndex = items.Count - 1;
+            // The list can shrink under the cursor as pages load or a filter changes. An empty
+            // one is still loading (a library opened again, its place kept from the last visit)
+            // or filtered to nothing: the place is kept for the cards to come.
+            else if (_cursorIndex >= items.Count && items.Count > 0) _cursorIndex = items.Count - 1;
             return;
         }
         _cursorKey = key;
@@ -94,20 +97,66 @@ public sealed partial class ApertureApp
         _cursorToEnd = false;
     }
 
+    /// <summary>Whether the view being built registered a list (<see cref="SetCursorList"/>); one
+    /// that did not is given an empty one.</summary>
+    private bool _cursorListSet;
+
     /// <summary>True when this card is the one the arrows are on — the ring, and the
     /// element that takes focus.</summary>
     internal bool IsCursor(int index) => index == _cursorIndex && _cursorItems.Count > 0;
 
-    /// <summary>Attaches the cursor ref to the card at the cursor, so the next build can
-    /// hand it the keyboard.</summary>
+    /// <summary>
+    /// What a card at <paramref name="index"/> is to the keyboard: <see cref="CardMark.Cursor"/>
+    /// (ringed, and the list's one Tab stop), <see cref="CardMark.Stop"/> (the first card, the Tab
+    /// stop while nothing has moved the cursor) or <see cref="CardMark.None"/>. Part of what a kept
+    /// card was made with, as the ring is.
+    /// </summary>
+    internal CardMark MarkOf(int index) =>
+        IsCursor(index) ? CardMark.Cursor
+        : index == 0 && _cursorIndex < 0 && _cursorItems.Count > 0 ? CardMark.Stop
+        : CardMark.None;
+
+    internal enum CardMark : byte { None, Stop, Cursor }
+
+    /// <summary>
+    /// Makes a card one of its list's: the cursor's card holds the ref the keyboard is handed
+    /// through, and is the list's one Tab stop — a roving stop, as in any grid or list box, so Tab
+    /// goes into the cards and on out of them in one press each rather than through a library's
+    /// thousand posters, and the arrows walk them. Until the cursor is anywhere the first card is the
+    /// stop, and Tab onto it puts the cursor there.
+    /// </summary>
     internal T TrackCursor<T>(T card, int index) where T : BoxElement
     {
-        if (IsCursor(index))
+        var mark = MarkOf(index);
+        card.IsFocusable = true;
+        card.TabIndex = mark == CardMark.None ? -1 : 0;
+        if (mark == CardMark.Cursor)
         {
             card.WithRef(_cursorCard);
             _cursorCardIndex = index;
         }
+        else if (mark == CardMark.Stop)
+        {
+            card.On(_firstCardFocused ??= OnFirstCardFocused);
+        }
         return card;
+    }
+
+    private Action<FocusEvent>? _firstCardFocused;
+
+    /// <summary>Tab onto the first card while the cursor is nowhere: the cursor starts there,
+    /// ringed, so the keys that follow act on the card that has the keyboard.</summary>
+    private void OnFirstCardFocused(FocusEvent e)
+    {
+        if (e.Reason is not (FocusReason.Next or FocusReason.Previous)) return;
+        if (_cursorIndex >= 0 || _cursorItems.Count == 0 || e.CurrentTarget is not BoxElement card) return;
+        _cursorIndex = 0;
+        _cursorToEnd = false;
+        // On the live card, as a cursor key moves it (MoveRingWithoutBuild): a kept card was made as
+        // the stop, so the next build makes it again, ringed.
+        card.Outline = CursorRing;
+        _cursorCard.Current = card;
+        _cursorCardIndex = 0;
     }
 
     /// <summary>
@@ -186,6 +235,8 @@ public sealed partial class ApertureApp
     {
         Element? left, reached;
         bool build = false;
+        // The card the move leaves is the list's Tab stop, which before the first move is the first.
+        from = Math.Max(from, 0);
         switch (Current.View)
         {
             case ApertureView.Home:
@@ -205,10 +256,15 @@ public sealed partial class ApertureApp
             default:
                 return false;
         }
-        if (left is BoxElement l) l.Outline = default;
+        if (left is BoxElement l)
+        {
+            l.Outline = default;
+            l.TabIndex = -1;
+        }
         if (reached is BoxElement r)
         {
             r.Outline = CursorRing;
+            r.TabIndex = 0;
             _cursorCard.Current = r;
             _cursorCardIndex = _cursorIndex;
         }
@@ -224,6 +280,9 @@ public sealed partial class ApertureApp
     private bool HandleCursorKey(KeyDownEvent e)
     {
         if (_cursorItems.Count == 0) return false;
+        // Bare keys only (Shift+F10 aside): Alt+← is Back, and Ctrl or Alt with an arrow walked
+        // the cards as if it were not held.
+        if ((e.Modifiers & (KeyModifiers.Ctrl | KeyModifiers.Alt | KeyModifiers.Super)) != 0) return false;
 
         switch (e.Key)
         {
@@ -293,7 +352,8 @@ public sealed partial class ApertureApp
     /// card left, which kept the keyboard, or with nothing once that one scrolled away).</summary>
     private void FocusCursorCard()
     {
-        if (!_pendingCursorFocus) return;
+        // A list still loading has no card yet: the build that brings them hands it over.
+        if (!_pendingCursorFocus || _cursorItems.Count == 0) return;
         _pendingCursorFocus = false;
         if (_cursorCardIndex == _cursorIndex) _cursorCard.Current?.Focus();
         else if (_fitGridStride > 0f) _window.RequestPostFrameCallback(FocusCursorCardMadeInTheFrame);

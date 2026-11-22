@@ -304,6 +304,76 @@ read with titles, and the first page's cards open in the library.
 
 **Still open:** nothing on the Discover page; every row of the server's layout is drawn.
 
+## Slice 8 — new seasons of series watched through (**8a done**, 2026-11-22)
+
+Designed first and confirmed: a Home row from Jellyfin alone; the request server's "Season 4 is
+out, not in your library" is a later add-on to the same row.
+
+| 8a — done | |
+|---|---|
+| The watch | `Aperture.Core/SeasonWatch.cs`: a pure detector (`NewSeasons`, `StillNew`) and one look (`LookAsync`) over two lean calls on `IMediaLibrary` — series by "date episode added" (`DateLastContentAdded`, field `DateLastMediaAdded`, provider ids) and seasons with `RecursiveItemCount`, `DateCreated` and user data |
+| Cost | one probe call per look, plus one per changed or carded series; the first look and a re-scan (all 25 probed series changed) read every series and season a thousand to a page; a server that sends no dates is read in full each time |
+| The row | "New seasons" after the "what now" rows; the card is the new season's first episode with a "New season" mark; Dismiss, Stop watching (card menu), Clear all (row menu); Dismiss keeps the cursor in its place |
+| Muting | for good: matched on the Jellyfin id or the TMDB or TVDB id, so a re-added library does not unmute; Settings lists them with Watch again |
+| State | notices, dismissed (200 newest) and muted in `ApertureSettingsData.SeasonWatch`, per server **and user**; the baseline in `season-watch-<server>-<user>.json` beside the settings |
+| When | 30 s after the library opens, every 30 min, F5, and after a film (the data generation); marking a card's episode watched looks at once |
+
+Decisions worth knowing before touching it:
+
+1. **Season numbers, not dates, decide "new".** A re-scan or a re-added library rewrites dates;
+   numbers do not move. A series the last look never saw is the baseline, not news — which is
+   also why a re-added library (all new ids) brings no burst of cards.
+2. **The series counters are not used.** Jellyfin's series `UnplayedItemCount` includes the
+   specials and cannot say which season is unwatched; the watch reads seasons.
+3. **Dismissed and carded seasons may stay unwatched.** Without that, a dismissed Season 3 left
+   untouched would block Season 4 from ever counting as news.
+4. **The look applies over what the user did meanwhile.** It runs off the UI thread with a copy
+   of the notices; a Dismiss or a mute made while it looked wins.
+5. **A gap filled in is not news.** Found on the lab server: a series with season 5 watched in
+   January and seasons 1–3 downloaded a week ago read as "Seasons 1–3 are new". A new season has to
+   be numbered above every season already watched; one below it is a backfill, and while it stays
+   unwatched the series is not caught up either.
+
+**Verified live, read-only** (`LiveServerTests.TheSeasonWatchReadsWhatItNeedsAndASecondLookIsOneCall`,
+which prints what it saw; it needs `APERTURE_LIVE_SERVER`, a key and `APERTURE_USER`): all 19
+series carry `DateLastMediaAdded` and a TMDB or TVDB id and come back newest first; seasons carry
+`RecursiveItemCount` (equal to the children count), an unwatched count within it, and a date added.
+The first look is 3 calls in 65–120 ms; a second with nothing changed is 1 call. Not exercised: a
+series without season folders (the lab server has none), and a sweep of hundreds of series.
+
+### 8b — done (2026-11-22)
+
+| | |
+|---|---|
+| Toast | once per new season, when a look adds it to the row or a season to it: "Glass Harbour: Season 3 is in your library" with Play (from the row's card, or fetched); several are one toast whose Show opens Home with the cursor on the row |
+| Quiet | held while a film plays and said when the player closes (if still on the row); never while the row is hidden; one toast per arrival — the arrival watch and this one share the set of series named this session |
+| Series page | "Season 3 is new · added 2 days ago" above the seasons, beside "on its way"; the season's card marked New |
+| Next up | leaves out an episode the New seasons row shows (and so does the combined Up next), unless that row is hidden |
+
+### 8c — done (2026-11-22)
+
+| | |
+|---|---|
+| The rule | `SeasonWatch.OutSeasons`: for a caught-up series, the request server's seasons that have aired (`DiscoverSeason.AirDate`, now read), have episodes, are not asked for, and are numbered above every season the server marks available — so the comparison stays inside TMDB's numbering, which is not always the library's, and a gap below is not offered |
+| The look | `SeasonWatch.OutLookAsync`: every series and season read once (two calls), then one `GetDetailAsync` per series that is caught up, still running (Jellyfin's `Status`, now `MediaItem.SeriesStatus`; "Ended" is skipped), has a TMDB id and is neither muted nor on the row; a second apart. A series the server cannot look up is skipped; a server that is off stops the look |
+| When | 90 s after the request server opens, every 12 h, F5; only for someone who may ask for series; kept in memory, no toast |
+| The card | the library's series (fetched for its artwork) after the library's own cards, with a quiet "Not in library" mark; Enter opens the series page; the menu has Request Season N…, Dismiss (kept apart from the library-season dismissals, so the same season arriving later is still news) and Stop watching |
+| Request | opens the season picker with just the out seasons ticked (as many as the allowance covers); a request made for the series takes the card off the row |
+
+Found on the lab servers, read only (`LiveRequestServerTests.TheOutSeasonLookAsksOnlyAboutSeriesWatchedThrough`):
+
+1. **A season with no number is extras, not a numbering.** An anime series there has "NC" and
+   "OVA" seasons with no index; the rule had made any unnumbered season disqualify the series. Now an
+   unnumbered season counts neither way, as the specials do, which still leaves a series numbered
+   straight through unqualified (it has no numbered season at all).
+2. **The request server answers 500 "Unable to retrieve series."** for a TMDB id it cannot find
+   as a series, and that one failure ended the whole look. Now such a series is skipped and
+   counted; only an unreachable, slow or signed-out server stops the look.
+3. 19 series (7 continuing, 12 ended): 2 library calls, 4 request-server calls (1 skipped), about
+   a second at 200 ms apart; one finding — a series whose library has season 2 (watched), whose
+   request-server record has seasons 3 and 4 aired and unasked for, and whose season 1 (also
+   missing) is below what is watched, so it is not offered.
+
 ## Things deliberately not done
 
 - **A device profile, by default.** Aperture tells the server it can direct-play and

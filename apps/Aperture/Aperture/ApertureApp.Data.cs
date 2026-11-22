@@ -44,6 +44,8 @@ public sealed partial class ApertureApp
         EnsureHomeWatchlist();
         // The Favourites page's own list: one load serves the row and the page.
         EnsureFavourites();
+        // The New seasons row's cards: the first episode of each new season on it.
+        EnsureNewSeasonCards();
         _resume.Load(("resume", _dataGeneration),
             () => Fetch(() => lib.GetResumeAsync(ResumeRowSize), (IReadOnlyList<MediaItem>)[], "Continue watching"));
         _nextUp.Load(("nextup", _dataGeneration),

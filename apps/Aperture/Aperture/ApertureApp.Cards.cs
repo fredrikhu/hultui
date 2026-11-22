@@ -263,19 +263,30 @@ public sealed partial class ApertureApp
                 Action = () => Navigate(new Route(ApertureView.Detail, seriesId, item.SeriesName)),
             });
         }
+
+        // The first episode of a new season on Home's row: Dismiss, and Stop watching the series.
+        if (NoticeFor(item) is { } notice) AddNewSeasonMenu(items, notice);
+        // A series with seasons out that the library does not have: ask for them, or not.
+        else if (OutCardFor(item) is { } outCard) AddOutSeasonMenu(items, outCard);
         return items;
     }
 
     /// <summary>
     /// Makes a card reachable by keyboard, and rings it when the cursor is on it. The ring
     /// is an outline rather than a border: a border would take layout space and shift every
-    /// card beside it as the cursor moves through the row.
+    /// card beside it as the cursor moves through the row. A card no list walks (a season on
+    /// a series' page) is a button of its own: a Tab stop that Enter and Space press, and
+    /// whose menu the menu key opens.
     /// </summary>
     private void MarkCursor(BoxElement card, int cursorIndex, MediaItem? item = null)
     {
         card.IsFocusable = true;
         if (item is { } subject) card.ContextMenu(() => CardMenu(subject));
-        if (cursorIndex < 0) return;
+        if (cursorIndex < 0)
+        {
+            card.Pressable();
+            return;
+        }
         TrackCursor(card, cursorIndex);
         if (IsCursor(cursorIndex))
             card.Outline = CursorRing;
@@ -647,7 +658,12 @@ public sealed partial class ApertureApp
             _rowPages[rowId] = Math.Max(0, target);
             Rerender();
         }, 14f, enabled ? Halide.TextDim : Halide.TextFaint, $"{rowId}-{label.ToLowerInvariant()}");
-        if (!enabled) b.Opacity(0.4f);
+        if (!enabled)
+        {
+            b.Opacity(0.4f);
+            // Nowhere to page to: no Tab stop, as a disabled button is none.
+            b.IsFocusable = false;
+        }
         return b;
     }
 

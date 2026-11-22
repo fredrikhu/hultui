@@ -99,6 +99,7 @@ public class RadioButtonElement : Element
                     IsChecked = true;
                     OnChanged?.Invoke(true);
                 }
+                evt.Handled = true;
             }
         });
     }

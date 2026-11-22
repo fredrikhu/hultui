@@ -49,20 +49,28 @@ public sealed partial class ApertureApp
     /// The picture is asked for either way, which keeps one on screen recent in the cache and is how a
     /// card finds the one that landed.
     /// </summary>
-    private Element HomeCard(KeptElements<HomeCardState> cards, MediaItem item, bool still, int index)
+    private Element HomeCard(KeptElements<HomeCardState> cards, MediaItem item, bool still, int index,
+        SeasonNotice? notice = null, OutSeasonCard? outCard = null)
     {
         var picture = still
             ? ShownPicture(item, ImageKind.Backdrop, Halide.StillWidth, Halide.StillHeight)
             : ShownPicture(item, ImageKind.Primary, Halide.PosterWidth, MathF.Round(Halide.PosterWidth * 1.5f));
-        var state = new HomeCardState(item, index, IsCursor(index), picture, _settings.Data.ShowCardTitles, Ui.DisplayScale);
+        // A new season's card says when its season arrived ("added 2 days ago"), which moves on
+        // with the clock: the line is part of what the card was made with.
+        var note = notice is not null ? notice.SeriesName + "|" + NewSeasonLine(notice) + "|" + NewSeasonAdded(notice)
+            : outCard is not null ? "out|" + OutSeasonLine(outCard) + "|" + OutSeasonAired(outCard)
+            : null;
+        var state = new HomeCardState(item, index, MarkOf(index), picture, _settings.Data.ShowCardTitles, Ui.DisplayScale, note);
         if (cards.TryKeep(item.Id, state, out var kept)) return kept;
         return cards.Made(item.Id, state,
-            still ? StillCard(item, index, picture) : PosterCard(item, Halide.PosterWidth, index, picture));
+            notice is not null ? NewSeasonCard(item, notice, index, picture)
+            : outCard is not null ? OutSeasonCardElement(item, outCard, index, picture)
+            : still ? StillCard(item, index, picture) : PosterCard(item, Halide.PosterWidth, index, picture));
     }
 
     /// <summary>What a card on a shelf shows; see <see cref="HomeCard"/>.</summary>
-    private readonly record struct HomeCardState(MediaItem Item, int Index, bool Cursor,
-        HultUI.Core.Rendering.IImageSource? Picture, bool Titles, float Scale);
+    private readonly record struct HomeCardState(MediaItem Item, int Index, CardMark Mark,
+        HultUI.Core.Rendering.IImageSource? Picture, bool Titles, float Scale, string? Note = null);
 
     /// <summary>Each shelf's cards, by the shelf's key: an item can be on two shelves. The watchlist's
     /// title cards are made every build.</summary>
@@ -169,6 +177,33 @@ public sealed partial class ApertureApp
         }
         SetCursorList($"home:{string.Join(',', shown.Select(r => r.Key))}:{walk.Count}",
             walk, VisibleCards(Halide.PosterWidth));
+        // A card dismissed from under the cursor: the cursor stays at its place, on the card that
+        // moved up into it, rather than starting over with the shorter list.
+        if (_homeCursorAfterRemoval is { } place)
+        {
+            _homeCursorAfterRemoval = null;
+            if (walk.Count > 0)
+            {
+                _cursorIndex = Math.Min(place, walk.Count - 1);
+                _pendingCursorFocus = true;
+            }
+        }
+        // The new-season toast's "Show": the cursor on the first card of the row it names.
+        if (_homeCursorToRow is { } toRow)
+        {
+            _homeCursorToRow = null;
+            int start = 0;
+            foreach (var row in shown)
+            {
+                if (row.Key == toRow && row.Count > 0)
+                {
+                    _cursorIndex = start;
+                    _pendingCursorFocus = true;
+                    break;
+                }
+                start += row.Count;
+            }
+        }
 
         _homeBuild = Builds;
         _homeShelves.Clear();
@@ -226,9 +261,11 @@ public sealed partial class ApertureApp
         var shown = _homeShelfCards;
         shown.Clear();
         bool cardsKept = true;
+        bool newSeasons = row.Key == NewSeasonsRowKey;
         for (int i = first; i < end; i++)
         {
-            var card = HomeCard(cards, row.Items[i], row.Stills, start + i);
+            var card = HomeCard(cards, row.Items[i], row.Stills, start + i,
+                newSeasons ? NoticeFor(row.Items[i]) : null, newSeasons ? OutCardFor(row.Items[i]) : null);
             cardsKept &= card.IsHosted;   // a card handed back is the live one
             shown.Add(card);
         }
@@ -252,9 +289,17 @@ public sealed partial class ApertureApp
     {
         var rows = new List<HomeRow>();
 
+        // Series watched through that have had a season arrive since (ApertureApp.NewSeasons.cs). The
+        // server's Next up names the same first episode, so while this row is shown Next up leaves it
+        // out: one episode under two neighbouring headings reads as a bug, as in the combined row.
+        var newSeasons = NewSeasonItems;
+        var nextUp = NextUpItems;
+        if (newSeasons.Count > 0 && nextUp.Count > 0 && !NewSeasonsRowHidden)
+            nextUp = nextUp.Where(i => !newSeasons.Any(n => n.Id == i.Id)).ToList();
+
         if (_settings.Data.CombineUpNext)
         {
-            var merged = MergeUpNext(ResumeItems, NextUpItems);
+            var merged = MergeUpNext(ResumeItems, nextUp);
             if (merged.Count > 0)
                 rows.Add(new HomeRow(CombinedRowKey, "Up next", merged, Halide.StillWidth, Stills: true));
         }
@@ -265,12 +310,16 @@ public sealed partial class ApertureApp
                     SeeAll: ResumeItems.Count >= ResumeRowSize
                         ? () => Navigate(new Route(ApertureView.ContinueWatching))
                         : null));
-            if (NextUpItems.Count > 0)
-                rows.Add(new HomeRow(NextUpRowKey, "Next up", NextUpItems, Halide.PosterWidth, Stills: false,
+            if (nextUp.Count > 0)
+                rows.Add(new HomeRow(NextUpRowKey, "Next up", nextUp, Halide.PosterWidth, Stills: false,
                     SeeAll: NextUpItems.Count >= NextUpRowSize
                         ? () => Navigate(new Route(ApertureView.NextUp))
                         : null));
         }
+
+        // Right after what you are watching, as it answers the same question: what do I put on now.
+        if (newSeasons.Count > 0)
+            rows.Add(new HomeRow(NewSeasonsRowKey, "New seasons", newSeasons, Halide.PosterWidth, Stills: false));
 
         // What you meant to watch, from the request server — after what you are already
         // watching, before what has merely arrived. Only with a request server connected
@@ -357,6 +406,12 @@ public sealed partial class ApertureApp
             ContextMenuItem.Separator(),
             new() { Label = "Hide this row", Action = () => SetHomeRowHidden(row.Key, true) },
         };
+
+        if (row.Key == NewSeasonsRowKey)
+        {
+            items.Add(ContextMenuItem.Separator());
+            items.Add(new ContextMenuItem { Label = "Clear all", Action = DismissAllNewSeasons });
+        }
 
         bool upNextRow = row.Key is ResumeRowKey or NextUpRowKey or CombinedRowKey;
         if (upNextRow)

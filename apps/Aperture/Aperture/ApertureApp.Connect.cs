@@ -134,7 +134,8 @@ public sealed partial class ApertureApp
         _stage = ApertureStage.Browsing;
         _connectFailure = null;
         _dataGeneration++;
-        GoHome();
+        ResetHistory();
+        StartSeasonWatch();
 
         if (remember && !_settings.Remember(library.Server, library.User))
             Flash("Signed in, but this machine has nowhere to keep the token — you'll sign in again next launch.",
@@ -153,6 +154,7 @@ public sealed partial class ApertureApp
         // The request server is paired with the Jellyfin server being left; its session
         // goes with it (and, when the account is forgotten, so does its row).
         CloseRequestServer();
+        StopSeasonWatch();
         _library?.Dispose();
         _library = null;
         _posters.Authorize(null, null);

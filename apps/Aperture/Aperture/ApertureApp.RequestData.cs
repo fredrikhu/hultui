@@ -108,14 +108,12 @@ public sealed partial class ApertureApp
         _requestListKey = null;
         _issueListItems.Clear();
         _issueListKey = null;
-        // Off any view that needs it — their rail buttons have just gone, and a page with
-        // no way back to it is a dead end.
-        if (_stack.RemoveAll(r => r.View is ApertureView.Discover or ApertureView.DiscoverTitle or ApertureView.DiscoverGenre
-                or ApertureView.DiscoverPerson or ApertureView.DiscoverCompany or ApertureView.DiscoverAll
-                or ApertureView.DiscoverGenres or ApertureView.DiscoverCompanies or ApertureView.Requests
-                or ApertureView.Issues or ApertureView.Issue) > 0
-            && _stack.Count == 0)
-            _stack.Add(new Route(ApertureView.Home));
+        // Off any view that needs it, back and forward — their rail buttons have just gone, and
+        // a page with no way back to it is a dead end.
+        ForgetPages(static r => r.View is ApertureView.Discover or ApertureView.DiscoverTitle or ApertureView.DiscoverGenre
+            or ApertureView.DiscoverPerson or ApertureView.DiscoverCompany or ApertureView.DiscoverAll
+            or ApertureView.DiscoverGenres or ApertureView.DiscoverCompanies or ApertureView.Requests
+            or ApertureView.Issues or ApertureView.Issue);
     }
 
     // ── Discover's rows: the administrator's layout ──────────────────────
@@ -608,9 +606,13 @@ public sealed partial class ApertureApp
     {
         if (_requestServer is not { } server) return;
         _ = ApplyRequestAsync(() => server.RequestAsync(request), made =>
-            made.Status == RequestStatus.Approved
+        {
+            // Asked for: its "out, not in your library" card on Home has been acted on.
+            if (request.Kind == DiscoverKind.Tv) ForgetOutSeasons(request.TmdbId);
+            return made.Status == RequestStatus.Approved
                 ? $"Requested {title} — approved, on its way"
-                : $"Requested {title} — waiting for approval");
+                : $"Requested {title} — waiting for approval";
+        });
     }
 
     internal void DecideRequest(MediaRequest request, bool approve)

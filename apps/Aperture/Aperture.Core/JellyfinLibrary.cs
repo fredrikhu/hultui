@@ -36,6 +36,15 @@ public sealed class JellyfinLibrary : IMediaLibrary
 
     private static readonly ImageType[] ListImages = [ImageType.Primary, ImageType.Backdrop, ImageType.Thumb];
 
+    /// <summary>What the season watch asks of a series: when an episode last arrived, and the ids
+    /// that outlive a re-added library (a muted series is matched on them).</summary>
+    private static readonly ItemFields[] SeriesWatchFields = [ItemFields.DateLastMediaAdded, ItemFields.ProviderIds];
+
+    /// <summary>What the season watch asks of a season: the date added, and the count of episodes
+    /// with a file — the server's recursive count, which leaves out missing episodes, as its count
+    /// of unwatched ones does.</summary>
+    private static readonly ItemFields[] SeasonWatchFields = [ItemFields.DateCreated, ItemFields.RecursiveItemCount];
+
     internal JellyfinLibrary(ServerInfo server, SignedInUser user, DeviceIdentity device,
         JellyfinApiClient client, HttpClientRequestAdapter adapter, HttpClient http)
     {
@@ -106,6 +115,71 @@ public sealed class JellyfinLibrary : IMediaLibrary
             var items = (result?.Items ?? []).Select(Map).ToList();
             return ApertureResult<ItemPage>.Success(
                 new ItemPage(items, result?.TotalRecordCount ?? items.Count, result?.StartIndex ?? query.StartIndex));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return ApertureResult<ItemPage>.Fail(JellyfinConnection.Classify(ex, Server.Host));
+        }
+    }
+
+    public async Task<ApertureResult<ItemPage>> GetSeriesByEpisodeAddedAsync(int startIndex, int limit,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            var result = await _client.Items.GetAsync(q =>
+            {
+                var p = q.QueryParameters;
+                p.UserId = User.Id;
+                p.IncludeItemTypes = [BaseItemKind.Series];
+                p.Recursive = true;
+                p.StartIndex = startIndex;
+                p.Limit = limit;
+                // The server's "date episode added" sort, newest first; the name breaks ties so
+                // pages of a sweep neither repeat nor skip a series.
+                p.SortBy = [ItemSortBy.DateLastContentAdded, ItemSortBy.SortName];
+                p.SortOrder = [SortOrder.Descending, SortOrder.Ascending];
+                p.Fields = SeriesWatchFields;
+                p.EnableImages = false;
+                p.EnableUserData = false;
+                p.EnableTotalRecordCount = true;
+            }, ct).ConfigureAwait(false);
+            var items = (result?.Items ?? []).Select(Map).ToList();
+            return ApertureResult<ItemPage>.Success(
+                new ItemPage(items, result?.TotalRecordCount ?? items.Count, result?.StartIndex ?? startIndex));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return ApertureResult<ItemPage>.Fail(JellyfinConnection.Classify(ex, Server.Host));
+        }
+    }
+
+    public async Task<ApertureResult<ItemPage>> GetSeasonsAsync(string? seriesId, int startIndex, int limit,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            var result = await _client.Items.GetAsync(q =>
+            {
+                var p = q.QueryParameters;
+                p.UserId = User.Id;
+                if (ParseId(seriesId) is { } series) p.ParentId = series;
+                p.IncludeItemTypes = [BaseItemKind.Season];
+                p.Recursive = true;
+                p.StartIndex = startIndex;
+                p.Limit = limit;
+                // A stable order, so the pages of a sweep neither repeat nor skip a season.
+                p.SortBy = [ItemSortBy.SeriesSortName, ItemSortBy.SortName];
+                p.SortOrder = [SortOrder.Ascending, SortOrder.Ascending];
+                p.Fields = SeasonWatchFields;
+                p.EnableImages = false;
+                // The watched state is the point: a season's unwatched count comes with it.
+                p.EnableUserData = true;
+                p.EnableTotalRecordCount = true;
+            }, ct).ConfigureAwait(false);
+            var items = (result?.Items ?? []).Select(Map).ToList();
+            return ApertureResult<ItemPage>.Success(
+                new ItemPage(items, result?.TotalRecordCount ?? items.Count, result?.StartIndex ?? startIndex));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -532,6 +606,12 @@ public sealed class JellyfinLibrary : IMediaLibrary
         ChildCount = dto.ChildCount ?? dto.RecursiveItemCount,
         TmdbId = int.TryParse(Tag(dto.ProviderIds?.AdditionalData, "Tmdb"), System.Globalization.NumberStyles.None,
             System.Globalization.CultureInfo.InvariantCulture, out var tmdb) && tmdb > 0 ? tmdb : null,
+        TvdbId = int.TryParse(Tag(dto.ProviderIds?.AdditionalData, "Tvdb"), System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out var tvdb) && tvdb > 0 ? tvdb : null,
+        DateAdded = dto.DateCreated,
+        DateLastMediaAdded = dto.DateLastMediaAdded,
+        FileCount = dto.RecursiveItemCount,
+        SeriesStatus = dto.Type == BaseItemDto_Type.Series ? dto.Status : null,
         People = MapPeople(dto.People),
         Chapters = MapChapters(dto.Chapters),
         Trickplay = MapTrickplay(dto.Trickplay),

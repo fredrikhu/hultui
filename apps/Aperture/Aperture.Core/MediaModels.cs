@@ -77,6 +77,28 @@ public sealed record MediaItem
     /// single item fetched for its detail page, like <see cref="People"/>.</summary>
     public int? TmdbId { get; init; }
 
+    /// <summary>The item's TVDB id, beside <see cref="TmdbId"/>: a series matched only on TVDB still
+    /// has one of the two. Read where provider ids are asked for (a detail page, the season watch).</summary>
+    public int? TvdbId { get; init; }
+
+    /// <summary>When the item came into the library — the server's own date added. Only filled where
+    /// it is asked for (the season watch).</summary>
+    public DateTimeOffset? DateAdded { get; init; }
+
+    /// <summary>For a series, when an episode last arrived under it. Only filled where it is asked
+    /// for (the season watch, which uses it to see which series changed since it last looked).</summary>
+    public DateTimeOffset? DateLastMediaAdded { get; init; }
+
+    /// <summary>Episodes with a file under a season or series — what the server counts, which
+    /// leaves out episodes it lists as missing. Only filled where it is asked for (the season watch);
+    /// <see cref="ChildCount"/> is what a page shows.</summary>
+    public int? FileCount { get; init; }
+
+    /// <summary>For a series, whether it is still being made, as the server's metadata has it:
+    /// "Continuing" or "Ended" (null when it does not say). An ended series gets no new seasons, so
+    /// the season watch does not ask the request server about it.</summary>
+    public string? SeriesStatus { get; init; }
+
     /// <summary>Cast and crew, in the order the server lists them — which is billing order
     /// for actors, so the first few are the ones a poster would name. Only ever filled in
     /// for a single item fetched for its detail page; a list query does not ask for it.</summary>

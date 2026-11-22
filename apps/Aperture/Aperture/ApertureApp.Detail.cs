@@ -57,6 +57,7 @@ public sealed partial class ApertureApp
         switch (item.Kind)
         {
             case MediaKind.Series:
+                if (NewSeasonsLineFor(item) is { } newSeasons) body.AddChild(newSeasons);
                 if (SeasonsUnderWay(item) is { } underWay) body.AddChild(underWay);
                 body.AddChild(SeasonsSection(item));
                 break;
@@ -228,6 +229,7 @@ public sealed partial class ApertureApp
             item.IsFavorite ? "In favourites" : "Add to favourites",
             item.IsFavorite, () => ToggleFavorite(item), "detail-favorite"));
         if (MissingSeasonsButton(item) is { } missing) row.AddChild(missing);
+        MarkArrivalFocus(row);
         return row;
     }
 
@@ -256,7 +258,8 @@ public sealed partial class ApertureApp
             .Cursor(CursorType.Pointer)
             .Tooltip(label)
             .AccessibleRole(AccessibilityRole.Button).AccessibleName(label)
-            .AutomationId(automationId);
+            .AutomationId(automationId)
+            .Pressable();
         b.AddChild(Ui.Icon(glyph, 15f, on ? Halide.Accent : Halide.TextDim));
         b.OnClick(_ => onClick());
         return b;
@@ -269,7 +272,7 @@ public sealed partial class ApertureApp
         var seasons = Children.Where(c => c.Kind == MediaKind.Season).ToList();
         if (seasons.Count > 0)
             return CardRow($"{seasons.Count} season{(seasons.Count == 1 ? "" : "s")}", seasons,
-                item => PosterCard(item, 130f), 130f, "row-seasons-" + series.Id);
+                item => SeasonCard(item, series.Id), 130f, "row-seasons-" + series.Id);
 
         // A series whose episodes hang straight off it — a mini-series, or a library
         // whose folders were never split into seasons. Showing "no seasons" over a series
@@ -303,7 +306,8 @@ public sealed partial class ApertureApp
             .Cursor(CursorType.Pointer)
             .AccessibleRole(AccessibilityRole.Button)
             .AccessibleName(AccessibleNameFor(episode))
-            .AutomationId("episode-" + episode.Id);
+            .AutomationId("episode-" + episode.Id)
+            .Pressable();
 
         row.AddChild(Artwork(episode, ImageKind.Primary, 160f, 90f, Halide.Radius1));
 
@@ -392,7 +396,8 @@ public sealed partial class ApertureApp
             .AccessibleRole(AccessibilityRole.Button)
             .AccessibleName(person.Role is { Length: > 0 } role ? $"{person.Name} as {role}" : person.Name)
             .AutomationId("person-" + person.Id)
-            .Tooltip(person.Role is { Length: > 0 } r ? $"{person.Name} — {r}" : person.Name);
+            .Tooltip(person.Role is { Length: > 0 } r ? $"{person.Name} — {r}" : person.Name)
+            .Pressable();
 
         // Round, so a face reads as a person and not as another poster on the shelf.
         var portrait = Box.New()
@@ -448,16 +453,23 @@ public sealed partial class ApertureApp
     {
         if (_library is not { } lib) return;
         bool played = !item.Played;
+        // A new season's first episode marked watched is a new season started: the watch looks
+        // again, and the card leaves the row (a reload looks anyway, through Refresh).
+        bool newSeason = NoticeFor(item) is not null;
         _ = ApplyAsync(() => lib.SetPlayedAsync(item.Id, played),
             played ? "Marked watched" : "Marked unwatched", reload,
-            () => PatchItem(item.Id, i => i with
+            () =>
             {
-                Played = played,
-                // Watching something to the end is what clears its resume point, and
-                // marking it watched by hand means the same thing.
-                ResumePosition = played ? null : i.ResumePosition,
-                PlayedPercentage = played ? 100 : null,
-            }));
+                PatchItem(item.Id, i => i with
+                {
+                    Played = played,
+                    // Watching something to the end is what clears its resume point, and
+                    // marking it watched by hand means the same thing.
+                    ResumePosition = played ? null : i.ResumePosition,
+                    PlayedPercentage = played ? 100 : null,
+                });
+                if (newSeason) LookForNewSeasons();
+            });
     }
 
     private void ToggleFavorite(MediaItem item, bool reload = true)

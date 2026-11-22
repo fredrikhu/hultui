@@ -20,7 +20,8 @@ Connect  ──►  Home ──► Library grid ──► Item page ──► Pl
                 └── Search, Settings ──────┘
 ```
 
-- **Home** is Continue watching, Next up, your favourites, then what each library has added. Rows
+- **Home** is Continue watching, Next up, new seasons of series you had watched through (below),
+  your favourites, then what each library has added. Rows
   page sideways with two buttons rather than scrolling — a horizontal scroller
   nested in the page's vertical one is the framework's wheel-capture trap. A
   library's "Latest in" row that comes back full has "See all": the library itself,
@@ -37,7 +38,81 @@ Connect  ──►  Home ──► Library grid ──► Item page ──► Pl
   Paging follows the viewport: the row that scrolls in asks for the page that
   would hold it.
 - **The player** is a sheet over whatever you were looking at, so stopping a film
-  puts you back where you started it with the navigation stack intact.
+  puts you back where you started it with the history intact.
+
+## New seasons
+
+A series you had watched through gets a card on Home's **New seasons** row when a season arrives
+after you caught up: "Glass Harbour · Season 3 · 10 episodes · added 2 days ago". The card is the
+new season's first episode, so it behaves as a Next up card does — Enter opens it, Space plays it —
+and the row sits right after Continue watching and Next up, since it answers the same question.
+
+- **Caught up** is judged per season from the server's own watched state for whoever is signed in,
+  so watching on the television counts: every other numbered season fully watched, the new one not
+  started. The specials and seasons with no number (extras folders, "Season Unknown") count neither
+  way, so a series numbered straight through never qualifies.
+- **New** means a season with at least one episode file that was not there at the last look.
+  Season numbers are compared, not dates, so a re-scan that rewrites "date added" changes nothing;
+  dates are used only at the very first look, when a season added in the last 14 days counts. A
+  season numbered below one already watched — seasons 1–3 downloaded after season 5 was watched — is
+  a gap filled in, not news.
+- **It is said once**, as a toast — "Glass Harbour: Season 3 is in your library", with Play; several
+  at once are one toast whose Show puts the cursor on the row. Not over a film (it waits for the
+  player to close), not twice for a season you asked for (the request server's arrival toast has
+  said it), and not at all while the row is hidden: hiding the row is how to stop hearing about it.
+  The series' own page says "Season 3 is new · added 2 days ago" and marks the season's card, and
+  Next up leaves out an episode the row is showing.
+- **Out, but not in your library.** With a request server connected, and for someone allowed to
+  ask for series, a series you are caught up on that is still running gets a card after the
+  library's own — "Low Tide · Season 3 · 8 episodes · out 12 days ago", marked "Not in library" —
+  for seasons that have aired, nobody has asked for, and are numbered above every season the request
+  server knows the library has (so a gap below is not offered). Enter opens the series' page; the
+  card's menu has **Request Season 3…**, which opens the season picker with just those seasons
+  ticked, and the card leaves once they are asked for. It costs a call per such series, so it looks
+  a minute and a half after the request server opens, every twelve hours and on F5, and says nothing
+  as a toast: a season that is out has not arrived.
+- **A card leaves** once an episode of its season is watched (or marked watched from the card), or
+  the season leaves the library. **Dismiss** in the card's menu removes it for that season; **Clear
+  all** in the row's menu, every card. **Stop watching … for new seasons** mutes the series for good
+  — matched on its TMDB and TVDB ids too, so a library removed and added again (new Jellyfin ids)
+  does not unmute it — and Settings lists the muted series, each with **Watch again**.
+- **When it looks:** half a minute after the library opens, then every 30 minutes, and on F5 or
+  after a film. A look is one small call — the 25 series with the newest "date episode added",
+  without artwork — and one more per series that changed or has a card. The first look, and a
+  change too wide for that one call (a re-scan), read every series and every season once instead,
+  a thousand to a page.
+
+What is kept, and where:
+
+| | Where |
+|---|---|
+| Cards on the row, dismissed seasons, muted series | the settings file, per server and user |
+| The seasons each series had at the last look | `season-watch-<server>-<user>.json` beside it — a cache: losing it makes the next look a first look |
+
+## History and the keyboard
+
+Every page you open goes into a history, kept the way a browser keeps one: **Back** is
+Alt+←, Escape, Backspace or the mouse's back button, and **Forward** is Alt+→ or the
+forward button. Opening a page drops whatever was ahead of you; Home is a page like any
+other, so Back from it returns to where you were. Each page remembers where the cursor was,
+so Back lands on the card you opened, and a page opened again from the rail starts where
+you left it. The side buttons do nothing over a playing film.
+
+Everything is reachable without a pointer:
+
+| Keys | What they do |
+|---|---|
+| Tab, Shift+Tab | the title bar's account button, the rail, then the page's controls |
+| Arrows, Home, End, Page Up/Down | walk the cards on a page; cards the arrows walk are one Tab stop between them |
+| Enter | open the card under the cursor, or press the focused button |
+| Space | play the card under the cursor (a series opens instead), or press the focused button |
+| Menu key, Shift+F10 | the card's menu |
+| 1, 2–9, 0, / | Home, the libraries in rail order, Favourites, Search |
+| F5 | refresh |
+
+An item's page hands its first verb (Play, Resume, Request) the keyboard as it opens, so
+Enter on a card and Enter again plays it. Over a film the player's own keys apply, with
+Escape, Space, F, C, Q and Page Up/Down as listed in `Shortcuts.cs`.
 
 ## Signing in
 

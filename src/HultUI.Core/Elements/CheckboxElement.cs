@@ -91,6 +91,7 @@ public class CheckboxElement : Element
             {
                 IsChecked = !IsChecked;
                 OnChanged?.Invoke(IsChecked);
+                evt.Handled = true;
             }
         });
     }

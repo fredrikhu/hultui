@@ -32,7 +32,11 @@ internal static class Shortcuts
         map.Add("player.previousChapter", player, "Previous chapter", K(KeyCode.PageUp));
 
         const string browse = "Browse";
-        map.Add("browse.back", browse, "Back", K(KeyCode.Escape), K(KeyCode.Backspace));
+        // Back and Forward are a browser's: Alt+← and Alt+→ (and the mouse's side buttons,
+        // which are not keys — ApertureApp.History.cs), with Escape and Backspace for Back.
+        map.Add("browse.back", browse, "Back", K(KeyCode.Escape), K(KeyCode.Backspace),
+            new KeyChord(KeyCode.Left, KeyModifiers.Alt));
+        map.Add("browse.forward", browse, "Forward", new KeyChord(KeyCode.Right, KeyModifiers.Alt));
         map.Add("browse.search", browse, "Search", K(KeyCode.Slash));
         map.Add("browse.favourites", browse, "Favourites", K(KeyCode.Digit0));
         map.Add("browse.refresh", browse, "Refresh", K(KeyCode.F5));

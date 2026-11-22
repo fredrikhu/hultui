@@ -199,6 +199,7 @@ public sealed partial class ApertureApp
             .AccessibleRole(HultUI.Core.Accessibility.AccessibilityRole.ComboBox)
             .AccessibleName(active ? $"Genre: {GridGenre!.Name}" : "Any genre")
             .AutomationId("filter-genre")
+            .Pressable()
             .ContextMenu(GenreMenu)
             .Children(Ui.Line(active ? GridGenre!.Name : "Genre", 11.5f,
                 active ? Halide.Accent300 : Halide.TextMuted));
@@ -229,6 +230,7 @@ public sealed partial class ApertureApp
             .AccessibleRole(HultUI.Core.Accessibility.AccessibilityRole.ComboBox)
             .AccessibleName(list ? "View: list" : "View: grid")
             .AutomationId("library-view")
+            .Pressable()
             .ContextMenu(ViewMenu)
             .Children(Ui.Line(list ? "List" : "Grid", 11.5f, Halide.TextMuted));
         chip.OnClick(e => _window.OpenContextMenu(e.CurrentTarget, e.Position));
@@ -307,6 +309,7 @@ public sealed partial class ApertureApp
             .AccessibleRole(HultUI.Core.Accessibility.AccessibilityRole.Button)
             .AccessibleName(active ? label + " (on)" : label)
             .AutomationId(automationId)
+            .Pressable()
             .Children(Ui.Line(label, 11.5f, active ? Halide.Accent300 : Halide.TextMuted));
         chip.OnClick(_ => onClick());
         if (!active) chip.HoverBg(Halide.Raised);
@@ -315,7 +318,8 @@ public sealed partial class ApertureApp
 
     /// <summary>
     /// One row of the grid as its list sees it: its place (-1 for the "loading more" row) and
-    /// the column the cursor is in there (-1 when it is elsewhere). The cards themselves are
+    /// the column the cursor is in there (-1 when it is elsewhere; -2 on the first row while the
+    /// cursor is nowhere, whose first card is then the grid's Tab stop). The cards themselves are
     /// the items at that place, which the shape answers for.
     /// </summary>
     internal readonly record struct GridRowItem(int Row, int CursorColumn);
@@ -327,7 +331,8 @@ public sealed partial class ApertureApp
 
         public GridRowItem this[int index] => index >= rows
             ? new GridRowItem(-1, -1)
-            : new GridRowItem(index, cursor >= 0 && cursor / perRow == index ? cursor % perRow : -1);
+            : new GridRowItem(index, cursor >= 0 && cursor / perRow == index ? cursor % perRow
+                : cursor < 0 && index == 0 ? -2 : -1);
 
         public IEnumerator<GridRowItem> GetEnumerator()
         {
@@ -414,7 +419,7 @@ public sealed partial class ApertureApp
             // Asked for a card handed back as well: a make of the row is what keeps a picture on
             // screen recent in the cache, and what shows the one that landed.
             var picture = ShownPicture(item, ImageKind.Primary, Halide.PosterWidth, Halide.PosterHeight);
-            var state = new GridCardState(item, i, IsCursor(i), picture);
+            var state = new GridCardState(item, i, MarkOf(i), picture);
             if (_gridCards.TryKeep(item.Id, state, out var kept) && CanTakeCard(kept, key))
             {
                 row.AddChild(kept);
@@ -465,9 +470,9 @@ public sealed partial class ApertureApp
     }
 
     /// <summary>What a card shows besides what every card shows: its item (a watched or favourite
-    /// toggle changes the copy), its place, the cursor on it, and the picture it draws, null for
-    /// the placeholder.</summary>
-    private readonly record struct GridCardState(MediaItem Item, int Index, bool Cursor,
+    /// toggle changes the copy), its place, the cursor on it or the Tab stop (<see cref="MarkOf"/>),
+    /// and the picture it draws, null for the placeholder.</summary>
+    private readonly record struct GridCardState(MediaItem Item, int Index, CardMark Mark,
         HultUI.Core.Rendering.IImageSource? Picture);
 
     /// <summary>What every card shows: whether it has a caption, and the scale its glyphs are cut
