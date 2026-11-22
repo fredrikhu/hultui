@@ -120,4 +120,66 @@ public class PopupDismissTests
 
         Assert.Equal(2, session.Window.OverlayContents.Count);
     }
+
+    /// <summary>A popover closes when its window loses the foreground (bug B06).</summary>
+    [Fact]
+    public void AnOpenPopover_Closes_WhenTheWindowLosesFocus()
+    {
+        using var session = HeadlessSession.Create(width: 400, height: 300);
+        var filters = new Popover(() => TextElement.New("Filters"));
+        var anchor = Button.New("Filters").OnClick(e => filters.Toggle(e.CurrentTarget));
+        session.Window.SetRoot(Flex.Column(gap: 8).Padding(20f).Children(anchor));
+        session.PumpFrame();
+        session.Window.GetByText("Filters").Click();
+        session.PumpFrame();
+        Assert.True(filters.IsOpen);
+
+        session.Window.Deactivate();   // SDL_EVENT_WINDOW_FOCUS_LOST
+        session.PumpFrame();
+
+        Assert.False(filters.IsOpen);
+    }
+
+    /// <summary>A dropdown's list closed by the window losing the foreground had no press to
+    /// swallow, so the next click on the dropdown opens it again.</summary>
+    [Fact]
+    public void ADropdownClosedByLosingTheForeground_OpensOnTheNextClick()
+    {
+        using var session = Mount();
+        var dropdown = Dropdown.New(["a", "b"], 0);
+        session.Window.SetRoot(Box.New().Padding(new Thickness(40)).Children(dropdown));
+        session.PumpFrame();
+        session.Window.Click(dropdown);
+        session.PumpFrame();
+        Assert.True(dropdown.IsOpen);
+
+        session.Window.Deactivate();
+        session.PumpFrame();
+        Assert.False(dropdown.IsOpen);
+
+        session.Window.Click(dropdown);
+        session.PumpFrame();
+        Assert.True(dropdown.IsOpen);
+    }
+
+    /// <summary>The same for a date picker's calendar.</summary>
+    [Fact]
+    public void ADatePickerClosedByLosingTheForeground_OpensOnTheNextClick()
+    {
+        using var session = Mount();
+        var picker = DatePickerElement.New();
+        session.Window.SetRoot(Box.New().Padding(new Thickness(40)).Children(picker));
+        session.PumpFrame();
+        session.Window.Click(picker);
+        session.PumpFrame();
+        Assert.True(picker.IsOpen);
+
+        session.Window.Deactivate();
+        session.PumpFrame();
+        Assert.False(picker.IsOpen);
+
+        session.Window.Click(picker);
+        session.PumpFrame();
+        Assert.True(picker.IsOpen);
+    }
 }

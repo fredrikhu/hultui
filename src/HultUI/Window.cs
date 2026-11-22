@@ -724,7 +724,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// Raised when the window stops being the foreground one: the user clicked another window or
     /// application, or Alt+Tabbed away. On the UI thread, after the window's light-dismiss popups
     /// (a menu, a dropdown's list, a popover) have closed, as a native menu closes when its window
-    /// loses the foreground. Not raised by a headless or WinForms host, which cannot tell.
+    /// loses the foreground. Not raised by a WinForms host, which cannot tell; a headless test
+    /// raises it with <c>HeadlessWindow.Deactivate()</c>.
     /// </summary>
     public event Action? Deactivated;
 

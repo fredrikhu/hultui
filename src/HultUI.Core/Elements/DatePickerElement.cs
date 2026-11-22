@@ -32,7 +32,9 @@ public class DatePickerElement : Element
 
     // Set when the host dismissed the popup because of a press on the field itself: that
     // press's own PointerDown arrives right after the dismissal and must read as "close"
-    // (which already happened), not "open again". Mirrors DropdownElement.
+    // (which already happened), not "open again". Mirrors DropdownElement. A dismissal with no
+    // press (the window was deactivated, a frame press, DismissPopups) is cleared after the next
+    // frame.
     private bool _suppressOpenFromDismiss;
 
     private DropdownTheme _theme = new();
@@ -206,6 +208,9 @@ public class DatePickerElement : Element
         _open = false;
         AccessibleExpanded = false;
         _suppressOpenFromDismiss = true;
+        // Only the press that dismissed it is swallowed, and that press arrives before the next
+        // frame; a dismissal with no press (the window was deactivated) must not eat a later click.
+        OverlayHost?.RequestPostFrameCallback(() => _suppressOpenFromDismiss = false);
         MarkPaintDirty();
     }
 
