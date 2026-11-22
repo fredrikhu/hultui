@@ -6,8 +6,8 @@ file after every step and commits it with the step's work. Full survey reports a
 
 - **Round:** 18
 - **Phase:** build — round 18, step 7 next (resumed 2026-11-23 00:00 by the user's timer after the pause after step 6) (reactivity-aperture-parts-build-on-change). The survey ran 2026-11-22 in session
-  00f54f03 (reports `17-reports/r18-*`; usage 1 → 8 % of the week, the 5-hour window 7 → 54 %). Questions 73–76 are answered (73 → (b), 74 → (c), 75 → (a), 76 → (a)); question 77 (asked at step 3) is open
-  (its commit would ride with step 7). Round 18's files (the survey brief `brief-r18-survey.md`, build
+  00f54f03 (reports `17-reports/r18-*`; usage 1 → 8 % of the week, the 5-hour window 7 → 54 %). Questions 73–77 are answered (73 → (b), 74 → (c), 75 → (a), 76 → (a), 77 → (a) on
+  2026-11-23, its commit riding with step 7). Round 18's files (the survey brief `brief-r18-survey.md`, build
   briefs `brief-r18b<N>.md`, `archive_r18.py`, `merge_r18.py`, `desk.ps1`, agent ids `r18-agents.txt`, probes
   `r18-<area>\` and `r18b<N>\`) are in session 00f54f03's scratchpad
   `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\00f54f03-b511-4949-9273-30fe719e1bbb\scratchpad\`. Round
@@ -1043,6 +1043,7 @@ is not asked: 0f9c8477 and History.cs already promise "back where you were scrol
     element until the next arrow). (a) Focus the page's cursor card, or its first card on screen, on every way into a
     page, as Back and Escape now do. (b) Leave it. [(a): the same rule everywhere; a small app change, its own commit
     with step 7.]
+    **Answered (a)** by the user 2026-11-23 ("Yes it should"): its own commit with step 7 (r18b7).
 
 Reminder (expert 8): Aperture signed in to jellyfin.home as device "aperture-survey" in earlier rounds, as "aperture-r13" in round 13 (and twice in round 15), and once in
 round 12 as "aperture-r12" (again in round 15); the user should remove those devices and revoke the API key when the work is done.
