@@ -508,6 +508,29 @@ public class ApertureUnitTests
         Assert.True(pictureA.IsLoaded, "a picture asked for again at its own size was dropped");
     }
 
+    [Fact]
+    public void ADroppedPictureIsFreedAtOnceAndFetchedAgainWhenAskedFor()
+    {
+        using var cache = new PosterCache(() => { }, http: new HttpClient(new SmallPngHandler()));
+        var a = new Uri("http://jellyfin.test/Items/a/Images/Backdrop?fillWidth=2176");
+        var b = new Uri("http://jellyfin.test/Items/b/Images/Backdrop?fillWidth=2176");
+        var pictureA = Loaded(cache, a);
+        var pictureB = Loaded(cache, b);
+        Assert.Equal(4 * 6 * 4, cache.DecodedBytes(a));
+
+        // Nothing is downloading, so nothing would make a retired picture go: dropped, it goes now.
+        cache.Drop(a);
+        Assert.Equal(0, cache.PendingCount);
+        Assert.False(pictureA.IsLoaded, "a dropped picture still holds its pixels");
+        Assert.False(cache.IsReady(a));
+        Assert.Equal(0, cache.DecodedBytes(a));
+        Assert.True(pictureB.IsLoaded);
+
+        // Asked for again, it is fetched again.
+        Assert.Equal(PosterCache.Status.Pending, cache.Get(a).Status);
+        Assert.NotSame(pictureA, Loaded(cache, a));
+    }
+
     [Theory]
     [InlineData(1336f, 1.0f, 1408)]   // a 1,400-wide window, beside the 64-wide rail
     [InlineData(1336f, 1.5f, 2048)]   // 2,004 device pixels

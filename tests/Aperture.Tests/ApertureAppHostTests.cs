@@ -2250,6 +2250,64 @@ public partial class ApertureAppHostTests
         }, artwork: artwork);
     }
 
+    /// <summary>
+    /// Heroes are kept by their bytes as well as by their count. At 150 % a hero in a 1,440 by 900
+    /// window is 2,176 by 1,224, 10.2 MB of pixels (and a texture as big on a GPU), so only the
+    /// page on screen and the one behind it fit: over six pages the heroes held stay at two. The
+    /// one let go is disposed on the build that lets it go, with nothing left to download that
+    /// would make a retired picture go. Its page opened again asks for it again and draws it.
+    /// </summary>
+    [Fact]
+    public void HeroesAreKeptByTheirBytesAndOneLetGoIsFreedAtOnce()
+    {
+        var library = new FakeMediaLibrary().AddLibrary("movies", "Films", LibraryKind.Movies);
+        string[] pages = ["h1", "h2", "h3", "h4", "h5", "h6"];
+        foreach (var id in pages)
+        {
+            library.AddMovie(id, "Film " + id, "movies");
+            // A backdrop and nothing else to fetch: once the hero has landed, nothing lands again.
+            library.Update(library.Item(id)! with { BackdropImageTag = "bd-" + id, PrimaryImageTag = null });
+        }
+        const long HeroBytes = 2176L * 1224 * 4;
+        Assert.True(2 * HeroBytes <= ApertureApp.HeroBytesKept && 3 * HeroBytes > ApertureApp.HeroBytesKept);
+        var artwork = new SizedArtworkHandler();
+        Host(library, (session, app) =>
+        {
+            session.Window.SetScale(1.5f);
+            var heroes = new List<HultUI.Core.Rendering.IImageSource>();
+            foreach (var id in pages)
+            {
+                app.Navigate(new Route(ApertureView.Detail, id, id));
+                session.PumpUntil(() => Hero(session)?.Source is { IsLoaded: true, IntrinsicSize.Width: 2176f } s
+                    && !heroes.Contains(s), TimeSpan.FromSeconds(5));
+                heroes.Add(Hero(session)!.Source!);
+                session.PumpFrame();
+                Assert.Equal(0, app.Posters.PendingCount);
+                Assert.Equal(Math.Min(heroes.Count, ApertureApp.HeroesAlwaysKept), heroes.Count(h => h.IsLoaded));
+                Assert.True(heroes[^1].IsLoaded && heroes[Math.Max(0, heroes.Count - 2)].IsLoaded,
+                    "the hero on screen or the one behind it was let go");
+            }
+
+            // Back once: the page behind draws its hero without asking for it.
+            int asked = artwork.Count("/Images/Backdrop");
+            app.GoBack();
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.Same(heroes[^2], Hero(session)!.Source);
+            Assert.Equal(asked, artwork.Count("/Images/Backdrop"));
+
+            // Back again: that page's hero was let go, so it is asked for again and drawn; once it
+            // is in, the page furthest back lets go of its own.
+            app.GoBack();
+            session.PumpUntil(() => Hero(session)?.Source is { IsLoaded: true, IntrinsicSize.Width: 2176f } s
+                && !heroes.Contains(s), TimeSpan.FromSeconds(5));
+            session.PumpFrame();
+            Assert.Equal(asked + 1, artwork.Count("/Images/Backdrop"));
+            Assert.Equal(1376f, LayoutProbe.Painted(Hero(session)!).Width);
+            Assert.False(heroes[^1].IsLoaded, "three heroes of 10 MB were kept");
+            Assert.True(heroes[^2].IsLoaded);
+        }, artwork: artwork);
+    }
+
     [Fact]
     public void AHeroInANarrowWindowIsAskedForByHeight()
     {

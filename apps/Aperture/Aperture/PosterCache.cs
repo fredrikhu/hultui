@@ -213,6 +213,46 @@ public sealed class PosterCache : IDisposable
         }
     }
 
+    /// <summary>
+    /// A picture no longer wanted, dropped now: its pixels go at once, and so does the texture a
+    /// GPU window made of it, at the frame after; <see cref="Retire(Uri)"/> keeps a picture until
+    /// the downloads that follow have landed. Asked for again, it is fetched again. Still
+    /// downloading, it lands retired and goes with the retired ones.
+    ///
+    /// <para>Call it on the UI thread, the one that draws pictures, and only for a picture no
+    /// page on screen draws.</para>
+    /// </summary>
+    internal void Drop(Uri url)
+    {
+        var key = url.ToString();
+        lock (_lock)
+        {
+            if (_disposed) return;
+            if (_map.Remove(key, out var e))
+            {
+                _lru.Remove(key);
+                if (e.Retired) _retiredCount--;
+                (e.Image as IDisposable)?.Dispose();
+            }
+            else if (_inFlight.Contains(key))
+            {
+                _retireOnLanding.Add(key);
+            }
+        }
+    }
+
+    /// <summary>The bytes this URL's own picture holds decoded, four a pixel (see
+    /// <see cref="Decode"/>); 0 when it has not landed.</summary>
+    internal long DecodedBytes(Uri url)
+    {
+        lock (_lock)
+        {
+            if (!_map.TryGetValue(url.ToString(), out var e) || e.Image is not { IsLoaded: true } image) return 0;
+            var size = image.IntrinsicSize;
+            return (long)size.Width * (long)size.Height * 4;
+        }
+    }
+
     /// <summary>Whether this URL's own picture has landed — not a stand-in for it, and not a
     /// download that failed.</summary>
     public bool IsReady(Uri url)

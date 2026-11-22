@@ -458,12 +458,27 @@ public sealed partial class ApertureApp
         (ArtworkPixels(layoutSize, scale) + HeroStep - 1) / HeroStep * HeroStep;
 
     /// <summary>
-    /// How many heroes' pictures the app keeps: the page on screen and the three behind it,
-    /// for Back. The cache bounds pictures by count, 400 of them, and a hero counted as one,
-    /// like a poster: every page visited kept its own, 9 MB at 150 % in a 1,400-wide window
-    /// (33 MB on a 4K monitor). A page further back than this fetches its hero again.
+    /// How many heroes' pictures the app keeps at most: the page on screen and the three behind
+    /// it, for Back, while they fit <see cref="HeroBytesKept"/>. The cache bounds pictures by
+    /// count, 400 of them, and a hero counted as one, like a poster: every page visited kept its
+    /// own, 9 MB at 150 % in a 1,400-wide window (33 MB on a 4K monitor). A page further back
+    /// than the heroes kept fetches its hero again.
     /// </summary>
     internal const int HeroesKept = 4;
+
+    /// <summary>The heroes kept whatever their size: those of the last two pages shown with
+    /// one, the page on screen and the one before it.</summary>
+    internal const int HeroesAlwaysKept = 2;
+
+    /// <summary>
+    /// The decoded bytes the heroes kept may hold together; past it, only
+    /// <see cref="HeroesAlwaysKept"/> stay. A hero is held twice, its pixels in memory and its
+    /// texture on the GPU, and its size follows the window: four were 41 MB of pixels at 150 % in
+    /// a 1,440 by 900 window (2,176 by 1,224 each), 53 MB with a film whose poster is its hero
+    /// (2,000 by 3,000), and about 120 MB in a window filling a 4K monitor. Four heroes the size
+    /// of a 1,440-wide window at 100 % (4.5 MB each) still fit.
+    /// </summary>
+    internal const long HeroBytesKept = 24L * 1024 * 1024;
 
     /// <summary>A hero kept: which artwork it is, the URL of the picture it draws, and the URL
     /// it last asked for (the same one, once that has landed).</summary>
@@ -487,8 +502,8 @@ public sealed partial class ApertureApp
     /// <para>When the same artwork is asked for at another size — the window was resized past
     /// a step, or moved to a monitor with another scale — the picture on screen stays up until
     /// the new one lands, and then goes rather than staying in the cache beside it. So does a
-    /// size the window passed over before it landed, and so does the picture of a page more
-    /// than <see cref="HeroesKept"/> heroes back.</para>
+    /// size the window passed over before it landed. The picture of a page further back than
+    /// the heroes kept goes at once (<see cref="LetGoOfHeroes"/>).</para>
     /// </summary>
     private (HultUI.Core.Rendering.IImageSource? Image, PosterCache.Status Status) HeroArtwork(
         string? art, double? aspect, Func<int?, int?, Uri?> sized)
@@ -500,23 +515,8 @@ public sealed partial class ApertureApp
             return _posters.Get(null);
 
         var hero = _heroes.Find(h => h.Art == art);
-        if (hero is null)
-        {
-            hero = new HeroPicture(art);
-            if (_heroes.Count == HeroesKept)
-            {
-                // The page furthest back: its picture goes once the downloads that follow
-                // have landed.
-                var oldest = _heroes[0];
-                _heroes.RemoveAt(0);
-                if (oldest.Shown is { } kept) _posters.Retire(kept);
-                if (oldest.Asked is { } asked) _posters.Retire(asked);
-            }
-        }
-        else
-        {
-            _heroes.Remove(hero);
-        }
+        if (hero is null) hero = new HeroPicture(art);
+        else _heroes.Remove(hero);
         _heroes.Add(hero);
 
         // Every other size of this artwork goes once the new picture is in: the one on screen
@@ -529,7 +529,37 @@ public sealed partial class ApertureApp
 
         var result = _posters.Get(url, standIn);
         if (_posters.IsReady(url)) hero.Shown = url;
+        LetGoOfHeroes();
         return result;
+    }
+
+    /// <summary>
+    /// Holds the heroes kept to <see cref="HeroesKept"/> and <see cref="HeroBytesKept"/>, letting
+    /// go of the page furthest back first and never of the <see cref="HeroesAlwaysKept"/> latest.
+    /// Run whenever a hero is asked for, so a picture whose size is known only once it has landed
+    /// counts from the build that draws it. What is let go is dropped at once
+    /// (<see cref="PosterCache.Drop"/>), not retired until the next downloads land: no page on
+    /// screen draws it, this is the UI thread, and after a page's last picture has landed
+    /// nothing may land again for a long time, so a retired hero stayed a page longer.
+    /// </summary>
+    private void LetGoOfHeroes()
+    {
+        while (_heroes.Count > HeroesAlwaysKept && (_heroes.Count > HeroesKept || HeroBytes() > HeroBytesKept))
+        {
+            var oldest = _heroes[0];
+            _heroes.RemoveAt(0);
+            if (oldest.Shown is { } shown) _posters.Drop(shown);
+            if (oldest.Asked is { } asked && asked != oldest.Shown) _posters.Drop(asked);
+        }
+    }
+
+    /// <summary>The decoded bytes of the heroes kept: each one's picture on screen.</summary>
+    private long HeroBytes()
+    {
+        long bytes = 0;
+        foreach (var kept in _heroes)
+            if (kept.Shown is { } shown) bytes += _posters.DecodedBytes(shown);
+        return bytes;
     }
 
     /// <summary>
