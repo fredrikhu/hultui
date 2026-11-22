@@ -68,6 +68,20 @@ public sealed partial class ApertureApp
     /// card that took its place, rather than nowhere.</summary>
     private int? _homeCursorAfterRemoval;
 
+    /// <summary>A row Home's next build puts the cursor on the first card of — the summary
+    /// toast's "Show".</summary>
+    private string? _homeCursorToRow;
+
+    /// <summary>Series a toast has named this session — the arrival watch's ("Severance is in your
+    /// library", for a season someone asked for) or this one's — so one arrival is one toast.</summary>
+    private readonly HashSet<string> _seriesToasted = new(StringComparer.Ordinal);
+
+    /// <summary>New seasons found while a film played, said when the player closes.</summary>
+    private readonly List<SeasonNotice> _seasonNewsHeld = [];
+
+    /// <summary>New-season toasts said, for tests.</summary>
+    internal int NewSeasonToasts { get; private set; }
+
     private void StartSeasonWatch()
     {
         StopSeasonWatch();
@@ -81,6 +95,8 @@ public sealed partial class ApertureApp
         _seasonTimer = null;
         _seasonLookArmed = false;
         _seasonLookAskedOf = null;
+        _seriesToasted.Clear();
+        _seasonNewsHeld.Clear();
     }
 
     /// <summary>The watch's tick, and F5's: look now.</summary>
@@ -152,10 +168,142 @@ public sealed partial class ApertureApp
             .Where(n => !watch.Muted.Any(m => m.Matches(n.SeriesId, n.TmdbId, n.TvdbId)))
             .Where(n => n.Seasons.Any(s => !dismissed.Contains(SeasonWatch.DismissKey(n.SeriesId, s))))
             .ToList();
-        if (SameNotices(watch.Notices, kept)) return;
-        watch.Notices = kept;
-        _settings.Save();
-        Rerender();
+        // News is what this look added to the row, and is still on it after what the user did.
+        var arrived = look.Arrived.Where(kept.Contains).ToList();
+        if (!SameNotices(watch.Notices, kept))
+        {
+            watch.Notices = kept;
+            _settings.Save();
+            Rerender();
+        }
+        AnnounceNewSeasons(arrived);
+    }
+
+    // ── Saying it ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// A toast for what arrived, once: a notice is news when a look adds it to the row or adds a
+    /// season to it, and the row is kept in the settings file, so a restart says nothing again.
+    /// Not while the row is hidden (hiding it is how to stop hearing about it), not twice for a
+    /// series the arrival watch has just named, and not over a film — held until the player closes.
+    /// </summary>
+    private void AnnounceNewSeasons(IReadOnlyList<SeasonNotice> arrived)
+    {
+        if (arrived.Count == 0 || NewSeasonsRowHidden) return;
+        var news = arrived.Where(n => !_seriesToasted.Contains(n.SeriesId)).ToList();
+        if (news.Count == 0) return;
+        if (_playingItem is not null)
+        {
+            _seasonNewsHeld.RemoveAll(h => news.Any(n => n.SeriesId == h.SeriesId));
+            _seasonNewsHeld.AddRange(news);
+            return;
+        }
+        SayNewSeasons(news);
+    }
+
+    private bool NewSeasonsRowHidden =>
+        _settings.Data.HiddenHomeRows.Contains(NewSeasonsRowKey, StringComparer.Ordinal);
+
+    private void SayNewSeasons(IReadOnlyList<SeasonNotice> news)
+    {
+        foreach (var notice in news) _seriesToasted.Add(notice.SeriesId);
+        NewSeasonToasts++;
+        if (news.Count == 1)
+        {
+            var notice = news[0];
+            var series = notice.SeriesName.Length > 0 ? notice.SeriesName : "A series you finished";
+            Flash($"{series}: {SeasonsPhrase(notice.Seasons)} {(notice.Seasons.Count == 1 ? "is" : "are")} in your library",
+                ToastSeverity.Success, ("Play", () => PlayNewSeason(notice)));
+        }
+        else
+        {
+            Flash($"{news.Count} series you'd finished have new seasons", ToastSeverity.Success,
+                ("Show", ShowNewSeasonsRow));
+        }
+    }
+
+    /// <summary>The player closed: what arrived while it played, if it is still on the row.</summary>
+    private void SayHeldSeasonNews()
+    {
+        if (_seasonNewsHeld.Count == 0 || _playingItem is not null) return;
+        var notices = NewSeasonNotices;
+        var still = _seasonNewsHeld.Where(h => notices.Any(n => n.SeriesId == h.SeriesId)).ToList();
+        _seasonNewsHeld.Clear();
+        if (still.Count > 0 && !NewSeasonsRowHidden) SayNewSeasons(still);
+    }
+
+    /// <summary>The toast's "Play": the new season's first episode, from the row's cards when they
+    /// have it, from the server when Home has not been drawn since.</summary>
+    private void PlayNewSeason(SeasonNotice notice)
+    {
+        if (_newSeasonCards.Value.TryGetValue(notice.FirstSeasonId, out var episode))
+        {
+            Play(episode, episode.ResumePosition ?? TimeSpan.Zero);
+            return;
+        }
+        if (_library is not { } lib) return;
+        _ = Task.Run(async () =>
+        {
+            var page = await lib.GetItemsAsync(FirstEpisodeOf(notice.FirstSeasonId)).ConfigureAwait(false);
+            Application.InvokeOnMainThread(() =>
+            {
+                if (_library != lib) return;
+                if (page.Ok && page.Value.Items.Count > 0) Play(page.Value.Items[0], TimeSpan.Zero);
+                else if (!page.Ok) FlashFailure(page.Failure!, notice.SeriesName);
+            });
+        });
+    }
+
+    /// <summary>A season's first episode, in the order the season's page lists them.</summary>
+    private static ItemQuery FirstEpisodeOf(string seasonId) => new()
+    {
+        ParentId = seasonId,
+        Kinds = [MediaKind.Episode],
+        Recursive = false,
+        Sort = ItemSort.Name,
+        Limit = 1,
+    };
+
+    /// <summary>The summary toast's "Show": Home, with the cursor on the row's first card.</summary>
+    private void ShowNewSeasonsRow()
+    {
+        _homeCursorToRow = NewSeasonsRowKey;
+        if (Current.View == ApertureView.Home) Rerender();
+        else GoHome();
+    }
+
+    // ── The series page ──────────────────────────────────────────────────
+
+    /// <summary>The notice standing for a series, or null.</summary>
+    internal SeasonNotice? NoticeForSeries(string seriesId)
+    {
+        foreach (var notice in NewSeasonNotices)
+            if (notice.SeriesId == seriesId) return notice;
+        return null;
+    }
+
+    /// <summary>"Season 3 is new · added 2 days ago", above a series' seasons — beside "Season 3 on
+    /// its way", in the same voice.</summary>
+    private Element? NewSeasonsLineFor(MediaItem series)
+    {
+        if (NoticeForSeries(series.Id) is not { } notice) return null;
+        var text = $"{SeasonsPhrase(notice.Seasons)} {(notice.Seasons.Count == 1 ? "is" : "are")} new · {NewSeasonAdded(notice)}";
+        var line = UnderWayLine(Icons.NewSeason, Halide.Accent, text);
+        line.AutomationId("detail-new-seasons");
+        return line;
+    }
+
+    /// <summary>A season's card on its series' page, marked "New" while it is on a notice.</summary>
+    private Element SeasonCard(MediaItem season, string seriesId)
+    {
+        const float width = 130f;
+        if (NoticeForSeries(seriesId) is not { } notice || season.IndexNumber is not { } number
+            || !notice.Seasons.Contains(number))
+            return PosterCard(season, width);
+        var card = PosterCard(season, width, -1, ShownPicture(season, ImageKind.Primary, width, MathF.Round(width * 1.5f)));
+        card.AccessibleName(AccessibleNameFor(season) + ", new");
+        card.Children[0].AddChild(NewSeasonMark("New"));
+        return card;
     }
 
     private static bool SameNotices(IReadOnlyList<SeasonNotice> a, IReadOnlyList<SeasonNotice> b) =>
@@ -184,15 +332,7 @@ public sealed partial class ApertureApp
             var map = new Dictionary<string, MediaItem>(StringComparer.Ordinal);
             foreach (var seasonId in wanted)
             {
-                // A season's episodes in their own order, as the season's page lists them.
-                var page = lib.GetItemsAsync(new ItemQuery
-                {
-                    ParentId = seasonId,
-                    Kinds = [MediaKind.Episode],
-                    Recursive = false,
-                    Sort = ItemSort.Name,
-                    Limit = 1,
-                }).GetAwaiter().GetResult();
+                var page = lib.GetItemsAsync(FirstEpisodeOf(seasonId)).GetAwaiter().GetResult();
                 if (page.Ok && page.Value.Items.Count > 0) map[seasonId] = page.Value.Items[0];
             }
             return (IReadOnlyDictionary<string, MediaItem>)map;
@@ -258,7 +398,7 @@ public sealed partial class ApertureApp
         MarkCursor(card, cursorIndex, item);
 
         var art = Artwork(item, width, height, Halide.Radius2, picture);
-        art.AddChild(NewSeasonMark(notice.Seasons.Count));
+        art.AddChild(NewSeasonMark(notice.Seasons.Count == 1 ? "New season" : "New seasons"));
         card.AddChild(art);
 
         if (_settings.Data.ShowCardTitles)
@@ -274,13 +414,13 @@ public sealed partial class ApertureApp
     }
 
     /// <summary>The accent mark in the artwork's corner: a mark, not a surface, as the watched tick is.</summary>
-    private static Element NewSeasonMark(int seasons)
+    private static Element NewSeasonMark(string text)
     {
         var mark = Box.New()
             .Padding(new Thickness(2, 7, 2, 7))
             .CornerRadius(Halide.Radius1)
             .Background(Halide.Accent);
-        mark.AddChild(Ui.Line(seasons == 1 ? "New season" : "New seasons", 10.5f, new Color(35, 23, 4)));
+        mark.AddChild(Ui.Line(text, 10.5f, new Color(35, 23, 4)));
         mark.Position.Type = PositionType.Absolute;
         mark.Position.Left = Dimension.Px(Halide.S2);
         mark.Position.Top = Dimension.Px(Halide.S2);

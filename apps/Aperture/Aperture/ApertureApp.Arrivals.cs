@@ -96,6 +96,8 @@ public sealed partial class ApertureApp
             _seenAvailable = now;
         }
 
+        // A series the new-season watch has just named is not named again: one arrival, one toast.
+        arrived = arrived.Where(r => r.JellyfinItemId is not { } id || _seriesToasted.Add(id)).ToList();
         if (arrived.Count == 1)
         {
             var request = arrived[0];

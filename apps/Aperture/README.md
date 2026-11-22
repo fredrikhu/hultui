@@ -56,6 +56,12 @@ and the row sits right after Continue watching and Next up, since it answers the
   dates are used only at the very first look, when a season added in the last 14 days counts. A
   season numbered below one already watched — seasons 1–3 downloaded after season 5 was watched — is
   a gap filled in, not news.
+- **It is said once**, as a toast — "Glass Harbour: Season 3 is in your library", with Play; several
+  at once are one toast whose Show puts the cursor on the row. Not over a film (it waits for the
+  player to close), not twice for a season you asked for (the request server's arrival toast has
+  said it), and not at all while the row is hidden: hiding the row is how to stop hearing about it.
+  The series' own page says "Season 3 is new · added 2 days ago" and marks the season's card, and
+  Next up leaves out an episode the row is showing.
 - **A card leaves** once an episode of its season is watched (or marked watched from the card), or
   the season leaves the library. **Dismiss** in the card's menu removes it for that season; **Clear
   all** in the row's menu, every card. **Stop watching … for new seasons** mutes the series for good

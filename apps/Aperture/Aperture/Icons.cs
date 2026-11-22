@@ -45,6 +45,8 @@ public static class Icons
     public const string Discover = "compass";
     public const string Requests = "list-checks";
     public const string Request = "plus-circle";
+    /// <summary>A season that arrived after the rest was watched.</summary>
+    public const string NewSeason = "sparkle";
     public const string Pending = "clock";
     public const string Processing = "download-simple";
     public const string Available = "check-circle";

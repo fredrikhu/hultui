@@ -247,6 +247,8 @@ public sealed partial class ApertureApp
             // What was watched changed, so the home rows are stale.
             _dataGeneration++;
         }
+        // New seasons found while the film played are said now that it has stopped.
+        if (!keepSheet) SayHeldSeasonNews();
         Rerender();
     }
 

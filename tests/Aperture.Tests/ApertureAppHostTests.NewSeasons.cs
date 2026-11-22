@@ -224,6 +224,121 @@ public partial class ApertureAppHostTests
         });
     }
 
+    // ── Saying it (slice 8b) ─────────────────────────────────────────────
+
+    [Fact]
+    public void ANewSeasonIsToldOnce_AndThePlayInItsToastPlaysTheFirstEpisode()
+    {
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(45) };
+        Host(WithNewSeason(), (session, app) =>
+        {
+            PumpUntilShown(session, "Stalker");
+            LookNow(session);
+            Assert.Equal("Severance: Season 3 is in your library", app.Toasts.Message);
+            Assert.Equal(1, app.NewSeasonToasts);
+
+            var (label, run) = app.Toasts.Action!.Value;
+            Assert.Equal("Play", label);
+            run();
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+            Assert.Equal("sev-s3e1", app.PlayingItem?.Id);
+            app.StopPlayback(report: false);
+
+            // The next look finds it still on the row, and says nothing: it is not news twice.
+            LookNow(session);
+            Assert.Single(app.NewSeasonNotices);
+            Assert.Equal(1, app.NewSeasonToasts);
+        }, () => backend);
+    }
+
+    [Fact]
+    public void SeveralAtOnceAreOneToast_WhoseShowPutsTheCursorOnTheRow()
+    {
+        Host(WithNewSeason(second: true), (session, app) =>
+        {
+            PumpUntilShown(session, "Stalker");
+            LookNow(session);
+            Assert.Equal("2 series you'd finished have new seasons", app.Toasts.Message);
+
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            PumpUntilShown(session, "Solaris");
+            app.Toasts.Action!.Value.Run();
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+
+            Assert.Equal(ApertureView.Home, app.Current.View);
+            // Newest arrival first: Northern Light's season came yesterday.
+            Assert.Equal("north-s2e1", app.CursorItem?.Id);
+            Assert.Equal("new-season-north", Focused(session));
+        });
+    }
+
+    [Fact]
+    public void WhatArrivesDuringAFilmIsToldWhenThePlayerCloses()
+    {
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(167) };
+        Host(WithNewSeason(), (session, app) =>
+        {
+            PumpUntilShown(session, "Stalker");
+            session.Window.FindByAutomationId("resume-m2")!.Click();
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+            Assert.Equal("m2", app.PlayingItem?.Id);
+
+            app.LookForNewSeasons();
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+            Assert.Single(app.NewSeasonNotices);
+            Assert.Equal(0, app.NewSeasonToasts);
+
+            app.StopPlayback(report: false);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.Equal(1, app.NewSeasonToasts);
+            Assert.Equal("Severance: Season 3 is in your library", app.Toasts.Message);
+        }, () => backend);
+    }
+
+    [Fact]
+    public void NextUpLeavesOutWhatTheRowShows_UnlessTheRowIsHidden_WhichAlsoKeepsItQuiet()
+    {
+        var library = WithNewSeason();
+        library.NextUpIds.Add("sev-s3e1");
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Stalker");
+            app.SetHomeRowHidden(ApertureApp.NewSeasonsRowKey, true);
+            LookNow(session);
+
+            // Hidden: found all the same, but not said, and Next up keeps the episode.
+            Assert.Single(app.NewSeasonNotices);
+            Assert.Equal(0, app.NewSeasonToasts);
+            Assert.NotNull(session.Window.FindByAutomationId("card-sev-s3e1"));
+            Assert.Null(session.Window.FindByAutomationId("new-season-sev"));
+
+            app.SetHomeRowHidden(ApertureApp.NewSeasonsRowKey, false);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.NotNull(session.Window.FindByAutomationId("new-season-sev"));
+            Assert.Null(session.Window.FindByAutomationId("card-sev-s3e1"));
+        });
+    }
+
+    [Fact]
+    public void TheSeriesPageSaysWhichSeasonIsNew_AndMarksItsCard()
+    {
+        var library = WithNewSeason();
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Stalker");
+            LookNow(session);
+            app.Open(library.Item("sev")!);
+            PumpUntilShown(session, "Season 3 is new · added 2 days ago");
+            for (int i = 0; i < 4; i++) session.PumpFrame();   // the seasons arrive after the item
+
+            var s3 = session.Window.FindByAutomationId("card-sev-s3");
+            var s2 = session.Window.FindByAutomationId("card-sev-s2");
+            Assert.True(s3 is not null && s2 is not null, "the season cards are not on the page");
+            Assert.EndsWith(", new", s3!.Name);
+            Assert.DoesNotContain(", new", s2!.Name);
+        }, height: 1400);
+    }
+
     [Fact]
     public void ARowWithNothingInItIsNotDrawn()
     {

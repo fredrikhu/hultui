@@ -1022,6 +1022,35 @@ public class RequestServerHostTests
         });
     }
 
+    [Fact]
+    public void ASeasonYouAskedForIsOneToastNotTwo()
+    {
+        var library = Library();
+        library.AddItem(new MediaItem { Id = "sev", Name = "Severance", Kind = MediaKind.Series, TmdbId = 95396 }, "shows");
+        library.AddSeason("sev", 1, 9, watched: 9, added: library.Made.AddDays(-700));
+        library.AddSeason("sev", 2, 10, watched: 10, added: library.Made.AddDays(-300));
+        library.AddSeason("sev", 3, 8, added: library.Made.AddDays(-2));
+        var requests = Requests(RequestPermission.Request | RequestPermission.AutoApprove);
+        requests.AddSeries(95396, "Severance", 2022);
+        requests.RequestAsync(new NewRequest(DiscoverKind.Tv, 95396, [3])).GetAwaiter().GetResult();
+        Host(library, requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.CheckArrivalsAsync().GetAwaiter().GetResult();   // the first look records
+            Pump(session, 3);
+
+            requests.Arrive("tv:95396", "sev");
+            app.CheckArrivalsAsync().GetAwaiter().GetResult();
+            PumpUntilShown(session, "Severance is in your library");
+
+            // The season watch finds the same season: on the row, but not said again.
+            app.LookForNewSeasons();
+            Pump(session, 6);
+            Assert.Equal("sev", Assert.Single(app.NewSeasonNotices).SeriesId);
+            Assert.Equal(0, app.NewSeasonToasts);
+        });
+    }
+
     // ── The watchlist on Home ────────────────────────────────────────────
 
     [Fact]
