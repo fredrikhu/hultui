@@ -66,7 +66,8 @@ public sealed class HeadlessUiaReader : IDisposable
         _bridge = new WindowsAccessibilityBridge(_hwnd, host)
         {
             Raised = e => _raised.Add(new HeadlessUiaEvent((HeadlessUiaEventKind)e.Kind, e.Id, e.Element)),
-            ProviderDisconnected = _disconnected.Add,
+            // On the bridge's disconnect thread.
+            ProviderDisconnected = id => { lock (_disconnected) _disconnected.Add(id); },
         };
         _listening = new Listening(_bridge);
         window.InstallAccessibilityBridge(_listening);
@@ -84,14 +85,29 @@ public sealed class HeadlessUiaReader : IDisposable
         _raised.Where(e => e.Kind == HeadlessUiaEventKind.Event && e.Id == FocusChangedEvent).Select(e => e.Element).ToList();
 
     /// <summary>The elements whose providers the bridge disconnected (they left the tree) since it was
-    /// installed or <see cref="Clear"/>ed: a client holding one is told it is gone.</summary>
-    public IReadOnlyList<ElementId> Disconnected => _disconnected;
+    /// installed or <see cref="Clear"/>ed: a client holding one is told it is gone. The bridge tells UI
+    /// Automation on a thread of its own after the frame; this waits for what it has not told yet.</summary>
+    public IReadOnlyList<ElementId> Disconnected
+    {
+        get
+        {
+            Flush();
+            lock (_disconnected) return _disconnected.ToArray();
+        }
+    }
 
     /// <summary>Forgets the events raised and the providers disconnected so far.</summary>
     public void Clear()
     {
+        Flush();
         _raised.Clear();
-        _disconnected.Clear();
+        lock (_disconnected) _disconnected.Clear();
+    }
+
+    private void Flush()
+    {
+        if (!_bridge.FlushDisconnects(TimeSpan.FromSeconds(10)))
+            throw new TimeoutException("The UI Automation bridge did not tell its disconnects within 10 s.");
     }
 
     /// <summary>The tree the bridge has applied.</summary>

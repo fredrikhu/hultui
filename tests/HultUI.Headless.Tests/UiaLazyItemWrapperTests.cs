@@ -61,18 +61,29 @@ public class UiaLazyItemWrapperTests
         private readonly TestHwnd _hwnd = TestHwnd.Create();
         public readonly WindowsAccessibilityBridge Uia;
         public readonly List<UiaRaised> Raised = [];
-        public readonly List<ElementId> Disconnected = [];
+        private readonly List<ElementId> _disconnected = [];
         public readonly Pane Pane = new(Items);
 
         public Rig()
         {
             Uia = new WindowsAccessibilityBridge(_hwnd.Handle, new NoHost());
             Uia.Raised = Raised.Add;
-            Uia.ProviderDisconnected = Disconnected.Add;
+            Uia.ProviderDisconnected = id => { lock (_disconnected) _disconnected.Add(id); };   // the disconnect thread's
             Session.Window.InstallAccessibilityBridge(new Listening(Uia));
             Session.Application.SetRoot(Pane.Mount());
             Session.PumpFrames(2);
             Session.PumpFrame(TimeSpan.FromMilliseconds(300));
+        }
+
+        /// <summary>The elements whose providers the bridge told UI Automation are gone, once its
+        /// disconnect thread has told all it was handed.</summary>
+        public List<ElementId> Disconnected
+        {
+            get
+            {
+                Assert.True(Uia.FlushDisconnects(TimeSpan.FromSeconds(10)));
+                lock (_disconnected) return [.. _disconnected];
+            }
         }
 
         public int ItemWrappers => Uia.Wrappers.Count(w => VirtualItemId.IsItem(w.ElementId));
