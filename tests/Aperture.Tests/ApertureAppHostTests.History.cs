@@ -1,4 +1,6 @@
 using Aperture;
+using Aperture.Core;
+using Aperture.Core.Testing;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Headless;
@@ -177,6 +179,121 @@ public partial class ApertureAppHostTests
             Assert.Equal(ApertureView.Library, app.Current.View);
             Assert.Equal(item.Id, app.CursorItem?.Id);
             Assert.Equal(3, app.Stack.Count(r => r.View == ApertureView.Library));
+        });
+    }
+
+    /// <summary>A library of films enough that ten Downs take its grid off the first screen.</summary>
+    private static FakeMediaLibrary ManyFilms()
+    {
+        var library = new FakeMediaLibrary()
+            .AddLibrary("movies", "Films", LibraryKind.Movies)
+            .AddLibrary("shows", "Series", LibraryKind.TvShows);
+        for (int i = 0; i < 300; i++)
+            library.AddMovie($"m{i:000}", $"Film number {i:000}", "movies", 1950 + i % 70, 80 + i % 60);
+        return library;
+    }
+
+    private static ScrollViewElement? LibraryGrid(HeadlessSession session) =>
+        AllOf(Root(session)).OfType<ScrollViewElement>().FirstOrDefault(e => e.AutomationId == "library-grid");
+
+    private static void OpenManyFilms(HeadlessSession session)
+    {
+        PumpUntilShown(session, "Films");
+        session.Window.FindByAutomationId("rail-films")!.Click();
+        PumpUntilShown(session, "Film number 000");
+    }
+
+    /// <summary>
+    /// Back to a library scrolled off its first screen lands where it was scrolled, on the card that
+    /// was opened, ringed and with the keyboard, all made in Back's own frame, so the keys after it
+    /// build nothing; Forward to it and a reopen from the rail the same. It landed at the top: another
+    /// view had let go of the grid, so the cursor's row had no list to be scrolled to, its card was
+    /// not made and the keyboard went nowhere, and the first two keys after made the grid again
+    /// (plan 17 round 18: 279 KB and 289 elements, then 76 KB).
+    /// </summary>
+    [Fact]
+    public void BackToAScrolledGrid_LandsWhereItWas_OnTheCardThatWasOpened()
+    {
+        Host(ManyFilms(), (session, app) =>
+        {
+            OpenManyFilms(session);
+            Press(session, KeyCode.Right);
+            for (int i = 0; i < 10; i++) Press(session, KeyCode.Down);
+            var opened = app.CursorItem!;
+            float scrolled = LibraryGrid(session)!.ScrollOffsetY;
+            Assert.True(scrolled > 0, "ten Downs left the grid at the top");
+
+            Press(session, KeyCode.Enter);
+            Assert.Equal((ApertureView.Detail, opened.Id), (app.Current.View, app.Current.Id));
+            Press(session, KeyCode.Left, KeyModifiers.Alt);
+            LandedOnTheOpenedCard("Back");
+
+            int builds = app.Builds;
+            Press(session, KeyCode.Right);
+            Press(session, KeyCode.Left);
+            Assert.Equal(builds, app.Builds);
+            Assert.Equal("card-" + opened.Id, Focused(session));
+
+            // Forward to the film's page and Escape back; Back to Home and Forward to the library.
+            Press(session, KeyCode.Right, KeyModifiers.Alt);
+            Assert.Equal(ApertureView.Detail, app.Current.View);
+            Press(session, KeyCode.Escape);
+            LandedOnTheOpenedCard("Escape");
+            Press(session, KeyCode.Left, KeyModifiers.Alt);
+            Assert.Equal(ApertureView.Home, app.Current.View);
+            Press(session, KeyCode.Right, KeyModifiers.Alt);
+            LandedOnTheOpenedCard("Forward");
+
+            // Opened again from the rail, after Home: where its last visit left it.
+            Press(session, KeyCode.Digit1);
+            Assert.Equal(ApertureView.Home, app.Current.View);
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            LandedOnTheOpenedCard("the rail");
+
+            void LandedOnTheOpenedCard(string how)
+            {
+                Assert.Equal(ApertureView.Library, app.Current.View);
+                Assert.True(scrolled == LibraryGrid(session)!.ScrollOffsetY,
+                    $"{how} landed at {LibraryGrid(session)!.ScrollOffsetY}, not at {scrolled}");
+                Assert.Equal(opened.Id, app.CursorItem?.Id);
+                Assert.Equal("card-" + opened.Id, Focused(session));
+                Assert.True(((BoxElement)FocusedElement(session)!).Outline.Width > 0, $"after {how} the card has no ring");
+            }
+        });
+    }
+
+    /// <summary>The mouse the same: a grid wheeled down, a card clicked, and the mouse's back button
+    /// lands where the wheel left it, with the card that was clicked on screen. It landed at the
+    /// top.</summary>
+    [Fact]
+    public void TheMouseBackButton_ReturnsAWheeledGridToWhereItWas()
+    {
+        Host(ManyFilms(), (session, app) =>
+        {
+            OpenManyFilms(session);
+            var box = LibraryGrid(session)!.Layout.AbsoluteContentBox;
+            for (int i = 0; i < 15; i++)
+            {
+                session.Window.Wheel(box.X + box.Width / 2, box.Y + box.Height / 2, 0, -4);
+                session.PumpFrame();
+            }
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            var grid = LibraryGrid(session)!;
+            float wheeled = grid.ScrollOffsetY;
+            Assert.True(wheeled > 1000, $"the wheel took the grid to {wheeled}");
+            var clicked = AllOf(grid).OfType<BoxElement>()
+                .First(e => e.AutomationId?.StartsWith("card-", StringComparison.Ordinal) == true
+                    && e.WindowBorderBox.Y > grid.WindowBorderBox.Y + 200);
+            string id = clicked.AutomationId!;
+            session.Window.Click(clicked);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.Equal(ApertureView.Detail, app.Current.View);
+
+            SideButton(session, MouseButton.Back);
+            Assert.Equal(ApertureView.Library, app.Current.View);
+            Assert.Equal(wheeled, LibraryGrid(session)!.ScrollOffsetY);
+            Assert.NotNull(session.Window.FindByAutomationId(id));
         });
     }
 

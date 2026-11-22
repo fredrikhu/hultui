@@ -62,6 +62,10 @@ public sealed partial class ApertureApp
         int visibleRows = Math.Max(1, (int)Math.Ceiling(viewportHeight / rowStride));
         _fitGridStride = rowStride;
         var cursorKey = $"library:{libraryId}:{GridSort}:{GridDescending}:{GridPlayedFilter}:{GridGenre?.Id}:{GridFavouritesOnly}";
+        // Where the page was left is a place in the list it showed then (the key the page arrived
+        // with, until SetCursorList below takes this one): another sort or filter since is another
+        // list, which opens at the top, as the cursor starts over in it.
+        if (_cursorKey != cursorKey) _gridArrivalScrollY = -1;
 
         // What to have loaded: a page beyond the furthest the grid has been taken — the last
         // row made as it came into view (see GridRowFor), or the cursor — so the next page is
@@ -71,6 +75,9 @@ public sealed partial class ApertureApp
         // library loaded 100, and End, the arrows and the wheel stopped at the 100th.
         int needed = Math.Max((visibleRows * 2 + 1) * perRow, _gridReached + GridPageSize);
         if (CursorIndexIn(cursorKey) is >= 0 and var cursor) needed = Math.Max(needed, cursor + 1 + GridPageSize);
+        // The rows down to where the page was left, as for the cursor.
+        if (_gridArrivalScrollY >= 0)
+            needed = Math.Max(needed, ((int)((_gridArrivalScrollY + viewportHeight) / rowStride) + 1) * perRow + GridPageSize);
         if (CursorGoingToEndIn(cursorKey)) needed = int.MaxValue;
         EnsureGridPage(libraryId, needed);
         // A page that lands rebuilds the view: this read is tracked. Nothing else here read the
@@ -110,6 +117,7 @@ public sealed partial class ApertureApp
         _gridCardShape = cardShape;
 
         var list = VirtualListElement<GridRowItem>.New();
+        OpenGridWhereItWasLeft(list, perRow, rowStride, rowCount, viewportHeight);
         // Each item here is a row of posters, and every poster is its own button — so the
         // realized rows answer for themselves rather than the list publishing one node per
         // row (see VirtualListElement.RowsAreComposite).
@@ -137,6 +145,42 @@ public sealed partial class ApertureApp
         // the list has the new rows.
         if ((cursorRow + 1) * rowStride > mounted.ContentHeight)
             _window.RequestPostFrameCallback(() => _gridList.Current?.ScrollRangeIntoView(cursorRow * rowStride, rowStride));
+    }
+
+    /// <summary>How far the grid of the page arrived at was scrolled when that visit was left
+    /// (<see cref="Visit.GridScrollY"/>), until a list made for it opens there; -1 for none.</summary>
+    private float _gridArrivalScrollY = -1;
+
+    /// <summary>
+    /// A library arrived at by Back, Forward or the rail opens its grid where its visit left it, as a
+    /// browser puts you back where you were scrolled: at the offset it was left at, the wheel's as the
+    /// keys', or with none kept at the cursor's row. It used to open at the top: another view had let
+    /// go of the grid (<see cref="LetGoOfGrid"/>), so <see cref="RevealGridCursor"/> had no list to
+    /// scroll, the cursor's card was not made and the keyboard went nowhere, and the first key after
+    /// made the grid again (279 KB and 289 elements at 300 films; the second key 76 KB more).
+    /// <para>The list is new (another view showed in between, or the empty state while a page
+    /// loaded), so the offset is its own, held for its first layout: the rows there are the ones made,
+    /// the cursor's card among them, ringed, and it takes the keyboard once the frame is drawn
+    /// (<see cref="FocusCursorCard"/>), all in the arrival's own frame. An offset past the rows loaded
+    /// so far (the library was loaded again since) is put again on the list on screen once a page
+    /// that reaches it has been laid out, as the cursor's reveal is.</para>
+    /// </summary>
+    private void OpenGridWhereItWasLeft(VirtualListElement<GridRowItem> list, int perRow, float rowStride, int rowCount,
+        float viewportHeight)
+    {
+        float at = _gridArrivalScrollY;
+        if (_gridList.Current is { IsHosted: true })
+        {
+            // A build of the grid on screen: only an offset still waiting for its rows to load.
+            if (at >= 0)
+                _window.RequestPostFrameCallback(() =>
+                {
+                    if (_gridList.Current is { IsHosted: true } shown) shown.ScrollOffsetY = at;
+                });
+        }
+        else if (at >= 0) list.ScrollOffsetY = at;
+        else if (CursorIndex >= 0) list.ScrollRangeIntoView(CursorIndex / perRow * rowStride, rowStride);
+        if (!GridHasMore || rowCount * rowStride >= at + viewportHeight) _gridArrivalScrollY = -1;
     }
 
     private Element BuildLibraryBar(string title, string libraryId)
