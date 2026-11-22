@@ -85,6 +85,48 @@ public sealed class FakeMediaLibrary : IMediaLibrary
             PlayedPercentage = resume is { } r ? r.TotalMinutes / runtimeMinutes * 100 : null,
         }, parentId);
 
+    /// <summary>
+    /// A season of a series that is already in the fixture, with <paramref name="episodes"/>
+    /// episodes under it, the first <paramref name="watched"/> of them watched. Ids are
+    /// <c>{series}-s{n}</c> and <c>{series}-s{n}e{m}</c>. The season and its episodes were added at
+    /// <paramref name="added"/> (a week before the fixture was made, when not given).
+    /// </summary>
+    public FakeMediaLibrary AddSeason(string seriesId, int number, int episodes, int watched = 0,
+        DateTimeOffset? added = null)
+    {
+        var series = _items[seriesId];
+        var when = added ?? Made.AddDays(-7);
+        string seasonId = $"{seriesId}-s{number}";
+        AddItem(new MediaItem
+        {
+            Id = seasonId, Name = number == 0 ? "Specials" : $"Season {number}", Kind = MediaKind.Season,
+            SeriesId = seriesId, SeriesName = series.Name, IndexNumber = number, ChildCount = episodes,
+            PrimaryImageTag = "tag-" + seasonId, DateAdded = when,
+        }, seriesId);
+        for (int e = 1; e <= episodes; e++)
+            AddItem(new MediaItem
+            {
+                Id = $"{seasonId}e{e}", Name = $"Episode {e}", Kind = MediaKind.Episode,
+                SeriesId = seriesId, SeriesName = series.Name, SeasonId = seasonId, SeasonName = $"Season {number}",
+                ParentIndexNumber = number, IndexNumber = e, RunTime = TimeSpan.FromMinutes(45),
+                PrimaryImageTag = $"tag-{seasonId}e{e}", Played = e <= watched, DateAdded = when,
+            }, seasonId);
+        return this;
+    }
+
+    /// <summary>Takes an item and everything under it out of the fixture, as a server does when the
+    /// files go.</summary>
+    public void Remove(string id)
+    {
+        foreach (var child in (_children.GetValueOrDefault(id) ?? []).ToList()) Remove(child);
+        _items.Remove(id);
+        _children.Remove(id);
+        foreach (var kids in _children.Values) kids.Remove(id);
+    }
+
+    /// <summary>When the fixture was made: what <see cref="AddSeason"/> dates a season from.</summary>
+    public DateTimeOffset Made { get; } = DateTimeOffset.UtcNow;
+
     public MediaItem? Item(string id) => _items.GetValueOrDefault(id);
 
     /// <summary>Replaces an item — what a test uses to check a view re-reads state after a
@@ -139,6 +181,62 @@ public sealed class FakeMediaLibrary : IMediaLibrary
         };
         if (query.Descending) source = source.Reverse();
         return source.ToList();
+    }
+
+    public Task<ApertureResult<ItemPage>> GetSeriesByEpisodeAddedAsync(int startIndex, int limit,
+        CancellationToken ct = default)
+    {
+        Calls.Add($"GetSeriesByEpisodeAdded(start={startIndex}, limit={limit})");
+        var all = _items.Values.Where(i => i.Kind == MediaKind.Series)
+            .Select(s => s with { DateLastMediaAdded = s.DateLastMediaAdded ?? LastAdded(s.Id) })
+            .OrderByDescending(s => s.DateLastMediaAdded ?? DateTimeOffset.MinValue)
+            .ThenBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return Result(new ItemPage(all.Skip(startIndex).Take(limit).ToList(), all.Count, startIndex));
+    }
+
+    public Task<ApertureResult<ItemPage>> GetSeasonsAsync(string? seriesId, int startIndex, int limit,
+        CancellationToken ct = default)
+    {
+        Calls.Add($"GetSeasons({seriesId ?? "all"}, start={startIndex}, limit={limit})");
+        IEnumerable<MediaItem> seasons = seriesId is null
+            ? _items.Values.Where(i => i.Kind == MediaKind.Season)
+            : (_children.GetValueOrDefault(seriesId) ?? []).Select(id => _items[id]).Where(i => i.Kind == MediaKind.Season);
+        var all = seasons
+            .OrderBy(s => _items.GetValueOrDefault(s.SeriesId ?? "")?.Name ?? "", StringComparer.OrdinalIgnoreCase)
+            .ThenBy(s => s.IndexNumber ?? int.MaxValue)
+            .Select(WithWatchedState)
+            .ToList();
+        return Result(new ItemPage(all.Skip(startIndex).Take(limit).ToList(), all.Count, startIndex));
+    }
+
+    /// <summary>A season as the server reports it with user data: counted from the episodes under
+    /// it, when it has any in the fixture; otherwise as the fixture wrote it.</summary>
+    private MediaItem WithWatchedState(MediaItem season)
+    {
+        var episodes = (_children.GetValueOrDefault(season.Id) ?? [])
+            .Select(id => _items[id]).Where(i => i.Kind == MediaKind.Episode).ToList();
+        if (episodes.Count == 0) return season with { FileCount = season.FileCount ?? 0 };
+        int unwatched = episodes.Count(e => !e.Played);
+        return season with
+        {
+            FileCount = episodes.Count,
+            UnplayedItemCount = unwatched,
+            Played = unwatched == 0,
+        };
+    }
+
+    /// <summary>When anything under a series last arrived: its seasons' and episodes' dates added.</summary>
+    private DateTimeOffset? LastAdded(string id)
+    {
+        DateTimeOffset? newest = null;
+        foreach (var child in _children.GetValueOrDefault(id) ?? [])
+        {
+            var item = _items[child];
+            if (item.DateAdded is { } at && (newest is null || at > newest)) newest = at;
+            if (LastAdded(child) is { } below && (newest is null || below > newest)) newest = below;
+        }
+        return newest;
     }
 
     public Task<ApertureResult<IReadOnlyList<MediaItem>>> GetResumeAsync(int limit = 12, CancellationToken ct = default)

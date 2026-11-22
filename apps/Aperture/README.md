@@ -20,7 +20,8 @@ Connect  ──►  Home ──► Library grid ──► Item page ──► Pl
                 └── Search, Settings ──────┘
 ```
 
-- **Home** is Continue watching, Next up, your favourites, then what each library has added. Rows
+- **Home** is Continue watching, Next up, new seasons of series you had watched through (below),
+  your favourites, then what each library has added. Rows
   page sideways with two buttons rather than scrolling — a horizontal scroller
   nested in the page's vertical one is the framework's wheel-capture trap. A
   library's "Latest in" row that comes back full has "See all": the library itself,
@@ -38,6 +39,40 @@ Connect  ──►  Home ──► Library grid ──► Item page ──► Pl
   would hold it.
 - **The player** is a sheet over whatever you were looking at, so stopping a film
   puts you back where you started it with the history intact.
+
+## New seasons
+
+A series you had watched through gets a card on Home's **New seasons** row when a season arrives
+after you caught up: "Glass Harbour · Season 3 · 10 episodes · added 2 days ago". The card is the
+new season's first episode, so it behaves as a Next up card does — Enter opens it, Space plays it —
+and the row sits right after Continue watching and Next up, since it answers the same question.
+
+- **Caught up** is judged per season from the server's own watched state for whoever is signed in,
+  so watching on the television counts: every other numbered season fully watched, the new one not
+  started. The specials count neither way, and a series numbered straight through ("Season
+  Unknown") never qualifies.
+- **New** means a season with at least one episode file that was not there at the last look.
+  Season numbers are compared, not dates, so a re-scan that rewrites "date added" changes nothing;
+  dates are used only at the very first look, when a season added in the last 14 days counts. A
+  season numbered below one already watched — seasons 1–3 downloaded after season 5 was watched — is
+  a gap filled in, not news.
+- **A card leaves** once an episode of its season is watched (or marked watched from the card), or
+  the season leaves the library. **Dismiss** in the card's menu removes it for that season; **Clear
+  all** in the row's menu, every card. **Stop watching … for new seasons** mutes the series for good
+  — matched on its TMDB and TVDB ids too, so a library removed and added again (new Jellyfin ids)
+  does not unmute it — and Settings lists the muted series, each with **Watch again**.
+- **When it looks:** half a minute after the library opens, then every 30 minutes, and on F5 or
+  after a film. A look is one small call — the 25 series with the newest "date episode added",
+  without artwork — and one more per series that changed or has a card. The first look, and a
+  change too wide for that one call (a re-scan), read every series and every season once instead,
+  a thousand to a page.
+
+What is kept, and where:
+
+| | Where |
+|---|---|
+| Cards on the row, dismissed seasons, muted series | the settings file, per server and user |
+| The seasons each series had at the last look | `season-watch-<server>-<user>.json` beside it — a cache: losing it makes the next look a first look |
 
 ## History and the keyboard
 

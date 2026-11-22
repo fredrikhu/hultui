@@ -225,6 +225,62 @@ public class LiveServerTests
     /// — no artwork, nothing playable — says so on the console and stops rather than failing
     /// over someone else's library contents.
     /// </summary>
+    /// <summary>
+    /// What the new-season watch rests on, read-only: series sorted by "date episode added" carry
+    /// that date and their provider ids; seasons carry a number, a count of episodes with a file, an
+    /// unwatched count no larger than it, and a date added; one look succeeds, and a second look with
+    /// nothing changed costs one call. Prints what it saw, for the slice's notes.
+    /// </summary>
+    [LiveServerFact]
+    public async Task TheSeasonWatchReadsWhatItNeedsAndASecondLookIsOneCall()
+    {
+        using var library = await LiveServer.ConnectAsync(Ct);
+        var series = await library.GetSeriesByEpisodeAddedAsync(0, SeasonWatch.ChangedProbe, Ct);
+        Assert.True(series.Ok, series.Failure?.Message);
+        if (Absent(series.Value.Items.Count == 0, "The server has no series.")) return;
+
+        var dated = series.Value.Items.Count(s => s.DateLastMediaAdded is not null);
+        var withIds = series.Value.Items.Count(s => s.TmdbId is not null || s.TvdbId is not null);
+        Console.WriteLine($"series: {series.Value.TotalCount}; of the newest {series.Value.Items.Count}, " +
+                          $"{dated} dated, {withIds} with a TMDB or TVDB id");
+        Assert.True(dated > 0, "No series carries DateLastMediaAdded: every look would read everything.");
+        var dates = series.Value.Items.Select(s => s.DateLastMediaAdded).OfType<DateTimeOffset>().ToList();
+        Assert.Equal(dates.OrderByDescending(d => d), dates);
+
+        var newest = series.Value.Items[0];
+        var seasons = await library.GetSeasonsAsync(newest.Id, 0, 100, Ct);
+        Assert.True(seasons.Ok, seasons.Failure?.Message);
+        foreach (var s in seasons.Value.Items)
+            Console.WriteLine($"  {newest.Name} {s.Name}: number {s.IndexNumber}, files {s.FileCount}, " +
+                              $"children {s.ChildCount}, unwatched {s.UnplayedItemCount}, played {s.Played}, added {s.DateAdded:u}");
+        Assert.All(seasons.Value.Items, s =>
+        {
+            Assert.Equal(MediaKind.Season, s.Kind);
+            Assert.Equal(newest.Id, s.SeriesId);
+            Assert.NotNull(s.FileCount);
+            Assert.NotNull(s.DateAdded);
+            Assert.InRange(s.UnplayedItemCount ?? 0, 0, s.FileCount ?? 0);
+        });
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var first = await SeasonWatch.LookAsync(library, null, [], [], [], DateTimeOffset.UtcNow, Ct);
+        Assert.True(first.Ok, first.Failure?.Message);
+        Console.WriteLine($"first look: {first.Value.Calls} calls, {watch.ElapsedMilliseconds} ms, " +
+                          $"{first.Value.Baseline.Seasons.Count} series, {first.Value.Notices.Count} notices: " +
+                          string.Join(", ", first.Value.Notices.Select(n => $"{n.SeriesName} {string.Join('+', n.Seasons)}")));
+        foreach (var notice in first.Value.Notices)
+        {
+            var its = await library.GetSeasonsAsync(notice.SeriesId, 0, 100, Ct);
+            foreach (var s in its.Value.Items)
+                Console.WriteLine($"  {notice.SeriesName} {s.Name}: number {s.IndexNumber}, files {s.FileCount}, " +
+                                  $"unwatched {s.UnplayedItemCount}, added {s.DateAdded:u}");
+        }
+        var second = await SeasonWatch.LookAsync(library, first.Value.Baseline, [], [], [], DateTimeOffset.UtcNow, Ct);
+        Assert.True(second.Ok, second.Failure?.Message);
+        Assert.False(second.Value.Swept);
+        Assert.Equal(1, second.Value.Calls);
+    }
+
     private static bool Absent(bool missing, string why)
     {
         if (missing) Console.WriteLine("SKIPPED: " + why);

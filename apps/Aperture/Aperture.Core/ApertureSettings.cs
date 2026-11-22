@@ -75,6 +75,80 @@ public sealed class SeenIssue
     public bool Resolved { get; set; }
 }
 
+/// <summary>
+/// The season watch's state for one person on one Jellyfin server: what it is telling them, what
+/// they dismissed, and the series they asked never to hear about again. Keyed by server <i>and</i>
+/// user: <see cref="ServerAccountData"/> holds one user per server, and someone else signing in on
+/// this machine must not inherit these.
+///
+/// <para>The list of seasons each series had at the last look — what the next look compares with —
+/// is not here but in a cache file beside the settings (<see cref="SeasonBaselineStore"/>): it is
+/// hundreds of ids, and this file is the user's.</para>
+/// </summary>
+public sealed class SeasonWatchAccount
+{
+    public string ServerId { get; set; } = "";
+    public string UserId { get; set; } = "";
+
+    /// <summary>New seasons on Home's row now, newest first.</summary>
+    public List<SeasonNotice> Notices { get; set; } = [];
+
+    /// <summary>Seasons dismissed from the row, as <c>{seriesId}:{season}</c> — never said again.
+    /// The newest few hundred are kept: a season is only ever new once.</summary>
+    public List<string> Dismissed { get; set; } = [];
+
+    /// <summary>Series never to be told about again, whatever arrives. Kept without a limit: each
+    /// one is a choice someone made, and Settings lists them with a way back.</summary>
+    public List<MutedSeries> Muted { get; set; } = [];
+
+    public void Normalize()
+    {
+        Notices ??= [];
+        Notices.RemoveAll(n => n is null || string.IsNullOrWhiteSpace(n.SeriesId) || n.Seasons is not { Count: > 0 });
+        Dismissed = (Dismissed ?? []).Where(d => !string.IsNullOrWhiteSpace(d)).Distinct(StringComparer.Ordinal).ToList();
+        Muted ??= [];
+        Muted.RemoveAll(m => m is null || string.IsNullOrWhiteSpace(m.SeriesId));
+    }
+}
+
+/// <summary>
+/// "Season 3 of Severance is new": a series whose every other season had been watched when one
+/// (or several) more arrived, none of it watched yet.
+/// </summary>
+public sealed class SeasonNotice
+{
+    public string SeriesId { get; set; } = "";
+    public string SeriesName { get; set; } = "";
+    /// <summary>The new seasons, in order — more than one when they arrived together.</summary>
+    public List<int> Seasons { get; set; } = [];
+    /// <summary>The first new season's own id, whose first episode the card plays.</summary>
+    public string FirstSeasonId { get; set; } = "";
+    /// <summary>Episodes with a file across the new seasons.</summary>
+    public int Episodes { get; set; }
+    /// <summary>When the newest of them came into the library, by the server's date added — or
+    /// when the watch saw it, when the server gave no date.</summary>
+    public DateTimeOffset Added { get; set; }
+    /// <summary>The series' provider ids, so muting it from the card outlives a re-added library.</summary>
+    public int? TmdbId { get; set; }
+    public int? TvdbId { get; set; }
+}
+
+/// <summary>A series muted for new seasons: its Jellyfin id, and the provider ids that survive a
+/// library being removed and added again (which gives every series a new Jellyfin id).</summary>
+public sealed class MutedSeries
+{
+    public string SeriesId { get; set; } = "";
+    public string Name { get; set; } = "";
+    public int? TmdbId { get; set; }
+    public int? TvdbId { get; set; }
+
+    /// <summary>Whether this is the series: the same Jellyfin id, or the same TMDB or TVDB id.</summary>
+    public bool Matches(string seriesId, int? tmdbId, int? tvdbId) =>
+        string.Equals(SeriesId, seriesId, StringComparison.Ordinal)
+        || (TmdbId is { } tmdb && tmdb == tmdbId)
+        || (TvdbId is { } tvdb && tvdb == tvdbId);
+}
+
 /// <summary>How a library draws what it holds.</summary>
 public enum LibraryLayout { Grid, List }
 
@@ -154,8 +228,14 @@ public sealed class ApertureSettingsData
     /// was full screen — so it opens there again. Null until it has closed once.</summary>
     public HultUI.Core.Platform.WindowPlacement? WindowPlacement { get; set; }
 
+    /// <summary>The new-season watch, per Jellyfin server and user (<see cref="SeasonWatchAccount"/>).</summary>
+    public List<SeasonWatchAccount> SeasonWatch { get; set; } = [];
+
     public void Normalize()
     {
+        SeasonWatch ??= [];
+        SeasonWatch.RemoveAll(w => w is null || string.IsNullOrWhiteSpace(w.ServerId) || string.IsNullOrWhiteSpace(w.UserId));
+        foreach (var watch in SeasonWatch) watch.Normalize();
         Servers ??= [];
         Servers.RemoveAll(s => string.IsNullOrWhiteSpace(s.Address) || string.IsNullOrWhiteSpace(s.ServerId));
         RequestServers ??= [];
@@ -202,6 +282,21 @@ public sealed class ApertureSettings
     }
 
     public ApertureSettingsData Data { get; }
+
+    /// <summary>The folder the settings file is in — where the caches that go with it are kept.</summary>
+    public string Folder => System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(_file.Path)) ?? ConfigDirectory;
+
+    /// <summary>The season watch's state for this server and user, made empty on first use (and not
+    /// saved until something is put in it).</summary>
+    public SeasonWatchAccount SeasonWatchFor(string serverId, string userId)
+    {
+        var found = Data.SeasonWatch.FirstOrDefault(w =>
+            string.Equals(w.ServerId, serverId, StringComparison.Ordinal) && string.Equals(w.UserId, userId, StringComparison.Ordinal));
+        if (found is not null) return found;
+        found = new SeasonWatchAccount { ServerId = serverId, UserId = userId };
+        Data.SeasonWatch.Add(found);
+        return found;
+    }
 
     /// <summary>This installation's identity, with the device id from the settings file.</summary>
     public DeviceIdentity Device => DeviceIdentity.New(Data.DeviceId);
@@ -294,4 +389,5 @@ public sealed class ApertureSettings
 
 [JsonSourceGenerationOptions(WriteIndented = true)]
 [JsonSerializable(typeof(ApertureSettingsData))]
+[JsonSerializable(typeof(SeasonBaseline))]
 internal partial class ApertureJsonContext : JsonSerializerContext;

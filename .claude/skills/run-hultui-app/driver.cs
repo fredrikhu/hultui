@@ -371,6 +371,16 @@ Aperture.Core.Testing.FakeMediaLibrary DemoLibrary()
             ResumePosition = e == 4 ? TimeSpan.FromMinutes(12) : null,
             Overview = "What happens in episode " + e + ".",
         }, "s1");
+    // A series watched through two seasons, with a third added two days ago: what Home's New
+    // seasons row shows once the watch has looked (F5 looks at once: `key:F5 settle:500`).
+    fake.AddItem(new Aperture.Core.MediaItem
+    {
+        Id = "s2", Name = "Glass Harbour", Kind = Aperture.Core.MediaKind.Series, TmdbId = 2001,
+        ProductionYear = 2021, Overview = "A fixture series whose new season is the news.",
+    }, "shows");
+    fake.AddSeason("s2", 1, 8, watched: 8, added: fake.Made.AddDays(-500));
+    fake.AddSeason("s2", 2, 8, watched: 8, added: fake.Made.AddDays(-150));
+    fake.AddSeason("s2", 3, 10, added: fake.Made.AddDays(-2));
     fake.ResumeIds.Add("m1");
     fake.ResumeIds.Add("e4");
     // A few hearted, for Home's favourites row.

@@ -452,16 +452,23 @@ public sealed partial class ApertureApp
     {
         if (_library is not { } lib) return;
         bool played = !item.Played;
+        // A new season's first episode marked watched is a new season started: the watch looks
+        // again, and the card leaves the row (a reload looks anyway, through Refresh).
+        bool newSeason = NoticeFor(item) is not null;
         _ = ApplyAsync(() => lib.SetPlayedAsync(item.Id, played),
             played ? "Marked watched" : "Marked unwatched", reload,
-            () => PatchItem(item.Id, i => i with
+            () =>
             {
-                Played = played,
-                // Watching something to the end is what clears its resume point, and
-                // marking it watched by hand means the same thing.
-                ResumePosition = played ? null : i.ResumePosition,
-                PlayedPercentage = played ? 100 : null,
-            }));
+                PatchItem(item.Id, i => i with
+                {
+                    Played = played,
+                    // Watching something to the end is what clears its resume point, and
+                    // marking it watched by hand means the same thing.
+                    ResumePosition = played ? null : i.ResumePosition,
+                    PlayedPercentage = played ? 100 : null,
+                });
+                if (newSeason) LookForNewSeasons();
+            });
     }
 
     private void ToggleFavorite(MediaItem item, bool reload = true)
