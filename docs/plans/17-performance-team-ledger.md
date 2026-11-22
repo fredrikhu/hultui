@@ -981,3 +981,14 @@ From 2026-11-19 (round 17's survey); earlier entries are in the archive ([to 202
 - 2026-11-20: the user answered question 72b: (2), "b" — with both panes on one folder, F3 does nothing on a file whose
   only partner is itself (as on a folder) and nothing is ringed. Step 11 goes at the head of round 18's build order as a
   decided item (Waiting vesper-file-not-its-own-partner).
+- 2026-11-22: round 18 survey started in a fresh context (session 00f54f03, after the weekly reset; usage 1 % weekly,
+  the 5-hour window 7 %). Main had moved by 5 commits (fe8f4ecf: a control outside the framework can arm text input;
+  Aperture's browser-style page history, whole-app keyboard use and New seasons row, 0f9c8477, ee044d36, f67b25ec,
+  93f8a26d); merged into the branch as b28e9128, no conflicts. Moved to the archive by a checked script
+  (`archive_r18.py`; every moved line found there, nothing lost): round 16's 10 Landed rows, round 17's build order with
+  its closed-from-Waiting note (its untaken steps 9 and 10 copied into Waiting first, with their evidence), questions
+  69–72b, and round 16's 123 log lines (2026-11-18, its survey, to the app releases on 2026-11-19). Attached: both
+  monitors (the 4K at 150 % primary, 120 Hz; the 1440p at 100 %, 120 Hz, to its left). Steam is running. The eight
+  experts survey round 17's build and main's 18 commits outside plan 17 since round 17's survey, in their own worktrees
+  on the archive commit aa3a3696, in real windows too (desktop lock `Global\HultUI-r18-desktop`); all eight spawned at
+  ~09:45 UTC.
