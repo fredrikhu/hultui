@@ -341,9 +341,17 @@ series carry `DateLastMediaAdded` and a TMDB or TVDB id and come back newest fir
 The first look is 3 calls in 65–120 ms; a second with nothing changed is 1 call. Not exercised: a
 series without season folders (the lab server has none), and a sweep of hundreds of series.
 
-**Next (8b, 8c):** a toast once per new season (held while a film plays, not doubled with the
-arrival toast), a line and a mark on the series page, Next up leaving out an episode the row
-shows; then the request server's seasons that are out but not in the library.
+### 8b — done (2026-11-22)
+
+| | |
+|---|---|
+| Toast | once per new season, when a look adds it to the row or a season to it: "Glass Harbour: Season 3 is in your library" with Play (from the row's card, or fetched); several are one toast whose Show opens Home with the cursor on the row |
+| Quiet | held while a film plays and said when the player closes (if still on the row); never while the row is hidden; one toast per arrival — the arrival watch and this one share the set of series named this session |
+| Series page | "Season 3 is new · added 2 days ago" above the seasons, beside "on its way"; the season's card marked New |
+| Next up | leaves out an episode the New seasons row shows (and so does the combined Up next), unless that row is hidden |
+
+**Next (8c):** the request server's seasons that are out but not in the library, for caught-up
+series that are still running, with Request through the existing season picker.
 
 ## Things deliberately not done
 

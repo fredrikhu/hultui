@@ -185,6 +185,22 @@ public sealed partial class ApertureApp
                 _pendingCursorFocus = true;
             }
         }
+        // The new-season toast's "Show": the cursor on the first card of the row it names.
+        if (_homeCursorToRow is { } toRow)
+        {
+            _homeCursorToRow = null;
+            int start = 0;
+            foreach (var row in shown)
+            {
+                if (row.Key == toRow && row.Count > 0)
+                {
+                    _cursorIndex = start;
+                    _pendingCursorFocus = true;
+                    break;
+                }
+                start += row.Count;
+            }
+        }
 
         _homeBuild = Builds;
         _homeShelves.Clear();
@@ -270,9 +286,17 @@ public sealed partial class ApertureApp
     {
         var rows = new List<HomeRow>();
 
+        // Series watched through that have had a season arrive since (ApertureApp.NewSeasons.cs). The
+        // server's Next up names the same first episode, so while this row is shown Next up leaves it
+        // out: one episode under two neighbouring headings reads as a bug, as in the combined row.
+        var newSeasons = NewSeasonItems;
+        var nextUp = NextUpItems;
+        if (newSeasons.Count > 0 && nextUp.Count > 0 && !NewSeasonsRowHidden)
+            nextUp = nextUp.Where(i => !newSeasons.Any(n => n.Id == i.Id)).ToList();
+
         if (_settings.Data.CombineUpNext)
         {
-            var merged = MergeUpNext(ResumeItems, NextUpItems);
+            var merged = MergeUpNext(ResumeItems, nextUp);
             if (merged.Count > 0)
                 rows.Add(new HomeRow(CombinedRowKey, "Up next", merged, Halide.StillWidth, Stills: true));
         }
@@ -283,16 +307,14 @@ public sealed partial class ApertureApp
                     SeeAll: ResumeItems.Count >= ResumeRowSize
                         ? () => Navigate(new Route(ApertureView.ContinueWatching))
                         : null));
-            if (NextUpItems.Count > 0)
-                rows.Add(new HomeRow(NextUpRowKey, "Next up", NextUpItems, Halide.PosterWidth, Stills: false,
+            if (nextUp.Count > 0)
+                rows.Add(new HomeRow(NextUpRowKey, "Next up", nextUp, Halide.PosterWidth, Stills: false,
                     SeeAll: NextUpItems.Count >= NextUpRowSize
                         ? () => Navigate(new Route(ApertureView.NextUp))
                         : null));
         }
 
-        // Series watched through that have had a season arrive since: right after what you are
-        // watching, as it is the same question — what do I put on now (ApertureApp.NewSeasons.cs).
-        var newSeasons = NewSeasonItems;
+        // Right after what you are watching, as it answers the same question: what do I put on now.
         if (newSeasons.Count > 0)
             rows.Add(new HomeRow(NewSeasonsRowKey, "New seasons", newSeasons, Halide.PosterWidth, Stills: false));
 

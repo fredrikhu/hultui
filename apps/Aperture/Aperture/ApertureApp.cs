@@ -151,6 +151,9 @@ public sealed partial class ApertureApp : Component, IDisposable
     internal ApertureSettings Settings => _settings;
     internal ApertureStage Stage => _stage;
 
+    /// <summary>The toast on screen, for tests.</summary>
+    internal ToastHost Toasts => _toasts;
+
     private void Rerender()
     {
         _parts.Invalidate();

@@ -57,6 +57,7 @@ public sealed partial class ApertureApp
         switch (item.Kind)
         {
             case MediaKind.Series:
+                if (NewSeasonsLineFor(item) is { } newSeasons) body.AddChild(newSeasons);
                 if (SeasonsUnderWay(item) is { } underWay) body.AddChild(underWay);
                 body.AddChild(SeasonsSection(item));
                 break;
@@ -271,7 +272,7 @@ public sealed partial class ApertureApp
         var seasons = Children.Where(c => c.Kind == MediaKind.Season).ToList();
         if (seasons.Count > 0)
             return CardRow($"{seasons.Count} season{(seasons.Count == 1 ? "" : "s")}", seasons,
-                item => PosterCard(item, 130f), 130f, "row-seasons-" + series.Id);
+                item => SeasonCard(item, series.Id), 130f, "row-seasons-" + series.Id);
 
         // A series whose episodes hang straight off it — a mini-series, or a library
         // whose folders were never split into seasons. Showing "no seasons" over a series
