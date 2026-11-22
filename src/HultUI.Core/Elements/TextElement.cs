@@ -102,6 +102,22 @@ public class TextElement : Element
         }
     }
 
+    /// <summary>The character a mnemonic marks, underlined while the window shows keyboard cues
+    /// (Alt held, <see cref="FocusManager.MnemonicCues"/>); -1 for none. Set by the control the
+    /// label belongs to (a button that uses mnemonics). A label with spans of its own keeps them,
+    /// and shows no underline.</summary>
+    internal int MnemonicIndex
+    {
+        get => _mnemonicIndex;
+        set
+        {
+            if (_mnemonicIndex == value) return;
+            _mnemonicIndex = value;
+            MarkPaintDirty();
+        }
+    }
+    private int _mnemonicIndex = -1;
+
     private static bool AnyMetricAffecting(IReadOnlyList<TextSpan>? spans)
     {
         if (spans is null) return false;
@@ -529,6 +545,7 @@ public class TextElement : Element
             Overflow = text.Overflow;
             MaxLines = text.MaxLines;
             Spans = text.Spans;
+            MnemonicIndex = text.MnemonicIndex;
             // Carry the opt-in flag from the freshly built element, but keep our
             // own live selection (the incoming element has none). Content's setter
             // already clamped the offsets to the new text.
@@ -618,6 +635,8 @@ public class TextElement : Element
         _paragraph = null;
         if (_spans is { Count: > 0 } spans)
             ctx.DrawText(Content, contentBox, style, Overflow, MaxLines, spans);
+        else if (_mnemonicIndex >= 0 && _mnemonicIndex < Content.Length && FocusManager?.MnemonicCues == true)
+            ctx.DrawText(Content, contentBox, style, Overflow, MaxLines, Mnemonics.Underline(_mnemonicIndex));
         else
             ctx.DrawText(Content, contentBox, style, Overflow, MaxLines);
     }

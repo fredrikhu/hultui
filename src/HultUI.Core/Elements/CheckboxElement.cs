@@ -46,6 +46,58 @@ public class CheckboxElement : Element
         }
     }
 
+    /// <summary>
+    /// Whether <see cref="Label"/> marks its mnemonic with <c>&amp;</c>: <c>"&amp;Wrap lines"</c> is
+    /// shown as "Wrap lines", with the W underlined while Alt is held, and <see cref="Mnemonic"/> is
+    /// 'w'. <c>&amp;&amp;</c> is an ampersand. False, the default: the label is shown as written.
+    /// Choosing it with Alt and the letter is the app's, as for a button.
+    /// </summary>
+    public bool UseMnemonic
+    {
+        get => _useMnemonic;
+        set
+        {
+            if (_useMnemonic == value) return;
+            _useMnemonic = value;
+            MarkLayoutDirty();
+            MarkPaintDirty();
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.Name);
+        }
+    }
+    private bool _useMnemonic;
+
+    /// <summary>The label as shown and read out: <see cref="Label"/> without its marker where
+    /// <see cref="UseMnemonic"/> is set, <see cref="Label"/> otherwise; "" for none.</summary>
+    public string DisplayLabel => _useMnemonic ? Parsed.Label : _label ?? "";
+
+    /// <summary>The mnemonic, lower case, or '\0' for none.</summary>
+    public char Mnemonic
+    {
+        get
+        {
+            if (!_useMnemonic) return '\0';
+            var (label, index) = Parsed;
+            return index < 0 || char.IsSurrogate(label[index]) ? '\0' : char.ToLowerInvariant(label[index]);
+        }
+    }
+
+    // The label parsed, kept until it changes.
+    private (string? Source, string Label, int Index) _parsed;
+
+    private (string Label, int Index) Parsed
+    {
+        get
+        {
+            var source = _label ?? "";
+            if (!ReferenceEquals(_parsed.Source, source))
+            {
+                var (label, index) = Mnemonics.Parse(source);
+                _parsed = (source, label, index);
+            }
+            return (_parsed.Label, _parsed.Index);
+        }
+    }
+
     public float LabelGap
     {
         get => _labelGap;
@@ -115,7 +167,7 @@ public class CheckboxElement : Element
 
         float textMaxWidth = availableWidth - CheckboxSize - LabelGap;
         if (textMaxWidth < 0) textMaxWidth = 0;
-        var textSize = ctx.MeasureText(Label, ResolvedInherited, textMaxWidth, null);
+        var textSize = ctx.MeasureText(DisplayLabel, ResolvedInherited, textMaxWidth, null);
         return new Size(
             CheckboxSize + LabelGap + textSize.Width,
             Math.Max(CheckboxSize, textSize.Height));
@@ -125,7 +177,7 @@ public class CheckboxElement : Element
     internal override float? MeasureBaseline(Size borderBox, IMeasureContext ctx) =>
         string.IsNullOrEmpty(Label)
             ? null
-            : ContentTop + ctx.MeasureFirstBaseline(Label, ResolvedInherited, float.PositiveInfinity, null, TextOverflow.Ellipsis);
+            : ContentTop + ctx.MeasureFirstBaseline(DisplayLabel, ResolvedInherited, float.PositiveInfinity, null, TextOverflow.Ellipsis);
 
     /// <summary>Unbounded: the focus ring stands 3 past the square, and a label squeezed into a
     /// short box runs out of it.</summary>
@@ -172,7 +224,10 @@ public class CheckboxElement : Element
             float textX = box.X + CheckboxSize + LabelGap;
             float textWidth = box.Width - CheckboxSize - LabelGap;
             var textBounds = new Rect(textX, box.Y, textWidth, box.Height);
-            ctx.DrawText(Label, textBounds, ResolvedInherited, TextOverflow.Ellipsis, null);
+            // The mnemonic underlined while Alt is held (FocusManager.MnemonicCues).
+            var spans = _useMnemonic && Parsed.Index >= 0 && FocusManager?.MnemonicCues == true
+                ? Mnemonics.Underline(Parsed.Index) : null;
+            ctx.DrawText(DisplayLabel, textBounds, ResolvedInherited, TextOverflow.Ellipsis, null, spans);
         }
     }
 
@@ -194,6 +249,7 @@ public class CheckboxElement : Element
             CheckmarkColor = cb.CheckmarkColor;
             CornerRadius = cb.CornerRadius;
             Label = cb.Label;
+            UseMnemonic = cb.UseMnemonic;
             LabelGap = cb.LabelGap;
             OnChanged = cb.OnChanged;
             IsChecked = cb.IsChecked;

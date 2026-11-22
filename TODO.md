@@ -1,6 +1,13 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Buttons and check boxes: & mnemonics** — `ButtonElement.UseMnemonic` and
+  `CheckboxElement.UseMnemonic` make an `&` in the label mark its mnemonic (`&&` an ampersand):
+  shown and read out as `DisplayLabel`, the letter as `Mnemonic`, underlined only while Alt is held
+  (the window's keyboard cues, off again on Alt's release, a click, or the window losing the
+  foreground; AltGr shows none). Routing Alt+letter stays the app's. Menu items, menu bar titles,
+  buttons and check boxes share one parser and one underline. Tests: `ButtonMnemonicTests`,
+  `CheckboxMnemonicTests` (8 and 5), `MnemonicCueTests` (2). See `docs/ELEMENTS.md`.
 - **Context menus from the keyboard** — the Menu key and Shift+F10 open the focused element's
   context menu when nothing took the key (`Window.ContextMenuKeys`, `Window.OpenContextMenu(element)`),
   under `Element.ContextMenuAnchor` (a list's current row or cell), on its first item. An open menu

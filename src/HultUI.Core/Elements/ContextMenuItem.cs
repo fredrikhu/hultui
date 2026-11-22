@@ -1,6 +1,4 @@
-using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
-using HultUI.Core.Styling;
 
 namespace HultUI.Core.Elements;
 
@@ -38,25 +36,13 @@ public sealed class ContextMenuItem
     internal int MnemonicIndex => UseMnemonic ? Parsed.Index : -1;
 
     /// <summary>The underline under the mnemonic, for drawing <see cref="DisplayLabel"/>; null for none.</summary>
-    internal TextSpan[]? MnemonicSpans
-    {
-        get
-        {
-            if (!UseMnemonic) return null;
-            var parsed = Parsed;
-            return parsed.Index < 0 ? null
-                : parsed.Spans ??= [new TextSpan(parsed.Index, 1, Color.Transparent, Decoration: TextDecoration.Underline)];
-        }
-    }
+    internal TextSpan[]? MnemonicSpans => MnemonicIndex >= 0 ? Mnemonics.Underline(MnemonicIndex) : null;
 
     // Parsed once, when first asked, and only for an item that uses mnemonics (a dropdown makes
     // hundreds that do not): items are immutable. A reader's bridge may ask off the UI thread,
     // where parsing twice is harmless; label and index are published as one object, so no thread
     // sees one without the other. One field: a dropdown makes an item per entry each time it opens.
-    private sealed record ParsedLabel(string Label, int Index)
-    {
-        public TextSpan[]? Spans;
-    }
+    private sealed record ParsedLabel(string Label, int Index);
     private ParsedLabel? _parsed;
 
     private ParsedLabel Parsed => _parsed ??= Parse();

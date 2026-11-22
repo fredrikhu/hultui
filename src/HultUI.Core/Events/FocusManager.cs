@@ -6,6 +6,10 @@ public sealed class FocusManager
 {
     public Element? FocusedElement { get; private set; }
 
+    /// <summary>Whether keyboard cues show: true while Alt is held. Labels that use mnemonics
+    /// underline theirs then. UI thread; the window sets it.</summary>
+    internal bool MnemonicCues { get; set; }
+
     /// <summary>
     /// Called after focus changes. The Window subscribes to provide
     /// platform services (e.g. clipboard) to the newly focused element.

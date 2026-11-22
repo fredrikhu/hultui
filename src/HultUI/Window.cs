@@ -759,8 +759,19 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// took it (<paramref name="keepPopups"/>), so a menu can be inspected while it is open.</summary>
     internal void RaiseDeactivated(bool keepPopups)
     {
+        // An Alt held as the window lost the foreground (Alt+Tab) is let go elsewhere.
+        SetMnemonicCues(false);
         if (!keepPopups) DismissPopups();
         Deactivated?.Invoke();
+    }
+
+    /// <summary>Shows or hides the keyboard's cues, the mnemonics' underlines
+    /// (<see cref="FocusManager.MnemonicCues"/>), redrawing the window when they change.</summary>
+    private void SetMnemonicCues(bool show)
+    {
+        if (_focusManager.MnemonicCues == show) return;
+        _focusManager.MnemonicCues = show;
+        _root?.MarkPaintDirty();
     }
 
     internal void RaiseActivated()
@@ -2778,9 +2789,13 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             {
                 var pos = new Point(button.X, button.Y);
 
-                // Hide tooltip on any mouse button press
+                // Hide tooltip on any mouse button press, and the keyboard's cues: an Alt held
+                // through a click (Alt+drag) is not a keyboard user's.
                 if (button.IsDown)
+                {
                     HideTooltip();
+                    SetMnemonicCues(false);
+                }
 
                 // The release of a press that only closed an anchored overlay goes nowhere.
                 if (!button.IsDown && button.Button == _swallowedRelease)
@@ -3137,6 +3152,16 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     }
                     else
                         Tracer.StopRecording(FrameTracer.DefaultPath);
+                }
+
+                // Alt held shows the mnemonics of buttons and check boxes, as a menu bar's titles; AltGr,
+                // which types, does not (the test MenuBar.HandleKey makes).
+                if (key.KeyCode is KeyCode.AltLeft or KeyCode.AltRight)
+                {
+                    if (!key.IsDown) SetMnemonicCues(false);
+                    else if ((key.KeyCode == KeyCode.AltLeft || key.ModifierKeys == ModifierKeys.None)
+                        && (key.ModifierKeys & ModifierKeys.AltGr) == 0)
+                        SetMnemonicCues(true);
                 }
 
                 // The window's own keys first, whatever holds the keyboard (PreviewKeyDown). A key

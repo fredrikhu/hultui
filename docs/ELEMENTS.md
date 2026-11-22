@@ -734,6 +734,15 @@ Checkbox.New(true)      // Pre-checked
 | `CheckedColor` | -- | `Color` | `rgb(66,135,245)` |
 | `CheckmarkColor` | -- | `Color` | `rgb(255,255,255)` |
 | `CornerRadius` | -- | `float` | `3f` |
+| `UseMnemonic` | -- | `bool` | `false` |
+
+**Mnemonics** (`UseMnemonic`): `&` in `Label` marks the letter, `&&` is an ampersand. The box
+draws and reads out `DisplayLabel` ("&Wrap lines" is "Wrap lines"), and `Mnemonic` is the
+letter, lower case ('w'). The letter is underlined only while Alt is held, as a menu bar's
+titles are (`AltGr`, which types, shows nothing), and not after a click or after the window
+loses the foreground with Alt down. Choosing the control with Alt and the letter is the app's: a
+dialog matches the key against `Mnemonic`, as an app routes its `MenuBar`. A label that comes
+from data leaves it off, so its ampersands stay ampersands.
 
 **Example:**
 
@@ -2278,6 +2287,16 @@ mid-hover keeps the button lit, in the new colours.
 over the app's own `Opacity`, dropped from the Tab ring, and its click is swallowed
 before any handler runs — the app's or a row's behind it. It stays under the pointer, so a
 tooltip can say why. Assistive technology sees it as disabled.
+
+**Mnemonics** (`UseMnemonic`): `&` in `Label` marks the letter, `&&` is an ampersand. The label
+child shows `DisplayLabel` ("&Apply" shows "Apply"), which is also the accessible name, and
+`Mnemonic` is the letter, lower case ('a'); `Label` keeps the `&`. The letter is underlined only
+while Alt is held, as a menu bar's titles are (`AltGr`, which types, shows nothing), and not
+after a click or after the window loses the foreground with Alt down. A label child given spans
+of its own (styled runs) keeps them and shows no underline. Choosing the control with Alt and
+the letter is the app's: a dialog matches the key against `Mnemonic`, as an app routes its
+`MenuBar`. A label that comes from data leaves it off, so its ampersands stay ampersands. A button
+whose first child is not a text (a glyph) has no label to mark.
 
 | Variant | Fill | Border | Label | For |
 |---|---|---|---|---|
