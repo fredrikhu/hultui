@@ -218,6 +218,7 @@ public sealed partial class ApertureApp
             string rowId = "row-" + row.Key;
             int shownPage = ShelfPage(rowId, row.Count, row.CardWidth, out int perPage);
             _homeShelves.Add(new HomeShelf(start, row.Count, row.Items, cards, rowId, perPage, shownPage));
+            AddCursorShelf(start, row.Count, row.CardWidth, rowId);
             // Every child of the page is keyed: a shelf handed back comes back through the keyed reconcile.
             if (cards is null)
             {

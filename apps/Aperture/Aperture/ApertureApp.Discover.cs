@@ -196,6 +196,7 @@ public sealed partial class ApertureApp
         string rowId = "discover-row-" + rowKey;
         int page = ShelfPage(rowId, entries.Count, cardWidth, out int perPage);
         _discoverShelves.Add(new DiscoverShelf(start, entries, cards, rowId, perPage, page));
+        AddCursorShelf(start, entries.Count, cardWidth, rowId);
     }
 
     /// <summary>Turns the shelf the cursor is on to the cursor's page when it shows another
@@ -847,6 +848,12 @@ public sealed partial class ApertureApp
         SetCursorList($"recs:{item.Key}:{recs.Count}", recs, VisibleCards(Halide.PosterWidth));
         if (recs.Count > 0)
         {
+            // One shelf, paged: Up and Down stay on it, and the page it shows follows the cursor,
+            // which walked off the first page onto cards nobody could see.
+            const string recsRow = "discover-recs";
+            AddCursorShelf(0, recs.Count, Halide.PosterWidth, recsRow);
+            int recsPage = ShelfPage(recsRow, recs.Count, Halide.PosterWidth, out int recsPerPage);
+            TurnShelfTo(_cursorIndex, 0, recs.Count, recsRow, recsPerPage, recsPage);
             body.AddChild(CardRow("More like this", recs.Count,
                 i => DiscoverCard(recs[i], Halide.PosterWidth, cursorIndex: i),
                 Halide.PosterWidth, "discover-recs"));

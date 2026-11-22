@@ -76,8 +76,9 @@ public class ShelfPageTests
         }, watchlist: 3);
     }
 
-    /// <summary>Discover's shelves of twenty, seven a page: Right onto the second page, Down onto the
-    /// third, Up and Left back, each turning the page with a build.</summary>
+    /// <summary>Discover's shelves of twenty, seven a page: Right onto the second page and Left back
+    /// each turn the page with a build. Down and Up go to the shelf below and back, onto the page each
+    /// shows, so they turn nothing: Down used to walk seven on along the same shelf, onto its third page.</summary>
     [Fact]
     public void OnDiscover_ACardOnAnotherPage_TurnsTheShelf()
     {
@@ -85,18 +86,24 @@ public class ShelfPageTests
         {
             Keys(session, KeyCode.Right);
             for (int i = 0; i < 6; i++) Keys(session, KeyCode.Right);
-            int builds = app.Builds;
             AssertRingAndKeyboardOnTheCursor(session, app);
 
-            foreach (var key in new[] { KeyCode.Right, KeyCode.Down, KeyCode.Up, KeyCode.Left })
+            foreach (var (key, at, turns) in new[]
+                     {
+                         (KeyCode.Right, 7, true),     // the first shelf's second page
+                         (KeyCode.Down, 20, false),    // the second shelf, on the page it shows
+                         (KeyCode.Up, 7, false),       // back to the card on the second page
+                         (KeyCode.Left, 6, true),      // the first page again
+                     })
             {
                 DiscoverCursorTests.Settle(session);   // the pictures a turned page asked for are in
-                builds = app.Builds;
+                int builds = app.Builds;
                 Keys(session, key);
-                Assert.True(app.Builds > builds, $"{key} onto another page built nothing");
+                Assert.Equal(at, app.CursorIndex);
+                if (turns) Assert.True(app.Builds > builds, $"{key} onto another page built nothing");
+                else Assert.Equal(builds, app.Builds);
                 AssertRingAndKeyboardOnTheCursor(session, app);
             }
-            Assert.Equal(6, app.CursorIndex);
         }, titles: 20);
     }
 
