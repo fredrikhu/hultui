@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 18
-- **Phase:** release — round 18 (14 build steps, the pre-suite work, main merged twice (87a0d35e, 2eba86c9); the full suite green at 2eba86c9): merge into main, push, wait for CI. The survey ran 2026-11-22 in session
+- **Phase:** release — round 18 (14 build steps, the pre-suite work, main merged twice (87a0d35e, 2eba86c9); the full suite green at 2eba86c9): merged into main 6366d201 and pushed 2026-11-23 11:28; waiting for CI (runs 45156444317 CI, 45156441081 Push on main). The survey ran 2026-11-22 in session
   00f54f03 (reports `17-reports/r18-*`; usage 1 → 8 % of the week, the 5-hour window 7 → 54 %). Questions 73–77 are answered (73 → (b), 74 → (c), 75 → (a), 76 → (a), 77 → (a) on
   2026-11-23, its commit riding with step 7); question 78 (asked at step 14, not perf) is open. Round 18's files (the survey brief `brief-r18-survey.md`, build
   briefs `brief-r18b<N>.md`, `archive_r18.py`, `merge_r18.py`, `desk.ps1`, agent ids `r18-agents.txt`, probes
