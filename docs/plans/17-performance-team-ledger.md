@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 18
-- **Phase:** build — round 18, step 12 next (vk-swapchain-two-images). The survey ran 2026-11-22 in session
+- **Phase:** build — round 18, step 13 next (text-bidi-wrap-ranges); step 12 (vk-swapchain-two-images) moved after 14, or sooner once the 4K is attached: its approved HDR drag run (question 74 (c)) needs the 4K, and only the 1440p has been attached since step 8. The survey ran 2026-11-22 in session
   00f54f03 (reports `17-reports/r18-*`; usage 1 → 8 % of the week, the 5-hour window 7 → 54 %). Questions 73–77 are answered (73 → (b), 74 → (c), 75 → (a), 76 → (a), 77 → (a) on
   2026-11-23, its commit riding with step 7). Round 18's files (the survey brief `brief-r18-survey.md`, build
   briefs `brief-r18b<N>.md`, `archive_r18.py`, `merge_r18.py`, `desk.ps1`, agent ids `r18-agents.txt`, probes
