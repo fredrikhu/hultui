@@ -17,7 +17,9 @@ namespace HultUI.Platform.SDL3;
 /// <para>Windows has its own registry of format ids rather than MIME types, so the
 /// well-known ones are mapped: text becomes <c>CF_UNICODETEXT</c> (UTF-16, which is what
 /// every Windows app actually reads), HTML becomes the registered "HTML Format" with the
-/// header Word and browsers require, and RTF the registered "Rich Text Format". Anything
+/// header Word and browsers require, RTF the registered "Rich Text Format", and a
+/// <c>text/uri-list</c> of <c>file:</c> URIs becomes <c>CF_HDROP</c>, the file list Explorer
+/// copies and pastes (<see cref="WindowsFileList"/>). Anything
 /// unmapped is registered under its MIME string and round-trips verbatim between HultUI
 /// apps.</para>
 /// </summary>
@@ -25,6 +27,7 @@ namespace HultUI.Platform.SDL3;
 internal static partial class WindowsClipboard
 {
     private const uint CF_UNICODETEXT = 13;
+    private const uint CF_HDROP = 15;
     private const uint GMEM_MOVEABLE = 0x0002;
 
     /// <summary>
@@ -43,10 +46,17 @@ internal static partial class WindowsClipboard
 
             foreach (var (mime, bytes) in data)
             {
-                var payload = Encode(mime, bytes);
-                if (payload.Length == 0) continue;
-
-                nint handle = Copy(payload);
+                nint handle;
+                if (mime == ClipboardFormats.Uris)
+                {
+                    handle = WindowsFileList.Allocate(WindowsFileList.FromUriList(bytes));
+                }
+                else
+                {
+                    var payload = Encode(mime, bytes);
+                    if (payload.Length == 0) continue;
+                    handle = Copy(payload);
+                }
                 if (handle == 0) continue;
 
                 // Ownership moves to the clipboard on success; on failure it stays ours.
@@ -74,6 +84,9 @@ internal static partial class WindowsClipboard
         {
             nint handle = GetClipboardData(format);
             if (handle == 0) return null;
+
+            if (mime == ClipboardFormats.Uris)
+                return WindowsFileList.ToUriList(WindowsFileList.Read(handle));
 
             nint locked = GlobalLock(handle);
             if (locked == 0) return null;
@@ -147,6 +160,11 @@ internal static partial class WindowsClipboard
     {
         if (mime == ClipboardFormats.PlainText || mime == "text/plain")
             return CF_UNICODETEXT;
+
+        // What Explorer copies and pastes; a list registered as "text/uri-list" would be
+        // invisible to it, as Explorer's would be to us.
+        if (mime == ClipboardFormats.Uris)
+            return CF_HDROP;
 
         lock (RegisteredFormats)
         {

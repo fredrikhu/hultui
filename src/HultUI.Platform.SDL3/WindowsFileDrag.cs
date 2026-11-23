@@ -92,48 +92,16 @@ internal static unsafe partial class WindowsFileDrag
         return _oleReady ??= OleInitialize(0) >= 0;
     }
 
-    /// <summary>Put the paths into the data object as CF_HDROP: a <c>DROPFILES</c> header
-    /// followed by the names as one double-null-terminated UTF-16 block.</summary>
+    /// <summary>Put the paths into the data object as CF_HDROP (<see cref="WindowsFileList"/>).</summary>
     private static bool SetFileList(nint pdo, IReadOnlyList<string> paths)
     {
-        int chars = 1;                                   // the list's own terminating NUL
-        foreach (var p in paths) chars += p.Length + 1;
-
-        nuint bytes = (nuint)(sizeof(DROPFILES) + chars * sizeof(char));
-        nint hglobal = GlobalAlloc(GMEM_MOVEABLE, bytes);
+        nint hglobal = WindowsFileList.Allocate(paths);
         if (hglobal == 0) return false;
 
-        bool handedOver = false;
-        try
-        {
-            nint locked = GlobalLock(hglobal);
-            if (locked == 0) return false;
-            try
-            {
-                var header = (DROPFILES*)locked;
-                *header = default;
-                header->pFiles = (uint)sizeof(DROPFILES);   // names start right after the header
-                header->fWide = 1;                          // ...and are UTF-16
-
-                var dst = (char*)((byte*)locked + sizeof(DROPFILES));
-                foreach (var p in paths)
-                {
-                    p.AsSpan().CopyTo(new Span<char>(dst, p.Length));
-                    dst += p.Length;
-                    *dst++ = '\0';
-                }
-                *dst = '\0';
-            }
-            finally { GlobalUnlock(hglobal); }
-
-            handedOver = SetData(pdo, CF_HDROP, hglobal);
-            return handedOver;
-        }
-        finally
-        {
-            // SetData took ownership only if it succeeded (fRelease is honoured on success).
-            if (!handedOver) GlobalFree(hglobal);
-        }
+        // SetData takes ownership only if it succeeds (fRelease is honoured on success).
+        if (SetData(pdo, CF_HDROP, hglobal)) return true;
+        GlobalFree(hglobal);
+        return false;
     }
 
     /// <summary>Write the "Preferred DropEffect" format — a single DWORD the shell reads to
@@ -188,15 +156,6 @@ internal static unsafe partial class WindowsFileDrag
         var vtable = *(void***)pUnk;
         var release = (delegate* unmanaged[Stdcall]<nint, uint>)vtable[2];
         release(pUnk);
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct DROPFILES
-    {
-        public uint pFiles;      // byte offset from this header to the first name
-        public int PtX, PtY;     // POINT pt — the drop point; the shell fills it in
-        public int fNC;
-        public int fWide;        // non-zero: the names are UTF-16
     }
 
     [StructLayout(LayoutKind.Sequential)]
