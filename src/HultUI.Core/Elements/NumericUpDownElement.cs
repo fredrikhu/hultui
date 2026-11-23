@@ -338,8 +338,40 @@ public class NumericUpDownElement : Element, IRangeValueElement
             + ctx.MeasureFirstBaseline(DisplayText, style, float.PositiveInfinity, 1);
     }
 
-    /// <summary>Unbounded: laid out shorter than it measures, it draws its value past the box.</summary>
-    public override Rect? PaintBounds(IRenderContext ctx) => null;
+    /// <summary>
+    /// The box, the value's ink and the step strip, grown by a pixel for antialiasing. The value
+    /// is one line centred on the content box's height, so a field laid out shorter or narrower
+    /// than it measures (or holding an edit longer than its range) draws it past the box, and the
+    /// chevrons keep the font's size in a strip squeezed smaller than they are. Everything
+    /// <see cref="Render"/> draws lies inside, focused, held or mid-edit: the focused border is
+    /// drawn inside the box, and the keyboard focus ring is the window's, drawn after the tree.
+    /// Null only when the context cannot tell where text inks. Without it a faded row of fields
+    /// (Vesper's Multi-rename) was drawn through a layer the size of the whole clip (plan 17,
+    /// round 18).
+    /// </summary>
+    public override Rect? PaintBounds(IRenderContext ctx)
+    {
+        var box = Layout.AbsoluteBorderBox;
+        var content = Layout.AbsoluteContentBox;
+        float buttonsX = content.Right - _theme.ButtonWidth;
+        var style = ValueStyle;
+        if (ctx.TextPaintBounds(DisplayText, ValueRect(ctx, content, buttonsX, style), style, TextOverflow.Clip, 1, null)
+            is not Rect ink)
+            return null;
+
+        // The hairline (1 wide, centred on buttonsX, the box's height less a pixel each end), the
+        // pressed halves, and both chevrons with half their stroke on every side.
+        float w = ChevronWidth, h = w / 2f, reach = _theme.ChevronStrokeWidth / 2f;
+        float half = content.Height / 2;
+        float cx = buttonsX + _theme.ButtonWidth / 2f;
+        float upY = content.Y + half / 2f, downY = content.Y + half + half / 2f;
+        var chevrons = new Rect(cx - w / 2f - reach, upY - h / 2f - reach, w + 2 * reach, downY - upY + h + 2 * reach);
+        return box.Union(ink)
+            .Union(new Rect(buttonsX - 1f, box.Y, 2f, box.Height))
+            .Union(new Rect(buttonsX, content.Y, _theme.ButtonWidth, content.Height))
+            .Union(chevrons)
+            .Inflate(new Thickness(1f));
+    }
 
     public override void Render(IRenderContext ctx)
     {
@@ -352,15 +384,8 @@ public class NumericUpDownElement : Element, IRangeValueElement
         var content = Layout.AbsoluteContentBox;
         float buttonsX = content.Right - _theme.ButtonWidth;
 
-        // Value (or the edit in progress), left-aligned in what the buttons leave and
-        // centred on the box's height — the measure reserved the theme's padding, but a
-        // row that stretches the field gives it more, and the text should sit in the
-        // middle of whatever it got rather than at the top.
-        var style = ResolvedInherited with { FontSize = _boxTheme.FontSize, TextColor = _boxTheme.TextColor };
-        float lineHeight = ctx.MeasureText(DisplayText, style).Height;
-        var textRect = new Rect(content.X + _boxTheme.Padding.Left, content.Y + (content.Height - lineHeight) / 2,
-            Math.Max(0f, buttonsX - _boxTheme.ChevronGap - content.X - _boxTheme.Padding.Left), lineHeight);
-        ctx.DrawText(DisplayText, textRect, style, TextOverflow.Clip, 1);
+        var style = ValueStyle;
+        ctx.DrawText(DisplayText, ValueRect(ctx, content, buttonsX, style), style, TextOverflow.Clip, 1);
 
         // The strip: a hairline off the text, an up half and a down half.
         ctx.DrawLine(new Point(buttonsX, box.Y + 1), new Point(buttonsX, box.Bottom - 1), _boxTheme.BorderColor, 1f);
@@ -373,9 +398,25 @@ public class NumericUpDownElement : Element, IRangeValueElement
         DrawChevron(ctx, down, pointsUp: false);
     }
 
+    private ResolvedInheritedStyle ValueStyle =>
+        ResolvedInherited with { FontSize = _boxTheme.FontSize, TextColor = _boxTheme.TextColor };
+
+    // Value (or the edit in progress), left-aligned in what the buttons leave and centred on
+    // the box's height — the measure reserved the theme's padding, but a row that stretches
+    // the field gives it more, and the text should sit in the middle of whatever it got rather
+    // than at the top.
+    private Rect ValueRect(IRenderContext ctx, Rect content, float buttonsX, ResolvedInheritedStyle style)
+    {
+        float lineHeight = ctx.MeasureText(DisplayText, style).Height;
+        return new Rect(content.X + _boxTheme.Padding.Left, content.Y + (content.Height - lineHeight) / 2,
+            Math.Max(0f, buttonsX - _boxTheme.ChevronGap - content.X - _boxTheme.Padding.Left), lineHeight);
+    }
+
+    private float ChevronWidth => MathF.Round(_boxTheme.FontSize * 0.5f);
+
     private void DrawChevron(IRenderContext ctx, Rect area, bool pointsUp)
     {
-        float w = MathF.Round(_boxTheme.FontSize * 0.5f);
+        float w = ChevronWidth;
         float h = w / 2f;
         float cx = area.X + area.Width / 2f;
         float cy = area.Y + area.Height / 2f;
