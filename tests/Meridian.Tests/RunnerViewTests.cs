@@ -83,6 +83,39 @@ public class RunnerViewTests : IClassFixture<TestHttpServer>, IDisposable
         session.PumpFrames(2);
     }
 
+    /// <summary>
+    /// A run of <paramref name="count"/> requests whose results land one main-thread drain at a time:
+    /// the server answers each request only once the result before it has landed and its frame has
+    /// built. Results that land within one drain are built once, so a count of builds a result raced
+    /// the network: a full suite's run had two results land in one drain now and then, and fewer
+    /// builds than results (plan 17 round 18, 4 runs in 20).
+    /// </summary>
+    private void RunOneResultADrain(HeadlessSession session, MeridianApp app, int count)
+    {
+        var results = (List<RunRequestResult>)typeof(MeridianApp)
+            .GetField("_runResults", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
+        var gate = new SemaphoreSlim(0);
+        _server.Gate = gate;
+        try
+        {
+            Click(session, "run-start");
+            for (int i = 1; i <= count; i++)
+            {
+                gate.Release();
+                session.PumpUntil(() => results.Count >= i, TimeSpan.FromSeconds(15));
+                Assert.Equal(i, results.Count);
+                session.PumpFrame();   // what the result asked for is built before the next can land
+            }
+            session.PumpUntil(() => !app.RunnerRunning, TimeSpan.FromSeconds(15));
+            session.PumpFrames(2);
+        }
+        finally
+        {
+            _server.Gate = null;
+            gate.Release(count + 1);   // anything still waiting, should a step fail
+        }
+    }
+
     [Fact]
     public void ThePreFlightShowsScopeOptionsAndTheCiHint()
     {
@@ -280,7 +313,7 @@ public class RunnerViewTests : IClassFixture<TestHttpServer>, IDisposable
         Hosted((session, app) =>
         {
             int made = app.RunRowsMade, results = app.RunResultsBuilds;
-            RunAndWait(session, app);
+            RunOneResultADrain(session, app, 15);
             int n = app.LastRunSummaryForTests!.Results.Count;
             Assert.Equal(15, n);
             Assert.True(app.RunResultsBuilds - results >= n, $"{app.RunResultsBuilds - results} builds of the results for {n} results");
@@ -316,8 +349,9 @@ public class RunnerViewTests : IClassFixture<TestHttpServer>, IDisposable
         Hosted((session, app) =>
         {
             int builds = app.Builds, parts = app.PartBuilds, results = app.RunResultsBuilds;
-            RunAndWait(session, app);
+            RunOneResultADrain(session, app, 15);
             int n = app.LastRunSummaryForTests!.Results.Count;
+            Assert.Equal(15, n);
             Assert.True(app.RunResultsBuilds - results >= n, $"{app.RunResultsBuilds - results} builds of the results for {n} results");
             Assert.InRange(app.Builds - builds, 2, 4);      // the run's start and its end (and a click)
             Assert.InRange(app.PartBuilds - parts, 4, 8);   // the title bar and the rail, as often
