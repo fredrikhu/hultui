@@ -148,6 +148,21 @@ public sealed class Application : IDisposable
     public event Action? MonitorsChanged;
 
     /// <summary>
+    /// The desktop's light or dark preference: on Linux the XDG desktop portal's
+    /// <c>org.freedesktop.appearance</c> <c>color-scheme</c>, on Windows and macOS the system's
+    /// app mode. <see cref="ColorScheme.NoPreference"/> when the desktop states none or the
+    /// platform cannot read it. Read it before the first frame to start in the right theme, and
+    /// follow <see cref="DesktopSettingsChanged"/>; HultUI never changes <see cref="Theme"/> itself.
+    /// </summary>
+    public ColorScheme DesktopColorScheme => (_platform as IDesktopSettingsSource)?.ColorScheme ?? ColorScheme.NoPreference;
+
+    /// <summary>Raised on the UI thread when a desktop setting changed (today the colour scheme).
+    /// The properties already hold the new values. On Linux SDL hears of the change only while it
+    /// pumps events, so an idle app is told with its window's next event (a hover, focus, a key),
+    /// not at the moment the desktop changed.</summary>
+    public event Action? DesktopSettingsChanged;
+
+    /// <summary>
     /// Schedules an action to run on the main (UI) thread during the next
     /// frame, and wakes the loop if it is parked between frames so that frame
     /// starts now. Use this to safely update component state from background
@@ -467,6 +482,7 @@ public sealed class Application : IDisposable
         // The one application steps the tweens that were current already, as it always has.
         _animations = s_live.Count == 1 ? AnimationManager.CurrentSet : new AnimationSet();
         if (_platform is IMonitorSource monitors) monitors.MonitorsChanged += () => MonitorsChanged?.Invoke();
+        if (_platform is IDesktopSettingsSource desktop) desktop.Changed += () => DesktopSettingsChanged?.Invoke();
         // Claim this thread before any window (and therefore any element) exists, so
         // the tree can never be built on one thread and driven from another.
         Switch();

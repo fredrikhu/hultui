@@ -144,6 +144,17 @@ public sealed partial class HeadlessSession : IDisposable
     }
 
     /// <summary>
+    /// Changes the simulated desktop's light or dark preference; <c>Application.DesktopSettingsChanged</c>
+    /// is raised during the next <see cref="PumpFrame()"/>, from the event pump, as a real desktop
+    /// change is. Setting the value it already has raises nothing.
+    /// </summary>
+    public void SetColorScheme(Core.Platform.ColorScheme scheme)
+    {
+        ThrowIfDisposed();
+        _platform.SetColorScheme(scheme);
+    }
+
+    /// <summary>
     /// Makes this session's application the one the code on this thread runs for, as its pumps,
     /// input and <see cref="HeadlessWindow.SetRoot"/> already do: <c>Application.InvokeOnMainThread</c>
     /// (and the work it starts, which carries it along), <c>await</c> continuations, tweens and

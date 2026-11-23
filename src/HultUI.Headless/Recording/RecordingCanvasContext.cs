@@ -1,5 +1,6 @@
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
+using HultUI.Core.Styling;
 using static HultUI.Headless.Recording.OpFormat;
 
 namespace HultUI.Headless.Recording;
@@ -125,6 +126,12 @@ internal sealed class RecordingCanvasContext : ICanvasDrawingContext
     // Not recorded: it runs after every canvas callback, and a balanced callback (the
     // usual case) gets nothing from it — logging it would add a line to every canvas.
     public void PopAll() => _inner.PopAll();
+
+    public float DrawTextLine(string text, Point origin, ResolvedInheritedStyle style, IReadOnlyList<TextSpan>? spans = null)
+    {
+        Record("DrawTextLine", $"{Quoted(text)} {Fmt(origin)} size={F(style.FontSize)} {Fmt(style.TextColor)} spans={spans?.Count ?? 0}");
+        return _inner.DrawTextLine(text, origin, style, spans);
+    }
 
     private static string Points(ReadOnlySpan<Point> points)
     {

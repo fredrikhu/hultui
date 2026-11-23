@@ -1,6 +1,39 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Large documents: a `long`-range scrollbar and canvas text lines** — `ScrollbarElement`
+  (`Scrollbar.Vertical`/`Horizontal`) stands beside what it scrolls over a range of up to
+  `long.MaxValue` units, a byte offset or a row index, and looks and behaves like ScrollView's
+  bars (drag once a frame, track click, wheel, keys when focusable, the `ScrollBar` role with a
+  range value on UIA and AT-SPI). `ICanvasDrawingContext.DrawTextLine` draws one unwrapped line
+  through the label pipeline (shaping, fallback, spans, backgrounds, decorations), and
+  `CanvasElement.TextSource` serves a custom-drawn document's text to screen readers. The bar's
+  paint is shared through `Scrollbar.PaintAt`; ScrollView's and TextArea's bars draw as before
+  (`ScrollbarRegressionTests`). ELEMENTS.md §7 and §29; three perf rows.
+- **Buttons and check boxes: & mnemonics** — `ButtonElement.UseMnemonic` and
+  `CheckboxElement.UseMnemonic` make an `&` in the label mark its mnemonic (`&&` an ampersand):
+  shown and read out as `DisplayLabel`, the letter as `Mnemonic`, underlined only while Alt is held
+  (the window's keyboard cues, off again on Alt's release, a click, or the window losing the
+  foreground; AltGr shows none). Routing Alt+letter stays the app's. Menu items, menu bar titles,
+  buttons and check boxes share one parser and one underline. Tests: `ButtonMnemonicTests`,
+  `CheckboxMnemonicTests` (8 and 5), `MnemonicCueTests` (2). See `docs/ELEMENTS.md`.
+- **Context menus from the keyboard** — the Menu key and Shift+F10 open the focused element's
+  context menu when nothing took the key (`Window.ContextMenuKeys`, `Window.OpenContextMenu(element)`),
+  under `Element.ContextMenuAnchor` (a list's current row or cell), on its first item. An open menu
+  takes Home, End, PageUp, PageDown, Space, Backspace, Tab and typed characters without taking the
+  focus: `ContextMenuItem.UseMnemonic` mnemonics (underlined once the keyboard is used), else
+  type-ahead, and the text of a key it took reaches no element. `MenuBarItem` and menu items share
+  one `&` parser. Tests: `MnemonicsTests` (8), `ContextMenuKeyboardTests` (unit 19, headless 26),
+  `MenuBarTests` (2 more) and `ContextMenuAccessibilityTests` (1 more), the
+  `context-menu-mnemonics` golden. See `docs/ELEMENTS.md` "Menus from the keyboard".
+- **The desktop's light or dark preference** — `Application.DesktopColorScheme` (`ColorScheme`:
+  `NoPreference`, `Light`, `Dark`) reads it through SDL (on Linux the XDG desktop portal's
+  `org.freedesktop.appearance` `color-scheme`), and `Application.DesktopSettingsChanged` is raised
+  from the event pump when it changes; HultUI never switches `Application.Theme` itself. A platform
+  offers it by implementing `IDesktopSettingsSource`, as `IMonitorSource` offers monitors (the
+  WinForms host does not: `NoPreference`). Headless: `HeadlessOptions.ColorScheme` and
+  `HeadlessSession.SetColorScheme`. On Linux an idle app is told with its window's next event: SDL
+  pumps D-Bus only as it pumps events. See `docs/THEMES.md`.
 - **Virtual lists that flow into columns** — `VirtualListElement.Flow = ListFlow.Columns` (with
   `ColumnWidth`) lays items out in columns that scroll sideways, a file manager's Brief view:
   rows per column follow the height (less the horizontal bar's room when the columns overflow),
@@ -201,6 +234,14 @@
   content box — the grip in the padding was unreachable; a later sibling wins a press on a shared
   edge; `Array.Sort` insertion-sorts ≤16 items, so stability needs a longer test list. Tests: 9
   model, 6 headless, 1 Fluent, 1 Vesper, AT-SPI role rows; controls (10) each fail their test.
+- **A table the app sorts** — `TableView.SortMode = TableSortMode.External`: the table never sorts,
+  a header press (pointer, Enter/Space, Shift for a next key, an assistive invoke) raises
+  `SortRequested` with the keys the table would have used, and the header shows only what the app
+  sets with `SetSortKeys` (several keys, each header with its place). `TableColumn.CanSort` makes a
+  column sortable with no `Compare`. The pressed header announces the answer once. Internal mode
+  unchanged. Tests: `TableViewExternalSortTests` (unit and headless),
+  `A11yCurrentItemFocusTests.ATSPI_AReSortThatMovesTheCursor_SendsOneFocusMove_AndOneAnnouncement`;
+  perf row `table/TableView 1M external sort` (0 comparisons). See `docs/ELEMENTS.md` §25.
 - **Popover** — `src/HultUI.Core/Builders/Popover.cs` (+ `PopoverTheme`): a non-modal card of any
   content against an anchor. Placement (Below/Above/Right/Left × Start/Center/End) flips when it
   does not fit and the other side has more room, slides to stay in the window, lands on whole

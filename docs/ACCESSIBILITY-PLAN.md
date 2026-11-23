@@ -1042,7 +1042,9 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   (2026-10-25, plan 17 round 5), and `expanded` only when that bit changes: only `expanded` was
   sent, so a caching client (libatspi) kept "expandable" for good (seen live in WSL).
 - **Table column headers** — role `ColumnHeader` (UIA HeaderItem, AT-SPI table column header),
-  Invoke/click sorts (`TableView<T>`, 2026-10-05).
+  Invoke/click sorts (`TableView<T>`, 2026-10-05); in External mode it asks the app, the name
+  follows the app's answer (several keys: "sort key 1 of 2"), and the answer is announced once
+  (2026-11-22).
 - **Tabs** — per W3C Core-AAM 1.1 (2026-10-05). Role `TabList` is the strip: UIA `Tab`,
   AT-SPI `page tab list`. Role `Tab` is one tab: UIA `TabItem`, AT-SPI `page tab`; it is
   named from its content, as a button is. Role `TabPanel` is the content shown for a tab:
@@ -1087,6 +1089,9 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   `OnValueChanged`). A number field's text change and its number change tell AT-SPI once, with the
   number. Before, a slider or a progress bar that moved told nothing on either platform, and AT-SPI
   had no Value interface: a keyboard user moving VideoPlayer's Seek slider heard nothing.
+  A `ScrollbarElement` (2026-11-21) is a range value too, with the `ScrollBar` role: UIA's
+  ScrollBar control type with the RangeValue pattern, AT-SPI's scroll bar (48) with Value; its
+  value is the scroll position, in the app's unit.
   The RangeValue pattern answers from the node, as the RangeValue properties do (2026-10-24):
   it read the live slider, ahead of what was told.
   A range can move on every frame — a drag, a download, a playing video, a key held down — and
@@ -1147,6 +1152,9 @@ providers), a UIA `ItemContainer` on virtualized lists.
     change; a keystroke and a caret move are patches with no tree built; a caret move was never told before; its
     read-only switch reaches the text a reader reads. In both, a character's box runs
     between its two caret places, so where the direction changes a box can span a run.
+    And a canvas, through `CanvasElement.TextSource` (2026-11-21): an app that draws
+    a document itself (a file viewer too large to lay out) hands it the visible text as
+    immutable snapshots, with the Document role, and calls `NotifyTextSourceChanged`.
     Single-line text inputs are the next candidate.
 - **Announcements (A2).** `Element.Announce(text, politeness)`: a UIA notification
   (`UiaRaiseNotificationEvent`, activity `HultUI.Announcement`; polite is

@@ -80,6 +80,27 @@ theme. Three things must follow it, and none of them happen inside:
 
 Then rebuild.
 
+## Following the desktop's light or dark setting
+
+`Application.DesktopColorScheme` is the desktop's preference — `Light`, `Dark` or
+`NoPreference` — read through SDL (on Linux the XDG desktop portal's
+`org.freedesktop.appearance` `color-scheme`, on Windows and macOS the system's app mode), and
+`Application.DesktopSettingsChanged` is raised on the UI thread when it changes. Read it before the
+first frame, so the app starts in the right theme, and follow the event:
+
+```csharp
+void FollowDesktop() => app.Theme = app.DesktopColorScheme == ColorScheme.Dark ? Theme.Dark : Theme.Light;
+FollowDesktop();
+app.DesktopSettingsChanged += FollowDesktop;
+```
+
+HultUI reports the preference and never changes `Application.Theme` itself; NoPreference means the
+desktop says nothing (no portal, no session bus). On Linux SDL hears of a change only while it pumps
+events, and an idle loop waits on the display connection alone, so an idle app is told with its
+window's next event — the pointer over it, focus coming back, a key — rather than at the moment the
+desktop changed. An app with its own palettes does the three steps
+of "Switching at runtime" in the handler.
+
 ## Colouring code and diffs
 
 `HultUI.Syntax` turns text into coloured spans with VS Code's TextMate grammars, in the code

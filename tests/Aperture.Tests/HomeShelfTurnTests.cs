@@ -15,17 +15,18 @@ namespace Aperture.Tests;
 /// <summary>
 /// Each of Home's shelves of library cards is a part of its own (plan 17 round 18 step 9; the perf suite's
 /// proposal (j), here because the suite hosts no app): a turn of its page builds that shelf alone. A Right
-/// past a page's last card, a Down or an Up onto a card on another page of its shelf, and the shelf's Next
-/// and Previous used to build all of Home, every shelf's cards asked for again around the seven the turn
-/// makes. Home here is three shelves of thirty films at 1440 px, seven a page.
+/// or a Left past a page's end and the shelf's Next and Previous used to build all of Home, every shelf's
+/// cards asked for again around the seven the turn makes. (Down and Up go shelf to shelf onto the page each
+/// shows, and turn nothing.) Home here is three shelves of thirty films at 1440 px, seven a page.
 /// </summary>
 [Collection("ApertureProcessWide")]
 public class HomeShelfTurnTests
 {
     private const string Untouched = "untouched";
 
-    /// <summary>Right past the first page, then Down and Up, then the next shelf's Next: each turn builds
-    /// its shelf and nothing else, and the other shelves are the elements they were.</summary>
+    /// <summary>Right past the first page, Left back and Right again, then the next shelf's Next and
+    /// Previous: each turn builds its shelf and nothing else, and the other shelves are the elements they
+    /// were. Down and Up between them build nothing.</summary>
     [Fact]
     public void AShelfTurn_BuildsThatShelfAlone()
     {
@@ -35,7 +36,7 @@ public class HomeShelfTurnTests
             Assert.Equal(6, app.CursorIndex);
             Assert.Equal("1/5", PageOf(session, 0));
 
-            foreach (var (key, cursor, page) in new[] { (KeyCode.Right, 7, "2/5"), (KeyCode.Down, 14, "3/5"), (KeyCode.Up, 7, "2/5") })
+            foreach (var (key, cursor, page) in new[] { (KeyCode.Right, 7, "2/5"), (KeyCode.Left, 6, "1/5"), (KeyCode.Right, 7, "2/5") })
             {
                 Stamp(Shelf(session, 1), Shelf(session, 2));
                 int builds = app.Builds, shelves = app.HomeShelvesMade;
@@ -47,36 +48,55 @@ public class HomeShelfTurnTests
                 AssertUntouched(Shelf(session, 1), Shelf(session, 2));
             }
 
-            // The pointer's Next on the next shelf.
-            Stamp(Shelf(session, 0), Shelf(session, 2));
-            int was = app.Builds, made = app.HomeShelvesMade;
-            session.Window.FindByAutomationId("row-latest-lib1-next")!.Click();
-            session.PumpFrames(2);
-            Assert.Equal("2/5", PageOf(session, 1));
-            Assert.Equal(was, app.Builds);
-            Assert.Equal(made + 1, app.HomeShelvesMade);
-            AssertUntouched(Shelf(session, 0), Shelf(session, 2));
+            // Down to the next shelf's first card on the page it shows, and Up back: no turn, no build.
+            int before = app.Builds, made = app.HomeShelvesMade;
+            Keys(session, KeyCode.Down);
+            Assert.Equal(30, app.CursorIndex);
+            Keys(session, KeyCode.Up);
+            Assert.Equal(7, app.CursorIndex);
+            Assert.Equal(before, app.Builds);
+            Assert.Equal(made, app.HomeShelvesMade);
+            Assert.Equal("2/5", PageOf(session, 0));
+            Assert.Equal("1/5", PageOf(session, 1));
+
+            // The pointer's Next and Previous on the next shelf.
+            foreach (var (button, page) in new[] { ("row-latest-lib1-next", "2/5"), ("row-latest-lib1-previous", "1/5") })
+            {
+                Stamp(Shelf(session, 0), Shelf(session, 2));
+                int was = app.Builds, shelves = app.HomeShelvesMade;
+                session.Window.FindByAutomationId(button)!.Click();
+                session.PumpFrames(2);
+                Assert.Equal(page, PageOf(session, 1));
+                Assert.Equal(was, app.Builds);
+                Assert.Equal(shelves + 1, app.HomeShelvesMade);
+                AssertUntouched(Shelf(session, 0), Shelf(session, 2));
+            }
         });
     }
 
     /// <summary>The card a turn brings in takes the ring and the keyboard, as the build of Home that turned
-    /// the shelf gave them, and a reader hears the card it is on; the card the cursor left has neither.</summary>
+    /// the shelf gave them, and a reader hears the card it is on; the card the cursor left has neither. On
+    /// the first shelf and, after a Down that turns nothing, on the second.</summary>
     [Fact]
     public void AShelfTurn_HandsTheCursorsCardTheKeyboard()
     {
         Host((session, app, _) =>
         {
             for (int i = 0; i < 7; i++) Keys(session, KeyCode.Right);
-            // 6 → 7, 14, 21, 14 and 13: each onto another page of the first shelf.
-            foreach (var key in new[] { KeyCode.Right, KeyCode.Down, KeyCode.Down, KeyCode.Up, KeyCode.Left })
+            // 6 → 7 and 6 (the first shelf's second page and back), 36 (Down, the second shelf's page),
+            // 37 and 36 (its second page and back), 6 (Up).
+            foreach (var (key, turns) in new[] { (KeyCode.Right, true), (KeyCode.Left, true), (KeyCode.Down, false),
+                         (KeyCode.Right, true), (KeyCode.Left, true), (KeyCode.Up, false) })
             {
                 int shelves = app.HomeShelvesMade;
                 Keys(session, key);
-                Assert.True(app.HomeShelvesMade > shelves, $"{key} turned nothing");
+                if (turns) Assert.True(app.HomeShelvesMade > shelves, $"{key} turned nothing");
+                else Assert.Equal(shelves, app.HomeShelvesMade);
                 AssertRingAndKeyboardOnTheCursor(session, app);
             }
-            Assert.Equal(13, app.CursorIndex);
-            Assert.Equal("2/5", PageOf(session, 0));
+            Assert.Equal(6, app.CursorIndex);
+            Assert.Equal("1/5", PageOf(session, 0));
+            Assert.Equal("1/5", PageOf(session, 1));
         });
     }
 
@@ -110,10 +130,15 @@ public class HomeShelfTurnTests
     {
         Host((session, app, _) =>
         {
+            // The first shelf on its second page, the cursor gone from it to the second shelf's second
+            // page, and the third shelf turned by its Next.
             for (int i = 0; i < 8; i++) Keys(session, KeyCode.Right);
             Keys(session, KeyCode.Down);
+            for (int i = 0; i < 7; i++) Keys(session, KeyCode.Right);
             session.Window.FindByAutomationId("row-latest-lib2-next")!.Click();
             session.PumpFrames(2);
+            Assert.Equal(37, app.CursorIndex);
+            Assert.Equal(["2/5", "2/5", "2/5"], Enumerable.Range(0, 3).Select(i => PageOf(session, i)));
             var kept = Enumerable.Range(0, 3).Select(i => Sig(Shelf(session, i))).ToList();
             int shelves = app.HomeShelvesMade;
 

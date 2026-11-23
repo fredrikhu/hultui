@@ -280,6 +280,7 @@ public sealed partial class ApertureApp
                 var titles = row.Titles;
                 string rowId = "row-" + row.Key;
                 int shownPage = ShelfPage(rowId, row.Count, row.CardWidth, out int perPage);
+                AddCursorShelf(start, row.Count, row.CardWidth, rowId);
                 // Every child of the page is keyed: a part's host is keyed by its part, and comes back
                 // through the keyed reconcile with nothing marked.
                 if (titles is not null)

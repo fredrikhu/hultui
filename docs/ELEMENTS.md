@@ -735,6 +735,15 @@ Checkbox.New(true)      // Pre-checked
 | `CheckedColor` | -- | `Color` | `rgb(66,135,245)` |
 | `CheckmarkColor` | -- | `Color` | `rgb(255,255,255)` |
 | `CornerRadius` | -- | `float` | `3f` |
+| `UseMnemonic` | -- | `bool` | `false` |
+
+**Mnemonics** (`UseMnemonic`): `&` in `Label` marks the letter, `&&` is an ampersand. The box
+draws and reads out `DisplayLabel` ("&Wrap lines" is "Wrap lines"), and `Mnemonic` is the
+letter, lower case ('w'). The letter is underlined only while Alt is held, as a menu bar's
+titles are (`AltGr`, which types, shows nothing), and not after a click or after the window
+loses the foreground with Alt down. Choosing the control with Alt and the letter is the app's: a
+dialog matches the key against `Mnemonic`, as an app routes its `MenuBar`. A label that comes
+from data leaves it off, so its ampersands stay ampersands.
 
 **Example:**
 
@@ -932,6 +941,7 @@ Canvas.New()       // Without draw callback (set Draw property later)
 | Property | Type |
 |---|---|
 | `Draw` | `Action<ICanvasDrawingContext>?` |
+| `TextSource` | `IAccessibleTextSource?`: the text a screen reader reads on the canvas (below) |
 
 **ICanvasDrawingContext methods:**
 
@@ -950,6 +960,7 @@ Canvas.New()       // Without draw callback (set Draw property later)
 | `DrawImage(source, dest, sourceRect, sampling)` | A rectangle of an image (in its own pixels) over `dest`, resampled per `ImageSampling` (`Nearest`, `Linear`, `Cubic`, or `Default`); frame sources are cut too |
 | `FillPolygon(points, fill)` / `DrawPolyline(points, color, width)` | Antialiased polygon fill and open polyline |
 | `PushClip(rect)` / `PushTransform(matrix)` / `Pop()` | Clip and transform until the matching `Pop`; the matrix is in canvas coordinates |
+| `DrawTextLine(text, origin, style, spans)` | One line of text, never wrapped, top-left at `origin`, through the label pipeline: shaping, font fallback, the style's face, colour spans, backgrounds and decorations; returns its advance width |
 
 A clip or transform the callback leaves open is undone when it returns (`PopAll`), so it never
 leaks into the elements painted after the canvas.
@@ -958,6 +969,26 @@ leaks into the elements painted after the canvas.
 the canvas's box meets the visible area of the scroll view or clipping box around it; a box of
 no size meets nothing. Work that must follow the canvas's size goes in `.OnLayoutChanged`
 (Events, above), not in `Draw`.
+
+**Text lines.** `DrawTextLine` is how a document too large to lay out is drawn: a file viewer, a
+log, a hex dump, each visible line one call. It draws as a label does, through the same shaping,
+fallback, caches and span painter (`TextSpan` colours, backgrounds for a selection or a search
+hit, decorations), and it never wraps: what a line is, is the app's to say. The line runs
+rightward from `origin` whatever the style's alignment or direction, and the advance width it
+returns, trailing blanks included, places the next piece after it. Keep each visible line's string between frames: layouts
+are cached by content, so a redraw of the same strings shapes nothing, and a scroll through a huge
+file does not grow the caches. Keep a call under 4,096 characters. Measure the cell and the line
+height with `TextMeasure.MeasureFont(style)` (`FontMetrics`), clip a panned line with `PushClip`
+or a clipping parent box, and set size-dependent state (how many lines fit) in `.OnLayoutChanged`,
+not in the callback. A context that does not implement it draws the text through `DrawText`.
+
+**Text for a screen reader.** `TextSource` (`IAccessibleTextSource?`) is the text a screen reader
+reads and moves through on the canvas, by character, word and line (UIA's Text pattern, AT-SPI's
+Text), with its caret and selection. With `.AccessibleRole(AccessibilityRole.Document)` the canvas
+reads as the terminal does. The bridges read it on their own threads, so it returns immutable
+`AccessibleText` snapshots; give its geometry in window coordinates (`WindowContentBox` is the
+canvas's origin there). Call `NotifyTextSourceChanged()` when the text, the caret or the selection
+changes; a rebuild that hands the canvas a different source object tells it without a call.
 
 **Showing an image under your own zoom, pan and rotation.** `DrawImage` with a source
 rectangle is the zoom and pan, `PushTransform` around it the rotation or mirror, and the
@@ -1998,6 +2029,37 @@ means the item is not a choice. A label that begins `"• "` is read out as punc
 the spaces its unchecked siblings need in order to line up are read out with them; a checked
 state is announced as a state and exposed through UIA's Toggle pattern and AT-SPI's `checked`.
 
+**Menus from the keyboard.** The Menu key and Shift+F10 open the focused element's context menu
+(its own, or its nearest ancestor's) when no handler took the key, under
+`Element.ContextMenuAnchor` — the element's box, or a list's current row — with the first item
+highlighted. `Window.ContextMenuKeys` sets the keys (empty turns this off), and
+`Window.OpenContextMenu(element)` opens a menu the same way from a command of the app's own.
+`ContextMenuItem.UseMnemonic` makes an `&` in `Label` mark its mnemonic (`"&Rename…"`, `&&` for an
+ampersand), underlined once the menu is used from the keyboard; it is opt-in because a label that
+comes from data (a file name) means its ampersands. An open menu takes its keys without taking the
+focus:
+
+| Key | Does |
+|---|---|
+| ↑ ↓ | Previous, next enabled item, round the ends |
+| Home, PageUp / End, PageDown | First / last enabled item |
+| → | Opens the highlighted item's submenu on its first item; on a leaf, hands → to the owner (a menu bar's next menu) |
+| ← | Closes the innermost submenu; in the root menu hands ← to the owner |
+| Esc | Closes the innermost submenu, else the menu |
+| Enter, keypad Enter | Runs the highlighted item; a submenu opens on its first item |
+| Space | Part of the type-ahead text while typing ahead; otherwise as Enter |
+| A character, without Ctrl or Super | Mnemonic, else type-ahead. Always the menu's, matched or not |
+| Alt with a character | The mnemonic only; when no item has it, the key goes on (a menu bar's Alt+letter) |
+| Backspace | Takes the last character off the type-ahead text |
+| Tab, Shift+Tab, Menu, Shift+F10 | Taken; nothing happens |
+| Anything else (function keys; Ctrl and Super chords of other keys) | Goes on to the focused element |
+
+A character with no type-ahead going on is a mnemonic first: one item with it runs, several take
+the highlight in turn, none starts type-ahead. Type-ahead highlights the first item whose label
+starts with the text typed, and runs nothing; a run of one character walks the items starting with
+it, and a pause of a second starts a new run. Menus, dropdown lists and popovers close when the
+window loses the foreground.
+
 **A row that is not one thing.** Drive a wrap grid through the list — one item per *row*
 of cards — and that model inverts: the list would publish one node per row, named after
 all the cards in it, and every card's own name, role and automation id would vanish from
@@ -2248,6 +2310,16 @@ mid-hover keeps the button lit, in the new colours.
 over the app's own `Opacity`, dropped from the Tab ring, and its click is swallowed
 before any handler runs — the app's or a row's behind it. It stays under the pointer, so a
 tooltip can say why. Assistive technology sees it as disabled.
+
+**Mnemonics** (`UseMnemonic`): `&` in `Label` marks the letter, `&&` is an ampersand. The label
+child shows `DisplayLabel` ("&Apply" shows "Apply"), which is also the accessible name, and
+`Mnemonic` is the letter, lower case ('a'); `Label` keeps the `&`. The letter is underlined only
+while Alt is held, as a menu bar's titles are (`AltGr`, which types, shows nothing), and not
+after a click or after the window loses the foreground with Alt down. A label child given spans
+of its own (styled runs) keeps them and shows no underline. Choosing the control with Alt and
+the letter is the app's: a dialog matches the key against `Mnemonic`, as an app routes its
+`MenuBar`. A label that comes from data leaves it off, so its ampersands stay ampersands. A button
+whose first child is not a text (a glyph) has no label to mark.
 
 | Variant | Fill | Border | Label | For |
 |---|---|---|---|---|
@@ -2676,6 +2748,40 @@ Flex.Column(gap: 0).Children(_files.Header(), _files.Body(rows).FlexGrow(1))
   way. `Sort(items)` is stable and memoized on the list's identity. `Group` pins rows whatever the
   direction (a file list's ".." and folders). An app that sorts its own rows (Vesper keeps a sort
   per tab) calls `SetSort` to tell the header, and passes `sort: false` to `Body`.
+- **Sorting by the app:** with `SortMode = TableSortMode.External` the table never sorts — `Sort`
+  and `Body` return the rows as given — and a column sorts when it has a `Compare` or says
+  `CanSort`. A press on a sortable header (pointer, Enter or Space, an assistive invoke) raises
+  `SortRequested` with the column, the modifiers and `Suggested`, the keys the table would have
+  sorted by (the column, the other way round when it is the first key, else its `FirstSort`; with
+  Shift, the keys with the column added after them or turned round where it is one), and changes
+  nothing. The app sorts its rows wherever it likes, then calls `SetSortKeys` with the keys they
+  are in, which the header shows: it always describes the rows' order, never a pending one. With
+  several keys each sorted header draws its place (1, 2, 3) after its chevron. `Restore` leaves
+  the sort alone (the app sets the keys); `SetSort` and `ClearSort` set one key or none. The
+  built-in sort stays single-key: several keys there throw.
+
+  ```csharp
+  _files = new TableView<FileRow>(
+  [
+      new() { Id = "name", Header = "Name", Fill = 1, CanHide = false, CanSort = true, Text = f => f.Name },
+      new() { Id = "size", Header = "Size", Width = 90, Align = ColumnAlign.End, CanSort = true,
+              FirstSort = SortDirection.Descending, Text = f => Size(f) },
+  ], MarkDirty)
+  {
+      SortMode = TableSortMode.External,
+      SortRequested = request => _ = ResortAsync(request.Suggested),
+  };
+
+  async Task ResortAsync(IReadOnlyList<TableSortKey> keys)
+  {
+      int version = ++_sortVersion;
+      var sorted = await Task.Run(() => _listing.SortedBy(keys));   // the app's own keys, off the UI thread
+      if (version != _sortVersion) return;                          // a newer request won
+      _rows = sorted;
+      _files.SetSortKeys(keys);                                     // the header now says what the rows are
+      MarkDirty();
+  }
+  ```
 - **Widths:** drag the grip at a column's edge; a double click puts its own width back. Columns
   before the fill resize from their end edge, columns after it from their start edge — the fixed
   columns after a fill are pinned to the table's end, so their end edge cannot follow a drag.
@@ -2685,9 +2791,12 @@ Flex.Column(gap: 0).Children(_files.Header(), _files.Body(rows).FlexGrow(1))
   `Restore` puts it back and skips columns that no longer exist; `StateChanged` runs when a click
   or a drag settles, not on every move.
 - **Keyboard:** sortable headers are Tab stops unless `HeadersTakeFocus` is off — off for a list
-  that owns Tab itself.
+  that owns Tab itself. Enter or Space on a header sorts by it; in External mode Shift+Enter or
+  Shift+Space asks for it as the next key.
 - **Accessibility:** headers have the new `ColumnHeader` role (UIA header item, AT-SPI table column
-  header), invokable, named with their sort ("Size, sorted descending"). `Body` names each row by
+  header), invokable, named with their sort ("Size, sorted descending"; with several keys "Name,
+  sorted ascending, sort key 1 of 2"). In External mode the pressed header announces the app's
+  answer once, when it comes ("Sorted by Size, descending"). `Body` names each row by
   `RowLabel` ("a.txt, Size 100 B"), which a virtual list needs: its rows reach a screen reader by
   that label alone.
 
@@ -2834,3 +2943,105 @@ private Element Shelf(IReadOnlyList<MediaItem> items)
 - **The state is what the element shows and does:** its item, the cursor on it, its picture as the
   cache has it, and a setting every element shows (or `Clear()` when it moves). Its handlers are the
   old build's, so what they capture belongs in the state too.
+
+---
+
+## 29. ScrollbarElement
+
+A scrollbar standing on its own over a logical range of up to `long.MaxValue` units: the bar beside
+a document too large to lay out, drawn a screen at a time on a `CanvasElement`, whose position is a
+byte offset or a row index rather than a pixel offset. A `ScrollViewElement` keeps its offset in
+`float`, exact to about 16.7 M px; this bar keeps the app's own unit, exact at 50 GB of bytes or
+3 G rows. It looks and behaves like `ScrollViewElement`'s bars: the same colours, widths, hover
+widening and pill ends, a drag, a track click that centres the thumb under the pointer, and the
+wheel.
+
+**Builders:**
+
+```csharp
+Scrollbar.Vertical(value, contentLength, viewportLength)
+Scrollbar.Horizontal(value, contentLength, viewportLength)
+ScrollbarElement.New(ScrollbarAxis.Vertical)   // the lengths and value set later
+```
+
+**Properties:**
+
+| Property | Type | Description |
+|---|---|---|
+| `Axis` | `ScrollbarAxis` | `Vertical` (the default) or `Horizontal` |
+| `ContentLength` | `long` | The whole document; negative is 0 |
+| `ViewportLength` | `long` | How much of it shows; negative is 0 |
+| `MaxValue` | `long` | `ContentLength - ViewportLength`, at least 0 (read-only) |
+| `Value` | `long` | The first unit shown, clamped to [0, `MaxValue`] |
+| `SmallChange` | `long` | An arrow key's step, at least 1; a wheel notch moves three (default 1) |
+| `LargeChange` | `long` | Page Up/Down's step; 0, the default, is `ViewportLength` |
+| `OnChanged` | `Action<long>?` | Called with the new value on a user gesture (drag, track, wheel, keys, assistive technology), never when a build sets `Value` |
+| `IsDragging` | `bool` | Whether the thumb is being dragged (read-only) |
+| `TrackColor`, `ThumbColor`, `TrackHoverColor` | `Color`, `Color`, `Color?` | As `ScrollViewElement`'s `Scrollbar*` colours |
+| `BarWidth`, `BarRadius` | `float` | The resting width (6) and the corner radius (-1: half the drawn width, a pill) |
+| `ExpandOnHover`, `ExpandedBarWidth`, `ExpandDuration` | `bool`, `float`, `float` | The widening under the pointer: on, to 12, over 0.12 s |
+
+The element is as wide (or, horizontal, as tall) as the expanded bar, so there is something to
+reach for at rest, and stretches along its axis in a flex container. With nothing to scroll
+(`MaxValue` 0) it draws nothing.
+
+**The value is controlled**, as a slider's is: a build sets `Value`, a gesture sets it and calls
+`OnChanged`, and the owner writes it back on its next build. A rebuild during a drag keeps the
+dragged value, so a build with an older `Value` does not throw the thumb back. A drag follows the
+pointer once a frame. Every fraction is worked out in `double`, so the thumb is placed to well
+under a pixel for any range and a drag to the end reads back `MaxValue` exactly. One pixel of a
+1,000 px track over 50 GB is about 50 MB: the pointer does the coarse positioning, and the wheel,
+the keys and the app's own Go to do the fine.
+
+**Keyboard.** Not focusable by default, as platform scrollbars are not: the document it scrolls
+owns the keyboard. Set `IsFocusable` and it takes the arrows of its axis (`SmallChange`), Page
+Up/Down (`LargeChange`) and Home/End.
+
+**Accessibility.** Its role is `AccessibilityRole.ScrollBar` (UIA's ScrollBar control, AT-SPI's
+scroll bar) with a range value: a reader hears the position and can set it, which calls
+`OnChanged`.
+
+**Example:** a document of `LineCount` lines that the component reads on demand.
+
+```csharp
+protected override Element Build()
+{
+    var style = TextMeasure.StyleFor(13f, FontFamilies.Monospace) with { TextColor = Fg };
+    float lineHeight = MathF.Ceiling(TextMeasure.MeasureFont(style)?.LineHeight ?? 16f);
+    long visible = Math.Max(1, (long)(ViewportHeight / lineHeight));
+
+    // The canvas's size is known after layout: Draw is no after-layout hook.
+    var canvas = Canvas.New(ctx =>
+        {
+            for (int row = 0; row * lineHeight < ctx.Bounds.Height; row++)
+            {
+                var line = _document.LineText(TopLine + row);    // the app's cache of decoded strings
+                if (line is null)
+                    break;
+
+                ctx.DrawTextLine(line.Text, new Point(-_panX, row * lineHeight), style, line.Spans);
+            }
+        })
+        .FlexGrow(1)
+        .OnLayoutChanged(e => { if (e.SizeChanged) ViewportHeight = e.Box.Height; })   // a [Reactive] float
+        .AccessibleRole(AccessibilityRole.Document)
+        .AccessibleName(_document.Name)
+        .WithRef(_canvasRef);
+    canvas.IsFocusable = true;
+    canvas.TextSource = _visibleText;                             // the app's IAccessibleTextSource
+    canvas.On<KeyDownEvent>(OnKey);
+    canvas.On<ScrollEvent>(OnWheel);
+
+    var bar = Scrollbar.Vertical(TopLine, _document.LineCount, visible);
+    bar.SmallChange = 1;
+    bar.OnChanged = v => TopLine = v;
+
+    // The clipping box keeps a panned line inside the text column.
+    var body = Box.New().FlexGrow(1).OverflowX(Overflow.Hidden).OverflowY(Overflow.Hidden).Children(canvas);
+    return Flex.Row().FlexGrow(1).Children(body, bar);
+}
+```
+
+`Scrollbar` here is the builder in `HultUI.Core.Builders`. An assembly that sees HultUI.Core's
+internals and imports `HultUI.Core.Elements` too finds the internal painter of the same name
+there; it names the builder with an alias (`using ScrollbarBuilder = HultUI.Core.Builders.Scrollbar;`).

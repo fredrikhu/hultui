@@ -1,8 +1,10 @@
+using System.Globalization;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 
@@ -16,13 +18,17 @@ public sealed partial class TableView<T>
     private float _dragFrom;
     private float _dragWidth;
 
+    // The live header row, for announcing the app's answer to a press from the pressed column's cell.
+    private readonly Ref<Element> _headerRef = new();
+
     /// <summary>Whether Tab stops on the sortable headers. On by default — Enter or Space on one
     /// sorts it. Off for a list that owns Tab itself (a two-pane file manager switches panes).</summary>
     public bool HeadersTakeFocus { get; set; } = true;
 
     /// <summary>
     /// The header row: each visible column's name on the table's grid, the sorted one with its
-    /// mark. A press on a sortable header sorts by it (again: the other way); dragging the grip
+    /// mark. A press on a sortable header sorts by it (again: the other way; in
+    /// <see cref="TableSortMode.External"/> mode, asks the app: <see cref="SortRequested"/>); dragging the grip
     /// at a fixed column's end resizes it, and a double click on the grip puts its own width back;
     /// a right press lists the columns to show or hide.
     /// </summary>
@@ -38,15 +44,29 @@ public sealed partial class TableView<T>
             header.AddChild(cell.GridColumn(i));
             pastFill |= visible[i].IsFill;
         }
+        header.WithRef(_headerRef);
         return header;
+    }
+
+    /// <summary>Tells a reader the sort the app answered a press with, from the pressed column's
+    /// header cell (the row, when that column is hidden now).</summary>
+    private void AnnounceSort(string columnId)
+    {
+        if (_headerRef.Current is not { IsDetached: false } row) return;
+        Element source = row;
+        string automationId = "column-" + columnId;
+        foreach (var child in row.Children)
+            if (child.AutomationId == automationId) { source = child; break; }
+        source.Announce(SortSummary());
     }
 
     /// <summary>The rows' height, for <see cref="Body"/>.</summary>
     public float RowHeight { get; set; } = 28f;
 
     /// <summary>
-    /// The rows: a virtual list of <paramref name="items"/> in the table's sort, each a
-    /// <see cref="Row"/> of <see cref="RowHeight"/>, named for assistive technology by
+    /// The rows: a virtual list of <paramref name="items"/> in the table's sort — in
+    /// <see cref="TableSortMode.External"/> mode, or with <paramref name="sort"/> false, as given —
+    /// each a <see cref="Row"/> of <see cref="RowHeight"/>, named for assistive technology by
     /// <see cref="RowLabel"/>. Selection, activation and anything else a row does are the app's
     /// to add to the list it gets back; an app that sorts its own rows passes them sorted and
     /// leaves <see cref="SortColumn"/> to say how.
@@ -118,38 +138,46 @@ public sealed partial class TableView<T>
     /// resize from the start edge, the divider they share with the fill.</param>
     private HeaderCellElement HeaderCell(TableColumn<T> column, bool pastFill)
     {
-        bool sorted = _sortColumn == column.Id;
-        var cell = new HeaderCellElement { Align = column.Align, Sortable = column.IsSortable };
+        int rank = RankOf(column.Id);
+        bool sortable = CanSortBy(column);
+        var cell = new HeaderCellElement { Align = column.Align, Sortable = sortable };
         cell.Role = AccessibilityRole.ColumnHeader;
-        cell.AccessibleName = !sorted ? column.Header
-            : $"{column.Header}, sorted {(_sortDirection == SortDirection.Ascending ? "ascending" : "descending")}";
+        cell.AccessibleName = rank < 0 ? column.Header
+            : $"{column.Header}, sorted {(_sortKeys[rank].Direction == SortDirection.Ascending ? "ascending" : "descending")}"
+              + (_sortKeys.Length > 1 ? $", sort key {rank + 1} of {_sortKeys.Length}" : "");
         cell.AutomationId = "column-" + column.Id;
 
         var label = CellText(column.Header, column.Align);
         // The name, not the mark, gives way when the column is narrow.
         label.Flex.FlexGrow = 0;
-        var mark = new SortMarkElement { Direction = sorted ? _sortDirection : null };
+        // The key's place is drawn by the mark, not added as text: a reader would hear "Size 2".
+        var mark = new SortMarkElement
+        {
+            Direction = rank >= 0 ? _sortKeys[rank].Direction : null,
+            Priority = rank >= 0 && _sortKeys.Length > 1 ? rank + 1 : 0,
+        };
         // The mark sits after the name — before it in a right-aligned column, so the names of
         // numeric columns stay flush with their numbers.
         if (column.Align == ColumnAlign.End) cell.ReplaceChildren(mark, label);
         else cell.ReplaceChildren(label, mark);
 
-        string id = column.Id;
-        if (column.IsSortable)
+        if (sortable)
         {
             cell.IsFocusable = HeadersTakeFocus;
             cell.ShowsFocusVisual = HeadersTakeFocus;
             cell.On<ClickEvent>(e =>
             {
                 if (e.Target is GripElement) return;
-                SortBy(id);
+                Activate(column, e.Modifiers);
             });
             cell.On<KeyDownEvent>(e =>
             {
                 if (!ReferenceEquals(e.Target, e.CurrentTarget)) return;
                 if (e.Key is not (KeyCode.Enter or KeyCode.Space)) return;
-                if ((e.Modifiers & (KeyModifiers.Ctrl | KeyModifiers.Alt | KeyModifiers.Super | KeyModifiers.Shift)) != 0) return;
-                SortBy(id);
+                // No modifiers; Shift too where the app sorts, for its next key.
+                var held = e.Modifiers & (KeyModifiers.Ctrl | KeyModifiers.Alt | KeyModifiers.Super | KeyModifiers.Shift);
+                if (held != KeyModifiers.None && !(held == KeyModifiers.Shift && _sortMode == TableSortMode.External)) return;
+                Activate(column, e.Modifiers);
                 e.StopPropagation = true;
             });
         }
@@ -167,6 +195,14 @@ public sealed partial class TableView<T>
         if (column.Resizable && !column.IsFill)
             cell.AddChild(Grip(column, atStart: pastFill));
         return cell;
+    }
+
+    /// <summary>A press on a sortable header: the table sorts by it, or, where the app sorts,
+    /// asks it to.</summary>
+    private void Activate(TableColumn<T> column, KeyModifiers modifiers)
+    {
+        if (_sortMode == TableSortMode.Internal) SortBy(column.Id);
+        else Request(column, null, modifiers, fromHeader: true);
     }
 
     /// <summary>Every column that can be hidden, checked when shown.</summary>
@@ -380,15 +416,19 @@ public sealed partial class TableView<T>
         }
     }
 
-    /// <summary>The ▲ or ▼ by the sorted column's name; takes no room when the column is not sorted.</summary>
+    /// <summary>The ▲ or ▼ by the sorted column's name, and the key's place (1, 2, 3) after it
+    /// when the rows are sorted by several; takes no room when the column is not sorted.</summary>
     internal sealed class SortMarkElement : Element
     {
         public SortDirection? Direction;
+        /// <summary>The key's place, from 1, when there are several keys; 0 draws none.</summary>
+        public int Priority;
+        private string? _priorityText;
         private Color _color;
 
         public SortMarkElement() => Flex.FlexShrink = 0;
 
-        // Its patch marks layout when the direction, all it measures, changes.
+        // Its patch marks layout when the direction or the place, all it measures, changes.
         private protected override bool PatchMarksOwnLayout => true;
 
         protected internal override void ApplyTheme(Theme theme) =>
@@ -397,21 +437,35 @@ public sealed partial class TableView<T>
         internal override void PatchFrom(Element source)
         {
             base.PatchFrom(source);
-            if (source is SortMarkElement mark && mark.Direction != Direction)
+            if (source is not SortMarkElement mark) return;
+            if (mark.Direction != Direction)
             {
                 Direction = mark.Direction;
                 MarkLayoutDirty();
             }
+            if (mark.Priority != Priority)
+            {
+                Priority = mark.Priority;
+                _priorityText = null;
+                MarkLayoutDirty();
+            }
         }
 
-        internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx) =>
-            Direction is null ? new Size(0, 0) : new Size(8, 8);
+        internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx)
+        {
+            if (Direction is null) return new Size(0, 0);
+            if (Priority == 0) return new Size(8, 8);
+            _priorityText ??= Priority.ToString(CultureInfo.InvariantCulture);
+            var t = ctx.MeasureText(_priorityText, ResolvedInherited, float.PositiveInfinity, 1);
+            return new Size(8 + 2 + t.Width, Math.Max(8, t.Height));
+        }
 
         public override void Render(IRenderContext ctx)
         {
             if (Direction is not { } direction) return;
             var box = Layout.AbsoluteContentBox;
-            float cx = box.X + box.Width / 2f, cy = box.Y + box.Height / 2f;
+            // The chevron in the first 8 px: with no place drawn that is the whole box, as before.
+            float cx = box.X + 4f, cy = box.Y + box.Height / 2f;
             float half = 3.5f, rise = direction == SortDirection.Ascending ? -1.75f : 1.75f;
             // A stroked chevron: up for ascending, down for descending.
             var left = new Point(cx - half, cy - rise);
@@ -419,6 +473,12 @@ public sealed partial class TableView<T>
             var right = new Point(cx + half, cy - rise);
             ctx.DrawLine(left, tip, _color, 1.25f);
             ctx.DrawLine(tip, right, _color, 1.25f);
+            if (Priority > 0)
+            {
+                _priorityText ??= Priority.ToString(CultureInfo.InvariantCulture);
+                ctx.DrawText(_priorityText, new Rect(box.X + 10, box.Y, box.Width - 10, box.Height),
+                    ResolvedInherited, TextOverflow.Clip, 1);
+            }
         }
     }
 

@@ -927,6 +927,21 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         return new Rect(0, OffsetOf(index), Math.Max(_contentWidth, _rowWidth), HeightOf(index));
     }
 
+    /// <inheritdoc/>
+    /// <remarks>The current item's row (its cell in <see cref="ListFlow.Columns"/>) while any of it
+    /// is in view; the list's own box otherwise.</remarks>
+    public override Rect ContextMenuAnchor
+    {
+        get
+        {
+            if ((uint)CurrentIndex >= (uint)_items.Count) return base.ContextMenuAnchor;
+            var r = ItemRect(CurrentIndex);
+            var content = WindowContentBox;
+            var row = new Rect(content.X + r.X - ScrollOffsetX, content.Y + r.Y - ScrollOffsetY, r.Width, r.Height);
+            return row.IntersectsWith(content) ? row : base.ContextMenuAnchor;
+        }
+    }
+
     private Rect CellRect(int index, int rows) =>
         new(index / rows * _columnWidth, index % rows * _itemHeight, _columnWidth, _itemHeight);
 

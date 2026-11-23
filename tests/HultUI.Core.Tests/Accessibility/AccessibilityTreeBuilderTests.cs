@@ -35,6 +35,50 @@ public class AccessibilityTreeBuilderTests
     }
 
     [Fact]
+    public void ScrollbarElement_InfersScrollBarRole_AndCarriesItsRange()
+    {
+        var root = BoxElement.New();
+        root.Role = AccessibilityRole.Application;
+        root.Box.Width = 400;
+        root.Box.Height = 400;
+        var bar = global::HultUI.Core.Builders.Scrollbar.Vertical(25, 1000, 100);
+        root.AddChild(bar);
+        Layout(root);
+
+        var node = AccessibilityTreeBuilder.Build(root).Children.Single();
+
+        Assert.Equal(AccessibilityRole.ScrollBar, node.Role);
+        Assert.Equal(new AccessibleRange(25, 0, 900, 1, 100, false), node.Range);
+    }
+
+    [Fact]
+    public void ACanvasWithATextSource_GivesItsNodeTheSourcesText()
+    {
+        var root = BoxElement.New();
+        root.Role = AccessibilityRole.Application;
+        root.Box.Width = 400;
+        root.Box.Height = 400;
+        var canvas = CanvasElement.New();
+        canvas.Role = AccessibilityRole.Document;
+        canvas.Box.Width = 200;
+        canvas.Box.Height = 100;
+        canvas.TextSource = new FixedTextSource(new AccessibleText("first line\nsecond line", caret: 3));
+        root.AddChild(canvas);
+        Layout(root);
+
+        var node = AccessibilityTreeBuilder.Build(root).Children.Single();
+
+        Assert.Equal(AccessibilityRole.Document, node.Role);
+        Assert.Equal("first line\nsecond line", node.CurrentText?.Text);
+        Assert.Equal(3, node.CurrentText?.Caret);
+    }
+
+    private sealed class FixedTextSource(AccessibleText text) : IAccessibleTextSource
+    {
+        public AccessibleText? AccessibleText => text;
+    }
+
+    [Fact]
     public void ImageElement_InfersImageRole()
     {
         var img = new ImageElement();

@@ -1,5 +1,6 @@
 using System.Numerics;
 using HultUI.Core.Primitives;
+using HultUI.Core.Styling;
 
 namespace HultUI.Core.Rendering;
 
@@ -92,4 +93,24 @@ public interface ICanvasDrawingContext
     /// or transform into the elements drawn after it.
     /// </summary>
     void PopAll() { }
+
+    /// <summary>
+    /// Draws one line of <paramref name="text"/>, never wrapped, with its top-left at
+    /// <paramref name="origin"/>: shaped and font-fallen-back as any label is, in
+    /// <paramref name="style"/>'s face, size and colour, and coloured, highlighted and decorated by
+    /// <paramref name="spans"/> as <see cref="TextSpan"/> documents. The line runs rightward from
+    /// <paramref name="origin"/> whatever the style's alignment or direction. Text after a line
+    /// break is not drawn. Returns the line's advance width, so pieces can be drawn one after
+    /// another, trailing blanks included; 0 for empty text.
+    /// <para>What a document too large to lay out is drawn with, a visible line at a time: keep
+    /// each visible line's string between frames (layouts are cached by content), and keep a call
+    /// under 4,096 characters. The default draws through <see cref="DrawText"/>, without spans.</para>
+    /// </summary>
+    float DrawTextLine(string text, Point origin, ResolvedInheritedStyle style,
+        IReadOnlyList<TextSpan>? spans = null)
+    {
+        if (string.IsNullOrEmpty(text)) return 0;
+        DrawText(text, origin, style.TextColor, style.FontSize);
+        return TextMeasure.MeasureWidth(text, style);
+    }
 }

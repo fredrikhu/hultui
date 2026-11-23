@@ -1,3 +1,4 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
@@ -34,6 +35,38 @@ public class CanvasElementTests
         canvas1.PatchFrom(canvas2);
 
         Assert.Equal(newDraw, canvas1.Draw);
+    }
+
+    [Fact]
+    public void PatchFrom_CopiesTheTextSource()
+    {
+        var canvas1 = CanvasElement.New();
+        var source = new FixedTextSource();
+        var canvas2 = CanvasElement.New();
+        canvas2.TextSource = source;
+
+        canvas1.PatchFrom(canvas2);
+
+        Assert.Same(source, canvas1.TextSource);
+    }
+
+    [Fact]
+    public void DrawTextLine_ByDefault_DrawsTheTextInTheStylesColourAndSize()
+    {
+        var ctx = new StubCanvasDrawingContext(new Rect(0, 0, 100, 100));
+        var style = TextMeasure.StyleFor(13f) with { TextColor = new Color(10, 20, 30) };
+
+        ((ICanvasDrawingContext)ctx).DrawTextLine("hello", new Point(4, 8), style, [new TextSpan(0, 2, Color.White)]);
+        float empty = ((ICanvasDrawingContext)ctx).DrawTextLine("", new Point(4, 8), style);
+
+        var drawn = Assert.Single(ctx.Texts);
+        Assert.Equal(("hello", new Point(4, 8), new Color(10, 20, 30), 13f), drawn);
+        Assert.Equal(0f, empty);
+    }
+
+    private sealed class FixedTextSource : IAccessibleTextSource
+    {
+        public AccessibleText? AccessibleText => new("text");
     }
 
     [Fact]
@@ -95,6 +128,8 @@ public class CanvasElementTests
         public void DrawCircleStroke(Point center, float radius, Color color, float strokeWidth) { }
         public void DrawRoundedRect(Rect rect, CornerRadius radius, Color fill) { }
         public void DrawRoundedRectStroke(Rect rect, CornerRadius radius, Color color, float strokeWidth) { }
-        public void DrawText(string text, Point position, Color color, float fontSize) { }
+        public readonly List<(string Text, Point Position, Color Color, float FontSize)> Texts = [];
+        public void DrawText(string text, Point position, Color color, float fontSize) =>
+            Texts.Add((text, position, color, fontSize));
     }
 }

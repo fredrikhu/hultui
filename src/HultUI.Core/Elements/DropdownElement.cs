@@ -36,7 +36,8 @@ public class DropdownElement : Element
     // Set when the host dismissed the popup because of a press on the control itself:
     // that press's own PointerDown arrives right after the dismissal and must read as
     // "close" (which already happened), not "open again". A press elsewhere clears it
-    // through Blur, so it cannot swallow a later, legitimate open.
+    // through Blur, so it cannot swallow a later, legitimate open. A dismissal with no press
+    // (the window was deactivated, a frame press, DismissPopups) is cleared after the next frame.
     private bool _suppressOpenFromDismiss;
 
     private Color _background = Color.White;
@@ -257,6 +258,9 @@ public class DropdownElement : Element
         _open = false;
         AccessibleExpanded = false;
         _suppressOpenFromDismiss = true;
+        // Only the press that dismissed it is swallowed, and that press arrives before the next
+        // frame; a dismissal with no press (the window was deactivated) must not eat a later click.
+        OverlayHost?.RequestPostFrameCallback(() => _suppressOpenFromDismiss = false);
         MarkPaintDirty();
     }
 

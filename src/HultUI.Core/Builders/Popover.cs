@@ -28,8 +28,8 @@ public enum PopoverAlignment : byte
 
 /// <summary>
 /// A card of any content that opens next to the element it belongs to — a filter panel under
-/// a toolbar button, a list of recent folders under a caret — and closes on a press outside it
-/// or Esc. Not modal: the rest of the window stays live.
+/// a toolbar button, a list of recent folders under a caret — and closes on a press outside it,
+/// Esc, or the window losing the foreground. Not modal: the rest of the window stays live.
 /// </summary>
 /// <remarks>
 /// <para><b>Use.</b> Hold one per anchor, and toggle it from the anchor's click:

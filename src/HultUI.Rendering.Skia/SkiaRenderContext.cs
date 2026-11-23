@@ -1018,6 +1018,48 @@ public sealed class SkiaRenderContext : IRenderContext, IFadingImageContext, IDi
         }
     }
 
+    /// <summary>
+    /// One line of text, never wrapped, from (<paramref name="x"/>, <paramref name="y"/>) rightward:
+    /// a canvas's <see cref="ICanvasDrawingContext.DrawTextLine"/>. Not one of the
+    /// <see cref="DrawText(string, Rect, ResolvedInheritedStyle, TextOverflow, int?)"/> overloads,
+    /// whose alignment offset against an infinite box would be infinite for centred or
+    /// right-to-left text: here there is no box and no alignment. Returns the line's width.
+    /// </summary>
+    internal float DrawTextLine(string text, float x, float y, ResolvedInheritedStyle style, IReadOnlyList<TextSpan>? spans,
+        bool draw = true)
+    {
+        if (string.IsNullOrEmpty(text) || _pipeline is null) return 0f;
+
+        bool spanned = spans is { Count: > 0 };
+        var layout = spanned
+            ? _pipeline.Layout(text, style, float.PositiveInfinity, 1, TextOverflow.Clip, spans)
+            : _pipeline.Layout(text, style, float.PositiveInfinity, 1, TextOverflow.Clip);
+        if (layout.Lines.Count == 0) return 0f;
+        var line = layout.Lines[0];
+        // Nothing would show: the width alone, so pieces after it are placed as if it had drawn.
+        if (!draw) return line.Width;
+
+        _pooledPaint.Reset();
+        _pooledPaint.IsAntialias = true;
+        float baseline = y + line.OffsetY + line.Ascent;
+        if (spanned)
+        {
+            DrawSpannedLine(line, spans!, style, x, baseline, y + line.OffsetY);
+        }
+        else
+        {
+            _pooledPaint.Color = ToSkColor(style.TextColor);
+            DrawRuns(line, x, baseline);
+        }
+
+        if (style.Decoration != TextDecoration.None)
+        {
+            _pooledPaint.Color = ToSkColor(style.TextColor);
+            DrawTextDecoration(style, x, baseline, line);
+        }
+        return line.Width;
+    }
+
     public TextParagraph LayoutParagraph(string text, ResolvedInheritedStyle style, float maxWidth,
         IReadOnlyList<TextSpan>? spans = null, int? maxLines = null, TextOverflow overflow = TextOverflow.Clip) =>
         _pipeline is null

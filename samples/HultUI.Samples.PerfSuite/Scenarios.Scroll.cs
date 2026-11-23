@@ -1,4 +1,5 @@
 using HultUI.Core.Builders;
+using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
@@ -10,6 +11,32 @@ static partial class Scenarios
 {
     private static IEnumerable<Scenario> Scroll()
     {
+        yield return new Scenario("scroll/scrollbar drag over 50 GiB",
+            $"Drag a ScrollbarElement over a 50 GiB document 7 px a step, beside the canvas of text/canvas lines: "
+            + "its OnChanged writes the top line and rebuilds the viewer, which draws {CanvasLines.Rows} lines from there",
+            ctx =>
+            {
+                var viewer = new BigDocument(ctx);
+                var host = viewer.Mount();
+                ctx.Mount(host);
+                // The live bar: a build's is a twin the next patch is copied from.
+                var bar = (ScrollbarElement)host.Children[0].Children[1];
+                var thumb = bar.WindowContentBox;
+                float x = thumb.X + thumb.Width / 2, y0 = thumb.Y + 5;
+                ctx.Window.MouseDown(x, y0);
+                // Down the track and back, so every step moves the thumb.
+                static float Along(int step) => 7f * (step % 180 < 90 ? step % 90 + 1 : 89 - step % 90);
+                int builds = 0;
+                return new Op
+                {
+                    Run = step => { builds = viewer.Builds; ctx.Window.MoveMouse(x, y0 + Along(step)); },
+                    Figure = () => viewer.Builds - builds,
+                    FigureUnit = "builds/frame",
+                    Check = _ => !bar.IsDragging ? "the bar is not being dragged"
+                        : viewer.Lines.Drawn(viewer.Top / BigDocument.BytesPerLine),
+                };
+            });
+
         yield return new Scenario("scroll/wheel 5,000-row list",
             "Mouse-wheel 3 notches through a non-virtualized 5,000-row list: no layout, paint culled to the viewport",
             ctx =>
@@ -85,4 +112,25 @@ static partial class Scenarios
 
     /// <summary>Down for 20 steps, then up for 20: the view keeps moving and never parks at an end.</summary>
     private static int WheelDirection(int step) => (step / 20) % 2 == 0 ? -1 : 1;
+
+    /// <summary>A 50 GiB document's viewer: the canvas of <see cref="CanvasLines"/> and a
+    /// <see cref="ScrollbarElement"/> over its bytes, rebuilt from the bar's reports.</summary>
+    private sealed class BigDocument(Ctx ctx) : Component
+    {
+        public const long Length = 50L << 30;
+        public const long BytesPerLine = 50;
+
+        public readonly CanvasLines Lines = new(ctx, mount: false);
+        public long Top;
+        public int Builds;
+
+        public override Element Build()
+        {
+            Builds++;
+            Lines.TopLine = Top / BytesPerLine;
+            var bar = HultUI.Core.Builders.Scrollbar.Vertical(Top, Length, CanvasLines.Rows * BytesPerLine);
+            bar.OnChanged = v => { Top = v; MarkDirty(); };
+            return Flex.Row().FlexGrow(1).AlignItems(AlignItems.Stretch).Children(Lines.NewCanvas(), bar);
+        }
+    }
 }

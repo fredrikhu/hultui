@@ -753,6 +753,14 @@ public abstract class Element
     /// after the app gave it a menu takes its own, as it always has.</summary>
     private protected void UseOwnContextMenu() => _contextMenuItems = null;
 
+    /// <summary>
+    /// The box, in window coordinates, that a context menu opened from the keyboard (the Menu
+    /// key, Shift+F10) is placed against: below its bottom-left corner, or above its top-left
+    /// corner when there is no room below. <see cref="WindowBorderBox"/> by default; a list
+    /// answers its current row.
+    /// </summary>
+    public virtual Rect ContextMenuAnchor => WindowBorderBox;
+
     // ──── Focus ────
     public bool IsFocusable { get; set; }
 

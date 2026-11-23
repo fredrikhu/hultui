@@ -100,16 +100,70 @@ public class ButtonElement : BoxElement
         }
     }
 
+    /// <summary>The text of the button's label: its first child, when that is a text. With
+    /// <see cref="UseMnemonic"/>, as written, with its <c>&amp;</c>.</summary>
     public string Label
     {
-        get => Children.Count > 0 && Children[0] is TextElement te ? te.Content : "";
+        get => MnemonicShown ? _mnemonicLabel : Children.Count > 0 && Children[0] is TextElement te ? te.Content : "";
         set
         {
-            if (Children.Count > 0 && Children[0] is TextElement te)
-                te.Content = value;
-            else
-                ReplaceChildren(TextElement.New(value));
+            if (_useMnemonic) _mnemonicLabel = value;
+            ShowLabel(value);
         }
+    }
+
+    /// <summary>
+    /// Whether <see cref="Label"/> marks its mnemonic with <c>&amp;</c>: <c>"&amp;Apply"</c> is shown
+    /// as "Apply", with the A underlined while Alt is held, and <see cref="Mnemonic"/> is 'a'.
+    /// <c>&amp;&amp;</c> is an ampersand. False, the default: the label is shown as written. The
+    /// button only shows the letter: choosing it with Alt and the letter is the app's (a dialog
+    /// matching <see cref="Mnemonic"/>), as a <see cref="Builders.MenuBar"/> is routed.
+    /// </summary>
+    public bool UseMnemonic
+    {
+        get => _useMnemonic;
+        set
+        {
+            if (_useMnemonic == value) return;
+            var label = Label;
+            _useMnemonic = value;
+            _mnemonicLabel = value ? label : "";
+            // Only a label child there is is marked: a button with no children, or whose first is a
+            // glyph, is left as it is (a later Label makes one).
+            if (Children.Count > 0 && Children[0] is TextElement) ShowLabel(label);
+            else _parsed = (label, -1);
+        }
+    }
+    private bool _useMnemonic;
+    private string _mnemonicLabel = "";
+    private (string Label, int Index) _parsed = ("", -1);
+
+    /// <summary>The label as shown and read out: <see cref="Label"/> without its marker where
+    /// <see cref="UseMnemonic"/> is set, <see cref="Label"/> otherwise.</summary>
+    public string DisplayLabel => MnemonicShown ? _parsed.Label : Label;
+
+    /// <summary>The mnemonic, lower case, or '\0' for none.</summary>
+    public char Mnemonic =>
+        MnemonicShown && _parsed.Index >= 0 && !char.IsSurrogate(_parsed.Label[_parsed.Index])
+            ? char.ToLowerInvariant(_parsed.Label[_parsed.Index]) : '\0';
+
+    // The mnemonic holds while the label child shows what the button gave it: children replaced
+    // since, or the child's text set directly, leave a button with none, rather than one a dialog
+    // would match against a label no longer there.
+    private bool MnemonicShown =>
+        _useMnemonic && Children.Count > 0 && Children[0] is TextElement te
+        && te.MnemonicIndex == _parsed.Index && te.Content == _parsed.Label;
+
+    /// <summary>Puts <paramref name="label"/> on the label child (making one if there is none),
+    /// without its marker and with the mnemonic marked where the button uses mnemonics.</summary>
+    private void ShowLabel(string label)
+    {
+        _parsed = _useMnemonic ? Mnemonics.Parse(label) : (label, -1);
+        if (Children.Count > 0 && Children[0] is TextElement te)
+            te.Content = _parsed.Label;
+        else
+            ReplaceChildren(te = TextElement.New(_parsed.Label));
+        te.MnemonicIndex = _parsed.Index;
     }
 
     /// <summary>The resolved rest fill, after the theme and palette have had their say.</summary>
@@ -283,6 +337,11 @@ public class ButtonElement : BoxElement
             Variant = btn.Variant;
             Style = btn.Style;
             IsEnabled = btn.IsEnabled;
+            // The label child is patched from the built one's, which holds the shown text and the
+            // marked index already; only what the button keeps of it is copied.
+            _useMnemonic = btn._useMnemonic;
+            _mnemonicLabel = btn._mnemonicLabel;
+            _parsed = btn._parsed;
         }
     }
 }

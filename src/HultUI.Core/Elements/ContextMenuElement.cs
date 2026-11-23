@@ -126,7 +126,7 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
         var menuItem = _items[item];
         // The shortcut is part of what the item is — "Copy, Ctrl C" is how a reader
         // announces it everywhere else.
-        return string.IsNullOrEmpty(menuItem.ShortcutHint) ? menuItem.Label : $"{menuItem.Label}, {menuItem.ShortcutHint}";
+        return string.IsNullOrEmpty(menuItem.ShortcutHint) ? menuItem.DisplayLabel : $"{menuItem.DisplayLabel}, {menuItem.ShortcutHint}";
     }
 
     bool? Accessibility.IAccessibleItemSource.ItemIsToggled(int index)
@@ -225,6 +225,128 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
             }
         }
     }
+
+    /// <summary>Puts the selection on the first (or last) enabled item; none when every item is a
+    /// separator or disabled. Home, End, PageUp and PageDown.</summary>
+    internal void MoveToEdge(bool first)
+    {
+        // Set without telling a reader: MoveSelection tells it where the selection lands.
+        int was = _hoveredIndex;
+        _hoveredIndex = first ? -1 : _items.Count;
+        MoveSelection(first ? 1 : -1);
+        if (_hoveredIndex >= 0 && _hoveredIndex < _items.Count) return;
+        // Nothing to select: none, told as a move from where it was.
+        _hoveredIndex = was;
+        Hover(-1);
+    }
+
+    /// <summary>Whether the items' mnemonics are underlined: in a menu opened from the keyboard,
+    /// and in any menu once a key has been used in it, as Windows and GTK do.</summary>
+    internal bool ShowMnemonics
+    {
+        get => _showMnemonics;
+        set
+        {
+            if (_showMnemonics == value) return;
+            _showMnemonics = value;
+            MarkPaintDirty();
+        }
+    }
+    private bool _showMnemonics;
+
+    // ──── Typed characters: mnemonics, then type-ahead ────
+
+    /// <summary>How long after a typed character the next one still extends the type-ahead text.</summary>
+    internal const long TypeAheadTimeoutMs = 1000;
+
+    private readonly System.Text.StringBuilder _typeAhead = new(16);
+    private long _lastTypedMs;
+
+    /// <summary>Whether a type-ahead run is going on at <paramref name="nowMs"/>: a character was
+    /// typed less than <see cref="TypeAheadTimeoutMs"/> ago.</summary>
+    internal bool IsTypingAhead(long nowMs) => _typeAhead.Length > 0 && nowMs - _lastTypedMs <= TypeAheadTimeoutMs;
+
+    /// <summary>
+    /// A character typed in the menu (lower case). With no type-ahead going on, or with Alt, it is
+    /// a mnemonic first: one item with it is chosen, several take the selection in turn. Otherwise,
+    /// and when no item has it (without Alt), it extends the type-ahead text, which selects the
+    /// first item starting with it; a run of one character walks the items starting with it.
+    /// </summary>
+    internal TypedKeyResult HandleTypedKey(char typed, bool alt, long nowMs)
+    {
+        if (!IsTypingAhead(nowMs)) _typeAhead.Clear();
+
+        if (_typeAhead.Length == 0 || alt)
+        {
+            int count = 0, first = -1, next = -1;
+            for (int i = 0; i < _items.Count; i++)
+            {
+                var item = _items[i];
+                if (item.IsSeparator || item.IsDisabled || item.Mnemonic != typed) continue;
+                count++;
+                if (first < 0) first = i;
+                if (next < 0 && i > _hoveredIndex) next = i;
+            }
+            if (count == 1)
+            {
+                Hover(first);
+                ActivateSelected();
+                return TypedKeyResult.Activated;
+            }
+            if (count > 1)
+            {
+                Hover(next >= 0 ? next : first);
+                return TypedKeyResult.Taken;
+            }
+            if (alt) return TypedKeyResult.NotHandled;
+        }
+
+        _typeAhead.Append(typed);
+        _lastTypedMs = nowMs;
+        string needle = _typeAhead.ToString();
+        bool allSame = true;
+        for (int i = 1; i < needle.Length && allSame; i++) allSame = needle[i] == needle[0];
+        if (allSame) needle = needle[..1];
+
+        int start = needle.Length == 1 ? _hoveredIndex + 1 : Math.Max(_hoveredIndex, 0);
+        for (int n = 0; n < _items.Count; n++)
+        {
+            int i = (start + n) % _items.Count;
+            var item = _items[i];
+            if (item.IsSeparator || item.IsDisabled) continue;
+            if (item.DisplayLabel.StartsWith(needle, StringComparison.OrdinalIgnoreCase))
+            {
+                Hover(i);
+                break;
+            }
+        }
+        return TypedKeyResult.Taken;
+    }
+
+    /// <summary>Takes the last character off the type-ahead text; the selection stays.</summary>
+    internal void BackspaceTypeAhead()
+    {
+        if (_typeAhead.Length > 0) _typeAhead.Length--;
+    }
+
+    /// <summary>
+    /// The character a key typed, lower case, for mnemonics and type-ahead: its text first (a
+    /// Russian "с" is "с", a French number-row key "é" or "&amp;"), else the layout's character (an
+    /// Alt chord types nothing), else the keypad's digit, else the chord's letter; '\0' for none.
+    /// </summary>
+    internal static char TypedChar(KeyDownEvent e)
+    {
+        if (e.Text is { Length: 1 } text && !char.IsControl(text[0]) && !char.IsSurrogate(text[0]))
+            return char.ToLowerInvariant(text[0]);
+        if (e.LayoutKey is >= 0x21 and <= 0xFFFF and not 0x7F && !char.IsSurrogate((char)e.LayoutKey))
+            return char.ToLowerInvariant((char)e.LayoutKey);
+        if (e.Digit is { } digit) return (char)('0' + digit);
+        return e.ShortcutLetter;
+    }
+
+    /// <summary>The first character of text that arrived without a key, lower case; '\0' for none.</summary>
+    internal static char TypedChar(string text) =>
+        text.Length == 0 || char.IsControl(text[0]) || char.IsSurrogate(text[0]) ? '\0' : char.ToLowerInvariant(text[0]);
 
     /// <summary>Activate the currently selected item. Returns true if an action was invoked.
     /// Items with children open their submenu (via <see cref="HoverChanged"/>) instead.</summary>
@@ -331,7 +453,7 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
                 continue;
             }
 
-            var labelSize = ctx.MeasureText(item.Label, itemStyle, float.MaxValue, 1);
+            var labelSize = ctx.MeasureText(item.DisplayLabel, itemStyle, float.MaxValue, 1);
             maxLabelWidth = Math.Max(maxLabelWidth, labelSize.Width);
 
             if (item.ShortcutHint is not null)
@@ -422,7 +544,7 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
                 continue;
             }
 
-            if (measure) _textHeights[i] = ctx.MeasureText(item.Label, itemStyle).Height;
+            if (measure) _textHeights[i] = ctx.MeasureText(item.DisplayLabel, itemStyle).Height;
             float textHeight = _textHeights[i];
             float itemHeight = _theme.ItemPadding.Top + textHeight + _theme.ItemPadding.Bottom;
             moved |= _itemHeights[i] != itemHeight;
@@ -474,7 +596,7 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
                 contentWidth - _theme.ItemPadding.Left - iconCol - _theme.ItemPadding.Right,
                 textHeight);
 
-            ctx.DrawText(item.Label, labelRect, labelStyle, TextOverflow.Clip, 1);
+            ctx.DrawText(item.DisplayLabel, labelRect, labelStyle, TextOverflow.Clip, 1, ShowMnemonics ? item.MnemonicSpans : null);
 
             // Shortcut hint or submenu arrow (right-aligned)
             var trailing = item.HasChildren ? SubmenuArrow : item.ShortcutHint;
@@ -501,4 +623,15 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
 
     public override bool HitTest(Point point) =>
         Layout.AbsoluteBorderBox.Contains(point);
+}
+
+/// <summary>What <see cref="ContextMenuElement.HandleTypedKey"/> did with a character.</summary>
+internal enum TypedKeyResult : byte
+{
+    /// <summary>Nothing: an Alt chord no item has as its mnemonic. The key goes on.</summary>
+    NotHandled,
+    /// <summary>Taken: the selection may have moved; nothing ran.</summary>
+    Taken,
+    /// <summary>An item was chosen by its mnemonic: its action ran, or its submenu opened.</summary>
+    Activated,
 }

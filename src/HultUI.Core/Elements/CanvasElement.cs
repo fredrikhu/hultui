@@ -1,3 +1,4 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 
@@ -13,6 +14,22 @@ public class CanvasElement : BoxElement
 
     public static CanvasElement New(Action<ICanvasDrawingContext>? draw = null, [OriginFile] string? file = null, [OriginLine] int line = 0) =>
         new CanvasElement { Draw = draw }.WithOrigin(file, line);
+
+    /// <summary>
+    /// The text a screen reader reads and moves through on this canvas (UIA's Text pattern,
+    /// AT-SPI's Text): what a custom-drawn document shows, with its caret and selection. With
+    /// <c>.AccessibleRole(AccessibilityRole.Document)</c> the canvas reads as the terminal does.
+    /// Read by the bridges on their own threads, so return immutable snapshots; give geometry in
+    /// window coordinates (<see cref="Element.WindowContentBox"/>). Call
+    /// <see cref="NotifyTextSourceChanged"/> when its text, caret or selection changes.
+    /// </summary>
+    public IAccessibleTextSource? TextSource { get; set; }
+
+    internal override IAccessibleTextSource? AccessibleTextSource => TextSource;
+
+    /// <summary>Tells assistive technology that <see cref="TextSource"/>'s text, caret or
+    /// selection changed. Patching in a different source tells it without a call.</summary>
+    public void NotifyTextSourceChanged() => NotifyAccessibilityPropertyChanged(AccessibilityProperties.Text);
 
     /// <summary>Unbounded: the callback draws wherever it likes, unclipped.</summary>
     public override Rect? PaintBounds(IRenderContext ctx) => null;
@@ -51,6 +68,11 @@ public class CanvasElement : BoxElement
         if (source is CanvasElement canvas)
         {
             Draw = canvas.Draw;
+            if (!ReferenceEquals(TextSource, canvas.TextSource))
+            {
+                TextSource = canvas.TextSource;
+                NotifyTextSourceChanged();
+            }
         }
     }
 }

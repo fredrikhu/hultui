@@ -839,6 +839,7 @@ public static partial class AccessibilityTreeBuilder
         TextInputElement => AccessibilityRole.TextInput,
         TextAreaElement => AccessibilityRole.TextInput,
         SliderElement => AccessibilityRole.Slider,
+        ScrollbarElement => AccessibilityRole.ScrollBar,
         CheckboxElement => AccessibilityRole.Checkbox,
         ToggleSwitchElement => AccessibilityRole.Switch,
         ProgressBarElement => AccessibilityRole.ProgressBar,
@@ -902,8 +903,8 @@ public static partial class AccessibilityTreeBuilder
 
         // Labels on checkboxes/radios serve as the accessible name when no
         // explicit AccessibleName is set.
-        if (element is CheckboxElement checkbox && !string.IsNullOrEmpty(checkbox.Label))
-            return checkbox.Label;
+        if (element is CheckboxElement checkbox && !string.IsNullOrEmpty(checkbox.DisplayLabel))
+            return checkbox.DisplayLabel;
         if (element is RadioButtonElement radio && !string.IsNullOrEmpty(radio.Label))
             return radio.Label;
         if (element is ToggleSwitchElement toggle && !string.IsNullOrEmpty(toggle.Label))
@@ -943,7 +944,7 @@ public static partial class AccessibilityTreeBuilder
         if (element.AccessibleName is not null) return element.AccessibleName == name;
         if (element is TextElement text && !string.IsNullOrEmpty(text.Content)) return text.Content == name;
         if (NameFromValue(element) is { } fromValue) return fromValue == name;
-        if (element is CheckboxElement checkbox && !string.IsNullOrEmpty(checkbox.Label)) return checkbox.Label == name;
+        if (element is CheckboxElement checkbox && !string.IsNullOrEmpty(checkbox.DisplayLabel)) return checkbox.DisplayLabel == name;
         if (element is RadioButtonElement radio && !string.IsNullOrEmpty(radio.Label)) return radio.Label == name;
         if (element is ToggleSwitchElement toggle && !string.IsNullOrEmpty(toggle.Label)) return toggle.Label == name;
         if (IsNameFromContentRole(ResolveRole(element)))

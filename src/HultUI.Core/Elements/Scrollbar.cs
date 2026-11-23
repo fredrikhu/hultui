@@ -29,7 +29,7 @@ internal sealed class Scrollbar
 {
     /// <summary>Shortest a thumb may get, so a very long document still leaves something to
     /// grab.</summary>
-    private const float MinThumbLength = 20f;
+    internal const float MinThumbLength = 20f;
 
     // ──── Appearance ────
 
@@ -233,11 +233,22 @@ internal sealed class Scrollbar
     {
         if (!IsVisible(contentBox, contentLength, vertical)) return;
 
+        PaintAt(ctx, contentBox,
+            ThumbStart(contentBox, contentLength, offset, vertical),
+            ThumbLength(Viewport(contentBox, vertical), contentLength), vertical);
+    }
+
+    /// <summary>Paints the bar along the content box's edge with its thumb at
+    /// <paramref name="thumbStart"/> (absolute, along the track) and <paramref name="thumbLength"/>
+    /// long. For a bar whose thumb is placed by other arithmetic than a float offset:
+    /// <see cref="ScrollbarElement"/>'s <c>long</c> range.</summary>
+    public void PaintAt(IRenderContext ctx, Rect contentBox, float thumbStart, float thumbLength, bool vertical)
+    {
         float viewport = Viewport(contentBox, vertical);
         float barW = TrackWidthNow;
         float thumbW = ThumbWidthNow;
-        float thumbLen = ThumbLength(viewport, contentLength);
-        float thumbPos = ThumbStart(contentBox, contentLength, offset, vertical);
+        float thumbLen = thumbLength;
+        float thumbPos = thumbStart;
 
         // Off the drawn width, not the resting one: a radius fixed to the resting width leaves
         // the expanding thumb with blunt ends halfway through the animation.

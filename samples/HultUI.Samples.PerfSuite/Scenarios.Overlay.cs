@@ -128,6 +128,41 @@ static partial class Scenarios
                     Check = _ => dropdown.IsOpen ? null : "the dropdown did not open",
                 };
             });
+
+        yield return new Scenario("overlay/context menu keys, 20 items",
+            "Type a letter in a context menu of 20 items opened from the keyboard: type-ahead moves the highlight to the next item starting with it (c, p and c of \"copy\", \"paste\", \"close\" in turn, 1.1 s apart)",
+            ctx =>
+            {
+                var items = new ContextMenuItem[20];
+                string[] fixedLabels = ["Copy", "Copy path", "Paste", "Paste as link", "Close", "Close others"];
+                for (int i = 0; i < items.Length; i++)
+                    items[i] = new ContextMenuItem { Label = i % 3 == 0 && i / 3 < fixedLabels.Length ? fixedLabels[i / 3] : Ui.Label(ctx.Rng), Action = () => { } };
+                var target = Text.New("Files").FontSize(13f).ContextMenu(items);
+                ctx.Mount(Busy(ctx, target));
+                ctx.Window.Window.OpenContextMenu(target);
+                ctx.Pump(2);
+                // Each letter a run of its own, which moves the highlight to the next item starting
+                // with it: the further letters of a word mostly leave it where it is, and draw nothing.
+                const string typed = "cpc";
+                ContextMenuElement? Menu() => ctx.Window.OverlayContents.OfType<ContextMenuElement>().FirstOrDefault();
+                int before = -1;
+                return new Op
+                {
+                    // More than a second after the last letter: a new type-ahead run.
+                    Reset = _ =>
+                    {
+                        ctx.Session.AdvanceTime(TimeSpan.FromMilliseconds(1100));
+                        before = Menu()?.HoveredIndex ?? -1;
+                    },
+                    Run = step =>
+                    {
+                        char c = typed[step % typed.Length];
+                        ctx.Window.PressKey((KeyCode)((int)KeyCode.A + (c - 'a')), layoutKey: c, text: c.ToString());
+                    },
+                    Check = _ => Menu() is { HoveredIndex: >= 0 } menu && menu.HoveredIndex != before
+                        ? null : "the menu closed, or its highlight did not move",
+                };
+            });
     }
 
     /// <summary>A header holding <paramref name="control"/>, over a scrolled list of 1,000 rows.</summary>

@@ -103,7 +103,8 @@ Everything is reachable without a pointer:
 | Keys | What they do |
 |---|---|
 | Tab, Shift+Tab | the title bar's account button, the rail, then the page's controls |
-| Arrows, Home, End, Page Up/Down | walk the cards on a page; cards the arrows walk are one Tab stop between them |
+| Arrows, Home, End, Page Up/Down | walk the cards on a page, scrolling to the card; cards the arrows walk are one Tab stop between them |
+| Up, Down on Home and Discover | the shelf above or below, onto the card under the cursor's on the page it shows; Left and Right run on into the next shelf |
 | Enter | open the card under the cursor, or press the focused button |
 | Space | play the card under the cursor (a series opens instead), or press the focused button |
 | Menu key, Shift+F10 | the card's menu |

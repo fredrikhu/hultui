@@ -724,7 +724,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// Raised when the window stops being the foreground one: the user clicked another window or
     /// application, or Alt+Tabbed away. On the UI thread, after the window's light-dismiss popups
     /// (a menu, a dropdown's list, a popover) have closed, as a native menu closes when its window
-    /// loses the foreground. Not raised by a headless or WinForms host, which cannot tell.
+    /// loses the foreground. Not raised by a WinForms host, which cannot tell; a headless test
+    /// raises it with <c>HeadlessWindow.Deactivate()</c>.
     /// </summary>
     public event Action? Deactivated;
 
@@ -758,8 +759,19 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// took it (<paramref name="keepPopups"/>), so a menu can be inspected while it is open.</summary>
     internal void RaiseDeactivated(bool keepPopups)
     {
+        // An Alt held as the window lost the foreground (Alt+Tab) is let go elsewhere.
+        SetMnemonicCues(false);
         if (!keepPopups) DismissPopups();
         Deactivated?.Invoke();
+    }
+
+    /// <summary>Shows or hides the keyboard's cues, the mnemonics' underlines
+    /// (<see cref="FocusManager.MnemonicCues"/>), redrawing the window when they change.</summary>
+    private void SetMnemonicCues(bool show)
+    {
+        if (_focusManager.MnemonicCues == show) return;
+        _focusManager.MnemonicCues = show;
+        _root?.MarkPaintDirty();
     }
 
     internal void RaiseActivated()
@@ -2777,9 +2789,13 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             {
                 var pos = new Point(button.X, button.Y);
 
-                // Hide tooltip on any mouse button press
+                // Hide tooltip on any mouse button press, and the keyboard's cues: an Alt held
+                // through a click (Alt+drag) is not a keyboard user's.
                 if (button.IsDown)
+                {
                     HideTooltip();
+                    SetMnemonicCues(false);
+                }
 
                 // The release of a press that only closed an anchored overlay goes nowhere.
                 if (!button.IsDown && button.Button == _swallowedRelease)
@@ -3138,6 +3154,16 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                         Tracer.StopRecording(FrameTracer.DefaultPath);
                 }
 
+                // Alt held shows the mnemonics of buttons and check boxes, as a menu bar's titles; AltGr,
+                // which types, does not (the test MenuBar.HandleKey makes).
+                if (key.KeyCode is KeyCode.AltLeft or KeyCode.AltRight)
+                {
+                    if (!key.IsDown) SetMnemonicCues(false);
+                    else if ((key.KeyCode == KeyCode.AltLeft || key.ModifierKeys == ModifierKeys.None)
+                        && (key.ModifierKeys & ModifierKeys.AltGr) == 0)
+                        SetMnemonicCues(true);
+                }
+
                 // The window's own keys first, whatever holds the keyboard (PreviewKeyDown). A key
                 // it ends goes nowhere else, and the text it would type is held back from the text
                 // input that follows it.
@@ -3156,49 +3182,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     }
                 }
 
-                // Context menu keyboard navigation, in the innermost menu open. Up/Down/Enter
-                // there; → opens the highlighted entry's flyout, at any depth; ← / Escape close
-                // one level.
-                if (key.IsDown && _contextMenuElement is not null)
-                {
-                    var activeMenu = DeepestContextMenu!;
-                    int depth = _contextSubmenus.Count;
-                    switch (key.KeyCode)
-                    {
-                        case KeyCode.Up:
-                            activeMenu.MoveSelection(-1);
-                            break;
-                        case KeyCode.Down:
-                            activeMenu.MoveSelection(1);
-                            break;
-                        case KeyCode.Right:
-                            if (activeMenu.ItemAt(activeMenu.HoveredIndex) is { HasChildren: true })
-                            {
-                                OnContextMenuHover(activeMenu, activeMenu.HoveredIndex);
-                                if (_contextSubmenus.Count > depth) DeepestContextMenu!.MoveSelection(1);
-                            }
-                            // Nothing to open here: a menu bar moves to the next menu.
-                            else _contextMenuNavigate?.Invoke(1);
-                            break;
-                        case KeyCode.Left:
-                            if (depth > 0) CloseContextSubmenus(depth);
-                            else _contextMenuNavigate?.Invoke(-1);
-                            break;
-                        case KeyCode.Enter:
-                            activeMenu.ActivateSelected();
-                            // Enter on a parent item opened its flyout — land on its first entry.
-                            if (_contextSubmenus.Count > depth) DeepestContextMenu!.MoveSelection(1);
-                            break;
-                        case KeyCode.Escape:
-                            if (depth > 0) CloseContextSubmenus(depth);
-                            else CloseContextMenu(MenuCloseReason.Escape);
-                            break;
-                        default:
-                            goto normalKeyHandling;
-                    }
-                    break;
-                }
-                normalKeyHandling:
+                // An open context menu takes its keys (HandleMenuKey) without taking the focus.
+                if (key.IsDown && _contextMenuElement is not null && HandleMenuKey(key)) break;
 
                 // Tab / Shift+Tab focus traversal. Dispatch the key to the focused
                 // element first so an app can observe or intercept Tab; a handler
@@ -3239,9 +3224,15 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     // changes the highlight on labels other than the focused one — so the
                     // whole realized group repaints, exactly as it does after a drag.
                     int before = _activeTextGroup?.Version ?? 0;
-                    EventDispatcher.Dispatch(NewKeyDown(key, target), target);
+                    var down = NewKeyDown(key, target);
+                    EventDispatcher.Dispatch(down, target);
                     if (_activeTextGroup is { } keyed && keyed.Version != before)
                         RepaintGroup(keyed);
+                    // The Menu key and Shift+F10, when nothing took them: the context menu of the
+                    // key's target, or of its nearest ancestor that has one.
+                    if (!down.StopPropagation && !down.Handled && _contextMenuElement is null
+                        && IsContextMenuKey(down) && target is not null)
+                        OpenContextMenu(target);
                 }
                 else
                 {
@@ -3261,6 +3252,16 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     _previewStoppedText = null;
                     if (stopped == textInput.Text) break;
                 }
+                // Text no key brought (the WinForms host's AltGr keys, text that came late) is the
+                // open menu's, as a typed character; it never reaches the element under the menu.
+                if (_contextMenuElement is not null)
+                {
+                    char typed = ContextMenuElement.TypedChar(textInput.Text);
+                    if (typed != '\0')
+                        DeepestContextMenu!.HandleTypedKey(typed, alt: false, Application.Platform.TimeProvider.GetUtcNow().ToUnixTimeMilliseconds());
+                    ShowMenuMnemonics();
+                    break;
+                }
                 var target = KeyTarget();
                 EventDispatcher.Dispatch(new TextInputEvent { Text = textInput.Text }, target);
                 break;
@@ -3268,6 +3269,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
             case InputEvent.TextEditingInput editInput:
             {
+                // A composition under an open menu: the menu has the keys, so the field does not.
+                if (_contextMenuElement is not null) break;
                 var target = KeyTarget();
                 EventDispatcher.Dispatch(new TextEditingEvent
                 {
@@ -5064,6 +5067,152 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     public void OpenContextMenu(Element target, Point pos) => TryShowContextMenu(target, pos);
 
     /// <summary>
+    /// Opens <paramref name="target"/>'s context menu (its own, or its nearest ancestor's) the
+    /// way the Menu key does: against <see cref="Element.ContextMenuAnchor"/>, with the first
+    /// item highlighted and mnemonics shown. False when no menu opened.
+    /// </summary>
+    public bool OpenContextMenu(Element target)
+    {
+        var (owner, itemsProvider) = FindContextMenuOwner(target);
+        if (owner is null || itemsProvider is null) return false;
+        var items = itemsProvider();
+        if (items.Count == 0) return false;
+        ShowContextMenu(items, default, onClosed: null, anchor: target.ContextMenuAnchor);
+        return true;
+    }
+
+    /// <summary>
+    /// The keys that open the focused element's context menu when nothing handled them:
+    /// Menu and Shift+F10 by default. An app with a remappable keymap sets its own; empty turns
+    /// the framework's handling off. A key handler that stops the key or marks it handled keeps
+    /// it for itself.
+    /// </summary>
+    public IReadOnlyList<KeyChord> ContextMenuKeys
+    {
+        get => _contextMenuKeys;
+        set => _contextMenuKeys = value ?? throw new ArgumentNullException(nameof(value));
+    }
+    private IReadOnlyList<KeyChord> _contextMenuKeys = [new KeyChord(KeyCode.Menu), new KeyChord(KeyCode.F10, KeyModifiers.Shift)];
+
+    private bool IsContextMenuKey(KeyDownEvent e)
+    {
+        var keys = _contextMenuKeys;
+        for (int i = 0; i < keys.Count; i++)
+            if (keys[i].Matches(e)) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// A key pressed while a context menu is open, for its innermost level; true when the menu took
+    /// it. Arrows, Home, End, PageUp, PageDown, Enter, Space, Esc, Backspace and Tab are the menu's;
+    /// so is a character typed without Ctrl or Super — a mnemonic, else type-ahead — matched or not,
+    /// and Alt with a character when an item has it as its mnemonic. Anything else (function keys,
+    /// Ctrl and Super chords, Alt with no mnemonic) goes on, as a menu bar's F10 and Alt+letter need.
+    /// </summary>
+    private bool HandleMenuKey(InputEvent.KeyInput key)
+    {
+        var active = DeepestContextMenu!;
+        int depth = _contextSubmenus.Count;
+        bool chorded = (key.Modifiers & (KeyModifiers.Ctrl | KeyModifiers.Super)) != 0;
+        bool alt = (key.Modifiers & KeyModifiers.Alt) != 0;
+        long now = Application.Platform.TimeProvider.GetUtcNow().ToUnixTimeMilliseconds();
+        bool taken = true;
+        switch (key.KeyCode)
+        {
+            case KeyCode.Up:
+                active.MoveSelection(-1);
+                break;
+            case KeyCode.Down:
+                active.MoveSelection(1);
+                break;
+            case KeyCode.Right:
+                if (active.ItemAt(active.HoveredIndex) is { HasChildren: true })
+                {
+                    OnContextMenuHover(active, active.HoveredIndex);
+                    if (_contextSubmenus.Count > depth) DeepestContextMenu!.MoveSelection(1);
+                }
+                // Nothing to open here: a menu bar moves to the next menu.
+                else _contextMenuNavigate?.Invoke(1);
+                break;
+            case KeyCode.Left:
+                if (depth > 0) CloseContextSubmenus(depth);
+                else _contextMenuNavigate?.Invoke(-1);
+                break;
+            case KeyCode.Home or KeyCode.PageUp:
+                active.MoveToEdge(first: true);
+                break;
+            case KeyCode.End or KeyCode.PageDown:
+                active.MoveToEdge(first: false);
+                break;
+            case KeyCode.Enter or KeyCode.NumpadEnter:
+                ActivateInMenu(active, depth);
+                break;
+            case KeyCode.Space when !chorded && !alt:
+                if (active.IsTypingAhead(now))
+                {
+                    // A host that sends the space as text of its own (key.Text null) types it then.
+                    if (key.Text is not null) TypeInMenu(active, ' ', alt: false, depth, now);
+                    _previewStoppedText = key.Text;
+                }
+                else
+                {
+                    ActivateInMenu(active, depth);
+                    // The space chose: its text, a host's own " " too, reaches nothing.
+                    _previewStoppedText = key.Text ?? " ";
+                }
+                break;
+            case KeyCode.Escape:
+                if (depth > 0) CloseContextSubmenus(depth);
+                else CloseContextMenu(MenuCloseReason.Escape);
+                break;
+            case KeyCode.Backspace:
+                active.BackspaceTypeAhead();
+                break;
+            case KeyCode.Tab:
+                break;
+            default:
+                var down = NewKeyDown(key, null);
+                if (IsContextMenuKey(down)) break;
+                char typed = chorded ? '\0' : ContextMenuElement.TypedChar(down);
+                if (typed == '\0' || char.IsControl(typed)) return false;
+                // Text that comes on its own after the key (key.Text null: the WinForms host's
+                // WM_CHAR, an input method's commit) is the menu's character: taken here, typed
+                // then, once. An Alt chord brings no text, so it types from the key.
+                if (key.Text is null && !alt) break;
+                taken = TypeInMenu(active, typed, alt, depth, now);
+                if (taken) _previewStoppedText = key.Text;
+                break;
+        }
+        if (taken) ShowMenuMnemonics();
+        return taken;
+    }
+
+    /// <summary>Enter in the menu: runs the highlighted item, or opens its submenu on its first entry.</summary>
+    private void ActivateInMenu(ContextMenuElement menu, int depth)
+    {
+        menu.ActivateSelected();
+        if (_contextSubmenus.Count > depth) DeepestContextMenu!.MoveSelection(1);
+    }
+
+    /// <summary>A character typed in the menu; false when it was not the menu's (Alt with no mnemonic).</summary>
+    private bool TypeInMenu(ContextMenuElement menu, char typed, bool alt, int depth, long now)
+    {
+        var result = menu.HandleTypedKey(typed, alt, now);
+        if (result == TypedKeyResult.NotHandled) return false;
+        // A mnemonic that opened a submenu lands on its first entry, as Enter does.
+        if (result == TypedKeyResult.Activated && _contextSubmenus.Count > depth)
+            DeepestContextMenu!.MoveToEdge(first: true);
+        return true;
+    }
+
+    /// <summary>Underlines the mnemonics in every open level: a key has been used in the menu.</summary>
+    private void ShowMenuMnemonics()
+    {
+        if (_contextMenuElement is { } menu) menu.ShowMnemonics = true;
+        for (int i = 0; i < _contextSubmenus.Count; i++) _contextSubmenus[i].Menu.ShowMnemonics = true;
+    }
+
+    /// <summary>
     /// Open a context menu of <paramref name="items"/> at <paramref name="pos"/>, for content
     /// that decides its menu itself and after the click that asked for it — a web page's
     /// engine answers a right-click a moment later, with the page's own items.
@@ -5097,7 +5246,12 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         }
         ShowContextMenu(items, position, request?.Closed);
         _contextMenuNavigate = request?.Navigate;
-        if (request?.HighlightFirst == true) _contextMenuElement?.MoveSelection(1);
+        if (request?.HighlightFirst == true && _contextMenuElement is { } menu)
+        {
+            // Opened from the keyboard (a menu bar's Alt+letter, F10, Enter): underlined at once.
+            menu.MoveSelection(1);
+            menu.ShowMnemonics = true;
+        }
     }
 
     /// <inheritdoc/>
@@ -5154,7 +5308,12 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         ShowContextMenu(items, pos, onClosed: null);
     }
 
-    private void ShowContextMenu(IReadOnlyList<ContextMenuItem> items, Point pos, Action<MenuCloseReason>? onClosed)
+    /// <param name="items">The items.</param>
+    /// <param name="pos">Top-left corner, in window coordinates; unused with <paramref name="anchor"/>.</param>
+    /// <param name="onClosed">Told why the menu closed.</param>
+    /// <param name="anchor">Opened from the keyboard: the box the menu goes below (above, when there
+    /// is no room below), with its first item highlighted and its mnemonics shown.</param>
+    private void ShowContextMenu(IReadOnlyList<ContextMenuItem> items, Point pos, Action<MenuCloseReason>? onClosed, Rect? anchor = null)
     {
         // Close any existing context menu first
         CloseContextMenu(MenuCloseReason.Replaced);
@@ -5163,8 +5322,23 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         var theme = Application.Theme;
         var menuElement = new ContextMenuElement(items, theme.ContextMenu, () => CloseContextMenu(MenuCloseReason.Chosen));
         menuElement.HoverChanged = index => OnContextMenuHover(menuElement, index);
+        if (anchor is not null)
+        {
+            menuElement.MoveToEdge(first: true);
+            menuElement.ShowMnemonics = true;
+        }
         _contextMenuElement = menuElement;
         _contextMenuOverlay = ShowOverlay(menuElement, pos.X, pos.Y, dismissOnOutsideClick: true, hitTestable: true);
+        if (anchor is not { } a) return;
+
+        // Laid out by ShowOverlay: below the anchor's bottom-left corner, above it when there is no
+        // room below, and in from the window's edges.
+        float w = menuElement.Layout.Width, h = menuElement.Layout.Height;
+        float vw = PlatformWindow.LayoutWidth, vh = PlatformWindow.LayoutHeight;
+        float x = Math.Clamp(a.X, 0, Math.Max(0, vw - w));
+        float y = a.Bottom;
+        if (y + h > vh) y = a.Y - h >= 0 ? a.Y - h : Math.Max(0, vh - h);
+        UpdateOverlayPosition(_contextMenuOverlay, x, y);
     }
 
     /// <summary>The menu at <paramref name="level"/>: 0 the menu, 1 its open flyout, 2 that one's, and

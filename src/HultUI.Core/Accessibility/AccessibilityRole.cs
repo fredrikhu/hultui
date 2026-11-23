@@ -52,4 +52,7 @@ public enum AccessibilityRole : byte
     /// pointer; a dropdown's list, which publishes its items the same way, is a
     /// <see cref="List"/>.</summary>
     Menu,
+    /// <summary>A scrollbar standing on its own (<see cref="Elements.ScrollbarElement"/>): a range
+    /// value whose value is the scroll position.</summary>
+    ScrollBar,
 }

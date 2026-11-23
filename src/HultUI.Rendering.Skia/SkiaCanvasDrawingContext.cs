@@ -1,5 +1,6 @@
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
+using HultUI.Core.Styling;
 using SkiaSharp;
 
 namespace HultUI.Rendering.Skia;
@@ -134,6 +135,22 @@ internal sealed class SkiaCanvasDrawingContext : ICanvasDrawingContext
             Canvas.DrawPath(path, paint);
         }
         DrawText(text, position, color, fontSize);
+    }
+
+    public float DrawTextLine(string text, Point origin, ResolvedInheritedStyle style, IReadOnlyList<TextSpan>? spans = null)
+    {
+        bool shows = style.TextColor.A > 0 || AnySpanPaints(spans);
+        return _owner.DrawTextLine(text, Bounds.X + origin.X, Bounds.Y + origin.Y, style, spans, draw: shows);
+    }
+
+    // Whether a span gives its range a colour or a background of its own: a line in a transparent
+    // style then still draws something.
+    private static bool AnySpanPaints(IReadOnlyList<TextSpan>? spans)
+    {
+        if (spans is null) return false;
+        for (int i = 0; i < spans.Count; i++)
+            if (spans[i].Color.A > 0 || spans[i].Background.A > 0) return true;
+        return false;
     }
 
     public float MeasureText(string text, float fontSize)

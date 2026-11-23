@@ -107,6 +107,87 @@ public class HomeCursorTests
         });
     }
 
+    /// <summary>Down from the first card of Continue watching lands on the first card of the shelf under
+    /// it. It added a poster row's worth of places to the cursor instead, which from the first of the
+    /// stills skipped the next shelf and landed part-way along the one after.</summary>
+    [Fact]
+    public void Down_FromTheFirstStill_LandsOnTheNextShelfsFirstCard()
+    {
+        Host((session, app) =>
+        {
+            Keys(session, KeyCode.Right);
+            Assert.Equal(0, app.CursorIndex);
+
+            Keys(session, KeyCode.Down);
+
+            // The walk: the still at 0, then the five shelves of seven, each newest first.
+            Assert.Equal(1, app.CursorIndex);
+            Assert.Same(Walk(session)[1], session.Window.Window.FocusedElement);
+        });
+    }
+
+    /// <summary>Up and Down keep to the card under the cursor's, by where it is across the screen:
+    /// the third poster goes to the third poster of the next shelf, and up into a shelf of wider
+    /// stills to the still above it, the only one there.</summary>
+    [Fact]
+    public void UpAndDown_GoToTheCardUnderTheCursors()
+    {
+        Host((session, app) =>
+        {
+            // The still at 0, then shelves of seven from 1, 8, 15…: the first shelf's third card.
+            foreach (var key in new[] { KeyCode.Right, KeyCode.Right, KeyCode.Right, KeyCode.Right })
+                Keys(session, key);
+            Assert.Equal(3, app.CursorIndex);
+
+            Keys(session, KeyCode.Down);
+            Assert.Equal(10, app.CursorIndex);   // the next shelf's third card
+            Assert.Same(Walk(session)[10], session.Window.Window.FocusedElement);
+            Keys(session, KeyCode.Up);
+            Assert.Equal(3, app.CursorIndex);
+            Keys(session, KeyCode.Up);
+            Assert.Equal("resume-m003", session.Window.Window.FocusedElement?.AutomationId);
+            Keys(session, KeyCode.Up);   // the top shelf: nowhere further, and the key is still Home's
+            Assert.Equal(0, app.CursorIndex);
+        });
+    }
+
+    /// <summary>Down past the bottom of the window scrolls Home to the card, with its shelf's heading;
+    /// Up to the top scrolls back. The cursor used to walk on out of sight.</summary>
+    [Fact]
+    public void TheCursorsCard_IsScrolledIntoView()
+    {
+        Host((session, app) =>
+        {
+            Keys(session, KeyCode.Right);
+            for (int i = 0; i < 5; i++) Keys(session, KeyCode.Down);
+
+            var card = (BoxElement)session.Window.Window.FocusedElement!;
+            Assert.Equal(29, app.CursorIndex);   // the last shelf's first card
+            Assert.Same(Walk(session)[29], card);
+            var scroll = Ancestors(card).OfType<ScrollViewElement>().First();
+            Assert.True(scroll.ScrollOffsetY > 0, "Home did not scroll");
+            AssertOnScreen(scroll, card);
+
+            for (int i = 0; i < 5; i++) Keys(session, KeyCode.Up);
+            card = (BoxElement)session.Window.Window.FocusedElement!;
+            Assert.Equal("resume-m003", card.AutomationId);
+            AssertOnScreen(scroll, card);
+        });
+    }
+
+    private static void AssertOnScreen(ScrollViewElement scroll, Element card)
+    {
+        var view = scroll.WindowBorderBox;
+        var box = card.WindowBorderBox;
+        Assert.True(box.Y >= view.Y - 0.5f && box.Y + box.Height <= view.Y + view.Height + 0.5f,
+            $"{card.AutomationId} at {box} is outside the view {view}");
+    }
+
+    private static IEnumerable<Element> Ancestors(Element element)
+    {
+        for (var e = element.Parent; e is not null; e = e.Parent) yield return e;
+    }
+
     // ── Hosting ──────────────────────────────────────────────────────────
 
     private static void Host(Action<HeadlessSession, ApertureApp> body)
