@@ -31,8 +31,7 @@ public class GridRowKeepTests
     {
         Host((session, app, _, _) =>
         {
-            Keys(session, KeyCode.Right);   // the first press lands on the first card
-            Keys(session, KeyCode.Right);
+            Keys(session, KeyCode.Right);   // the grid opened with the cursor on its first card
             int made = app.GridRowsMade;
 
             Rebuild(session, app);
@@ -186,8 +185,7 @@ public class GridRowKeepTests
     {
         Host((session, app, _, _) =>
         {
-            Keys(session, KeyCode.Right);
-            Rebuild(session, app);
+            Rebuild(session, app);   // the grid opened with the cursor on its first card
             var row = Rows(session)[0];
             var cards = Cards(row);
             Stamp(cards);
@@ -209,8 +207,7 @@ public class GridRowKeepTests
     {
         Host((session, app, _, _) =>
         {
-            Keys(session, KeyCode.Right);
-            Rebuild(session, app);
+            Rebuild(session, app);   // the grid opened with the cursor on its first card
             var rows = Rows(session);
             var cards = rows.SelectMany(Cards).ToList();
             Stamp(cards);
@@ -234,7 +231,6 @@ public class GridRowKeepTests
     {
         Host((session, app, _, _) =>
         {
-            Keys(session, KeyCode.Right);
             Keys(session, KeyCode.Right);
             var focused = session.Window.Window.FocusedElement;
             Assert.Equal("card-m001", focused?.AutomationId);
@@ -285,8 +281,7 @@ public class GridRowKeepTests
     {
         Host((session, app, _, _) =>
         {
-            Keys(session, KeyCode.Right);
-            Keys(session, KeyCode.Down);
+            Keys(session, KeyCode.Down);   // from the first card, which the grid opened with
             Rebuild(session, app);
             var card = Card(session, "m007");
             var row = card.Parent;

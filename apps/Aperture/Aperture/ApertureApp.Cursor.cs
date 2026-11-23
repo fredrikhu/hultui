@@ -99,8 +99,9 @@ public sealed partial class ApertureApp
             _cursorIndex = -1;
             _cursorToEnd = false;
         }
-        // Back or Forward to a page whose cursor is nowhere: it starts on the first card on screen,
-        // which takes the keyboard (Arrive). A list still loading waits for its cards.
+        // A page arrived at whose cursor is nowhere: it starts on the first card on screen, which
+        // takes the keyboard (Arrive) unless something else took it meanwhile. A list still loading
+        // waits for its cards.
         if (_pendingFirstCard && items.Count > 0)
         {
             _pendingFirstCard = false;
@@ -108,13 +109,29 @@ public sealed partial class ApertureApp
             {
                 _cursorIndex = Math.Clamp(firstCard, 0, items.Count - 1);
                 _pendingCursorFocus = true;
+                _firstCardFocus = true;
             }
         }
     }
 
-    /// <summary>Set by Back or Forward to a page with no cursor (<see cref="Arrive"/>): the next list
-    /// the page registers starts the cursor on its first card on screen.</summary>
+    /// <summary>Set on arriving at a page with no cursor (<see cref="Arrive"/>): the next list the
+    /// page registers starts the cursor on its first card on screen.</summary>
     private bool _pendingFirstCard;
+
+    /// <summary>The cursor's card is the first card an arrival put it on, and has not had the
+    /// keyboard yet: it takes it only from what had it when the page was opened.</summary>
+    private bool _firstCardFocus;
+
+    /// <summary>Whether the keyboard stays where it went since the page was opened, rather than
+    /// going to the first card the arrival put the cursor on: a click or a Tab while the page's
+    /// cards were loading. Asked when the keyboard is handed over, after the build, when the tree
+    /// it went to is the window's.</summary>
+    private bool KeyboardStaysWhereItWent()
+    {
+        if (!_firstCardFocus) return false;
+        _firstCardFocus = false;
+        return KeyboardMovedSinceArrival();
+    }
 
     /// <summary>Whether the view being built registered a list (<see cref="SetCursorList"/>); one
     /// that did not is given an empty one.</summary>
@@ -374,7 +391,10 @@ public sealed partial class ApertureApp
         // A list still loading has no card yet: the build that brings them hands it over.
         if (!_pendingCursorFocus || _cursorItems.Count == 0) return;
         _pendingCursorFocus = false;
-        if (_cursorCardIndex == _cursorIndex) _cursorCard.Current?.Focus();
+        if (_cursorCardIndex == _cursorIndex)
+        {
+            if (!KeyboardStaysWhereItWent()) _cursorCard.Current?.Focus();
+        }
         else if (_fitGridStride > 0f) _window.RequestPostFrameCallback(FocusCursorCardMadeInTheFrame);
     }
 
@@ -382,6 +402,7 @@ public sealed partial class ApertureApp
     /// a card that left keeps the focus manager it had.</summary>
     private void FocusCursorCardMadeInTheFrame()
     {
+        if (KeyboardStaysWhereItWent()) return;
         if (Current.View == ApertureView.Library && _cursorCardIndex == _cursorIndex
             && _cursorCard.Current is { IsHosted: true } card)
             card.Focus();

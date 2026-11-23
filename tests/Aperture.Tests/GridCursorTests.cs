@@ -28,7 +28,7 @@ public class GridCursorTests
     {
         Host((session, app) =>
         {
-            Keys(session, KeyCode.Right);   // the first press lands on the first card
+            Keys(session, KeyCode.Right);   // on from the first card, which the page opened with
             int builds = app.Builds;
             var cards = Cards(session);
             Stamp(cards);
@@ -52,8 +52,7 @@ public class GridCursorTests
     {
         Host((session, app) =>
         {
-            Keys(session, KeyCode.Right);
-            Keys(session, KeyCode.Right);
+            Keys(session, KeyCode.Right);   // from the first card, which the grid opened with
             Keys(session, KeyCode.Right);
             var cards = Cards(session);
             Stamp(cards);
@@ -63,7 +62,7 @@ public class GridCursorTests
 
             Assert.Equal(builds + 1, app.Builds);
             Assert.Equal(cards, Cards(session));
-            // And the first card, made as the grid's Tab stop before the cursor was anywhere.
+            // And the first card, made with the ring the grid opened with.
             Assert.Equal(["card-m000", "card-m002"], cards.Where(c => c.AccessibleDescription is null).Select(c => c.AutomationId));
             AssertRingAndKeyboardOnTheCursor(session, app);
 
@@ -186,8 +185,7 @@ public class GridCursorTests
     {
         Host((session, app) =>
         {
-            Keys(session, KeyCode.Right);
-            for (int i = 0; i < 6; i++) Keys(session, KeyCode.Right);
+            for (int i = 0; i < 6; i++) Keys(session, KeyCode.Right);   // from the first card
             Rebuild(session, app);
             Assert.Equal(6, app.CursorIndex);   // the last of seven across
             var card = Assert.Single(Cards(session), c => c.Outline.Width > 0);

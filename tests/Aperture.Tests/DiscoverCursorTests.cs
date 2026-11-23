@@ -29,7 +29,7 @@ public class DiscoverCursorTests
     {
         Host((session, app) =>
         {
-            Keys(session, KeyCode.Right);   // the first press lands on the first card
+            Keys(session, KeyCode.Right);   // on from the first card, which the page opened with
             int builds = app.Builds;
             var cards = Cards(session);
             Stamp(cards);
@@ -53,8 +53,7 @@ public class DiscoverCursorTests
     {
         Host((session, app) =>
         {
-            Keys(session, KeyCode.Right);
-            Keys(session, KeyCode.Right);
+            Keys(session, KeyCode.Right);   // from the first card, which the page opened with
             Keys(session, KeyCode.Right);
             var cards = Cards(session);
             Stamp(cards);
@@ -65,7 +64,7 @@ public class DiscoverCursorTests
 
             Assert.Equal(builds + 1, app.Builds);
             Assert.Equal(cards, Cards(session));
-            // And the first card, made as the shelves' Tab stop before the cursor was anywhere.
+            // And the first card, made with the ring the page opened with.
             Assert.Equal([cards[0].AutomationId, cards[2].AutomationId], cards.Where(c => c.AccessibleDescription is null).Select(c => c.AutomationId));
             AssertRingAndKeyboardOnTheCursor(session, app);
 

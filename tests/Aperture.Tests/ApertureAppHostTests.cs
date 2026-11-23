@@ -332,12 +332,10 @@ public partial class ApertureAppHostTests
             session.Window.FindByAutomationId("rail-films")!.Click();
             PumpUntilShown(session, "Stalker");
 
-            // Nothing is under the cursor until an arrow says so; the first press lands
-            // on the first card rather than moving from nowhere.
-            Assert.Equal(-1, app.CursorIndex);
-            session.Window.PressKey(HultUI.Core.Events.KeyCode.Right);
-            for (int i = 0; i < 3; i++) session.PumpFrame();
+            // The page opens with its first card under the cursor and the keyboard on it, however
+            // it was opened (question 77, plan 17 round 18): the first press moves on from there.
             Assert.Equal(0, app.CursorIndex);
+            Assert.Equal("card-" + app.CursorItem!.Id, session.Window.Window.FocusedElement?.AutomationId);
 
             session.Window.PressKey(HultUI.Core.Events.KeyCode.Right);
             for (int i = 0; i < 3; i++) session.PumpFrame();
@@ -384,15 +382,15 @@ public partial class ApertureAppHostTests
             session.Window.FindByAutomationId("rail-films")!.Click();
             PumpUntilShown(session, "Stalker");
             session.Window.PressKey(HultUI.Core.Events.KeyCode.Right);
-            session.Window.PressKey(HultUI.Core.Events.KeyCode.Right);
             for (int i = 0; i < 3; i++) session.PumpFrame();
             Assert.Equal(1, app.CursorIndex);
 
             // A different library is a different list: "the second poster" means nothing
-            // in it, so the cursor is put away rather than carried over.
+            // in it, so the cursor starts over, on its first card, rather than carried over.
             session.Window.FindByAutomationId("rail-series")!.Click();
             for (int i = 0; i < 8; i++) session.PumpFrame();
-            Assert.Equal(-1, app.CursorIndex);
+            Assert.Equal(0, app.CursorIndex);
+            Assert.Equal("s1", app.CursorItem?.Id);
         });
     }
 
@@ -1048,8 +1046,7 @@ public partial class ApertureAppHostTests
             Assert.NotNull(session.Window.FindByAutomationId("card-m1"));
             Assert.Equal(LibraryLayout.List, app.Settings.Data.Layout);
 
-            // And the arrows still walk it, one row at a time.
-            session.Window.PressKey(HultUI.Core.Events.KeyCode.Down);
+            // And the arrows still walk it, one row at a time, from its first.
             session.Window.PressKey(HultUI.Core.Events.KeyCode.Down);
             for (int i = 0; i < 4; i++) session.PumpFrame();
             Assert.Equal(1, app.CursorIndex);
@@ -1328,7 +1325,6 @@ public partial class ApertureAppHostTests
             PumpUntilShown(session, "Stalker");
 
             // Put the cursor somewhere, then act on that card the way the menu does.
-            session.Window.PressKey(HultUI.Core.Events.KeyCode.Right);
             session.Window.PressKey(HultUI.Core.Events.KeyCode.Right);
             for (int i = 0; i < 4; i++) session.PumpFrame();
             int cursor = app.CursorIndex;

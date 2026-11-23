@@ -83,8 +83,7 @@ public class ShelfPageTests
     {
         DiscoverCursorTests.Host((session, app) =>
         {
-            Keys(session, KeyCode.Right);
-            for (int i = 0; i < 6; i++) Keys(session, KeyCode.Right);
+            for (int i = 0; i < 6; i++) Keys(session, KeyCode.Right);   // from the first card
             int builds = app.Builds;
             AssertRingAndKeyboardOnTheCursor(session, app);
 

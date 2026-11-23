@@ -13,7 +13,8 @@ namespace Aperture;
 /// <para>Each page remembers where the cursor was when you left it, and a library how far its grid
 /// was scrolled, so Back lands where you were scrolled, as a browser puts you, on the card you
 /// opened, ringed and with the keyboard. A page opened again from the rail starts where its last
-/// visit left it; one never visited starts with no cursor, at the top.</para>
+/// visit left it; one never visited starts at the top, its first card with the cursor and the
+/// keyboard.</para>
 /// </summary>
 public sealed partial class ApertureApp
 {
@@ -92,7 +93,7 @@ public sealed partial class ApertureApp
         if (!CanGoBack) return false;
         Leave();
         _at--;
-        Arrive(_history[_at], alongTheHistory: true);
+        Arrive(_history[_at]);
         Rerender();
         return true;
     }
@@ -103,7 +104,7 @@ public sealed partial class ApertureApp
         if (!CanGoForward) return false;
         Leave();
         _at++;
-        Arrive(_history[_at], alongTheHistory: true);
+        Arrive(_history[_at]);
         Rerender();
         return true;
     }
@@ -167,14 +168,17 @@ public sealed partial class ApertureApp
     /// library's grid where it was scrolled (<see cref="OpenGridWhereItWasLeft"/>); a page with no
     /// cursor of its own, or one arrived at fresh, starts with none. A page whose verbs lead (an
     /// item's) hands its first verb the keyboard once it has loaded.
-    /// <para>Back and Forward (<paramref name="alongTheHistory"/>) always hand the page the keyboard:
-    /// what had it went with the page left. With the cursor nowhere it starts on the page's first
-    /// card, ringed, as Tab onto that card starts it (<see cref="SetCursorList"/>): Escape from a
-    /// library opened from the rail went Back to Home, whose cursor was never set, and the keyboard
-    /// went nowhere, so no focus event went out and a screen reader stayed on an element that was
-    /// gone. A page that leads with verbs hands them the keyboard instead, and Search its field.</para>
+    /// <para>Every way into a page hands it the keyboard: Back and Forward, a number key, a rail
+    /// button, a card's link. With the cursor nowhere it starts on the page's first card on screen,
+    /// ringed, as Tab onto that card starts it (<see cref="SetCursorList"/>): Escape from a library
+    /// opened from the rail went Back to Home, whose cursor was never set, and the keyboard went
+    /// nowhere, so no focus event went out and a screen reader stayed on an element that was gone;
+    /// a number key left it on nothing in the same way, and a rail button on itself (plan 17 round
+    /// 18, questions 76 and 77). A page that leads with verbs hands them the keyboard instead, and
+    /// Search its field. Whatever takes the keyboard before the first card is handed it keeps it (a
+    /// click or a Tab while a slow page loads); the cursor is on that card all the same.</para>
     /// </summary>
-    private void Arrive(Visit visit, bool alongTheHistory = false)
+    private void Arrive(Visit visit)
     {
         _cursorKey = visit.CursorKey;
         _cursorIndex = visit.CursorIndex;
@@ -186,12 +190,20 @@ public sealed partial class ApertureApp
         _pendingCursorFocus = _cursorIndex >= 0;
         _pendingArrivalFocus = _cursorIndex < 0
             && visit.Route.View is ApertureView.Detail or ApertureView.DiscoverTitle;
-        _arrivalFocusHeld.SetTarget(_pendingArrivalFocus ? _window.FocusedElement : null);
         // Search is a view whose whole content is one field: arriving there means typing —
         // unless coming back to a result the cursor was on, which takes the keyboard instead.
         if (visit.Route.View == ApertureView.Search && _cursorIndex < 0) _pendingSearchFocus = true;
-        _pendingFirstCard = alongTheHistory && _cursorIndex < 0 && !_pendingArrivalFocus
-            && visit.Route.View != ApertureView.Search;
+        _pendingFirstCard = _cursorIndex < 0 && !_pendingArrivalFocus && visit.Route.View != ApertureView.Search;
+        _firstCardFocus = false;
+        _arrivalFocusHeld.SetTarget(_pendingArrivalFocus || _pendingFirstCard ? _window.FocusedElement : null);
+    }
+
+    /// <summary>Whether the keyboard went somewhere since the page was opened: an element other than
+    /// the one that had it then, still in the window. It stays there.</summary>
+    private bool KeyboardMovedSinceArrival()
+    {
+        _arrivalFocusHeld.TryGetTarget(out var before);
+        return _window.FocusedElement is { } held && !ReferenceEquals(held, before) && _window.IsInTree(held);
     }
 
     // ── The page's first verb ────────────────────────────────────────────
@@ -227,8 +239,7 @@ public sealed partial class ApertureApp
     private void FocusArrival()
     {
         if (!_pendingArrivalFocus) return;
-        _arrivalFocusHeld.TryGetTarget(out var before);
-        if (_window.FocusedElement is { } held && !ReferenceEquals(held, before) && _window.IsInTree(held))
+        if (KeyboardMovedSinceArrival())
         {
             Settled();   // the keyboard went somewhere since; it stays there
             return;

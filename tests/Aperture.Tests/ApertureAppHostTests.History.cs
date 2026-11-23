@@ -46,6 +46,18 @@ public partial class ApertureAppHostTests
         PumpUntilShown(session, "Stalker");
     }
 
+    /// <summary>Films by key 2, with the keyboard taken to the rail's Films button before the grid's
+    /// cards land: the grid opens with no cursor and the keyboard stays there.</summary>
+    private static void OpenFilmsWithTheKeyboardOnTheRail(HeadlessSession session)
+    {
+        PumpUntilShown(session, "Films");
+        session.Window.PressKey(KeyCode.Digit2);   // builds at once; the page's cards land a frame later
+        Assert.Null(session.Window.FindByAutomationId("card-m1"));
+        session.Window.FindByAutomationId("rail-films")!.Element.Focus();
+        session.PumpUntil(() => session.Window.FindByAutomationId("card-m1") is not null, TimeSpan.FromSeconds(5));
+        for (int i = 0; i < 4; i++) session.PumpFrame();
+    }
+
     private static void SideButton(HeadlessSession session, MouseButton button)
     {
         // Over the page, wherever a thumb happens to be: on a poster here.
@@ -136,7 +148,6 @@ public partial class ApertureAppHostTests
         {
             OpenFilms(session);
             Press(session, KeyCode.Right);
-            Press(session, KeyCode.Right);
             var opened = app.CursorItem!;
             Assert.Equal(1, app.CursorIndex);
 
@@ -159,7 +170,7 @@ public partial class ApertureAppHostTests
     }
 
     /// <summary>A page opened again from the rail starts where its last visit left the cursor,
-    /// across other pages with cursors of their own; one never visited starts with none.</summary>
+    /// across other pages with cursors of their own; one never visited starts on its first card.</summary>
     [Fact]
     public void APageOpenedAgain_StartsWhereItsLastVisitLeftTheCursor()
     {
@@ -167,11 +178,10 @@ public partial class ApertureAppHostTests
         {
             OpenFilms(session);
             Press(session, KeyCode.Right);
-            Press(session, KeyCode.Right);
             var item = app.CursorItem!;
             Press(session, KeyCode.Digit3);   // the series: a page with a cursor of its own
             Assert.Equal((ApertureView.Library, "shows"), (app.Current.View, app.Current.Id));
-            Assert.Equal(-1, app.CursorIndex);
+            Assert.Equal(0, app.CursorIndex);
             Press(session, KeyCode.Right);
 
             session.Window.FindByAutomationId("rail-films")!.Click();
@@ -334,7 +344,7 @@ public partial class ApertureAppHostTests
         {
             OpenManyFilms(session);
             var box = LibraryGrid(session)!.Layout.AbsoluteContentBox;
-            Press(session, KeyCode.Right);   // the cursor on the first film, at the top
+            Assert.Equal(0, app.CursorIndex);   // the cursor on the first film, at the top, as the grid opened
             for (int i = 0; i < 15; i++)
             {
                 session.Window.Wheel(box.X + box.Width / 2, box.Y + box.Height / 2, 0, -4);
@@ -412,6 +422,83 @@ public partial class ApertureAppHostTests
         });
     }
 
+    /// <summary>
+    /// A number key or a rail button to a page with no cursor, from Home or from a film's page: the
+    /// page's first card takes the cursor and the keyboard, and a screen reader is told so, as Back and
+    /// Escape do (question 77, plan 17 round 18). The keyboard stayed on the rail button, or went
+    /// nowhere from Home and from a film's page, so no focus event went out and a reader stayed on an
+    /// element that was gone. The key after walks on from that card and builds nothing.
+    /// </summary>
+    [Theory]
+    [InlineData("Home", "key 2")]
+    [InlineData("a film's page", "key 2")]
+    [InlineData("Home", "the rail")]
+    [InlineData("a film's page", "the rail")]
+    public void ANumberKeyOrTheRail_HandsThePageItOpensItsFirstCard(string from, string how)
+    {
+        Host(Library(), (session, app) =>
+        {
+            HeadlessUiaReader? reader = OperatingSystem.IsWindows() ? HeadlessUiaReader.Install(session.Window) : null;
+            try
+            {
+                PumpUntilShown(session, "Films");
+                if (from != "Home")
+                {
+                    app.Navigate(new Route(ApertureView.Detail, "m1", "Stalker"));
+                    PumpUntilShown(session, "Stalker is a fixture.");
+                }
+                int before = reader?.Raised.Count ?? 0;
+                if (how == "the rail") session.Window.FindByAutomationId("rail-films")!.Click();
+                else session.Window.PressKey(KeyCode.Digit2);
+                session.PumpUntil(() => session.Window.FindByAutomationId("card-m1") is not null, TimeSpan.FromSeconds(5));
+                for (int i = 0; i < 4; i++) session.PumpFrame();
+
+                Assert.Equal(ApertureView.Library, app.Current.View);
+                Assert.Equal(0, app.CursorIndex);
+                var card = Assert.IsAssignableFrom<BoxElement>(FocusedElement(session));
+                Assert.Equal("card-" + app.CursorItem!.Id, card.AutomationId);
+                Assert.True(card.IsHosted && card.Outline.Width > 0, $"{how} from {from}: the first card is not ringed on screen");
+                if (reader is not null && OperatingSystem.IsWindows())
+                {
+                    var told = reader.Raised.Skip(before)
+                        .Where(e => e.Kind == HeadlessUiaEventKind.Event && e.Id == HeadlessUiaReader.FocusChangedEvent)
+                        .Select(e => e.Element!.Value).ToList();
+                    // A click tells of the rail button it focuses first; the card is told last, live and named.
+                    Assert.True(told.Count > 0 && told[^1] == card.Id,
+                        $"{how} from {from}: the focus events went to [{string.Join(", ", told)}], not to the card {card.Id}");
+                    Assert.NotNull(reader.Node(card.Id));
+                    Assert.False(string.IsNullOrEmpty(reader.Name(card.Id)), "the card a reader is told of has no name");
+                }
+
+                // A key walks on from it, as from a card Tab reached, and builds nothing.
+                int builds = app.Builds;
+                Press(session, KeyCode.Right);
+                Assert.Equal(1, app.CursorIndex);
+                Assert.Equal("card-" + app.CursorItem!.Id, Focused(session));
+                Assert.Equal(builds, app.Builds);
+            }
+            finally { reader?.Dispose(); }
+        });
+    }
+
+    /// <summary>The keyboard taken somewhere else before a page's first card is handed it stays there:
+    /// the first card takes the keyboard only from what had it when the page was opened, as an item's
+    /// first verb does. The cursor is on that card all the same, and an arrow walks on from it.</summary>
+    [Fact]
+    public void TheFirstCard_LeavesTheKeyboardWhereItWasTakenSince()
+    {
+        Host(Library(), (session, app) =>
+        {
+            OpenFilmsWithTheKeyboardOnTheRail(session);
+            Assert.Equal("rail-films", Focused(session));
+            Assert.Equal(0, app.CursorIndex);
+
+            Press(session, KeyCode.Right);
+            Assert.Equal(1, app.CursorIndex);
+            Assert.Equal("card-" + app.CursorItem!.Id, Focused(session));
+        });
+    }
+
     /// <summary>Play's name says the film, so a reader hears what Enter on a card opened ("Play
     /// Stalker", not "Play"); Resume's the same. The labels on screen stay the verbs alone.</summary>
     [Fact]
@@ -471,15 +558,16 @@ public partial class ApertureAppHostTests
         });
     }
 
-    /// <summary>A list of cards is one Tab stop: Tab goes into the grid at its first card, which
-    /// takes the cursor, and Enter opens it; one more Tab leaves the grid.</summary>
+    /// <summary>A list of cards is one Tab stop: Tab goes into the grid at the cursor's card, the
+    /// first as the grid opened, and Enter opens it; one more Tab leaves the grid. (The grid's first
+    /// card had the keyboard as it opened, unless something took it first, as the rail does here.)</summary>
     [Fact]
     public void AGridIsOneTabStop_WhoseCardTakesTheCursor()
     {
         Host(Library(), (session, app) =>
         {
-            OpenFilms(session);
-            Assert.Equal(-1, app.CursorIndex);
+            OpenFilmsWithTheKeyboardOnTheRail(session);
+            Assert.Equal("rail-films", Focused(session));
             TabUntil(session, e => e?.AutomationId?.StartsWith("card-", StringComparison.Ordinal) == true);
             Assert.Equal(0, app.CursorIndex);
             Assert.Equal("card-" + app.CursorItem!.Id, Focused(session));
