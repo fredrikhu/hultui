@@ -635,10 +635,11 @@ public class PartTests
     private static string DoorId(Part door) =>
         Descendants(door.Mount()).OfType<BoxElement>().First(b => b.AutomationId?.StartsWith("rail-", StringComparison.Ordinal) == true).AutomationId!;
 
-    /// <summary>The rail button lit for where the app is: the only one with an accent background.</summary>
+    /// <summary>The rail button lit for where the app is: the only one with an accent background. (The
+    /// rail is the part after the title bar; Home's shelves are parts too.)</summary>
     private static string Lit(HeadlessSession session)
     {
-        var rail = PartHosts(session).Last();
+        var rail = PartHosts(session).First(h => Descendants(h).Any(e => e.AutomationId == "rail-home"));
         return Descendants(rail).OfType<BoxElement>()
             .FirstOrDefault(b => b.AutomationId?.StartsWith("rail-", StringComparison.Ordinal) == true
                 && b.BorderColor != HultUI.Core.Primitives.Color.Transparent)?.AutomationId ?? "";

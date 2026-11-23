@@ -764,6 +764,32 @@ the one lighting up; whatever builds the rail builds every door with it. Make su
 keep them, the fixed ones by name and a list's by place, so a list that changes makes and drops none:
 a film's page 100.8 → 72.9 KB (−56 % of the 167.4 before both), Forward 61.1 → 32.9, Back −9 %.
 
+Aperture's Home makes each shelf of library cards a part in the same way (round 18, step 9), kept by the
+row's key rather than its place: one film can stand on two shelves, and a part must never be handed
+another row's cards. A turn of a shelf's page (a cursor key onto a card on another page, the shelf's Next
+and Previous) writes that shelf's `own:` revision and builds it alone; it used to build all of Home, every
+shelf's cards asked for again. The app's build still asks for the cards on each shelf's page, as before,
+and places the shelf stale only when one of them was made or its heading would read otherwise, so a shelf
+whose data changed shows it; the forced `MarkDirty()` invalidates the shelves' group as well. Three
+lessons:
+
+- **A part's own build reads untracked what its owner's build reads.** A turn asks for the cards itself,
+  and the new-season row's cards read a loader: tracked, a load that lands would build the shelf and the
+  app.
+- **Hand over the keyboard only from a build the part ran alone.** `afterBuild:` runs for every build but
+  the first, a build that `Place` starts inside the owner's build among them, before the owner's own
+  after-build: a shelf focuses the cursor's card after a turn, and leaves it to the app otherwise.
+- **`Mount()` before `Place(stale:)` when the comparison needs the part's last build.** A part with no
+  host builds as `Mount()` makes one; the value compared before that is the one before its first build,
+  and a stale flag computed from it builds it twice.
+
+Headless (JIT, three shelves of 30 films, 1440×900, a key and its frames): a turn whose pictures are cached
+67.0–68.4 → 50.9 KB (−24…−26 %; 61 → 52 elements made and no build of the app), with seven pictures to
+fetch 93.1–98.0 → 77.0–80.2 (−17…−18 %), one that also made again the shelf the cursor left 121.4 → 81.1
+(−33 %); with eight shelves 72.9–73.3 → 51.0 (−30 %). Home's start +1.0 % (+2.8 % with eight shelves) and
+Back to Home +2.1 % (−1.3 %): the parts and their hosts. What is left of a turn is the shelf: the seven
+cards it makes (39 KB) and the heading's page count and buttons, its menu and "See all" handed back.
+
 A worker's progress tick is a view-only change too. Vesper's copy, pack and folder-size workers
 asked for a full rebuild about every 40 ms, so all eleven parts were built some 25 times a second
 for the whole copy, though a tick moves only the progress the view shows and, of the parts, the

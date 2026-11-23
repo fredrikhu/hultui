@@ -254,7 +254,8 @@ public sealed partial class ApertureApp
     /// every shelf, the LINQ that finds them and the walk's key with them.</item>
     /// <item>On both, a card on another page of its shelf turns the shelf to that page, and a build
     /// draws it, the ring and the keyboard on the card (one build a page turned). The shelf used to
-    /// stay where it was, and the cursor walked on with no card ringed.</item>
+    /// stay where it was, and the cursor walked on with no card ringed. On Home that build is the
+    /// shelf's own (a part, ApertureApp.Home.cs); it used to be all of Home's, every shelf with it.</item>
     /// <item>The library grid, while its latest build drew it. The grid is scrolled to the cursor as a
     /// build does it, and the rows that brings in are made in the frame, the ring on the cursor's. A
     /// key used to build the view and make the two rows it moved between, and never handed over the
@@ -271,6 +272,7 @@ public sealed partial class ApertureApp
     {
         Element? left, reached;
         bool build = false;
+        HomeShelfPart? turned = null;
         // The card the move leaves is the list's Tab stop, which before the first move is the first.
         from = Math.Max(from, 0);
         switch (Current.View)
@@ -278,7 +280,12 @@ public sealed partial class ApertureApp
             case ApertureView.Home:
                 if (_homeBuild != Builds || !HomeCardAt(from, out left)) return false;
                 if (!HomeCardAt(_cursorIndex, out reached)) build = true;
-                build |= TurnHomeShelfToCursor();
+                // A shelf of library cards turns alone; the watchlist's page turns with a build of Home.
+                if (TurnHomeShelfToCursor() is { } shelf)
+                {
+                    if (!build && shelf.Part is { } part) turned = part;
+                    else build = true;
+                }
                 break;
             case ApertureView.Discover:
                 if (_discoverBuild != Builds || !DiscoverCardAt(from, out left) || !DiscoverCardAt(_cursorIndex, out reached)) return false;
@@ -305,7 +312,10 @@ public sealed partial class ApertureApp
             _cursorCardIndex = _cursorIndex;
         }
         if (build) return false;
-        FocusCursorCard();
+        // The shelf builds its new page alone, the cursor's card ringed, and hands that card the keyboard
+        // (AfterHomeShelfBuild).
+        if (turned is not null) turned.Turned.Value++;
+        else FocusCursorCard();
         return true;
     }
 

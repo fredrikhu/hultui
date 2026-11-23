@@ -36,6 +36,10 @@ public sealed partial class ApertureApp
     // compared on the app's build as the values are, so a page opened builds the door going dark
     // and the one lighting up, about 3.5 KB each, not the rail's nine (31.3 KB). Whatever builds
     // the rail builds every door with it, from the value it recorded.
+    //
+    // Home's shelves of library cards are parts as well (HomeShelfPart, ApertureApp.Home.cs), kept by
+    // their row's key in a group of their own that the hidden MarkDirty invalidates with this one: a turn
+    // of a shelf's page builds that shelf alone.
 
     private readonly PartGroup _parts = new();
     private Part? _titleBarPart, _railPart;
@@ -208,12 +212,14 @@ public sealed partial class ApertureApp
     /// <summary>Whether the light is on this door.</summary>
     private bool IsLit(RailDoorPart door) => door.Key == _light;
 
-    /// <summary>Rebuilds the window and every part, whatever moved. Hides <c>Component.MarkDirty</c>,
-    /// so every helper handed this app's MarkDirty builds the parts as well: the safe default for a
-    /// change no value above covers (a toast that comes; PartTests' oracle).</summary>
+    /// <summary>Rebuilds the window and every part, Home's shelves among them (ApertureApp.Home.cs), whatever
+    /// moved. Hides <c>Component.MarkDirty</c>, so every helper handed this app's MarkDirty builds the parts
+    /// as well: the safe default for a change no value above covers (a toast that comes; PartTests'
+    /// oracle).</summary>
     private new void MarkDirty()
     {
         _parts.Invalidate();
+        _homeShelfGroup.Invalidate();
         base.MarkDirty();
     }
 

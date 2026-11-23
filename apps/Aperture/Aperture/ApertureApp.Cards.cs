@@ -886,8 +886,8 @@ public sealed partial class ApertureApp
     /// The cursor's place <paramref name="index"/> on a shelf that starts at <paramref name="start"/> in
     /// the walk and holds <paramref name="count"/> cards, <paramref name="perPage"/> a page, showing
     /// <paramref name="page"/>: when the place is on the shelf but on another page, turns the shelf to
-    /// it and says so, and the build to come draws that page. A shelf used to stay where it was, so the
-    /// cursor walked on with no card ringed and the keyboard left behind.
+    /// it and says so, and the build to come draws that page (a Home shelf's own, Discover's view). A shelf
+    /// used to stay where it was, so the cursor walked on with no card ringed and the keyboard left behind.
     /// </summary>
     private bool TurnShelfTo(int index, int start, int count, string rowId, int perPage, int page)
     {
@@ -900,11 +900,8 @@ public sealed partial class ApertureApp
 
     private Element PageButton(string glyph, string label, string rowId, int target, bool enabled)
     {
-        var b = Ui.IconButton(glyph, label, () =>
-        {
-            _rowPages[rowId] = Math.Max(0, target);
-            Rerender();
-        }, 14f, enabled ? Halide.TextDim : Halide.TextFaint, $"{rowId}-{label.ToLowerInvariant()}");
+        var b = Ui.IconButton(glyph, label, () => TurnRowTo(rowId, target),
+            14f, enabled ? Halide.TextDim : Halide.TextFaint, $"{rowId}-{label.ToLowerInvariant()}");
         if (!enabled)
         {
             b.Opacity(0.4f);
