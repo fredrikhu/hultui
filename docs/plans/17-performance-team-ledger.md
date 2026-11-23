@@ -4,9 +4,9 @@ State of [the performance team](17-performance-team.md). The orchestrator update
 file after every step and commits it with the step's work. Full survey reports are in
 [`17-reports/`](17-reports/).
 
-- **Round:** 18
-- **Phase:** release — round 18 (14 build steps, the pre-suite work, main merged twice (87a0d35e, 2eba86c9); the full suite green at 2eba86c9): merged into main 6366d201 and pushed 2026-11-23 11:28; waiting for CI (runs 45156444317 CI, 45156441081 Push on main). The survey ran 2026-11-22 in session
-  00f54f03 (reports `17-reports/r18-*`; usage 1 → 8 % of the week, the 5-hour window 7 → 54 %). Questions 73–77 are answered (73 → (b), 74 → (c), 75 → (a), 76 → (a), 77 → (a) on
+- **Round:** 19
+- **Phase:** survey — round 19 (start in a fresh context, with the resume command below). Round 18 RELEASED 2026-11-23: main 6366d201, CI run 45156444317 green on the first attempt. Round 18's survey ran 2026-11-22 in session
+  00f54f03 (reports `17-reports/r18-*`; usage 1 → 8 % of the week, the 5-hour window 7 → 54 %). Its questions 73–77 are answered (73 → (b), 74 → (c), 75 → (a), 76 → (a), 77 → (a) on
   2026-11-23, its commit riding with step 7); question 78 (asked at step 14, not perf) is open. Round 18's files (the survey brief `brief-r18-survey.md`, build
   briefs `brief-r18b<N>.md`, `archive_r18.py`, `merge_r18.py`, `desk.ps1`, agent ids `r18-agents.txt`, probes
   `r18-<area>\` and `r18b<N>\`) are in session 00f54f03's scratchpad
@@ -14,8 +14,8 @@ file after every step and commits it with the step's work. Full survey reports a
   17's are in session 35903ed7's scratchpad
   `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\35903ed7-ff10-416d-84e9-b6c09675ab6b\scratchpad\`
   (`fullsuite-r17.sh` with `fedora-r17.sh` is the model for round 18's full suite, `brief-r17b<N>.md` for its build
-  briefs). Older scratch publishes have lost their DLLs (r18-8): re-publish rather than reuse them. Round 17 RELEASED
-  2026-11-20: main e799c23b, CI run 44653899561 green on the first attempt. The Jellyfin account to browse as is in
+  briefs). Older scratch publishes have lost their DLLs (r18-8): re-publish rather than reuse them. Round 18 RELEASED
+  2026-11-23: main 6366d201, CI run 45156444317 green on the first attempt (round 17: e799c23b, 2026-11-20). The Jellyfin account to browse as is in
   memory `aperture-jellyfin` (never in committed docs). Read the desk at the start and before every hold. To resume in a
   fresh context, run in this worktree: `/loop Run the next step of the performance team: follow
   docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md. Read both once per session
@@ -25,7 +25,7 @@ file after every step and commits it with the step's work. Full survey reports a
   read it whole). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a pre-push hook refuses
   pushes built on the old history).
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`)
-- **Review commits since:** round 18's survey reviews round 17's build, `git log --no-merges 0df5e3ea..e799c23b^2 ^45cbde7b^2` (the archive commit to the round 17 release; 41 commits not merges), with main's 13 commits outside plan 17 that 45cbde7b merged (781a857f, ba15d841, 78a69ee5, 52acb2f2 with their plan 19 notes and rows; 3490ba67; e66ead9f) and main's 5 that b28e9128 merged (fe8f4ecf, 0f9c8477, ee044d36, f67b25ec, 93f8a26d). Earlier: round 17's survey reviewed round 16's build, 32c85e81..b131ae85 (the last survey report to the round 16 release; 50 commits not merges), with main's 8 commits outside plan 17 that its merges 666e6486 and 5e180d17 brought in (266d6aee, 4917f40d, 23b552d8, 38ec9773, b8a3dcf5, d3e40ecb, 22c6e002, 791d1a44); main gained nothing after b131ae85. Earlier: round 16's survey reviewed round 15's build, 587f1767..75f2288a (the last survey report to the round 15 release; the one merge is round 15's own into main), and main's 41 commits outside plan 17 since that release, `git log --no-merges 75f2288a..3038f82b ^9550ecec` (42 with the ledger's cc093b50) (SkiaSharp 4 043f5b38, SDL 3.5.0 fd0cccb7, the app team's fixes; the screen-reader fix counts as reviewed). Earlier: round 15's survey reviewed round 14's build, 06d4db59..5b2985be (the last survey report to the round 14 release; the one merge is round 14's own into main). Earlier: round 14's survey reviewed round 13's build, 8f01b6fd..e432c224 (the last survey report to the round 13 release; its two merges are round 13's own into main). Round 13's survey reviewed round 12's build, 5f1744ca..afc1ed40 (the last survey report to the round 12 release; the one merge is round 12's own into main). Round 12's survey reviewed round 11's build, 5731ee58..b0dd1954 (the last survey report to the
+- **Review commits since:** round 19's survey reviews round 18's build, `git log --no-merges 49bd5d81..6366d201^2 ^87a0d35e^2 ^2eba86c9^2` (the survey merge to the round 18 release; 60 commits not merges), with main's 8 commits outside plan 17 that 87a0d35e and 2eba86c9 merged (1951019d, 6d95da0c, d9bf8e25, 11554b8b, ab8a2050, 133bcfe6, bd3605ff, d335159e; 936b5520's merge). Earlier: round 18's survey reviewed round 17's build, `git log --no-merges 0df5e3ea..e799c23b^2 ^45cbde7b^2` (the archive commit to the round 17 release; 41 commits not merges), with main's 13 commits outside plan 17 that 45cbde7b merged (781a857f, ba15d841, 78a69ee5, 52acb2f2 with their plan 19 notes and rows; 3490ba67; e66ead9f) and main's 5 that b28e9128 merged (fe8f4ecf, 0f9c8477, ee044d36, f67b25ec, 93f8a26d). Earlier: round 17's survey reviewed round 16's build, 32c85e81..b131ae85 (the last survey report to the round 16 release; 50 commits not merges), with main's 8 commits outside plan 17 that its merges 666e6486 and 5e180d17 brought in (266d6aee, 4917f40d, 23b552d8, 38ec9773, b8a3dcf5, d3e40ecb, 22c6e002, 791d1a44); main gained nothing after b131ae85. Earlier: round 16's survey reviewed round 15's build, 587f1767..75f2288a (the last survey report to the round 15 release; the one merge is round 15's own into main), and main's 41 commits outside plan 17 since that release, `git log --no-merges 75f2288a..3038f82b ^9550ecec` (42 with the ledger's cc093b50) (SkiaSharp 4 043f5b38, SDL 3.5.0 fd0cccb7, the app team's fixes; the screen-reader fix counts as reviewed). Earlier: round 15's survey reviewed round 14's build, 06d4db59..5b2985be (the last survey report to the round 14 release; the one merge is round 14's own into main). Earlier: round 14's survey reviewed round 13's build, 8f01b6fd..e432c224 (the last survey report to the round 13 release; its two merges are round 13's own into main). Round 13's survey reviewed round 12's build, 5f1744ca..afc1ed40 (the last survey report to the round 12 release; the one merge is round 12's own into main). Round 12's survey reviewed round 11's build, 5731ee58..b0dd1954 (the last survey report to the
   round 11 release; it includes the .NET 11 upgrade's step 0 only as already reviewed). Earlier: round 11's survey reviewed round 10's build and the .NET 11 upgrade, f4d6050d..868e2ffc
   (the last survey report to the upgrade's captures; round 10's merge into main cc55bdcc is in the range). Earlier: round 10's survey reviewed round 9's build, 4919ac40..facced69 (the last survey report
   to the round 9 release; 82 commits, 81 not merges; no merge from main this round). Round 9's survey reviewed
@@ -1435,3 +1435,15 @@ From 2026-11-19 (round 17's survey); earlier entries are in the archive ([to 202
   (387b277e) passes on Linux; docfx 0 warnings, 0 errors. One new compiler warning: CS0419 (an ambiguous cref) at
   `src/HultUI.Text/MeasurementCache.cs:393` from 3191b065's new `TryGet` overload (internal; fix in the next round).
   Phase → release.
+- 2026-11-23: round 18 RELEASED. Merged into main 6366d201 and pushed (gated: origin/main d335159e was in the branch
+  and unchanged before the push; the tree identical to the tested 2eba86c9 outside docs/plans; the primary checkout
+  fast-forwarded behind the guard). CI run 45156444317 green on the first attempt (test, test-linux, docs,
+  meridian-keyring on Ubuntu and macOS); "Push on main" 45156441081 green; main's Windows red from the scrollbar test
+  (run 45062007836) fixed by 387b277e. Round 18 in sum: 14 build steps landed (60 commits), the user's pause after step 6
+  and resume at midnight, step 12 run last for the 4K (absent; F16 stays at 3 images, the HDR run owed). Real-app
+  results: Aperture a film page open −56 % (parts), a library first open −47 % (pictures land in place), Forward −58 %,
+  a Home shelf turn −18…−33 %, heroes private −7 %, sign-in page DXGI local −14…−17 % (two images); Junction working set
+  at rest after big walks −20…−24 %, diff rows −12…−18 %, the drag ghost's GPU memory −30 % on GL; Vesper's Arabic
+  reader drag −83 % a step, the Multi-rename counters' GPU memory −26 % on GL; context menus act on the live element
+  after a rebuild; Back in Aperture lands where it was and every way into a page focuses a card. Open: question 78.
+  Round → 19, Phase survey; the loop stops here and round 19 starts in a fresh context.
