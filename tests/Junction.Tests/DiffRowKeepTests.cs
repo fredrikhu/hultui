@@ -95,6 +95,8 @@ public class DiffRowKeepTests
             Assert.True(app.DiffRowsMade > 0, "no row was drawn plain");
             var rows = Rows(app);
             int flattens = app.DiffFlattens, made = app.DiffRowsMade, passes = app.DiffHeightPasses;
+            var cells = NumberAndSignCells(app);
+            Assert.True(cells.Count > rows.Count, $"{cells.Count} number and sign labels on {rows.Count} rows");
             var measures = MeasureCounter.Install(session);
 
             colours.SetResult();
@@ -106,6 +108,8 @@ public class DiffRowKeepTests
             Assert.Equal(passes, app.DiffHeightPasses);
             Assert.Equal(flattens, app.DiffFlattens);
             Assert.Equal(rows, Rows(app));   // the same row elements, in the same places
+            // The numbers and signs (labels of the rows themselves) are kept with them, in their colours.
+            Assert.Equal(cells, NumberAndSignCells(app));
 
             // What the rows made afresh in colour draw.
             var recoloured = Pixels(session);
@@ -412,6 +416,12 @@ public class DiffRowKeepTests
 
     private static Element RowWith(JunctionApp app, string code) =>
         Rows(app).First(r => Texts(r).Any(t => t.StartsWith(code, StringComparison.Ordinal)));
+
+    /// <summary>The rows' line numbers and signs: each label, what it says, its colour and where it is.</summary>
+    private static List<(TextElement Label, string Text, Color Color, Rect Box)> NumberAndSignCells(JunctionApp app) =>
+        Rows(app).SelectMany(Descendants).OfType<TextElement>()
+            .Where(t => !t.Selectable && t.Content is not "" && (t.Content.All(char.IsAsciiDigit) || t.Content is "+" or "−" or " "))
+            .Select(t => (t, t.Content, t.ResolvedInherited.TextColor, t.Layout.AbsoluteBorderBox)).ToList();
 
     /// <summary>Every span background the rows on screen draw.</summary>
     private static List<Color> Backgrounds(JunctionApp app) =>

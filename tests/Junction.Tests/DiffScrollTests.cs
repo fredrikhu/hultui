@@ -295,16 +295,17 @@ public class DiffScrollTests
         return cell.Layout.AbsoluteContentBox.X - cell.Children[0].Layout.AbsoluteBorderBox.X;
     }
 
-    /// <summary>X of the line number. Not Children[0] — in the staging views that is the
-    /// checkbox column, which is empty on a context row.</summary>
+    /// <summary>X of the line number: the row's first label that is not its code. Not
+    /// Children[0] — in the staging views that is the checkbox column, which is empty on a
+    /// context row.</summary>
     private static float NumberX(JunctionApp app) =>
-        FirstCodeRow(app).Children
-            .First(c => c.Children.Count > 0 && c.Children[0] is TextElement)
-            .Children[0].Layout.AbsoluteBorderBox.X;
+        FirstCodeRow(app).Children.OfType<TextElement>().First(t => !t.Selectable).Layout.AbsoluteBorderBox.X;
 
-    /// <summary>The first row that is a code line rather than a hunk header.</summary>
+    /// <summary>The first row that is a code line rather than a hunk header: its last child is
+    /// the panned cell holding the code label.</summary>
     private static Element FirstCodeRow(JunctionApp app) =>
-        FindList(app).Children.First(c => c.Children.Count >= 4);
+        FindList(app).Children.First(c => c.Children.Count >= 3
+            && c.Children[^1] is BoxElement { Children: [TextElement { Selectable: true }] });
 
     private static HultUI.Core.Builders.HorizontalPan Pan(JunctionApp app) =>
         (HultUI.Core.Builders.HorizontalPan)typeof(JunctionApp)

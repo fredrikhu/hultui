@@ -1252,6 +1252,18 @@ landing 436–438 → 216 KB, and a control focused in its rows keeps the focus 
 again and make the row it was in). Pixels are byte-identical to the rows made afresh in colour. A span
 that sets a weight, slant, size or family moves where a line breaks: make that row again.
 
+And make a row of no more elements than it draws, since every row scrolled in or made again pays for
+each. A label places itself: its `Width`, `Padding` and `AlignSelf` do what a box around it did, so a
+cell that is one label needs no box. A cell that draws nothing (an empty value, a blank column) is a
+margin of a neighbour that does not shrink, not an empty label in a box (a margin on an item that
+shrinks changes its share of the shrink: LAYOUT.md, "Flex Grow and Shrink"). Junction's diff rows held
+each line number and the sign as a label in a box, and a missing number as an empty one (round 18 step
+14): a unified row went from 9 elements to 5 or 6 (8 → 4 wrapped), a split row from 11 to 8 or 9 (9 →
+6 or 7), and a row made and drawn from 7.3–8.2 to 5.0–5.2 KB (headless JIT, 1,440×900). The Commit
+view's unified diff of a commit of C# files: a first visit 827–864 → 733–770 KB (−11 %), a revisit
+631 → 537 KB (−15 %), ten wheel notches 280 → 231 KB (−17 %); split −3…−13 %, where the code cells are
+more of a row. The frames are byte-identical, wrapped or not, at 1.0 and 1.5.
+
 A picture that lands is the same: put it into the image element that waits for it, don't build the
 view to make the cards that show it again. Aperture's cards, heroes and faces make their placeholder
 (the glyph, or an empty image for a hero) as the image element the picture goes into, and the landing
