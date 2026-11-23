@@ -479,6 +479,7 @@ public partial class JunctionApp : Component, IDisposable
         Ui.DisplayScale = _window.DisplayScale;
         _resizeLayoutWidth = _window.LayoutWidth;
         _window.Resized += OnWindowResize;
+        _window.InputActivity += NoteInput;   // an idle collection waits for the input to stop
 
         // Global keys land on the host when nothing is focused (see App.cs for
         // the same rationale). Materialise the host so the handler is wired.
@@ -1937,6 +1938,7 @@ public partial class JunctionApp : Component, IDisposable
     public void Dispose()
     {
         _window.Resized -= OnWindowResize;
+        _window.InputActivity -= NoteInput;
         _autoFetchCts?.Cancel();
         _autoFetchCts?.Dispose();
         // AnimationManager's tween list is process-global, and a looping tween holds a

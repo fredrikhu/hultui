@@ -161,8 +161,14 @@ for 24 MB of objects; `GC.Collect(2, GCCollectionMode.Aggressive, blocking: true
 left 24 MB, and the window went to 134.0 MB, less than the 154.0 MB of the same walk keeping nothing
 (round 17 of plan 17; the numbers are in [DECISIONS.md](DECISIONS.md)). It is a blocking collection:
 run it once, when the burst is over and the app has stood idle a moment, on the UI thread between
-frames (8–12 ms there), not on a timer or after every action. `System.GC.ConserveMemory` (5) did less
-(175.4 MB) and adds gen-2 collections to every app; the apps do not set it.
+frames (4–12 ms there), not on a timer or after every action. Count the idle moment from the window's
+last input too (`Window.InputActivity`), or the pause lands in a frame of the scrolling that follows
+the burst. Decide by the size of the burst, not by what it kept: a walk that finishes keeps nothing
+and still leaves its committed memory (Junction after a 7,453-line walk: 123.1 MB working set, 33.5 MB
+committed, at rest for good; 98.0 MB and 8.4 MB with the collection, round 18), while a small one is
+not worth a collection (Junction collects after 2,000 lines or 32 MB allocated).
+`System.GC.ConserveMemory` (5) did less (175.4 MB) and adds gen-2 collections to every app; the apps
+do not set it.
 
 ### A large JSON document stays in the shared pool
 
