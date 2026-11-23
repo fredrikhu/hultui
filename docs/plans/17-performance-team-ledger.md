@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 18
-- **Phase:** build — round 18, build steps 1–14 and the pre-suite work done (main merged 87a0d35e, flake gated 4cb092ad, FIFO pre-existing); next the full suite (one agent: merge origin/main's d335159e first, then `HultUI.slnx -c Release` on Windows and the Fedora run), then Phase release. The survey ran 2026-11-22 in session
+- **Phase:** release — round 18 (14 build steps, the pre-suite work, main merged twice (87a0d35e, 2eba86c9); the full suite green at 2eba86c9): merge into main, push, wait for CI. The survey ran 2026-11-22 in session
   00f54f03 (reports `17-reports/r18-*`; usage 1 → 8 % of the week, the 5-hour window 7 → 54 %). Questions 73–77 are answered (73 → (b), 74 → (c), 75 → (a), 76 → (a), 77 → (a) on
   2026-11-23, its commit riding with step 7); question 78 (asked at step 14, not perf) is open. Round 18's files (the survey brief `brief-r18-survey.md`, build
   briefs `brief-r18b<N>.md`, `archive_r18.py`, `merge_r18.py`, `desk.ps1`, agent ids `r18-agents.txt`, probes
@@ -1426,3 +1426,12 @@ From 2026-11-19 (round 17's survey); earlier entries are in the archive ([to 202
   and HEAD alike). A whole-solution run on the merged tree: 15,134 tests, only the scrollbar test failing (now fixed).
   Found: label-focus-no-clipboard (Waiting). main moved again meanwhile (d335159e, another contributor: a pixel frame
   uploaded once per version on the GPU renderers): the full-suite agent merges it first. Next: the full suite.
+- 2026-11-23: round 18 full suite (one agent) at 2eba86c9 (main's d335159e merged with no conflicts: a pixel frame
+  uploaded once per version on the GPU renderers, beside step 11's `TreePaintBounds` and step 12's image counts),
+  11:08–11:26 on an idle machine: Windows `HultUI.slnx -c Release` 30 projects, 0 failures (Junction 1,203 in 9 m 49 s,
+  Core 5,305, Headless 1,913, Text 324, Skia 484, Vesper 964, Meridian 680 with the gated RunnerView tests, Aperture 462,
+  Reel 53; UiTests 25 passed and 125 skipped without `HULTUI_UITESTS`); Fedora the slnf's 22 projects and Junction 1,203,
+  Meridian 680, Aperture 462, Reel 53 each in a private D-Bus session, 0 failures; the pinned scrollbar baseline
+  (387b277e) passes on Linux; docfx 0 warnings, 0 errors. One new compiler warning: CS0419 (an ambiguous cref) at
+  `src/HultUI.Text/MeasurementCache.cs:393` from 3191b065's new `TryGet` overload (internal; fix in the next round).
+  Phase → release.
