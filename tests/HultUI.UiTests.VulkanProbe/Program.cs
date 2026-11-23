@@ -1,5 +1,6 @@
 using HultUI;
 using HultUI.Core.Builders;
+using HultUI.Core.Elements;
 using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
@@ -76,6 +77,14 @@ using HultUI.WebView.WebView2;
 // fill the window, which is then made 640x400 without activating it and drawn, and read again: a
 // software window draws into memory SDL makes again at the new size.
 //
+// --pixel-uploads draws one PixelFrameSink in two images side by side, through a source that counts
+// its borrows, and prints the borrows of 30 forced redraws with no new frame, of a new frame and
+// ten redraws, of a new frame of another size and ten redraws, of 30 redraws after the window is
+// resized, of the image taken off screen for a frame and put back, and of a frame in which a new
+// frame is published between drawing the two images (from a canvas drawn between them), and ten
+// redraws. A GPU surface borrows only to upload, so its counts are the uploads. It saves a frame
+// after each part and prints the colour at the middle of the left image in each (Windows).
+//
 // --frame-bytes repaints one box a frame and prints the managed bytes a frame allocates, the
 // least of five rounds of 120 frames.
 //
@@ -125,6 +134,7 @@ internal static class Program
         if (args.Contains("--size-rest")) return SizeRest(renderer, args.FirstOrDefault(a => a.StartsWith("--save-frame="))?["--save-frame=".Length..]);
         if (args.Contains("--frame-counter")) return FrameCounter(renderer);
         if (args.Contains("--frame-bytes")) return FrameBytes(renderer);
+        if (args.Contains("--pixel-uploads")) return PixelUploads(renderer);
         if (args.Contains("--first-thread-busy")) return FirstThread(renderer, busyMs: 800);
         if (args.Contains("--first-thread")) return FirstThread(renderer, busyMs: 0);
         if (args.Contains("--video-frame-bytes"))
@@ -832,6 +842,123 @@ internal static class Program
             $"probe: {least:0.0} bytes a frame"));
         Console.WriteLine("probe: done");
         return 0;
+    }
+
+    private static int PixelUploads(RendererKind renderer)
+    {
+        using var app = Foreground.NoActivate(new Application("vulkan-probe", 320, 200, renderer: renderer));
+        var sink = new PixelFrameSink();
+        var frames = new CountedFrames(sink);
+        ImageElement Picture()
+        {
+            var image = Image.New(frames).FlexGrow(1).FlexBasis(0).MinWidth(0f);
+            image.Fit = HultUI.Core.Layout.ImageFit.Fill;
+            return image;
+        }
+        // Publishes the frame it is armed with while the window is drawn, between the two images.
+        Action? midFrame = null;
+        var between = Canvas.New(_ =>
+        {
+            midFrame?.Invoke();
+            midFrame = null;
+        }).Width(1f);
+        var shown = Flex.Row().FlexGrow(1).Background(Color.FromHex("#141418")).Children(Picture(), between, Picture());
+        var empty = Flex.Row().FlexGrow(1).Background(Color.FromHex("#141418"));
+        app.SetRoot(shown);
+
+        void Publish(int width, int height, byte b, byte g, byte r)
+        {
+            using var writer = sink.BeginWrite(width, height, PixelFormat.Bgrx8888);
+            for (int i = 0; i < writer.Pixels.Length; i += 4)
+            {
+                writer.Pixels[i] = b;
+                writer.Pixels[i + 1] = g;
+                writer.Pixels[i + 2] = r;
+            }
+            writer.Publish();
+        }
+
+        int Frames(int count)
+        {
+            int before = frames.Borrows;
+            for (int i = 0; i < count; i++) app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+            return frames.Borrows - before;
+        }
+
+        // The window's frame as a PNG, decoded: the colour at the middle of the left image.
+        string Shown(string name)
+        {
+            string path = Path.Combine(Path.GetTempPath(), $"hultui-pixel-uploads-{Guid.NewGuid():N}-{name}.png");
+            try
+            {
+                var saved = app.PrimaryWindow.SaveFrame(path);
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                while (!saved.IsCompleted && clock.Elapsed.TotalSeconds < 10)
+                    app.RunFrame(TimeSpan.FromMilliseconds(16));
+                saved.GetAwaiter().GetResult();
+                using var bitmap = SkiaSharp.SKBitmap.Decode(path);
+                var c = bitmap.GetPixel(bitmap.Width / 4, bitmap.Height / 2);
+                return $"{name}=#{c.Red:X2}{c.Green:X2}{c.Blue:X2}";
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        Publish(64, 64, 0, 0, 255);
+        Frames(2);
+        int still = Frames(30);
+        string red = Shown("still");
+
+        Publish(64, 64, 0, 255, 0);
+        int changed = Frames(11);
+        string green = Shown("new");
+
+        Publish(32, 48, 255, 0, 0);
+        shown.MarkLayoutDirty();
+        int resized = Frames(11);
+        string blue = Shown("size");
+
+        SetWindowPos(app.PrimaryWindow.NativeHandle, 0, 0, 0, 400, 260, NoMove | NoZOrder | NoActivate);
+        int window = Frames(30);
+        string afterWindow = Shown("window");
+
+        app.SetRoot(empty);
+        Frames(1);
+        app.SetRoot(shown);
+        int back = Frames(1);
+        string afterBack = Shown("back");
+
+        // The left image borrows yellow; the right finds magenta published, and the sink lends it
+        // yellow again, the frame already borrowed.
+        Publish(32, 48, 0, 255, 255);
+        midFrame = () => Publish(32, 48, 255, 0, 255);
+        int mid = Frames(11);
+        string afterMid = Shown("mid");
+
+        Console.WriteLine($"probe: borrows still={still} new={changed} size={resized} window={window} back={back} mid={mid}");
+        Console.WriteLine($"probe: shown {red} {green} {blue} {afterWindow} {afterBack} {afterMid}");
+        Console.WriteLine("probe: done");
+        return 0;
+    }
+
+    /// <summary>A sink's frames, counting the renderer's borrows.</summary>
+    private sealed class CountedFrames(PixelFrameSink sink) : IPixelImageSource
+    {
+        public int Borrows { get; private set; }
+        public long Version => sink.Version;
+        public Size IntrinsicSize => sink.IntrinsicSize;
+        public bool IsLoaded => sink.IsLoaded;
+        public string? AlternateText => null;
+
+        public bool TryAcquire(out PixelFrame frame)
+        {
+            Borrows++;
+            return sink.TryAcquire(out frame);
+        }
+
+        public void Release(in PixelFrame frame) => sink.Release(frame);
     }
 
     private static int FirstThread(RendererKind renderer, int busyMs)

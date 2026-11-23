@@ -1164,7 +1164,10 @@ using (var frame = sink.BeginWrite(640, 360, PixelFormat.Bgrx8888))
 Mark the element layout-dirty too when the frame size changes, since it is the
 intrinsic size. The renderer holds a frame from the draw until the frame is
 flushed and only then hands it back, so a producer never overwrites what is being
-uploaded; with three slots it never has to wait for it either. The `x` formats
+uploaded; with three slots it never has to wait for it either. A GPU renderer uploads a
+frame once per `Version` and draws that texture until the next, so a still frame repainted
+behind a moving pointer or a tooltip costs no upload; a producer that changes published
+pixels must therefore publish a new version (the sink does on every `Publish`). The `x` formats
 (`Rgbx8888`, `Bgrx8888`) are opaque with the fourth byte ignored, which is what a
 decoder emitting `rgb0`/`bgr0` needs. `Gray8` is one byte a pixel, opaque grey — a
 monochrome image after its grey-level mapping — and its rows are `width` bytes, not

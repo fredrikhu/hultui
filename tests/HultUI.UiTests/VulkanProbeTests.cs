@@ -533,6 +533,36 @@ public sealed class VulkanProbeTests
     }
 
     /// <summary>
+    /// A GPU surface uploads a pixel frame once per version and draws that texture until the next,
+    /// so a redraw with no new frame borrows nothing. Every redraw used to upload the whole frame
+    /// again, and a pointer moving over a still remote desktop cost as much as one whose whole
+    /// screen changed (half a core for a 4K frame, Landfall's spike 1). Two images of one sink, so
+    /// the second of a frame draws the first's texture: one upload a new frame, whatever its size,
+    /// none for a resized window, one when the image comes back after a frame off screen, and every
+    /// saved frame shows the frame published last. That includes a frame published between drawing
+    /// the two: the sink lends the second the frame it lent the first, which must not be kept under
+    /// the newer version, or the newer frame would never be drawn. The software renderer reads the
+    /// borrowed bytes on every draw, as before: it has nothing to upload.
+    /// </summary>
+    [VulkanUiTheory]
+    [InlineData("vulkan")]
+    [InlineData("gl")]
+    [InlineData("software")]
+    public void APixelFrame_IsUploadedOncePerVersion(string renderer)
+    {
+        var run = RunProbe(new() { ["HULTUI_RENDERER"] = renderer == "software" ? "software" : null },
+            renderer == "vulkan" ? "--pixel-uploads" : "--pixel-uploads --renderer=default");
+
+        Assert.True(run.ExitCode == 0, run.Output);
+        Assert.Contains("probe: done", run.Output);
+        Assert.Contains(renderer switch { "vulkan" => " vulkan device=", "software" => " software window=", _ => " gl=\"" }, run.Output);
+        Assert.Contains("probe: shown still=#FF0000 new=#00FF00 size=#0000FF window=#0000FF back=#0000FF mid=#FF00FF", run.Output);
+        Assert.Contains(renderer == "software"
+            ? "probe: borrows still=60 new=22 size=22 window=60 back=2 mid=22"
+            : "probe: borrows still=0 new=1 size=1 window=0 back=1 mid=2", run.Output);
+    }
+
+    /// <summary>
     /// A steady Vulkan frame allocates nothing, as a GL one does. Wrapping the swapchain image in
     /// a new render target and surface every frame cost 2,048 bytes a frame (1,819 on an 8-bit
     /// swapchain): an SKSurface, its SKCanvas and their handle-table entries, and on the

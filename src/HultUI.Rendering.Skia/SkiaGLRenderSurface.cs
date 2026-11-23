@@ -38,6 +38,7 @@ public sealed class SkiaGLRenderSurface : IRenderSurface, ISkiaExternalSurface, 
         _ownsText = text is null;
         _text = text ?? new SkiaTextServices();
         _renderContext.SetPipeline(_text.Pipeline);
+        _renderContext.SetGpuContext(_grContext);
         _renderContext.SetGLSurface(this);
     }
 
