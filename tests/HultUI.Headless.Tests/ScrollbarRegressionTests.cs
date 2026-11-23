@@ -1,6 +1,7 @@
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
+using HultUI.Headless.Recording;
 using Xunit;
 
 namespace HultUI.Headless.Tests;
@@ -13,10 +14,10 @@ namespace HultUI.Headless.Tests;
 /// </summary>
 public class ScrollbarRegressionTests
 {
-    private static string Frame(Element root, Action<HeadlessSession>? before = null)
+    private static string Frame(Element root, Action<HeadlessSession>? before = null, HeadlessOptions? options = null)
     {
         using var session = HeadlessSession.Create(width: 200, height: 150,
-            options: HeadlessOptions.DeterministicRecording());
+            options: options ?? HeadlessOptions.DeterministicRecording());
         session.Window.SetRoot(root);
         session.PumpFrames(2);
         before?.Invoke(session);
@@ -61,18 +62,27 @@ public class ScrollbarRegressionTests
         Assert.Equal(Baselines.ScrollViewExpanding.ReplaceLineEndings("\n"), log);
     }
 
+    /// <summary>A text area takes its line height from the font it draws with, which the fixed
+    /// measuring does not reach, so the bar's thumb was the system font's: 25.7 px where the baseline
+    /// was taken, 26.31 on Windows. Drawn in the pinned fonts it is the same on every OS.</summary>
     [Fact]
     public void ATextArea_DrawsItsBarAsBefore()
     {
         var lines = string.Join("\n", Enumerable.Range(1, 40).Select(i => $"line {i}"));
         var area = TextArea.New(lines).Width(200f).Height(150f);
 
-        string log = Frame(area);
+        string log = Frame(area, options: new HeadlessOptions
+        {
+            RecordDrawCalls = true,
+            MeasureContextOverride = new FixedMetricsMeasureContext(),
+            PinnedText = true,
+        });
 
         Assert.Equal(Baselines.TextArea.ReplaceLineEndings("\n"), log);
     }
 
-    /// <summary>Captured at upstream fe8f4ecf, before the extraction.</summary>
+    /// <summary>Captured at upstream fe8f4ecf, before the extraction; the text area's in the pinned
+    /// fonts at 549a4980 (plan 17's branch, also before it).</summary>
     private static class Baselines
     {
         public const string ScrollViewScrolled = """
@@ -92,7 +102,7 @@ public class ScrollbarRegressionTests
         public const string TextArea = """
             DrawRoundedRect (0,0 200x150) r=4 fill=#FFFFFF stroke=#E2E8F0 width=1
             DrawRoundedRect (185,5 6x140) r=3 fill=#80808064
-            DrawRoundedRect (185,5 6x25.7) r=3 fill=#808080B4
+            DrawRoundedRect (185,5 6x30.07) r=3 fill=#808080B4
             """;
     }
 }
