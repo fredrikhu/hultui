@@ -22,7 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\HultUI.Terminal\HultUI.Terminal.csproj" />
-    <PackageReference Include="Porta.Pty" Version="2.2.3" />
+    <PackageReference Include="Porta.Pty" Version="2.2.4" />
   </ItemGroup>
 
 </Project>
