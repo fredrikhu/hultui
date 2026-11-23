@@ -4080,7 +4080,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             float offsetX = _lastDragPos.X - _dragVisual.Layout.Width / 2;
             float offsetY = _lastDragPos.Y - _dragVisual.Layout.Height / 2;
             ctx.PushTranslate(offsetX, offsetY);
-            ctx.PushOpacity(0.8f);
+            PushGhostOpacity(ctx, 0.8f, _dragVisual);
             ElementRenderer.RenderTree(_dragVisual, ctx);
             ctx.Pop();
             ctx.Pop();
@@ -4091,11 +4091,24 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             float offsetX = _lastDragPos.X - _dragSource.Layout.AbsoluteX - _dragSource.Layout.Width / 2;
             float offsetY = _lastDragPos.Y - _dragSource.Layout.AbsoluteY - _dragSource.Layout.Height / 2;
             ctx.PushTranslate(offsetX, offsetY);
-            ctx.PushOpacity(0.7f);
+            PushGhostOpacity(ctx, 0.7f, _dragSource);
             ElementRenderer.RenderTree(_dragSource, ctx);
             ctx.Pop();
             ctx.Pop();
         }
+    }
+
+    // The ghost fades as one group the size of what it paints. Unbounded, the group was the
+    // window's size on every frame of a drag, and Skia kept that texture for the window's life on
+    // GL and Vulkan: Junction's first repository drag held 14 MB more video memory at 1440×900 on
+    // GL, 18 MB at 2160×1350 (plan 17, round 18). An element in the ghost that cannot bound its
+    // paint still makes the group window-sized.
+    private static void PushGhostOpacity(IRenderContext ctx, float opacity, Element ghost)
+    {
+        if (ElementRenderer.TreePaintBounds(ghost, ctx) is Rect bounds)
+            ctx.PushOpacity(opacity, bounds);
+        else
+            ctx.PushOpacity(opacity);
     }
 
     // ──── Drag & Drop helpers ────
