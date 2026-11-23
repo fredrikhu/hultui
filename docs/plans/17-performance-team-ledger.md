@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 18
-- **Phase:** build — round 18, build steps 1–14 landed; next the pre-suite work (one agent): merge origin/main into the branch (Waiting release-merge-main-shelf-arrows), fix meridian-runnerview-build-count-flake, check vk-fifo-probe-tests-200hz at the base; then the full suite on the merged tree (Windows and Fedora), then Phase release. The survey ran 2026-11-22 in session
+- **Phase:** build — round 18, build steps 1–14 and the pre-suite work done (main merged 87a0d35e, flake gated 4cb092ad, FIFO pre-existing); next the full suite (one agent: merge origin/main's d335159e first, then `HultUI.slnx -c Release` on Windows and the Fedora run), then Phase release. The survey ran 2026-11-22 in session
   00f54f03 (reports `17-reports/r18-*`; usage 1 → 8 % of the week, the 5-hour window 7 → 54 %). Questions 73–77 are answered (73 → (b), 74 → (c), 75 → (a), 76 → (a), 77 → (a) on
   2026-11-23, its commit riding with step 7); question 78 (asked at step 14, not perf) is open. Round 18's files (the survey brief `brief-r18-survey.md`, build
   briefs `brief-r18b<N>.md`, `archive_r18.py`, `merge_r18.py`, `desk.ps1`, agent ids `r18-agents.txt`, probes
@@ -367,6 +367,10 @@ Re-ranked by the next survey.
   trees step 4's code 1 of 6 and the base 2 of 6; they pass alone. Results that land within one main-thread drain get
   one build, so the count is a timing race in the test, not a change of this round. CI may hit it. A fix agent makes the
   test deterministic (a gate or a count that does not depend on the drain) before the full suite.
+  Round 18 (pre-suite): fixed in 4cb092ad (`TestHttpServer.Gate` releases one request at a time, each result built
+  before the next lands; the reverse edit still fails; 40 of 40 inside a whole-solution run). The old test also passed
+  160 of 160 under four loads, so the flake was not seen first; the gate removes the race by construction. Close after
+  round 18's CI.
 - **skia-rest-purge-vulkan** (2 or 3, lead; r18b6) — Skia keeps the textures of every live picture up to its 256 MB
   budget: at Aperture's Home after 20 item pages 65 MB of textures of live pictures, 60 MB of them off screen, and 12 MB
   of upload staging; a rest-time `PurgeUnusedResources` on Vulkan would return about 70 MB of GPU memory and private.
@@ -386,6 +390,11 @@ Re-ranked by the next survey.
   scrolls the card into view after the frame). Rewrite `HomeShelfTurnTests`' Down/Up steps and guard (j)'s Down for
   main's arrows (the turn is then Right/Left past a page end and Next/Previous). Check step 4's context-menu-after-patch
   against d9bf8e25. Run the full suite on the merged tree.
+  Round 18 (pre-suite): DONE in 87a0d35e (three conflicts: `MoveRingWithoutBuild` as above; `FocusCursorCard` keeps
+  question 77's handover and main's scroll-to-card; Home.cs keeps step 9's shelf parts with main's `AddCursorShelf`;
+  `HomeShelfTurnTests` rewritten for Right/Left and Next/Previous, Down/Up assert no build, all 4 still fail under their
+  reverse edits). Step 4 and d9bf8e25 both hold (c3f0eab0's keyboard-menu test). main then moved again (d335159e, GPU
+  pixel-frame upload): merged by the full-suite agent.
 - **part-place-stale-double-build** (6, framework lead; r18b9) — `Part.Place(stale: true)` on a part with no host builds
   it twice (once in `Mount()`, again for the stale flag); Aperture's title bar and rail likely do this at start-up. For
   the next survey.
@@ -404,10 +413,18 @@ Re-ranked by the next survey.
   minimize/restore fifo case drew 8 frames in the second after restore (10 needed, 9 loop passes a second). FIFO keeps 3
   images on unchanged code; run both at the base 549a4980 on the same monitor: if they fail there too, they are a
   pre-existing 200 Hz/HDR lead for the next survey; if not, step 12 broke FIFO and must be fixed.
+  Round 18 (pre-suite): pre-existing, not step 12's: both cases fail at the base 549a4980 and at HEAD alike (4 runs, 2
+  holds, the 1440p at 200 Hz; FIFO gets 3 images both sides). Minimize/restore: 9–10 loop passes a second after the
+  restore, 8 frames (10 needed); capture case: ~240 ms a frame (60 frames in 14.2–14.9 s), its 60 s timeout masked by an
+  IOException deleting the validation log; nothing logged by the layer. Guess (untested): FIFO present waits for a
+  window shown without activation on this desk; `HULTUI_VULKAN_ACQUIRE_TRACE=1` would show it. For the next survey (3).
 - **f16-two-images-hdr-run** (3, owed; question 74 (c); r18b12) — the user approved one guarded HDR drag run (an HDR
   clip playing on the 4K, a maximized-sized window, modal-loop timer steps, stopping on any stall over 1 s) to decide 2
   images on F16; the 4K was absent all of step 12, so F16 keeps 3. Run it when the 4K is attached (with
   f16-held-drag-post-stall's question); the survey's one pair: maximized-sized HDR −179.9 MB (−21.3 %).
+- **label-focus-no-clipboard** (correctness, found by the pre-suite agent; not perf) — a selectable label focused by
+`Element.Focus()` gets no clipboard: `Window.OnFocusChanged` skips labels, so its Copy and Ctrl+C copy nothing.
+Framework fix with a test; for the next round's build or the framework backlog.
 
 Closed from Waiting by the round 18 survey (→ Examined unless named): text-wrap-ranges-per-width (r18-5: on top of round
 17's steps 1 and 8 the 4-range memo moves 33.0/23.7 → 33.1/23.0 KB a step), vk-drag-steps-dropped (r18-3: a timer step
@@ -1400,3 +1417,12 @@ From 2026-11-19 (round 17's survey); earlier entries are in the archive ([to 202
   PERFORMANCE.md" notes in this log need a home (the plan's guidelines file). Build steps done; next: the pre-suite fixes
   (meridian-runnerview-build-count-flake, vk-fifo-probe-tests-200hz at the base, question 78 if answered), then the
   full suite.
+- 2026-11-23: round 18 pre-suite work (one agent): main merged into the branch (87a0d35e: keyboard context menus,
+  mnemonics, Dropdown/DatePicker, TableView sort, light/dark, the long-range scrollbar, Aperture's shelf-to-shelf
+  arrows; three conflicts resolved, `HomeShelfTurnTests` rewritten); c3f0eab0 proves step 4's own-menu change with
+  d9bf8e25's keyboard menus; the Meridian RunnerView flake gated (4cb092ad); main's own red Windows test
+  (`ScrollbarRegressionTests.ATextArea_DrawsItsBarAsBefore`, CI run 45062007836, the system font's line height) pinned
+  to fonts with a baseline from 549a4980 (387b277e; Linux unverified). The FIFO probe failures are pre-existing (base
+  and HEAD alike). A whole-solution run on the merged tree: 15,134 tests, only the scrollbar test failing (now fixed).
+  Found: label-focus-no-clipboard (Waiting). main moved again meanwhile (d335159e, another contributor: a pixel frame
+  uploaded once per version on the GPU renderers): the full-suite agent merges it first. Next: the full suite.
