@@ -421,13 +421,13 @@ public sealed partial class ApertureApp
     /// <summary>
     /// What a grid row shows besides its place and its cursor column: how much of the list has
     /// loaded (a page fills the last row), the cards a watched or favourite toggle changed in
-    /// place, how many cards fit across, the pictures that have landed (a card made before its
-    /// picture shows a placeholder), and the display scale (glyphs and artwork are cut for it,
-    /// and a change retires the old rasters). Another library, sort or filter empties the list
-    /// first, which takes the grid off screen; the layout and the titles setting are another
-    /// row height: both make every row again by themselves.
+    /// place, how many cards fit across, a picture that landed and could not go into its card in
+    /// place (<see cref="_artworkRemade"/>; one that could needs no row), and the display scale
+    /// (glyphs and artwork are cut for it, and a change retires the old rasters). Another library,
+    /// sort or filter empties the list first, which takes the grid off screen; the layout and the
+    /// titles setting are another row height: both make every row again by themselves.
     /// </summary>
-    private readonly record struct GridRowShape(int Loaded, int Patched, int PerRow, int ArtworkLanded, float Scale);
+    private readonly record struct GridRowShape(int Loaded, int Patched, int PerRow, int ArtworkRemade, float Scale);
 
     private GridRowShape _gridRowShape;
 
@@ -438,7 +438,7 @@ public sealed partial class ApertureApp
     /// build asked; takes the new state either way.</summary>
     private bool GridRowShapeChanged(int perRow)
     {
-        var shape = new GridRowShape(_gridItems.Count, _gridPatches, perRow, _artworkLanded, Ui.DisplayScale);
+        var shape = new GridRowShape(_gridItems.Count, _gridPatches, perRow, _artworkRemade, Ui.DisplayScale);
         bool changed = shape != _gridRowShape;
         _gridRowShape = shape;
         return changed;
@@ -461,7 +461,13 @@ public sealed partial class ApertureApp
         // drawn.
         int loaded = items.Count;
         _gridReached = Math.Max(_gridReached, r.Row < 0 ? loaded : Math.Min(loaded, (r.Row + 1) * perRow));
-        if (GridHasMore && _gridAheadAsked != loaded && _gridReached + GridPageSize > loaded)
+        // So does one a taller window brings in when the build's estimate, two screenfuls and a row
+        // at the list's height now, reaches past the loaded end: a build would load that far, and a
+        // resize builds nothing. A picture landing used to build, and loaded it by the way.
+        float viewport = _gridList.Current?.Layout.AbsoluteContentBox.Height ?? 0f;
+        int screens = viewport > 0f && _fitGridStride > 0f
+            ? ((int)Math.Ceiling(viewport / _fitGridStride) * 2 + 1) * perRow : 0;
+        if (GridHasMore && _gridAheadAsked != loaded && Math.Max(_gridReached + GridPageSize, screens) > loaded)
         {
             _gridAheadAsked = loaded;
             HultUI.Application.InvokeOnMainThread(Rerender);
@@ -472,10 +478,10 @@ public sealed partial class ApertureApp
     }
 
     /// <summary>
-    /// A row of posters. A row made again — a picture landed, a page filled it, the cursor moved
-    /// onto it with a build, the columns changed — hands back each card whose item, cursor and
-    /// picture are what it was made with (REACTIVITY.md, "Hand back the elements a key does not
-    /// change"): the row is keyed by its first item's place, so the list patches the row it replaces
+    /// A row of posters. A row made again — a page filled it, the cursor moved onto it with a
+    /// build, the columns changed — hands back each card whose item, cursor and picture are what it
+    /// was made with, a picture that landed since having gone into its card in place (REACTIVITY.md,
+    /// "Hand back the elements a key does not change"): the row is keyed by its first item's place, so the list patches the row it replaces
     /// from it, and the cards by their items, so the patch puts the live ones back untouched, with the
     /// pictures they show. A change of columns moves places to other rows, and the cards go with them
     /// (<see cref="CanTakeCard"/>). A cursor key mostly makes no row at all (MoveRingWithoutBuild).
@@ -493,7 +499,7 @@ public sealed partial class ApertureApp
             if (i >= items.Count) break;
             var item = items[i];
             // Asked for a card handed back as well: a make of the row is what keeps a picture on
-            // screen recent in the cache, and what shows the one that landed.
+            // screen recent in the cache, and how a card whose picture the cache let go of is found.
             var picture = ShownPicture(item, ImageKind.Primary, Halide.PosterWidth, Halide.PosterHeight);
             var state = new GridCardState(item, i, MarkOf(i), picture);
             if (_gridCards.TryKeep(item.Id, state, out var kept) && CanTakeCard(kept, key))
@@ -547,9 +553,8 @@ public sealed partial class ApertureApp
 
     /// <summary>What a card shows besides what every card shows: its item (a watched or favourite
     /// toggle changes the copy), its place, the cursor on it or the Tab stop (<see cref="MarkOf"/>),
-    /// and the picture it draws, null for the placeholder.</summary>
-    private readonly record struct GridCardState(MediaItem Item, int Index, CardMark Mark,
-        HultUI.Core.Rendering.IImageSource? Picture);
+    /// and the picture it shows (<see cref="CardArt"/>: the placeholder until its picture lands in place).</summary>
+    private readonly record struct GridCardState(MediaItem Item, int Index, CardMark Mark, CardArt Picture);
 
     /// <summary>What every card shows: whether it has a caption, and the scale its glyphs are cut
     /// at, which retires them. (Artwork's scale goes with that one; the pictures are compared.)</summary>

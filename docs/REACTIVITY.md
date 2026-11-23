@@ -825,9 +825,11 @@ Aperture's library is the same shape (round 6, step 13), and adds four lessons:
 
 - **Compare what the card shows, not how it got there.** A poster's state holds the picture it
   draws, or null for the placeholder: loading and failed look the same, so a failure makes no card.
+  A picture that lands goes into the card in place, and the state compares what it shows since
+  (round 18; see the end of [Keep the index out of a list's item](#keep-the-index-out-of-a-lists-item)).
 - **Ask for what a make keeps fresh before deciding.** The picture cache is asked for every card of
   a row made again, handed back or not: that keeps a picture on screen recent in the cache, and is
-  how a row made for a landing finds the one card that landed. A kept card keeps its image element,
+  how a card whose picture the cache let go of is found. A kept card keeps its image element,
   and a card patched keeps it too, so nothing flashes.
 - **What a card needs is a row still in the list.** Its row's parent is the list: a row the list
   let go of is out of the tree. A row on screen is not asked for its cards, since a row is made for
@@ -884,7 +886,7 @@ pictures land, and with every card handed back it still made each shelf's headin
 the cards':
 
 - **Ask for the children first, every build.** Each card on the page is asked for before the shelf is
-  decided: that asks for its picture (how a landing finds the card it changed) and keeps its entry
+  decided: that asks for its picture (how a card whose picture the cache let go of is made again) and keeps its entry
   current for the next build and for a ring moved with no build. The shelf comes back only when every
   card came back as the live element (`IsHosted`).
 - **The state is what the heading's handlers read, not only what it draws.** The row's menu worked out
@@ -1223,6 +1225,28 @@ landing 335–347 → 80–94 KB, rows made 34 → 0, text measures 249 → 0, a
 landing 436–438 → 216 KB, and a control focused in its rows keeps the focus (the landing used to weave
 again and make the row it was in). Pixels are byte-identical to the rows made afresh in colour. A span
 that sets a weight, slant, size or family moves where a line breaks: make that row again.
+
+A picture that lands is the same: put it into the image element that waits for it, don't build the
+view to make the cards that show it again. Aperture's cards, heroes and faces make their placeholder
+(the glyph, or an empty image for a hero) as the image element the picture goes into, and the landing
+turns that element into what a make with the picture makes: the source, a cover fit, the full box
+(`ApertureApp.OnArtworkLanded`). Three things keep it right. **Key the waiting element by its
+picture's URL** and drop the key when it lands: the reconcile patches an element from one with the
+same key only, so a card made again for another item (a search that changed, a page that reuses its
+places) gets a new element and never takes the old card's picture; the landing takes only elements
+still in the window with that key. **A kept element's state compares what it shows** (`CardArt`): a
+card made while its picture was on the way and given it in place since equals one made now with the
+picture, so a later build hands it back; one whose picture the cache let go of does not, and is made
+again. **Build when it cannot go in place**: a picture asked for by something made again to show it,
+one that failed under the stand-in of another scale (the cache drops the stand-in once every download
+has landed), one the cache let go of before it was taken. A picture that fails changes nothing.
+Setting the source marks the layout up to the root, and the frame lays out the element and its
+ancestors again and measures nothing beside them: 9 elements and 10 measures for a library card,
+against 20 and 15 for the build it replaced. Plan 17 round 18 (headless JIT, 1,440×900, 300 films,
+posters served after 15 ms): a library's first open 1,109–1,150 → 594–600 KB, builds 12–13 → 4; a Down
+that brings a row 145–205 → 59–82 KB and no build; Home's start 1,236 → 865 KB, builds 8 → 3; a film
+page with its cast 376–378 → 210–212 KB; one landing 31–84 → 0.2–0.5 KB. Frames are byte-identical to
+the builds', before a picture lands and after.
 
 ---
 

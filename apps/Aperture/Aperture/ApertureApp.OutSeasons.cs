@@ -167,8 +167,7 @@ public sealed partial class ApertureApp
     /// under it. Enter (and Space, as for any series) opens the series' page, where the Request button
     /// already is; its menu asks for the seasons directly.
     /// </summary>
-    private BoxElement OutSeasonCardElement(MediaItem series, OutSeasonCard card, int cursorIndex,
-        HultUI.Core.Rendering.IImageSource? picture)
+    private BoxElement OutSeasonCardElement(MediaItem series, OutSeasonCard card, int cursorIndex, CardArt picture)
     {
         const float width = Halide.PosterWidth;
         float height = MathF.Round(width * 1.5f);

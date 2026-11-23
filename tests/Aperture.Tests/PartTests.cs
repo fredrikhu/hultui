@@ -68,8 +68,10 @@ public class PartTests
         });
     }
 
+    /// <summary>A picture that fails to land (a 404) builds nothing at all: the card keeps its
+    /// placeholder, in place. Each used to build the view, 30 KB for nothing to show.</summary>
     [Fact]
-    public void APictureLanding_BuildsNoPart()
+    public void APictureLanding_BuildsNothing()
     {
         var artwork = new GateArtwork();
         Host((session, app, _) =>
@@ -77,12 +79,11 @@ public class PartTests
             OpenGrid(session);
             int builds = app.Builds, partBuilds = app.PartBuilds;
 
-            // The pictures that land together share a build (ApertureApp.PostArtworkLanded), so
-            // this waits for all of them rather than for a build each.
             artwork.Gate.SetResult();
-            session.PumpUntil(() => app.Builds > builds && app.Posters.PendingCount == 0, TimeSpan.FromSeconds(5));
+            session.PumpUntil(() => app.Posters.PendingCount == 0, TimeSpan.FromSeconds(5));
             for (int i = 0; i < 20; i++) { session.PumpFrame(); Thread.Sleep(2); }
 
+            Assert.Equal(0, app.Builds - builds);
             Assert.Equal(0, app.PartBuilds - partBuilds);
         }, artwork: artwork);
     }

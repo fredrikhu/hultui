@@ -46,8 +46,8 @@ public sealed partial class ApertureApp
     /// before (REACTIVITY.md, "Hand back the elements a key does not change"): its item, its place in
     /// the walk, the cursor on it, the picture it draws, the caption setting and the scale its glyphs
     /// are cut at. A cursor key makes the two cards it moved between instead of every card on Home.
-    /// The picture is asked for either way, which keeps one on screen recent in the cache and is how a
-    /// card finds the one that landed.
+    /// The picture is asked for either way, which keeps one on screen recent in the cache and finds a
+    /// card whose picture the cache let go of; a picture that lands goes into its card in place.
     /// </summary>
     private Element HomeCard(KeptElements<HomeCardState> cards, MediaItem item, bool still, int index,
         SeasonNotice? notice = null, OutSeasonCard? outCard = null)
@@ -70,7 +70,7 @@ public sealed partial class ApertureApp
 
     /// <summary>What a card on a shelf shows; see <see cref="HomeCard"/>.</summary>
     private readonly record struct HomeCardState(MediaItem Item, int Index, CardMark Mark,
-        HultUI.Core.Rendering.IImageSource? Picture, bool Titles, float Scale, string? Note = null);
+        CardArt Picture, bool Titles, float Scale, string? Note = null);
 
     /// <summary>Each shelf's cards, by the shelf's key: an item can be on two shelves. The watchlist's
     /// title cards are made every build.</summary>

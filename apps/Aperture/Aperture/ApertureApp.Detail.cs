@@ -90,14 +90,11 @@ public sealed partial class ApertureApp
             .AlignItems(AlignItems.Stretch)
             .Background(Halide.Raised);
 
-        var (image, status) = HeroArtwork(ImageUrlFor(item, ImageKind.Backdrop, null)?.ToString(),
+        // The picture's element is there with no picture too, and draws nothing: while the picture is
+        // on the way it takes it when it lands, in place, and one that failed leaves it as it is.
+        var art = HeroInPlace(ImageUrlFor(item, ImageKind.Backdrop, null)?.ToString(),
             ArtAspect(item, ImageKind.Backdrop), (width, height) => ImageUrlFor(item, ImageKind.Backdrop, width, height));
-        if (status == PosterCache.Status.Ready && image is { IsLoaded: true })
-        {
-            var picture = Image.New(image);
-            picture.Fit = ImageFit.Cover;
-            hero.AddChild(picture.Size(Dimension.Percent(100), Dimension.Percent(100)));
-        }
+        hero.AddChild(Waiting(PictureLook(Image.New(), art.Picture), art.Wait));
 
         // Two scrims: one up from the bottom edge for the title block, one in from the
         // left for the verbs. Both are the app ground's own colour, so the hero dissolves
@@ -417,18 +414,10 @@ public sealed partial class ApertureApp
 
         var url = _library?.ImageUrl(person.Id, ImageKind.Primary, person.PrimaryImageTag,
             maxWidth: ArtworkPixels(PersonCardWidth));
-        var (image, status) = _posters.Get(url, StandInPixels(PersonCardWidth) is { } old
+        var art = ArtInPlace(url, StandInPixels(PersonCardWidth) is { } old
             ? _library?.ImageUrl(person.Id, ImageKind.Primary, person.PrimaryImageTag, maxWidth: old) : null);
-        if (status == PosterCache.Status.Ready && image is { IsLoaded: true })
-        {
-            var picture = Image.New(image);
-            picture.Fit = ImageFit.Cover;
-            portrait.AddChild(picture.Size(Dimension.Percent(100), Dimension.Percent(100)));
-        }
-        else
-        {
-            portrait.AddChild(Ui.Icon(Icons.User, 30f, Halide.TextFaint));
-        }
+        // The glyph takes the face when it lands, in place.
+        portrait.AddChild(Waiting(art.Picture is { } face ? PictureLook(Image.New(), face) : Glyph(Icons.User, 30f), art.Wait));
         card.AddChild(portrait);
 
         var caption = Flex.Column(gap: 1).Width(PersonCardWidth);
