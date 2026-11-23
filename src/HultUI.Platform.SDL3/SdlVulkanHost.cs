@@ -832,9 +832,12 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IVulkan
                 "Skia needs at least COLOR_ATTACHMENT and TRANSFER_SRC");
         _usage = usage;
 
-        uint imageCount = capabilities.minImageCount + 1;
-        if (capabilities.maxImageCount > 0 && imageCount > capabilities.maxImageCount)
-            imageCount = capabilities.maxImageCount;
+        // The surface's minimum for the 8-bit swapchain under MAILBOX on Windows at the window's
+        // size (two here), one more otherwise: see VulkanSwapchainChoice.ImageCount.
+        var presentMode = ChoosePresentMode();
+        uint imageCount = VulkanSwapchainChoice.ImageCount(OperatingSystem.IsWindows(),
+            _format == VkFormat.R16G16B16A16Sfloat, presentMode, oneToOne,
+            capabilities.minImageCount, capabilities.maxImageCount);
 
         var old = _swapchain;
 
@@ -877,7 +880,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IVulkan
             imageSharingMode = VkSharingMode.Exclusive,
             preTransform = capabilities.currentTransform,
             compositeAlpha = VkCompositeAlphaFlagsKHR.Opaque,
-            presentMode = _presentMode = ChoosePresentMode(),
+            presentMode = _presentMode = presentMode,
             clipped = true,
             oldSwapchain = old,
         };
@@ -906,7 +909,8 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IVulkan
         _builtOneToOne = oneToOne;
         StartupTrace.Mark($"vulkan swapchain {_widthPx}x{_heightPx} x{_images.Length} " +
             $"{_format}/{_colorSpace}" +
-            (oneToOne ? $" (allocated {_allocWidthPx}x{_allocHeightPx}, one-to-one)" : ""));
+            (oneToOne ? $" (allocated {_allocWidthPx}x{_allocHeightPx}, one-to-one)" : "") +
+            $" (surface {capabilities.minImageCount}..{capabilities.maxImageCount})");
         ResetCapture();
     }
 
