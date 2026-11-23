@@ -145,6 +145,8 @@ public class UiaDetachedElementTests(ITestOutputHelper output)
         var lockScreen = TextB.New("Locked");
         session.Window.SetRoot(lockScreen);
         Settle();
+        // UI Automation is told on the bridge's disconnect thread, after the frame.
+        Assert.True(bridge.FlushDisconnects(TimeSpan.FromSeconds(10)));
 
         var name = Name(labelSimple);
         var fieldValue = Property(fieldSimple, UiaInterop.UIA_ValueValuePropertyId);
@@ -278,5 +280,153 @@ public class UiaDetachedElementTests(ITestOutputHelper output)
         client.Wait();
         output.WriteLine($"Providers the client got: {got}");
         Assert.Equal(0, bad);
+    }
+
+    // ── The disconnect thread (plan 17 round 18): a UiaDisconnectProvider took 0.56–0.73 ms on the UI
+    //    thread with a client asking, so the providers an apply lets go are told gone on a thread of their own.
+
+    private static WindowsAccessibilityBridge NewBridge(TestHwnd hwnd, HeadlessSession session)
+    {
+        var window = session.Window.Window;
+        var router = new AccessibilityActionRouter(window);
+        var host = new UiaHostBridge(window, router);
+        window.SetUiaHostBridge(host);
+        window.SetActionRouter(router);
+        var bridge = new WindowsAccessibilityBridge(hwnd.Handle, host);
+        session.Window.InstallAccessibilityBridge(new Active(bridge));
+        return bridge;
+    }
+
+    /// <summary>What the bridge told, in order, and on which thread.</summary>
+    private sealed class Told
+    {
+        private readonly List<(string What, int Thread)> _log = [];
+        public void Add(string what) { lock (_log) _log.Add((what, Environment.CurrentManagedThreadId)); }
+        public List<(string What, int Thread)> Log { get { lock (_log) return [.. _log]; } }
+    }
+
+    /// <summary>The providers a frame lets go are told gone after it, on a thread that is not the UI
+    /// thread, every one of them.</summary>
+    [WindowsFact]
+    public void TheProvidersAFrameLetsGo_AreToldGoneOffTheUiThread()
+    {
+        using var hwnd = TestHwnd.Create();
+        using var session = HeadlessSession.Create(600, 400);
+        using var bridge = NewBridge(hwnd, session);
+        var labels = Enumerable.Range(0, 12).Select(i => TextB.New($"Row {i}")).ToArray();
+        session.Window.SetRoot(Flex.Column().Children(labels));
+        for (int i = 0; i < 3; i++) session.PumpFrame(TimeSpan.FromMilliseconds(150));
+        var held = labels.Select(l => bridge.NativeFragmentSimple(l.Id)).ToArray();   // what a client holds
+        Assert.DoesNotContain(IntPtr.Zero, held);
+        var told = new Told();
+        bridge.ProviderDisconnected = id => told.Add($"{id.Value}");
+
+        session.Window.SetRoot(TextB.New("Locked"));
+        session.PumpFrame(TimeSpan.FromMilliseconds(16));
+        Assert.True(bridge.FlushDisconnects(TimeSpan.FromSeconds(10)));
+
+        var log = told.Log;
+        output.WriteLine($"told {log.Count}, on threads {string.Join(", ", log.Select(t => t.Thread).Distinct())}; UI thread {Environment.CurrentManagedThreadId}");
+        Assert.Equal(labels.Select(l => $"{l.Id.Value}").Order(), log.Select(t => t.What).Order());
+        Assert.All(log, t => Assert.NotEqual(Environment.CurrentManagedThreadId, t.Thread));
+        foreach (var p in held)
+        {
+            Assert.Equal(NotAvailable, Name(p).Hr);
+            Marshal.Release(p);
+        }
+    }
+
+    /// <summary>A window closed while the disconnect thread has providers left to tell: every one is told
+    /// before UI Automation is told the window's providers are gone (UiaReturnRawElementProvider with
+    /// none), those it had not taken on the closing thread, and none is lost.</summary>
+    [WindowsFact]
+    public void AWindowClosedWithProvidersLeftToTell_TellsEveryOne_BeforeTheWindowsProvidersGo()
+    {
+        using var hwnd = TestHwnd.Create();
+        using var session = HeadlessSession.Create(600, 400);
+        var bridge = NewBridge(hwnd, session);
+        var labels = Enumerable.Range(0, 8).Select(i => TextB.New($"Row {i}")).ToArray();
+        session.Window.SetRoot(Flex.Column().Children(labels));
+        for (int i = 0; i < 3; i++) session.PumpFrame(TimeSpan.FromMilliseconds(150));
+        var held = labels.Select(l => bridge.NativeFragmentSimple(l.Id)).ToArray();
+        int ui = Environment.CurrentManagedThreadId;
+        var told = new Told();
+        using var entered = new ManualResetEventSlim();
+        using var gate = new ManualResetEventSlim();
+        // The disconnect thread stops in the first one it tells until the gate opens: the rest wait.
+        bridge.ProviderDisconnected = id =>
+        {
+            told.Add($"{id.Value}");
+            if (Environment.CurrentManagedThreadId != ui && !entered.IsSet) { entered.Set(); gate.Wait(TimeSpan.FromSeconds(10)); }
+        };
+        bridge.ProvidersReleased = _ => told.Add("released");
+
+        session.Window.SetRoot(TextB.New("Locked"));
+        session.PumpFrame(TimeSpan.FromMilliseconds(16));
+        Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
+        using var opens = new Timer(_ => gate.Set(), null, 300, Timeout.Infinite);
+        bridge.Dispose();
+        session.Window.InstallAccessibilityBridge();   // the window lets go of it, as a closed window would
+        gate.Set();
+        Assert.True(bridge.FlushDisconnects(TimeSpan.FromSeconds(10)));
+
+        var log = told.Log;
+        output.WriteLine(string.Join(", ", log.Select(t => t.What == "released" ? "released" : t.Thread == ui ? "UI" : "thread")));
+        Assert.Equal(labels.Length + 1, log.Count);   // none lost
+        Assert.Equal("released", log[^1].What);        // every one before the window's providers go
+        Assert.Equal(labels.Select(l => $"{l.Id.Value}").Order(), log.SkipLast(1).Select(t => t.What).Order());
+        Assert.NotEqual(ui, log[0].Thread);            // the one the disconnect thread was telling, waited for
+        Assert.Contains(log.SkipLast(1), t => t.Thread == ui);   // the ones it had not taken, told on closing
+        foreach (var p in held) Marshal.Release(p);
+    }
+
+    /// <summary>An element back in the tree before the disconnect thread told its old provider gone: the
+    /// old one is told before a new one is made for it, so UI Automation never hears of the old one after
+    /// it has the new one (they share a runtime id), and the new one answers.</summary>
+    [WindowsFact]
+    public void AnElementBackInTheTree_HasItsOldProviderToldGone_BeforeANewOneIsMade()
+    {
+        using var hwnd = TestHwnd.Create();
+        using var session = HeadlessSession.Create(600, 400);
+        using var bridge = NewBridge(hwnd, session);
+        var a = TextB.New("Anna");
+        var b = TextB.New("Bertil");
+        var c = TextB.New("Cecilia");
+        session.Window.SetRoot(Flex.Column().Children(a, b, c));
+        for (int i = 0; i < 3; i++) session.PumpFrame(TimeSpan.FromMilliseconds(150));
+        var held = new[] { a, b, c }.Select(l => bridge.NativeFragmentSimple(l.Id)).ToArray();
+        int ui = Environment.CurrentManagedThreadId;
+        var told = new Told();
+        using var entered = new ManualResetEventSlim();
+        using var gate = new ManualResetEventSlim();
+        ElementId first = default;
+        bridge.ProviderDisconnected = id =>
+        {
+            told.Add($"{id.Value}");
+            if (Environment.CurrentManagedThreadId != ui && !entered.IsSet) { first = id; entered.Set(); gate.Wait(TimeSpan.FromSeconds(10)); }
+        };
+
+        session.Window.SetRoot(TextB.New("Locked"));
+        session.PumpFrame(TimeSpan.FromMilliseconds(16));
+        Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
+        // The same elements back, the disconnect thread still in its first: the others wait to be told.
+        session.Window.SetRoot(Flex.Column().Children(a, b, c));
+        session.PumpFrame(TimeSpan.FromMilliseconds(16));
+        var back = new[] { a, b, c }.First(l => l.Id != first);
+        IntPtr now = bridge.NativeFragmentSimple(back.Id);
+        bool toldBefore = told.Log.Any(t => t.What == $"{back.Id.Value}");
+        gate.Set();
+        try
+        {
+            Assert.True(bridge.FlushDisconnects(TimeSpan.FromSeconds(10)));
+            Assert.True(toldBefore, "the old provider was told gone after the new one was made");
+            Assert.Equal((0, back == a ? "Anna" : "Bertil"), Name(now));   // the new one answers
+            Assert.Equal(NotAvailable, Name(held[Array.IndexOf(new[] { a, b, c }, back)]).Hr);
+        }
+        finally
+        {
+            Marshal.Release(now);
+            foreach (var p in held) Marshal.Release(p);
+        }
     }
 }

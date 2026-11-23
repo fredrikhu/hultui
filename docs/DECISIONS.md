@@ -1216,6 +1216,26 @@ MB with 0 gen-2 (none 377.3 / 377.2, 4); the second pass 382.2 / 385.8 MB, 0 gen
 between the last frame (25.5 s) and the next key (29.0 s). `ConserveMemory` would also change every
 other app, and the apps leave it unset.
 
+### Aperture keeps a picture's decoded copy beside its GPU texture (round 18)
+
+Aperture's `PosterCache` keeps each picture decoded (`SKBitmap`) while Skia also holds a GPU texture of
+it. Plan 17's round 18 step 6 measured a real Jellyfin walk (NativeAOT, Vulkan, the 4K at 150 %, a
+1440×900 window): back at Home after 20 item pages, private 327 MB against 148 MB before the walk;
+decoded pictures 67 MB (210 pictures, 3 heroes 30.5 MB of it); Skia's GPU cache 84 MB, 65 MB of it
+textures of live pictures (60 MB not on screen) and 12 MB upload staging buffers. On NVIDIA Vulkan the
+GPU memory counts in private bytes, about 1 s behind a purge. With every picture dropped and Skia
+purged, private falls to 163–170 MB.
+
+Built (678a786c): heroes are kept by their bytes (always the latest 2, up to 4 while they fit 24 MB)
+and a hero let go is disposed at once: after 20 pages private 341.5 → 317.1 MB (−7.1 %), DXGI local
+148.9 → 137.7 (−7.5 %); a hero let go loads again on Back (2–4 blank frames against 1).
+
+Declined: dropping the decoded copy once Skia has uploaded it (−67 MB, about −20 % private). There
+is no device-loss path to make a texture again; a texture belongs to one window's `GRContext`; the
+raster and capture paths need the pixels; and decoding again on demand would put 10–35 ms JPEG
+decodes on the UI thread. Not tried: a rest-time `PurgeUnusedResources` on Vulkan (about −70 MB at
+Aperture's Home), which is framework-wide and needs its own measurement.
+
 ### A ref's lock file alone is a working-tree event, not dropped (round 13)
 
 Plan 17's round 13, step 1 stopped Junction's repository watcher from reading a ref transaction

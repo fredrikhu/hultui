@@ -1220,6 +1220,26 @@ bytes. The user decided to gate it (plan 17 questions 50 and 66).
 - **Kill switches** as before: `HULTUI_A11Y=0` (no bridge), `HULTUI_UIA_EVENTS=0` (no events). The
   gate has none.
 
+## Disconnects off the UI thread (plan 17 round 18, built 2026-11-22)
+
+With a UI Automation client asking, each `UiaDisconnectProvider` took 0.56–0.73 ms on the UI thread (the
+first of a session 3.5–4.0 ms), whether or not the client held the object, and 5–11 µs on a thread of
+its own; headless runs never show it. Junction's palette closed with 13–14 in one frame.
+
+- **Where.** An apply hands the providers it let go to one thread for the process (MTA; the providers
+  are free-threaded), which tells UI Automation each is gone (`UiaDisconnectProvider`) and cuts it from
+  its wrapper, in order. The UI thread never waits for it.
+- **What a client sees.** An element's patterns answer UIA_E_ELEMENTNOTAVAILABLE as soon as the apply
+  lets it go (`IElementBound`); the element itself answers it a moment later, once its provider is
+  told gone.
+- **Order.** A provider made again for an element whose old one is not told yet (the thread a frame or
+  more behind) has the old one told first, on the thread that makes it (`TellFirst`). A window's
+  `Dispose` tells what the thread has not taken, and waits for the one it is telling, before
+  `UiaReturnRawElementProvider(hwnd, 0, 0, 0)`.
+- **Tests.** `HeadlessUiaReader.Disconnected` and `Clear` wait for the thread. A test that sets a bare
+  bridge's `ProviderDisconnected` (called on the thread that told) calls `FlushDisconnects` before it
+  reads, and before it reads what a held provider answers.
+
 ## Out of scope (follow-ups)
 
 - `EditableText` for AT-SPI; the text pattern on single-line text inputs.

@@ -395,6 +395,92 @@ public sealed class OpacityLayerTests
         Assert.True(far == 0, $"{far} pixels differ by more than {MovedOrigin.Channel} levels (at most {max}): the bounds cut something off");
     }
 
+    /// <summary>
+    /// Faded number fields, each in a box no bigger than itself — one given an edit wider than the
+    /// field (its one line keeps what fits), one squeezed shorter than its value's line, one
+    /// narrower than its step strip, whose hairline and chevrons then stand left of the box — at
+    /// rest, focused mid-edit and held on a step button: each is drawn through a group
+    /// of its own bounds and loses nothing to them, every pixel within the moved origin's few
+    /// levels of the same row drawn through groups the window's size. The fields' bounds were
+    /// null, so Vesper's Multi-rename faded its row of three through a layer of the whole dialog
+    /// (plan 17, round 18).
+    /// </summary>
+    [Theory]
+    [InlineData("rest", 1f)]
+    [InlineData("rest", 1.5f)]
+    [InlineData("editing", 1f)]
+    [InlineData("editing", 1.5f)]
+    [InlineData("held", 1.5f)]
+    public void FadedNumberFieldsAreBoundedAndLoseNothing(string state, float scale)
+    {
+        NumericUpDownElement? wide = null, flat = null, thin = null;
+        Element Faded(NumericUpDownElement field, bool unbounded)
+        {
+            var box = Box.New().Opacity(0.6f).Children(field);
+            if (unbounded) box.AddChild(Pinned(new UnboundedElement().Width(1).Height(1)));
+            return box;
+        }
+
+        Element Row(bool unbounded)
+        {
+            wide = NumericUpDown.New(5, 0, 9).Width(60);
+            flat = NumericUpDown.New(42, 0, 100).Height(6);
+            thin = NumericUpDown.New(7, 0, 9).Width(8);
+            return Flex.Row(gap: 40).AlignItems(AlignItems.Center).Padding(new Thickness(14, 30)).Children(
+                Faded(wide, unbounded), Faded(flat, unbounded), Faded(thin, unbounded));
+        }
+
+        SKBitmap Draw(bool unbounded, out string log)
+        {
+            using var session = HeadlessSession.Create(420, 90, scale,
+                options: new HeadlessOptions { RecordDrawCalls = true, PinnedText = true });
+            session.Window.SetRoot(Box.New().Width(420).Height(90).Background(Color.White).Children(Row(unbounded)));
+            session.PumpFrame();
+            if (state == "editing")
+            {
+                wide!.Focus();
+                session.PumpFrame();
+                session.Window.TypeText("123456789012");
+                Assert.True(wide.IsEditing, "the edit did not reach the field");
+            }
+            else if (state == "held")
+            {
+                var b = thin!.Layout.AbsoluteBorderBox;
+                session.Window.MouseDown(b.X + b.Width / 2, b.Y + 3);   // the upper half is the up button
+            }
+            session.PumpFrame();
+            session.Window.RenderLog.Clear();
+            session.PumpFrame(); // after the input's frame, the state settled
+            using var image = session.Window.CapturePixels();
+            log = session.Window.RenderLog.ToString();
+            if (state == "held") Assert.Equal(8, thin!.Value);
+            return SKBitmap.FromImage(image);
+        }
+
+        using var bounded = Draw(unbounded: false, out var boundedLog);
+        using var window = Draw(unbounded: true, out _);
+        Assert.Equal(3, boundedLog.Split('\n').Count(l => l.Contains("PushOpacity 0.6 bounds=", StringComparison.Ordinal)));
+
+        int max = 0, far = 0;
+        for (int y = 0; y < bounded.Height; y++)
+            for (int x = 0; x < bounded.Width; x++)
+            {
+                SKColor a = bounded.GetPixel(x, y), b = window.GetPixel(x, y);
+                int d = Math.Max(Math.Abs(a.Red - b.Red), Math.Max(Math.Abs(a.Green - b.Green), Math.Abs(a.Blue - b.Blue)));
+                max = Math.Max(max, d);
+                if (d > MovedOrigin.Channel) far++;
+            }
+        Assert.True(far == 0, $"{far} pixels differ by more than {MovedOrigin.Channel} levels (at most {max}): the bounds cut something off");
+    }
+
+    private static T Pinned<T>(T el) where T : Element
+    {
+        el.Position.Type = PositionType.Absolute;
+        el.Position.Left = Dimension.Px(0);
+        el.Position.Top = Dimension.Px(0);
+        return el;
+    }
+
     // ── At opacity 0 a subtree that only paints is not drawn ──
 
     /// <summary>A box at opacity 0 holding a box, a label, a canvas, a slider and an image: none of

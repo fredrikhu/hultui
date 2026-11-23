@@ -327,8 +327,9 @@ public class CacheBoundTests
     {
         // An entry keeps its key's text (2 bytes a character) and, on the BiDi path, a level a
         // character; a remembered line 16 bytes a glyph. Weighed less, the bound would let more
-        // than it says stay.
-        var pipeline = new TextPipeline(new StubFontCollection(), new StubTextShaper());
+        // than it says stay. (No wrap ranges: the entry is made at the second width laid out, which a range
+        // kept at the first would answer.)
+        var pipeline = new TextPipeline(new StubFontCollection(), new StubTextShaper()) { KeepsWrapRanges = false };
         var rtl = Style with { TextDirection = TextDirection.Rtl };
         string hebrew = string.Concat(Enumerable.Repeat(((char)0x05E9).ToString() + (char)0x05DC + (char)0x05D5 + (char)0x05DD + " ", 400));
         foreach (float width in new[] { 640f, 630f })
@@ -392,7 +393,8 @@ public class CacheBoundTests
     [Fact]
     public void AnEntryTheCacheLetGo_IsNotKeptAliveByItsLines()
     {
-        var pipeline = new TextPipeline(new StubFontCollection(), new StubTextShaper());
+        // No wrap ranges: each label's entry is made at its second width, which a range kept at the first would answer.
+        var pipeline = new TextPipeline(new StubFontCollection(), new StubTextShaper()) { KeepsWrapRanges = false };
         var entry = FirstEntryOf(pipeline, () => LayOutParagraphs(pipeline, 1, 2_000, styled: false));
         Assert.True(pipeline.MemoLineCacheUse.Entries > 10, "the paragraph's lines were not remembered");
 

@@ -413,8 +413,9 @@ outside it is cut off under opacity. Return `null` when the extent is not known 
 the group is then as large as the clip, which is always right and, on a CPU surface, slow
 (a window-sized image per faded element). The framework's controls with focus rings or
 thumbs past their box (checkbox, toggle and others) return `null`; a `Slider` reports its
-track and the square its thumb and focus ring can reach. A `Canvas` returns `null`, as its
-callback may draw anywhere.
+track and the square its thumb and focus ring can reach, and a `NumericUpDown` its box, its
+value's ink and its step strip (Vesper's Multi-rename fades a row of three; plan 17 round 18).
+A `Canvas` returns `null`, as its callback may draw anywhere.
 
 **One element with unknown bounds makes its faded ancestor window-sized**, whatever the
 ancestor's own size: the group covers the clip, and on GL and Vulkan Skia keeps that texture for

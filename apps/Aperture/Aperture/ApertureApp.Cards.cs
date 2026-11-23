@@ -5,6 +5,7 @@ using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Core.Styling;
 
 namespace Aperture;
@@ -23,7 +24,7 @@ public sealed partial class ApertureApp
         PosterCard(item, width, cursorIndex, ShownPicture(item, ImageKind.Primary, width, MathF.Round(width * 1.5f)));
 
     /// <summary>A poster tile drawing <paramref name="picture"/>; see <see cref="ShownPicture"/>.</summary>
-    private BoxElement PosterCard(MediaItem item, float width, int cursorIndex, HultUI.Core.Rendering.IImageSource? picture)
+    private BoxElement PosterCard(MediaItem item, float width, int cursorIndex, CardArt picture)
     {
         float height = MathF.Round(width * 1.5f);
         var card = Flex.Column(gap: Halide.S2)
@@ -73,7 +74,7 @@ public sealed partial class ApertureApp
         StillCard(item, cursorIndex, ShownPicture(item, ImageKind.Backdrop, Halide.StillWidth, Halide.StillHeight));
 
     /// <summary>A continue-watching card drawing <paramref name="picture"/>; see <see cref="ShownPicture"/>.</summary>
-    private BoxElement StillCard(MediaItem item, int cursorIndex, HultUI.Core.Rendering.IImageSource? picture)
+    private BoxElement StillCard(MediaItem item, int cursorIndex, CardArt picture)
     {
         var card = Flex.Column(gap: Halide.S2)
             .Width(Halide.StillWidth).FlexShrink(0)
@@ -112,10 +113,11 @@ public sealed partial class ApertureApp
 
     /// <summary>
     /// The picture an artwork box of this size draws now, asked of the cache (which fetches it
-    /// when it does not have it); null for the placeholder, while it loads or when the server
-    /// has none.
+    /// when it does not have it): null for the placeholder, while it loads or when the server
+    /// has none; and, until its own picture is in, the wait that puts it into the box when it
+    /// lands (<see cref="CardArt"/>).
     /// </summary>
-    private HultUI.Core.Rendering.IImageSource? ShownPicture(MediaItem item, ImageKind kind, float width, float height)
+    private CardArt ShownPicture(MediaItem item, ImageKind kind, float width, float height)
     {
         // The box in device pixels, by the side that decides a cover fit; the server scales
         // the other side to keep the picture's shape. A picture wider than its box (an
@@ -125,9 +127,8 @@ public sealed partial class ApertureApp
         // the picture by half a pixel, which is soft at one to one.
         bool byHeight = ArtAspect(item, kind) is { } aspect && aspect > width / height * 1.005;
         var url = CardArtworkUrl(item, kind, width, height, byHeight);
-        var (image, status) = _posters.Get(url, _standInScale is { } old && _posters.HasRetired
+        return ArtInPlace(url, _standInScale is { } old && _posters.HasRetired
             ? ArtworkUrl(item, kind, width, height, byHeight, old) : null);
-        return status == PosterCache.Status.Ready && image is { IsLoaded: true } ? image : null;
     }
 
     /// <summary>
@@ -168,8 +169,7 @@ public sealed partial class ApertureApp
         return url;
     }
 
-    private Element Artwork(MediaItem item, float width, float height, float radius,
-        HultUI.Core.Rendering.IImageSource? shown)
+    private Element Artwork(MediaItem item, float width, float height, float radius, CardArt art)
     {
         var box = Box.New()
             .Width(width).Height(height).FlexShrink(0)
@@ -181,19 +181,11 @@ public sealed partial class ApertureApp
         box.Box.OverflowX = Overflow.Hidden;
         box.Box.OverflowY = Overflow.Hidden;
 
-        if (shown is not null)
-        {
-            var picture = Image.New(shown);
-            picture.Fit = ImageFit.Cover;
-            box.AddChild(picture.Size(Dimension.Percent(100), Dimension.Percent(100)));
-        }
-        else
-        {
-            // Pending and Failed look the same on purpose: a spinner per tile in a grid of
-            // sixty is a strobe, and "no artwork" is not an error worth shouting about.
-            var glyph = Ui.Icon(Icons.ForItem(item.Kind), MathF.Min(40f, width * 0.28f), Halide.TextFaint);
-            box.AddChild(glyph);
-        }
+        // Pending and Failed look the same on purpose: a spinner per tile in a grid of
+        // sixty is a strobe, and "no artwork" is not an error worth shouting about. The glyph
+        // is the image element the picture goes into when it lands (ShowPicture).
+        box.AddChild(Waiting(art.Picture is { } shown ? PictureLook(Image.New(), shown)
+            : Glyph(Icons.ForItem(item.Kind), MathF.Min(40f, width * 0.28f)), art.Wait));
 
         // The tick is a badge on a poster, not on a thumbnail: at list size it would cover
         // most of the artwork, and the row draws its own mark at the end instead.
@@ -314,21 +306,16 @@ public sealed partial class ApertureApp
     /// <summary>The display scale artwork is fetched for; see <see cref="ArtworkScaleFor"/>.</summary>
     private float _artworkScale = 1f;
 
-    /// <summary>Builds for pictures that landed in the cache, counted on the UI thread: a card
-    /// made before its picture landed shows a placeholder (or an old size's stand-in) until it
-    /// is made again, so the grid's kept rows go with this. (A kept card does not ask the cache
-    /// again, so it does not refresh its picture's place in the LRU; the cache only drops a
-    /// picture when one lands, every landing is followed by a build that makes the rows on
-    /// screen again, and the cap is many screenfuls, so a picture on screen is never the
-    /// oldest.)</summary>
-    private int _artworkLanded;
+    /// <summary>Builds that had to make the cards again for pictures that landed, because a picture
+    /// could not go in place (see <see cref="Land"/>): the grid's kept rows go with this.</summary>
+    private int _artworkRemade;
 
-    /// <summary>1 while a build for landed pictures is posted to the UI thread and has not run.
-    /// The cache calls back once per picture, on the thread pool, and a whole screenful lands
-    /// within a few frames: a build posted for each made Home's 36 posters 41 builds, up to 10 of
-    /// them in one frame. Posted one at a time, the pictures that land before the build runs
-    /// share it. The build clears the flag before it reads the cache, so a picture that lands
-    /// while it runs posts the next one.</summary>
+    /// <summary>1 while taking what landed is posted to the UI thread and has not run. The cache
+    /// calls back once per picture, on the thread pool, and a whole screenful lands within a few
+    /// frames: posted one at a time, the pictures that land before it runs are taken together
+    /// (when each landing built the view, a post for each made Home's 36 posters 41 builds, up
+    /// to 10 of them in one frame). It clears the flag before it takes them, so a picture that
+    /// lands while it runs posts the next one.</summary>
     private int _artworkPosted;
 
     /// <summary>The cache's callback, on the thread pool.</summary>
@@ -338,16 +325,207 @@ public sealed partial class ApertureApp
             HultUI.Application.InvokeOnMainThread(OnArtworkLanded);
     }
 
+    private readonly List<PosterCache.Landing> _landings = [];
+
+    /// <summary>
+    /// Pictures landed. Each goes into the picture elements on screen that wait for it, in place
+    /// (<see cref="Waiting"/>), with no build: until plan 17 round 18 every landing built the whole
+    /// view to make the cards that show it again: 32 KB a landing on a library's grid, with its rows
+    /// made again besides, 84 KB on a film's page, 121 KB on a season's, and a library's first open
+    /// was 12 or 13 builds. A picture that failed changes nothing: the placeholder stays. The view is
+    /// built when a picture was asked for by something that is made again to show it (Discover's
+    /// cards, a chapter's still), and when one could not go in place: it failed under the stand-in
+    /// of another scale, or the cache let it go before it was taken.
+    /// </summary>
+    /// <remarks>A picture on screen is never the next the cache's count cap pushes out: it landed
+    /// last or was asked for when its card was made, and the cap is many screenfuls. A picture the
+    /// cap pushes out is disposed at the next ask, in a build, which makes again every card still
+    /// drawing it: a card's state compares the picture it shows (<see cref="CardArt"/>).</remarks>
     private void OnArtworkLanded()
     {
         Interlocked.Exchange(ref _artworkPosted, 0);
-        _artworkLanded++;
-        RerenderView();
+        _posters.TakeLanded(_landings);
+        bool build = false, hero = false;
+        foreach (var landing in _landings)
+        {
+            build |= landing.Build;
+            if (_artWaits.Remove(landing.Key, out var waits)) build |= Land(landing.Key, waits);
+            hero |= HeroLanded(landing.Url);
+        }
+        _landings.Clear();
+        if (hero) LetGoOfHeroes();
+        if (build)
+        {
+            _artworkRemade++;
+            RerenderView();
+        }
+        else
+        {
+            // What the pictures that landed stood in for: the next ask would drop it, and with no
+            // build there may be none for a long time.
+            _posters.Collect();
+        }
         // A trickplay sheet is artwork too, and the card over the scrubber is the player's, which
         // the app's build does not rebuild: a sheet landing under a pointer resting on the
         // scrubber showed only when the pointer next moved. Nothing when it is not hovered.
         _videoPlayer?.RefreshPreview();
     }
+
+    // ── Pictures that land in place ──────────────────────────────────────
+
+    /// <summary>
+    /// What an artwork box draws, as a build asked the cache: the picture (its own, or the stand-in
+    /// from the scale before), or null for the placeholder; and, while its own picture is on the
+    /// way, the wait that puts it into the box when it lands.
+    ///
+    /// <para>A kept card's state holds this, and compares what the box shows: a card made while its
+    /// picture was on the way, and given it in place since, equals one made now with the picture,
+    /// so it is handed back; one whose picture the cache let go of does not, so it is made again
+    /// with the placeholder and waits again.</para>
+    /// </summary>
+    internal readonly struct CardArt(HultUI.Core.Rendering.IImageSource? picture, ArtWait? wait) : IEquatable<CardArt>
+    {
+        /// <summary>What a box made now draws: the picture, a stand-in, or null for the placeholder.</summary>
+        public HultUI.Core.Rendering.IImageSource? Picture { get; } = picture;
+
+        /// <summary>The wait for its own picture, or null when that is in or will not come.</summary>
+        public ArtWait? Wait { get; } = wait;
+
+        /// <summary>What the box made from this shows now: the picture landed in place since, or
+        /// what it was made with.</summary>
+        private HultUI.Core.Rendering.IImageSource? Shown => Wait?.Landed ?? Picture;
+
+        /// <summary>The picture it still waits for, by URL.</summary>
+        private string? Awaits => Wait is { IsWaiting: true } wait ? wait.Key : null;
+
+        public bool Equals(CardArt other) =>
+            ReferenceEquals(Shown, other.Shown) && string.Equals(Awaits, other.Awaits, StringComparison.Ordinal);
+
+        public override bool Equals(object? obj) => obj is CardArt other && Equals(other);
+
+        /// <summary>Constant: what a box shows moves as its picture lands, and a state is compared,
+        /// never hashed.</summary>
+        public override int GetHashCode() => 0;
+    }
+
+    /// <summary>
+    /// A picture element waiting for its picture: its URL, and the element itself, as a ref the
+    /// reconcile points at the live element the one made is patched into. The element is keyed by
+    /// the URL while it waits, so the reconcile patches into it only an element waiting for the same
+    /// picture: a card reused for another item, or the same one at another size, is a new element,
+    /// and this one leaves the window. Ended when the picture lands, or fails.
+    /// </summary>
+    internal sealed class ArtWait(string key, HultUI.Core.Rendering.IImageSource? standIn) : Ref<ImageElement>
+    {
+        public string Key { get; } = key;
+
+        /// <summary>The picture from the scale before it draws until its own lands.</summary>
+        public HultUI.Core.Rendering.IImageSource? StandIn { get; } = standIn;
+
+        /// <summary>The next wait for the same picture: a card made again before it landed.</summary>
+        public ArtWait? Next;
+
+        public bool IsWaiting { get; private set; } = true;
+
+        /// <summary>The picture its element took when it landed; null when it did not take one.</summary>
+        public HultUI.Core.Rendering.IImageSource? Landed { get; private set; }
+
+        /// <summary>Lets go of the element: a card kept since still holds this in its state.</summary>
+        public void End(HultUI.Core.Rendering.IImageSource? landed)
+        {
+            IsWaiting = false;
+            Landed = landed;
+            Current = null;
+        }
+    }
+
+    /// <summary>The picture elements waiting for their pictures, by URL: each the latest of a chain
+    /// (<see cref="ArtWait.Next"/>). A wait is taken out when its picture lands, so this holds only
+    /// what is on the way.</summary>
+    private readonly Dictionary<string, ArtWait> _artWaits = new(StringComparer.Ordinal);
+
+    /// <summary>The cache asked for a picture another element puts into itself when it lands
+    /// (<see cref="Waiting"/>): what to draw now, and the wait while its own picture is on the way.</summary>
+    private CardArt ArtInPlace(Uri? url, Uri? standIn)
+    {
+        var (image, status) = _posters.Get(url, standIn, inPlace: true, out bool own);
+        var picture = status == PosterCache.Status.Ready && image is { IsLoaded: true } ? image : null;
+        return new CardArt(picture, own || status == PosterCache.Status.Failed || url is null
+            ? null : new ArtWait(url.ToString(), picture));
+    }
+
+    /// <summary>The element waits for its picture when <paramref name="wait"/> says it is on the way:
+    /// keyed by its URL and found by it when it lands (<see cref="OnArtworkLanded"/>).</summary>
+    private ImageElement Waiting(ImageElement element, ArtWait? wait)
+    {
+        if (wait is null) return element;
+        element.Key = wait.Key;
+        element.WithRef(wait);
+        wait.Next = _artWaits.GetValueOrDefault(wait.Key);
+        _artWaits[wait.Key] = wait;
+        return element;
+    }
+
+    /// <summary>
+    /// A picture landed for these waits. The elements still waiting for it in the window take it,
+    /// as a make would draw it (<see cref="PictureLook"/>). That marks their layout up to the root,
+    /// and the next frame lays out the element and the boxes above it again, measuring nothing
+    /// beside them: a library card's landing 9 elements and 10 measures, where the build it replaces
+    /// laid out 20 and measured 15. A picture that failed leaves the placeholder. True when the view
+    /// has to be built to show what landed: the cache no longer holds it, or it failed under a
+    /// stand-in.
+    /// </summary>
+    private bool Land(string key, ArtWait waits)
+    {
+        _posters.TryPeek(key, out var image, out var status);
+        var picture = status == PosterCache.Status.Ready && image is { IsLoaded: true } ? image : null;
+        bool build = false;
+        for (var wait = waits; wait is not null; wait = wait.Next)
+        {
+            if (wait.Current is not { IsHosted: true } element || element.Key != key) continue;
+            if (picture is not null)
+            {
+                ShowPicture(element, picture);
+                continue;
+            }
+            // The placeholder as a make shows it when the picture has failed: no longer keyed.
+            element.Key = null;
+            // Failed under the stand-in of another scale, which goes once every download has
+            // landed; or let go of before it was taken (the count cap, past four hundred).
+            if (wait.StandIn is not null || status != PosterCache.Status.Failed) build = true;
+        }
+        for (var wait = waits; wait is not null; wait = wait.Next)
+            wait.End(picture is not null && wait.Current is { } element && ReferenceEquals(element.Source, picture)
+                ? picture : null);
+        return build;
+    }
+
+    /// <summary>A picture element as a make with the picture makes it: the picture covering the box
+    /// it sits in. Also what turns a waiting element, the placeholder glyph or an empty frame, into
+    /// the picture when it lands, so the element is what the next build would make.</summary>
+    private static ImageElement PictureLook(ImageElement element, HultUI.Core.Rendering.IImageSource? picture)
+    {
+        element.Fit = ImageFit.Cover;
+        element.Box.Width = Dimension.Percent(100);
+        element.Box.Height = Dimension.Percent(100);
+        element.Source = picture;
+        return element;
+    }
+
+    private static void ShowPicture(ImageElement element, HultUI.Core.Rendering.IImageSource picture)
+    {
+        element.Key = null;
+        // A glyph does not shrink; a picture has the default. Layout styles mark nothing: the
+        // source marks the layout.
+        element.Flex.FlexShrink = 1;
+        PictureLook(element, picture);
+    }
+
+    /// <summary>A placeholder glyph, as the image element a picture can go into.</summary>
+    private static ImageElement Glyph(string name, float size) =>
+        Ui.Icon(name, size, Halide.TextFaint) as ImageElement
+        // A glyph Phosphor does not have is an empty box: an empty image of its size draws the same.
+        ?? Image.New().Width(Ui.IconBox(size)).Height(Ui.IconBox(size)).FlexShrink(0);
 
     /// <summary>The scale before the last change, while the cache may still hold pictures
     /// fetched for it — the stand-ins a tile draws until its new picture lands.</summary>
@@ -458,12 +636,27 @@ public sealed partial class ApertureApp
         (ArtworkPixels(layoutSize, scale) + HeroStep - 1) / HeroStep * HeroStep;
 
     /// <summary>
-    /// How many heroes' pictures the app keeps: the page on screen and the three behind it,
-    /// for Back. The cache bounds pictures by count, 400 of them, and a hero counted as one,
-    /// like a poster: every page visited kept its own, 9 MB at 150 % in a 1,400-wide window
-    /// (33 MB on a 4K monitor). A page further back than this fetches its hero again.
+    /// How many heroes' pictures the app keeps at most: the page on screen and the three behind
+    /// it, for Back, while they fit <see cref="HeroBytesKept"/>. The cache bounds pictures by
+    /// count, 400 of them, and a hero counted as one, like a poster: every page visited kept its
+    /// own, 9 MB at 150 % in a 1,400-wide window (33 MB on a 4K monitor). A page further back
+    /// than the heroes kept fetches its hero again.
     /// </summary>
     internal const int HeroesKept = 4;
+
+    /// <summary>The heroes kept whatever their size: those of the last two pages shown with
+    /// one, the page on screen and the one before it.</summary>
+    internal const int HeroesAlwaysKept = 2;
+
+    /// <summary>
+    /// The decoded bytes the heroes kept may hold together; past it, only
+    /// <see cref="HeroesAlwaysKept"/> stay. A hero is held twice, its pixels in memory and its
+    /// texture on the GPU, and its size follows the window: four were 41 MB of pixels at 150 % in
+    /// a 1,440 by 900 window (2,176 by 1,224 each), 53 MB with a film whose poster is its hero
+    /// (2,000 by 3,000), and about 120 MB in a window filling a 4K monitor. Four heroes the size
+    /// of a 1,440-wide window at 100 % (4.5 MB each) still fit.
+    /// </summary>
+    internal const long HeroBytesKept = 24L * 1024 * 1024;
 
     /// <summary>A hero kept: which artwork it is, the URL of the picture it draws, and the URL
     /// it last asked for (the same one, once that has landed).</summary>
@@ -487,36 +680,41 @@ public sealed partial class ApertureApp
     /// <para>When the same artwork is asked for at another size — the window was resized past
     /// a step, or moved to a monitor with another scale — the picture on screen stays up until
     /// the new one lands, and then goes rather than staying in the cache beside it. So does a
-    /// size the window passed over before it landed, and so does the picture of a page more
-    /// than <see cref="HeroesKept"/> heroes back.</para>
+    /// size the window passed over before it landed. The picture of a page further back than
+    /// the heroes kept goes at once (<see cref="LetGoOfHeroes"/>).</para>
     /// </summary>
     private (HultUI.Core.Rendering.IImageSource? Image, PosterCache.Status Status) HeroArtwork(
         string? art, double? aspect, Func<int?, int?, Uri?> sized)
+    {
+        var (url, standIn) = HeroAsked(art, aspect, sized);
+        var result = _posters.Get(url, standIn);
+        HeroAnswered(url);
+        return result;
+    }
+
+    /// <summary><see cref="HeroArtwork"/> for a hero whose picture goes into it in place when it lands
+    /// (<see cref="Waiting"/>): an item page's.</summary>
+    private CardArt HeroInPlace(string? art, double? aspect, Func<int?, int?, Uri?> sized)
+    {
+        var (url, standIn) = HeroAsked(art, aspect, sized);
+        var result = ArtInPlace(url, standIn);
+        HeroAnswered(url);
+        return result;
+    }
+
+    /// <summary>The URL a hero asks for now, and the picture on screen that stands in for it; the
+    /// hero kept moves to the latest.</summary>
+    private (Uri? Url, Uri? StandIn) HeroAsked(string? art, double? aspect, Func<int?, int?, Uri?> sized)
     {
         _fitHero = true;
         _fitHeroAspect = aspect;
         var (byHeight, pixels) = HeroAsk(aspect, _window.LayoutWidth, _window.LayoutHeight);
         if (art is null || (byHeight ? sized(null, pixels) : sized(pixels, null)) is not { } url)
-            return _posters.Get(null);
+            return (null, null);
 
         var hero = _heroes.Find(h => h.Art == art);
-        if (hero is null)
-        {
-            hero = new HeroPicture(art);
-            if (_heroes.Count == HeroesKept)
-            {
-                // The page furthest back: its picture goes once the downloads that follow
-                // have landed.
-                var oldest = _heroes[0];
-                _heroes.RemoveAt(0);
-                if (oldest.Shown is { } kept) _posters.Retire(kept);
-                if (oldest.Asked is { } asked) _posters.Retire(asked);
-            }
-        }
-        else
-        {
-            _heroes.Remove(hero);
-        }
+        if (hero is null) hero = new HeroPicture(art);
+        else _heroes.Remove(hero);
         _heroes.Add(hero);
 
         // Every other size of this artwork goes once the new picture is in: the one on screen
@@ -526,10 +724,59 @@ public sealed partial class ApertureApp
         var standIn = hero.Shown is { } shown && shown != url ? shown : null;
         if (standIn is not null) _posters.Retire(standIn);
         hero.Asked = url;
+        return (url, standIn);
+    }
 
-        var result = _posters.Get(url, standIn);
-        if (_posters.IsReady(url)) hero.Shown = url;
-        return result;
+    /// <summary>The cache has answered a hero's ask: the picture on screen is its own once that is
+    /// in, and the heroes kept are held to their bounds.</summary>
+    private void HeroAnswered(Uri? url)
+    {
+        if (url is null) return;
+        if (_posters.IsReady(url) && _heroes.Count > 0) _heroes[^1].Shown = url;
+        LetGoOfHeroes();
+    }
+
+    /// <summary>A picture landed that a hero kept asked for last: it is what that hero shows now,
+    /// put in place without a build. True when one did, for <see cref="LetGoOfHeroes"/>.</summary>
+    private bool HeroLanded(Uri url)
+    {
+        bool any = false;
+        foreach (var hero in _heroes)
+            if (hero.Asked == url && hero.Shown != url && _posters.IsReady(url))
+            {
+                hero.Shown = url;
+                any = true;
+            }
+        return any;
+    }
+
+    /// <summary>
+    /// Holds the heroes kept to <see cref="HeroesKept"/> and <see cref="HeroBytesKept"/>, letting
+    /// go of the page furthest back first and never of the <see cref="HeroesAlwaysKept"/> latest.
+    /// Run whenever a hero is asked for, so a picture whose size is known only once it has landed
+    /// counts from the build that draws it. What is let go is dropped at once
+    /// (<see cref="PosterCache.Drop"/>), not retired until the next downloads land: no page on
+    /// screen draws it, this is the UI thread, and after a page's last picture has landed
+    /// nothing may land again for a long time, so a retired hero stayed a page longer.
+    /// </summary>
+    private void LetGoOfHeroes()
+    {
+        while (_heroes.Count > HeroesAlwaysKept && (_heroes.Count > HeroesKept || HeroBytes() > HeroBytesKept))
+        {
+            var oldest = _heroes[0];
+            _heroes.RemoveAt(0);
+            if (oldest.Shown is { } shown) _posters.Drop(shown);
+            if (oldest.Asked is { } asked && asked != oldest.Shown) _posters.Drop(asked);
+        }
+    }
+
+    /// <summary>The decoded bytes of the heroes kept: each one's picture on screen.</summary>
+    private long HeroBytes()
+    {
+        long bytes = 0;
+        foreach (var kept in _heroes)
+            if (kept.Shown is { } shown) bytes += _posters.DecodedBytes(shown);
+        return bytes;
     }
 
     /// <summary>
@@ -639,8 +886,8 @@ public sealed partial class ApertureApp
     /// The cursor's place <paramref name="index"/> on a shelf that starts at <paramref name="start"/> in
     /// the walk and holds <paramref name="count"/> cards, <paramref name="perPage"/> a page, showing
     /// <paramref name="page"/>: when the place is on the shelf but on another page, turns the shelf to
-    /// it and says so, and the build to come draws that page. A shelf used to stay where it was, so the
-    /// cursor walked on with no card ringed and the keyboard left behind.
+    /// it and says so, and the build to come draws that page (a Home shelf's own, Discover's view). A shelf
+    /// used to stay where it was, so the cursor walked on with no card ringed and the keyboard left behind.
     /// </summary>
     private bool TurnShelfTo(int index, int start, int count, string rowId, int perPage, int page)
     {
@@ -653,11 +900,8 @@ public sealed partial class ApertureApp
 
     private Element PageButton(string glyph, string label, string rowId, int target, bool enabled)
     {
-        var b = Ui.IconButton(glyph, label, () =>
-        {
-            _rowPages[rowId] = Math.Max(0, target);
-            Rerender();
-        }, 14f, enabled ? Halide.TextDim : Halide.TextFaint, $"{rowId}-{label.ToLowerInvariant()}");
+        var b = Ui.IconButton(glyph, label, () => TurnRowTo(rowId, target),
+            14f, enabled ? Halide.TextDim : Halide.TextFaint, $"{rowId}-{label.ToLowerInvariant()}");
         if (!enabled)
         {
             b.Opacity(0.4f);

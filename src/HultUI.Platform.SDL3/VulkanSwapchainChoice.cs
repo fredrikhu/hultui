@@ -215,6 +215,51 @@ internal static class VulkanSwapchainChoice
         && replacedPresentMode == VkPresentModeKHR.Mailbox;
 
     /// <summary>
+    /// How many images to ask the swapchain for: the surface's minimum, and never fewer than two,
+    /// for the 8-bit swapchain under MAILBOX on Windows when it is built at the window's size;
+    /// one more than the minimum otherwise, as before. Never more than the surface's maximum,
+    /// where it names one.
+    ///
+    /// <para><b>Two images for the 8-bit swapchain on Windows</b> (plan 17 round 18, question 74,
+    /// approved by the user). Reel and Aperture hold their swapchain the whole session, and on an
+    /// RTX 4080 (610), which offers 2 to 8, the third image was dead weight: in playback, fades and
+    /// browsing no acquire waited over 1 ms with two, and DXGI's local memory fell 14–17 % for
+    /// Aperture's sign-in page and 1.5–4.6 % for Reel playing SDR on a 1440p (17–18 % and 3–8 % on
+    /// the 4K at 150 %), default size to maximized. With two images under MAILBOX a present never
+    /// blocks; an acquire waits for the image on screen to be let go at the next refresh, which
+    /// happens only when frames come faster than the display shows them.</para>
+    ///
+    /// <para><b>Not while over-allocated for a drag</b> (<paramref name="oneToOne"/>): that
+    /// swapchain is presented one-to-one at a larger extent, which the compositor copies, and with
+    /// two images about 40 % of a drag's frames waited up to one refresh (8.5–9.1 ms at 120 Hz) while
+    /// a video played, against 2 of 57 with three. The drag's builds are rebuilds anyway and its
+    /// end builds the exact swapchain again, so the third image costs memory only while the drag
+    /// lasts.</para>
+    ///
+    /// <para><b>Not the half-float swapchain</b>: a drag with an HDR video playing at two images has
+    /// not been measured (the 4K HDR display it needs was not attached). <b>Not FIFO or
+    /// IMMEDIATE</b>, which come only from <c>HULTUI_VULKAN_PRESENT</c> or a surface without
+    /// MAILBOX and were not measured at two images: under FIFO a present queues for the refresh,
+    /// so with two images the frame after it would wait for that refresh before it could start.
+    /// <b>Not off Windows</b>: Mesa, AMD and Intel were not measured.</para>
+    /// </summary>
+    /// <param name="isWindows">Whether this is Windows, the one platform it was measured on.</param>
+    /// <param name="halfFloat">Whether the swapchain is the half-float scRGB one.</param>
+    /// <param name="presentMode">The present mode the swapchain is built with.</param>
+    /// <param name="oneToOne">Whether it is over-allocated and shown one-to-one
+    /// (<see cref="OverAllocate"/>).</param>
+    /// <param name="minImageCount">The surface's <c>minImageCount</c>.</param>
+    /// <param name="maxImageCount">The surface's <c>maxImageCount</c>; 0 means no limit.</param>
+    internal static uint ImageCount(bool isWindows, bool halfFloat, VkPresentModeKHR presentMode, bool oneToOne,
+        uint minImageCount, uint maxImageCount)
+    {
+        uint count = isWindows && !halfFloat && !oneToOne && presentMode == VkPresentModeKHR.Mailbox
+            ? Math.Max(minImageCount, 2u)
+            : minImageCount + 1;
+        return maxImageCount > 0 && count > maxImageCount ? maxImageCount : count;
+    }
+
+    /// <summary>
     /// Whether a resize that keeps the swapchain may skip asking the surface for its formats. The
     /// choice depends on the wide-colour wish and the surface's list, and the list changes only with
     /// the display, which <c>SdlVulkanHost.DisplayChanged</c> reports and which forgets the answer.

@@ -224,36 +224,80 @@ public class CursorNoBuildTests
 
     /// <summary>Both panes on one folder: the same-named row over there is the cursor's own file,
     /// which F3 never pairs with, so the other pane's cursor on a file stays the partner while the
-    /// cursor moves — no build, the ring kept on it, also when the cursor reaches that very file.
-    /// With the other cursor on "..", F3 pairs the cursor's file with itself over there, so the
-    /// ring follows each key, which builds.</summary>
+    /// cursor moves — no build, the ring kept on it. When the cursor reaches that very file its
+    /// only partner would be itself: F3 does nothing there and the ring goes, which builds, as does
+    /// the key that leaves it.</summary>
     [Fact]
     public void WithBothPanesOnOneFolder_TheOtherCursorsFileStaysThePartner_AndAKeyBuildsNothing()
     {
-        using var t = Open();
-        t.Invoke("NavigateTo", 'R', t.Left, null, false);
-        t.Session.PumpUntil(() => t.Rows('R').Count == t.Rows('L').Count);
-        t.Session.PumpFrames(2);
+        using var t = OpenOnOneFolder();
         t.PutCursorOn('R', Name(5));
         t.PutCursorOn('L', Name(2));
         Assert.Equal(Nocturne.Accent700, PartnerBorder(t, Name(5)));
         int builds = Builds(t), parts = t.App.PartBuilds;
-        Press(t, KeyCode.Down, KeyCode.Down, KeyCode.Up, KeyCode.Down, KeyCode.Down);   // onto f05 itself
-        Assert.Equal(Name(5), t.Rows('L')[t.Cursor('L')].Name);
+        Press(t, KeyCode.Down, KeyCode.Down, KeyCode.Up, KeyCode.Down);
+        Assert.Equal(Name(4), t.Rows('L')[t.Cursor('L')].Name);
         Assert.Equal(0, Builds(t) - builds);
         Assert.Equal(0, t.App.PartBuilds - parts);
         Assert.Equal(Nocturne.Accent700, PartnerBorder(t, Name(5)));
         AssertIsAFullBuild(t, "with both panes on one folder");
 
-        t.PutCursorOn('R', "..");
-        t.PutCursorOn('L', Name(2));
-        Assert.Equal(Nocturne.Accent700, PartnerBorder(t, Name(2)));
+        builds = Builds(t);
+        Press(t, KeyCode.Down);   // onto f05 itself
+        Assert.Equal(1, Builds(t) - builds);
+        Assert.Equal(Color.Transparent, PartnerBorder(t, Name(5)));
+        AssertIsAFullBuild(t, "on the other cursor's own file");
+
         builds = Builds(t);
         Press(t, KeyCode.Down);
         Assert.Equal(1, Builds(t) - builds);
-        Assert.Equal(Nocturne.Accent700, PartnerBorder(t, Name(3)));
-        Assert.Equal(Color.Transparent, PartnerBorder(t, Name(2)));
-        AssertIsAFullBuild(t, "with the other cursor on ..");
+        Assert.Equal(Nocturne.Accent700, PartnerBorder(t, Name(5)));
+        AssertIsAFullBuild(t, "off the other cursor's own file");
+    }
+
+    /// <summary>Both panes on one folder with the other cursor on ".." or a folder: the cursor's
+    /// only partner would be its own file, so F3 does nothing and nothing is ringed, and a key
+    /// builds nothing. The file used to be ringed as its own partner, and the ring followed each
+    /// key, which built the window every time (29 KB a key against 1.2).</summary>
+    [Theory]
+    [InlineData("..")]
+    [InlineData("docs")]
+    public void WithBothPanesOnOneFolder_AndTheOtherCursorOnNoFile_NothingIsRinged_AndAKeyBuildsNothing(string other)
+    {
+        using var t = OpenOnOneFolder();
+        t.PutCursorOn('R', other);
+        t.PutCursorOn('L', Name(2));
+        AssertNothingRinged(t);
+        int builds = Builds(t), parts = t.App.PartBuilds;
+        Press(t, KeyCode.Down, KeyCode.Down, KeyCode.Up, KeyCode.Down);
+        Assert.Equal(Name(4), t.Rows('L')[t.Cursor('L')].Name);
+        Assert.Equal(0, Builds(t) - builds);
+        Assert.Equal(0, t.App.PartBuilds - parts);
+        AssertNothingRinged(t);
+        AssertIsAFullBuild(t, $"with the other cursor on {other}");
+    }
+
+    /// <summary><see cref="Open"/>, then the right pane moved to the left one's folder.</summary>
+    private static DiffViewTests.Fixture OpenOnOneFolder()
+    {
+        var t = Open();
+        t.Invoke("NavigateTo", 'R', t.Left, null, false);
+        t.Session.PumpUntil(() => t.Rows('R').Count == t.Rows('L').Count);
+        t.Session.PumpFrames(2);
+        return t;
+    }
+
+    private static void AssertNothingRinged(DiffViewTests.Fixture t)
+    {
+        int rows = 0;
+        foreach (var row in List(t, 'R').Children.Skip(1))
+            if (row.Children.Count > 1 && row.Children[1] is TextElement { Content: var name })
+            {
+                rows++;
+                if (((BoxElement)row).BorderColor != Color.Transparent)
+                    throw new Xunit.Sdk.XunitException($"{name} is ringed in the right pane");
+            }
+        Assert.True(rows > 10, $"only {rows} rows realized in the right pane");
     }
 
     private static Color PartnerBorder(DiffViewTests.Fixture t, string name)

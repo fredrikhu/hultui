@@ -10,8 +10,9 @@ public sealed class TextPipeline
 {
     private readonly IFontCollection _fonts;
     private readonly ITextShaper _shaper;
-    // Fully laid-out results, keyed on width (used only when the text must wrap).
-    private readonly LruCache<MeasurementKey, TextLayout> _cache = new(capacity: 2048, maxWeight: LayoutCacheBytes);
+    // Fully laid-out results, keyed on width (used only when the text must wrap), each with the range of
+    // widths it was kept for (WidthLayout).
+    private readonly LruCache<MeasurementKey, WidthLayout> _cache = new(capacity: 2048, maxWeight: LayoutCacheBytes);
     // Wrapped plain layouts keyed without their width, each with the widths that break the text into
     // the same lines (WrapRange, below).
     private readonly LruCache<WrapKey, WrapRange> _wrapRanges = new(capacity: WrapRangeEntries,
@@ -501,14 +502,14 @@ public sealed class TextPipeline
             style.FontSlant, maxWidth, maxLines ?? -1, overflow, style.LineHeight,
             style.LetterSpacing, digest, needsBidi ? style.TextDirection : TextDirection.Ltr);
         if (_cache.TryGet(key, out var cached))
-            return cached;
+            return cached.Layout;
 
         var memo = MemoOf(text, style, spans, digest, bidi: needsBidi);
         var layout = needsBidi
-            ? ComputeWrappedBidi(text, style, maxWidth, maxLines, overflow, memo, spans)
+            ? ComputeWrappedBidi(text, style, maxWidth, maxLines, overflow, memo, out _, out _, spans)
             : ComputeWrappedStyled(text, style, spans!, maxWidth, maxLines, overflow, memo);
         (_laidOutMemo, _laidOutKey) = (null, default);
-        _cache.Put(key, layout, LayoutBytes(text, layout));
+        _cache.Put(key, new WidthLayout(layout), LayoutBytes(text, layout));
         return layout;
     }
 
@@ -539,18 +540,7 @@ public sealed class TextPipeline
         // 0.16 µs on a 4,700-character warm layout and costs every warm BiDi lookup
         // ~45%, for a more tangled Layout. Not worth it.
         if (NeedsBidi(text, style, PlainPathForLtr))
-        {
-            var bidiKey = new MeasurementKey(text, style.FontFamily, style.FontSize, style.FontWeight,
-                style.FontSlant, maxWidth, maxLines ?? -1, overflow, style.LineHeight,
-                style.LetterSpacing, 0, style.TextDirection);
-            if (_cache.TryGet(bidiKey, out var cachedBidi))
-                return cachedBidi;
-            var bidiLayout = ComputeWrappedBidi(text, style, maxWidth, maxLines, overflow,
-                MemoOf(text, style, spans: null, spanDigest: 0, bidi: true));
-            (_laidOutMemo, _laidOutKey) = (null, default);
-            _cache.Put(bidiKey, bidiLayout, LayoutBytes(text, bidiLayout));
-            return bidiLayout;
-        }
+            return BidiLayout(text, style, maxWidth, maxLines, overflow, sizeAsk: false);
 
         var shapeKey = new ShapeKey(text, style.FontFamily, style.FontSize, style.FontWeight,
             style.FontSlant, style.LineHeight, style.LetterSpacing);
@@ -589,7 +579,7 @@ public sealed class TextPipeline
         var key = new MeasurementKey(text, style.FontFamily, style.FontSize, style.FontWeight,
             style.FontSlant, maxWidth, maxLines ?? -1, overflow, style.LineHeight, style.LetterSpacing);
         if (_cache.TryGet(key, out var cached))
-            return cached;
+            return cached.Layout;
 
         TextLayout layout;
         float fitsFrom = float.NaN, fitsBelow = float.NaN;
@@ -612,15 +602,52 @@ public sealed class TextPipeline
         else
             layout = ComputeWrapped(text, style, maxWidth, maxLines, overflow, shaped, out fitsFrom, out fitsBelow);
         int bytes = LayoutBytes(text, layout);
-        _cache.Put(key, layout, bytes);
         // The widths the break pass's decisions hold for; below the text's own width only, as from
         // there it is one line. NaN (from a NaN width or one not laid out by the break pass) keeps nothing.
         if (!shaped.HasNewline)
             fitsBelow = Math.Min(fitsBelow, shaped.TotalWidth);
-        if (overflow == TextOverflow.Clip && KeepsWrapRanges && ReuseAcrossWidths
-            && fitsFrom <= maxWidth && maxWidth < fitsBelow)
+        bool keepsRange = overflow == TextOverflow.Clip && KeepsWrapRanges && ReuseAcrossWidths
+            && fitsFrom <= maxWidth && maxWidth < fitsBelow;
+        _cache.Put(key, keepsRange ? new WidthLayout(layout, fitsFrom, fitsBelow) : new WidthLayout(layout), bytes);
+        if (keepsRange)
             _wrapRanges.Put(wrapKey.IsMade ? wrapKey : new WrapKey(text, style, maxLines),
                 new WrapRange(layout, fitsFrom, fitsBelow, shaped.HasNewline ? float.NaN : shaped.TotalWidth, layout.Size), bytes);
+        return layout;
+    }
+
+    // Layout of text on the direction-aware path, and WrappedSize's (sizeAsk), with no spans: the layout kept for the
+    // widths this one is in (WrapRange), the width's layout, or a new one, kept for the widths its breaks hold for
+    // (ComputeWrappedBidi notes them as the plain break pass does). Vesper Commander's wrapped reader on an Arabic
+    // README laid out all 477 of its paragraphs again at each step of a resize drag, 98–99.6 % of them into the lines
+    // they had. The direction is in the paragraph's key, as in the width's: an Rtl and an Auto layout of the same
+    // text differ. There is no one-line path to leave the range to, so it runs as far as the breaks hold. As on the
+    // plain path, only a size ask answered from the width-keyed cache puts that layout's range back (WidthLayout).
+    private TextLayout BidiLayout(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+        TextOverflow overflow, bool sizeAsk)
+    {
+        WrapKey wrapKey = default;   // made by the ask, for the puts below
+        if (KeptWrap(text, style, maxWidth, maxLines, overflow, ref wrapKey, style.TextDirection) is { } kept)
+            return kept;
+        var bidiKey = new MeasurementKey(text, style.FontFamily, style.FontSize, style.FontWeight,
+            style.FontSlant, maxWidth, maxLines ?? -1, overflow, style.LineHeight,
+            style.LetterSpacing, 0, style.TextDirection);
+        if (_cache.TryGet(bidiKey, out var cached, out int cachedBytes))
+        {
+            if (sizeAsk && cached.From <= maxWidth && maxWidth < cached.Below)
+                _wrapRanges.Put(wrapKey.IsMade ? wrapKey : new WrapKey(text, style, maxLines, style.TextDirection),
+                    new WrapRange(cached.Layout, cached.From, cached.Below, float.NaN, cached.Layout.Size), cachedBytes);
+            return cached.Layout;
+        }
+        var layout = ComputeWrappedBidi(text, style, maxWidth, maxLines, overflow,
+            MemoOf(text, style, spans: null, spanDigest: 0, bidi: true), out float fitsFrom, out float fitsBelow);
+        (_laidOutMemo, _laidOutKey) = (null, default);
+        int bytes = LayoutBytes(text, layout);
+        bool keepsRange = overflow == TextOverflow.Clip && KeepsWrapRanges && ReuseAcrossWidths
+            && fitsFrom <= maxWidth && maxWidth < fitsBelow;
+        _cache.Put(bidiKey, keepsRange ? new WidthLayout(layout, fitsFrom, fitsBelow) : new WidthLayout(layout), bytes);
+        if (keepsRange)
+            _wrapRanges.Put(wrapKey.IsMade ? wrapKey : new WrapKey(text, style, maxLines, style.TextDirection),
+                new WrapRange(layout, fitsFrom, fitsBelow, float.NaN, layout.Size), bytes);
         return layout;
     }
 
@@ -634,8 +661,9 @@ public sealed class TextPipeline
     // layout's lines would, to the bit, without making a line. Its range of widths is kept as a layout's is,
     // with the size and no layout: an ask of the size anywhere in it is answered, and an ask of the layout
     // breaks the text again. Which paragraphs are drawn is read off the layout kept: a line's runs are made
-    // when a draw first reads them (WantsLayout). Not for spans that change metrics or text on the BiDi
-    // path, nor where the layout path keeps no range: those take Layout and read its size.
+    // when a draw first reads them (WantsLayout). Not for spans that change metrics, nor where the layout path
+    // keeps no range: those take Layout and read its size. Text on the BiDi path takes its layout too
+    // (BidiLayout), whose range is put back as below when the width-keyed cache answers.
 
     /// <summary>The size <see cref="Layout(string, ResolvedInheritedStyle, float, int?, TextOverflow,
     /// IReadOnlyList{Core.Rendering.TextSpan}?)"/> gives <paramref name="text"/> at
@@ -645,9 +673,11 @@ public sealed class TextPipeline
         IReadOnlyList<Core.Rendering.TextSpan>? spans)
     {
         if (string.IsNullOrEmpty(text) || !KeepsWrapRanges || !ReuseAcrossWidths || !ComposeRunsWhenRead
-            || AnyMetricAffecting(spans) || NeedsBidi(text, style, PlainPathForLtr))
+            || AnyMetricAffecting(spans))
             return Layout(text, style, maxWidth, null, TextOverflow.Clip, spans).Size;
         BeginParagraph(text);
+        if (NeedsBidi(text, style, PlainPathForLtr))
+            return BidiLayout(text, style, maxWidth, null, TextOverflow.Clip, sizeAsk: true).Size;
 
         // As Layout: the kept range before shaping, the one line that fits, the kept range, the width's layout.
         var shapeKey = new ShapeKey(text, style.FontFamily, style.FontSize, style.FontWeight,
@@ -668,8 +698,17 @@ public sealed class TextPipeline
             return kept.Size;
         var key = new MeasurementKey(text, style.FontFamily, style.FontSize, style.FontWeight,
             style.FontSlant, maxWidth, -1, TextOverflow.Clip, style.LineHeight, style.LetterSpacing);
-        if (_cache.TryGet(key, out var cached))
-            return cached.Size;
+        if (_cache.TryGet(key, out var cached, out int bytes))
+        {
+            // A width laid out before, out of the range kept: the view is back at a width it was laid out at (the
+            // one it opened at, after a drag). The layout's own range is put back, so the next width of a drag is
+            // answered from it rather than broken again, as from the range of the far end of the last drag.
+            if (cached.From <= maxWidth && maxWidth < cached.Below)
+                _wrapRanges.Put(wrapKey.IsMade ? wrapKey : new WrapKey(text, style, null),
+                    new WrapRange(cached.Layout, cached.From, cached.Below,
+                        shaped.HasNewline ? float.NaN : shaped.TotalWidth, cached.Layout.Size), bytes);
+            return cached.Layout.Size;
+        }
         // The layout is made now, as Layout makes it, where it is likely asked for next: for a paragraph not seen
         // before (a view's first measure, whose rows on screen are drawn next) and one whose kept layout was drawn
         // (a row on screen during a drag). Only a paragraph whose last layout was not drawn, or that was only sized,
@@ -740,24 +779,40 @@ public sealed class TextPipeline
     // style, not by width, one range a paragraph (the latest), and asked before the shape cache: a
     // kept paragraph is not shaped again (the archive's shapings did not fit the shape cache and were
     // all made again each step). Only Clip: truncation reads the width again (TruncatedTail). The
-    // width-keyed cache above keeps answering widths seen before.
-    // OneLine is the text's own width (NaN with a newline): a width it fits within OneLineFitTolerance
-    // is the one-line fast path's, even below the text's own width, where the range still runs.
+    // width-keyed cache above keeps answering widths seen before. A layout on the BiDi path is kept the
+    // same way (BidiLayout): its break pass takes the same greedy decisions over logical order, on widths
+    // that do not depend on the width asked (ComputeWrappedBidi), and its lines are shaped and reordered
+    // from where they start and end alone.
+    // OneLine is the text's own width (NaN with a newline, and on the BiDi path, which has no one-line
+    // path): a width it fits within OneLineFitTolerance is the one-line fast path's, even below the text's
+    // own width, where the range still runs.
     // Size is the layout's; a range kept by WrappedSize has the size alone, and no layout (null).
     private readonly record struct WrapRange(TextLayout? Layout, float From, float Below, float OneLine, Size Size);
 
+    // A layout in the width-keyed cache, with the range of widths it was kept for in _wrapRanges (NaN: none); the
+    // entry's weight is the bytes it was counted for there (at most half the layout bound, an eighth of the wrap
+    // ranges'). A size asked at its width, out of the range kept since, puts its range back (WrappedSize): a
+    // paragraph keeps one range, so after a drag every row of a view held the range of the drag's far end, and a
+    // return to the width the view opened at was answered here and left them so; the next drag broke every row
+    // again at its first width. Only a size ask puts it back: a row on screen is laid out at two widths a frame in
+    // Junction's split diff, and a layout's hit putting its range back sent the range to and fro between them (the
+    // first sweep of a drag 33.0 -> 81.8 KB a step). Two floats, not three: every entry's node carries them.
+    private readonly record struct WidthLayout(TextLayout Layout, float From = float.NaN, float Below = float.NaN);
+
     // A paragraph's key in _wrapRanges: a layout cache key with no width, and its hash. A layout makes
     // it once, for its ask and the put after a miss: a long paragraph is hashed once, not four times
-    // (TryGet; then TryGetValue, Remove and the store of LruCache.Put).
+    // (TryGet; then TryGetValue, Remove and the store of LruCache.Put). The direction is the style's on
+    // the BiDi path and Ltr on any other, as in the width-keyed cache's key.
     private readonly struct WrapKey : IEquatable<WrapKey>
     {
         private readonly MeasurementKey _key;
         private readonly int _hash;
 
-        public WrapKey(string text, ResolvedInheritedStyle style, int? maxLines)
+        public WrapKey(string text, ResolvedInheritedStyle style, int? maxLines,
+            TextDirection direction = TextDirection.Ltr)
         {
             _key = new(text, style.FontFamily, style.FontSize, style.FontWeight, style.FontSlant, 0f, maxLines ?? -1,
-                TextOverflow.Clip, style.LineHeight, style.LetterSpacing);
+                TextOverflow.Clip, style.LineHeight, style.LetterSpacing, 0, direction);
             _hash = _key.GetHashCode();
         }
 
@@ -767,20 +822,20 @@ public sealed class TextPipeline
         public override int GetHashCode() => _hash;
     }
 
-    // The layout kept for text at maxWidth, or null; key is made here if it is not yet. A range kept with
-    // a size alone (WrappedSize) has none.
+    // The layout kept for text at maxWidth, or null; key is made here if it is not yet, with direction (the
+    // style's on the BiDi path). A range kept with a size alone (WrappedSize) has none.
     private TextLayout? KeptWrap(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
-        TextOverflow overflow, ref WrapKey key) =>
-        KeptRange(text, style, maxWidth, maxLines, overflow, ref key, layout: true)?.Layout;
+        TextOverflow overflow, ref WrapKey key, TextDirection direction = TextDirection.Ltr) =>
+        KeptRange(text, style, maxWidth, maxLines, overflow, ref key, layout: true, direction)?.Layout;
 
     // The range kept for text that holds maxWidth (and with a layout, when one is asked for), or null.
     private WrapRange? KeptRange(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
-        TextOverflow overflow, ref WrapKey key, bool layout = false)
+        TextOverflow overflow, ref WrapKey key, bool layout = false, TextDirection direction = TextDirection.Ltr)
     {
         if (overflow != TextOverflow.Clip || !KeepsWrapRanges || !ReuseAcrossWidths)
             return null;
         if (!key.IsMade)
-            key = new WrapKey(text, style, maxLines);
+            key = new WrapKey(text, style, maxLines, direction);
         if (!_wrapRanges.TryGet(key, out var kept) || !(kept.From <= maxWidth && maxWidth < kept.Below)
             || (layout && kept.Layout is null))
             return null;
@@ -807,7 +862,8 @@ public sealed class TextPipeline
     internal bool KeptWrapRange(string text, ResolvedInheritedStyle style, int? maxLines, out float from,
         out float below)
     {
-        bool found = _wrapRanges.TryGet(new WrapKey(text, style, maxLines), out var kept);
+        bool found = _wrapRanges.TryGet(new WrapKey(text, style, maxLines,
+            NeedsBidi(text, style, PlainPathForLtr) ? style.TextDirection : TextDirection.Ltr), out var kept);
         (from, below) = (kept.From, kept.Below);
         return found;
     }
@@ -899,7 +955,8 @@ public sealed class TextPipeline
     // same widths (none depends on the width), and the pass breaks the text into the same lines
     // (WrapRange). Only a width that fitted raises the first and only one that did not lowers the second:
     // a pass that notes more than its own decisions only narrows the range. A NaN width measured
-    // makes it NaN, and a NaN range or maxWidth keeps nothing. ComputeWrapped starts them over.
+    // makes it NaN, and a NaN range or maxWidth keeps nothing. ComputeWrapped and ComputeWrappedBidi (whose
+    // tests are its loop's and BidiFitPrefix's) start them over.
     private float _fitsFrom = float.NegativeInfinity, _fitsBelow = float.PositiveInfinity;
 
     // width > maxWidth, noted.
@@ -1944,8 +2001,17 @@ public sealed class TextPipeline
     // The direction-aware twin of ComputeWrapped: same greedy break logic over
     // logical order, measurement and line shaping direction-resolved, same
     // truncation policy.
+    //
+    // fitsFrom and fitsBelow are the widths the break decisions hold for (Over, Within), as ComputeWrapped's. Each
+    // decision compares maxWidth with a width measured in logical order — a line's segments so far, a segment alone, a
+    // prefix of one — that does not depend on maxWidth, and a line is shaped, reordered and mirrored from where it
+    // starts and ends alone (BidiLine). So at any width in the range the same lines come out, whatever their
+    // directions, numbers, emoji or marks: a line's visual width is not tested, and its trailing whitespace counts
+    // as the break pass measured it. The ellipsis of a truncated line reads the width again; its decisions are not
+    // noted, and no range is kept for one (BidiLayout keeps Clip only).
     private TextLayout ComputeWrappedBidi(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
-        TextOverflow overflow, TextMemo? bidi, IReadOnlyList<Core.Rendering.TextSpan>? spans = null)
+        TextOverflow overflow, TextMemo? bidi, out float fitsFrom, out float fitsBelow,
+        IReadOnlyList<Core.Rendering.TextSpan>? spans = null)
     {
         // One UAX #9 resolution for the whole paragraph; every line, break
         // candidate and prefix measurement below slices into it. With the string's
@@ -1965,6 +2031,9 @@ public sealed class TextPipeline
         var lines = RentLines();
         int textOffset = 0;
         float lineWidth = 0;
+        // A layout made in the middle of another's notes its own decisions, and the other's resume after.
+        var outer = (_fitsFrom, _fitsBelow);
+        (_fitsFrom, _fitsBelow) = (float.NegativeInfinity, float.PositiveInfinity);
 
         for (int s = 1; s < allBreaks.Count; s++)
         {
@@ -1982,7 +2051,8 @@ public sealed class TextPipeline
 
             float segWidth = BidiSegmentWidth(text, allBreaks, s, style, levels, bidi, spans);
 
-            if (lineWidth + segWidth > maxWidth && lineWidth > 0)
+            // (The width is noted only where it decides: on a line with something on it.)
+            if (lineWidth > 0 && Over(lineWidth + segWidth, maxWidth))
             {
                 lines.Add(BidiLine(text, textOffset, segStart, style, levels, bidi, spans));
                 textOffset = segStart;
@@ -1990,7 +2060,7 @@ public sealed class TextPipeline
                 if (maxLines.HasValue && lines.Count >= maxLines.Value) break;
             }
 
-            if (lineWidth == 0 && segWidth > maxWidth)
+            if (lineWidth == 0 && Over(segWidth, maxWidth))
             {
                 while (textOffset < segEnd && (!maxLines.HasValue || lines.Count < maxLines.Value))
                 {
@@ -2007,6 +2077,8 @@ public sealed class TextPipeline
 
             lineWidth += segWidth;
         }
+        (fitsFrom, fitsBelow) = (_fitsFrom, _fitsBelow);
+        (_fitsFrom, _fitsBelow) = outer;
 
         if (textOffset < text.Length && (!maxLines.HasValue || lines.Count < maxLines.Value))
             lines.Add(BidiLine(text, textOffset, text.Length, style, levels, bidi, spans));
@@ -2032,7 +2104,7 @@ public sealed class TextPipeline
         IReadOnlyList<Core.Rendering.TextSpan>? spans)
     {
         int span = 1;
-        while (from + span < to && MeasureBidi(text, from, from + span, style, levels, bidi, spans) <= maxWidth)
+        while (from + span < to && Within(MeasureBidi(text, from, from + span, style, levels, bidi, spans), maxWidth))
             span <<= 1;
 
         int lo = from + Math.Min(span >> 1, to - from);
@@ -2041,7 +2113,7 @@ public sealed class TextPipeline
         while (lo <= hi)
         {
             int mid = (lo + hi) >> 1;
-            if (MeasureBidi(text, from, mid, style, levels, bidi, spans) <= maxWidth) { best = mid; lo = mid + 1; }
+            if (Within(MeasureBidi(text, from, mid, style, levels, bidi, spans), maxWidth)) { best = mid; lo = mid + 1; }
             else hi = mid - 1;
         }
         return SnapPrefix(text, best);

@@ -87,21 +87,63 @@ public class HighlightResumeTests
             Assert.Equal(collections, app.HighlightIdleCollections);   // once a rest
             Assert.True(KeptTexts(app).Contains(key), "the collection took the kept texts");
             int reads = app.HighlightFileReads, lines = app.HighlightLinesTokenized;
+            long bytes = app.HighlightBytesWalked;
 
             session.Window.PressKey(KeyCode.Up);   // back to Huge.cs
             session.PumpUntil(() => Highlights(app).Contains(key), TimeSpan.FromSeconds(60));
             Assert.Equal(reads, app.HighlightFileReads);
-            Assert.InRange(app.HighlightLinesTokenized - lines, 1, Whole(repo, Highlights(app)[key]!).LinesWalked - 1);
+            int walked = app.HighlightLinesTokenized - lines;
+            Assert.InRange(walked, 1, Whole(repo, Highlights(app)[key]!).LinesWalked - 1);
 
-            Rest(session, 600);   // landed, nothing kept since the collection: none more
-            Assert.Equal(collections, app.HighlightIdleCollections);
+            // Landed, nothing kept since the collection: one more only when the rest of the walk was big.
+            bool big = walked >= JunctionApp.BigWalkLines || app.HighlightBytesWalked - bytes >= JunctionApp.BigWalkBytes;
+            Rest(session, 600);
+            Assert.Equal(collections + (big ? 1 : 0), app.HighlightIdleCollections);
         });
+    }
 
-        static void Rest(HeadlessSession session, int ms)
+    /// <summary>A big walk that finished keeps nothing, and leaves the memory it allocated committed
+    /// all the same: it too is followed by one collection, once the worker rests and the window has
+    /// had no input for <see cref="JunctionApp.HighlightIdleCollect"/>, so never while the wheel
+    /// turns. A small file's walk is followed by none. Without it bigrepo's Commit open left the
+    /// window at 123.1 MB working set, 33.5 MB committed, for as long as it rested; with it 98.0 MB,
+    /// 8.4 MB (plan 17 round 18).</summary>
+    [Fact]
+    public void ABigWalkThatFinished_IsFollowedByOneCollectionOnceTheInputStops_ASmallOneByNone()
+    {
+        Hosted((session, app, _) =>
         {
-            var until = DateTime.UtcNow.AddMilliseconds(ms);
-            while (DateTime.UtcNow < until) { session.PumpFrame(); Thread.Sleep(5); }
-        }
+            app.HighlightIdleCollect = TimeSpan.FromMilliseconds(400);
+            Open(session, app, "src/Huge.cs");
+            string key = (string)Field(app, "_highlightShown")!;
+            int lines = app.HighlightLinesTokenized;
+            session.PumpUntil(() => Highlights(app).Contains(key), TimeSpan.FromSeconds(60));
+            Assert.Empty(KeptTexts(app));   // it finished: nothing kept
+            Assert.True(app.HighlightLinesTokenized - lines >= JunctionApp.BigWalkLines,
+                $"{app.HighlightLinesTokenized - lines} lines walked");
+
+            // The reader scrolls the diff its colours landed in: nothing collects while the wheel turns.
+            var until = DateTime.UtcNow.AddMilliseconds(1200);
+            while (DateTime.UtcNow < until)
+            {
+                session.Window.Wheel(1000, 500, 0, -1);
+                session.PumpFrame();
+                Thread.Sleep(20);
+            }
+            Assert.Equal(0, app.HighlightIdleCollections);
+            session.PumpUntil(() => app.HighlightIdleCollections > 0, TimeSpan.FromSeconds(10));
+            Rest(session, 1000);
+            Assert.Equal(1, app.HighlightIdleCollections);   // once a rest
+
+            lines = app.HighlightLinesTokenized;
+            long bytes = app.HighlightBytesWalked;
+            session.Window.PressKey(KeyCode.Down);   // to Small.cs: a walk of a line
+            session.PumpUntil(() => app.HighlightLinesTokenized > lines && ShownIsCached(app)
+                && Field(app, "_highlightRunning") is null, TimeSpan.FromSeconds(30));
+            Assert.InRange(app.HighlightBytesWalked - bytes, 1, JunctionApp.BigWalkBytes - 1);
+            Rest(session, 1000);
+            Assert.Equal(1, app.HighlightIdleCollections);
+        });
     }
 
     /// <summary>The texts kept are held to their bound in bytes, the file touched longest ago
@@ -164,6 +206,13 @@ public class HighlightResumeTests
     // ── Harness ──────────────────────────────────────────────────────────
 
     private const BindingFlags All = BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance;
+
+    /// <summary>Frames for <paramref name="ms"/> of the real clock, which the idle collection waits on.</summary>
+    private static void Rest(HeadlessSession session, int ms)
+    {
+        var until = DateTime.UtcNow.AddMilliseconds(ms);
+        while (DateTime.UtcNow < until) { session.PumpFrame(); Thread.Sleep(5); }
+    }
 
     /// <summary>The reader stays on the file a moment, then a key takes them to the next one,
     /// which cancels its walk; until a walk is kept with its texts (a busy machine may still be

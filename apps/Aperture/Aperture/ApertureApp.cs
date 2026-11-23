@@ -154,11 +154,9 @@ public sealed partial class ApertureApp : Component, IDisposable
     /// <summary>The toast on screen, for tests.</summary>
     internal ToastHost Toasts => _toasts;
 
-    private void Rerender()
-    {
-        _parts.Invalidate();
-        _revision.Value++;
-    }
+    /// <summary>Rebuilds the window: the view, and a part when what it shows moved
+    /// (ApertureApp.Parts.cs).</summary>
+    private void Rerender() => _revision.Value++;
 
     // A monitor change arrives as a resize: retire the icon rasters cached for the old
     // scale, or every icon disappears until the next build. Artwork is fetched at the new
@@ -199,8 +197,6 @@ public sealed partial class ApertureApp : Component, IDisposable
         Builds++;
         // Track the revision signal so Rerender() re-runs Build through the Effect.
         _ = _revision.Value;
-        if (!_viewBuild) _parts.Invalidate();
-        _viewBuild = false;
         StartWindowFit();
 
         var root = Flex.Column(gap: 0)
@@ -212,7 +208,7 @@ public sealed partial class ApertureApp : Component, IDisposable
         // Full screen means the window has no chrome — so neither do we. The app's own
         // title bar is the only chrome there is here, and leaving it up would put a strip
         // of app furniture across the top of a film.
-        if (!_window.IsFullscreen) root.AddChild(TitleBarPart.Place().FlexShrink(0));
+        if (!_window.IsFullscreen) root.AddChild(PlaceTitleBar().FlexShrink(0));
 
         var body = _stage == ApertureStage.Connect ? BuildConnectView() : BuildBrowsing();
         body.Key = "body";
@@ -253,7 +249,7 @@ public sealed partial class ApertureApp : Component, IDisposable
         EnsureSeasonWatch();
 
         var row = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
-        row.AddChild(RailPart.Place().FlexShrink(0));
+        row.AddChild(PlaceRail().FlexShrink(0));
 
         _cursorListSet = false;
         var view = Current.View switch
@@ -289,7 +285,10 @@ public sealed partial class ApertureApp : Component, IDisposable
 
     // ── Title bar ────────────────────────────────────────────────────────
 
-    private Element BuildTitleBar()
+    /// <summary>The wordmark, the server and who is signed in, and the window's buttons. Built
+    /// from <paramref name="shows"/> alone, the value the title bar part compares
+    /// (ApertureApp.Parts.cs).</summary>
+    private Element BuildTitleBar(in TitleBarShows shows)
     {
         var bar = Flex.Row(gap: 0)
             .Height(Halide.TitleBarHeight).FlexShrink(0)
@@ -300,10 +299,10 @@ public sealed partial class ApertureApp : Component, IDisposable
         var left = Flex.Row(gap: Halide.S3).FlexShrink(0).AlignItems(AlignItems.Center)
             .Padding(new Thickness(0, 0, 0, Halide.S4));
         left.AddChild(Ui.Wordmark(12f, Halide.TextMuted));
-        if (_library is { } lib)
+        if (shows.Server is { } server)
         {
             left.AddChild(Text.New("·").FontSize(12f).TextColor(Halide.TextFaint));
-            left.AddChild(Ui.Line(lib.Server.Name, 12f, Halide.TextDim));
+            left.AddChild(Ui.Line(server.Name, 12f, Halide.TextDim));
         }
         left.WindowDrag();
         bar.AddChild(left);
@@ -311,19 +310,19 @@ public sealed partial class ApertureApp : Component, IDisposable
         var right = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Center);
         right.AddChild(Flex.Row(gap: 0).FlexGrow(1).AlignSelf(AlignSelf.Stretch).WindowDrag());
 
-        if (_library is { } signedIn)
+        if (shows.User is { } signedIn)
         {
             var who = Flex.Row(gap: 6).AlignItems(AlignItems.Center)
                 .Padding(new Thickness(3, Halide.S2, 3, Halide.S2))
                 .CornerRadius(Halide.Radius1)
                 .Cursor(CursorType.Pointer)
-                .Tooltip($"Signed in as {signedIn.User.Name} — settings")
+                .Tooltip($"Signed in as {signedIn.Name} — settings")
                 .AccessibleRole(AccessibilityRole.Button)
-                .AccessibleName($"Signed in as {signedIn.User.Name}")
+                .AccessibleName($"Signed in as {signedIn.Name}")
                 .AutomationId("titlebar-user")
                 .Pressable();
             who.AddChild(Ui.Icon(Icons.User, 14f, Halide.TextMuted));
-            who.AddChild(Ui.Line(signedIn.User.Name, 12f, Halide.TextDim));
+            who.AddChild(Ui.Line(signedIn.Name, 12f, Halide.TextDim));
             who.OnClick(_ => Navigate(new Route(ApertureView.Settings)));
             who.HoverBg(Halide.Raised);
             right.AddChild(who);
@@ -362,9 +361,11 @@ public sealed partial class ApertureApp : Component, IDisposable
     /// Home, one button per library, then search and settings at the foot. The libraries
     /// are on the rail rather than behind a menu because a media server has two or three
     /// of them and they are the app's top-level nouns — keys 2… land on them in the order
-    /// the server lists them.
+    /// the server lists them. Built from <paramref name="shows"/>, the value the rail part
+    /// compares, and its doors, each a part of its own lit by the light (ApertureApp.Parts.cs),
+    /// so nothing it shows can move without one of the two moving.
     /// </summary>
-    private Element BuildRail()
+    private Element BuildRail(in RailShows shows)
     {
         var rail = Flex.Column(gap: Halide.S1).FlexShrink(0)
             .Width(Halide.RailWidth)
@@ -373,64 +374,80 @@ public sealed partial class ApertureApp : Component, IDisposable
             .Background(Halide.Surface)
             .BorderColor(Halide.Border).BorderWidth(new Thickness(0, 1, 0, 0));
 
-        rail.AddChild(RailButton(Icons.Home, "Home", "1",
-            // Home's rows in full are Home's, as a Discover row in full is Discover's.
-            active: Current.View is ApertureView.Home or ApertureView.ContinueWatching or ApertureView.NextUp,
-            onClick: () => GoHome()));
+        StartDoors();
+        rail.AddChild(PlaceDoor(ref _homeDoor, RailDoor.Home,
+            door => RailButton(Icons.Home, "Home", "1", active: IsLit(door), onClick: () => GoHome())).FlexShrink(0));
 
-        int key = 2;
-        foreach (var lib in Libraries)
-        {
-            var id = lib.Id;
-            string num = key <= 9 ? key.ToString() : "";
-            rail.AddChild(RailButton(Icons.ForLibrary(lib.Kind), lib.Name, num,
-                active: Current.View == ApertureView.Library && Current.Id == id,
-                onClick: () => Navigate(new Route(ApertureView.Library, id, lib.Name))));
-            key++;
-        }
+        for (int i = 0; i < shows.Libraries.Count; i++)
+            rail.AddChild(PlaceDoor(LibraryDoor(i), new RailLight(RailDoor.Library, shows.Libraries[i].Id)).FlexShrink(0));
 
         // The request server's two doors, under the libraries they fill — and only when one
         // is connected: a rail button that leads to "connect something first" is furniture.
-        if (_requestServer is { } requests)
+        if (shows.Requests is { } user)
         {
             rail.AddChild(Box.New().Height(Halide.S2));
-            rail.AddChild(RailButton(Icons.Discover, "Discover", "",
-                active: Current.View is ApertureView.Discover or ApertureView.DiscoverTitle
-                    or ApertureView.DiscoverGenre or ApertureView.DiscoverPerson or ApertureView.DiscoverCompany
-                    or ApertureView.DiscoverAll or ApertureView.DiscoverGenres or ApertureView.DiscoverCompanies,
-                onClick: () => Navigate(new Route(ApertureView.Discover))));
-            rail.AddChild(RailButton(Icons.Requests, "Requests", "",
-                active: Current.View == ApertureView.Requests,
-                onClick: () => Navigate(new Route(ApertureView.Requests)),
-                badge: requests.User.CanManageRequests && PendingRequestCount > 0 ? PendingRequestCount : 0));
-            // Everyone's reports are for whoever looks after the library; the badge only for
-            // someone who can do something about them.
-            if (requests.User.CanSeeIssues)
-                rail.AddChild(RailButton(Icons.Report, "Issues", "",
-                    active: Current.View is ApertureView.Issues or ApertureView.Issue,
-                    onClick: () => Navigate(new Route(ApertureView.Issues)),
-                    badge: requests.User.CanManageIssues ? OpenIssueCount : 0, badgeWord: "open"));
-            // Someone who files reports but may not read everyone's: their own, and a
-            // badge for the ones answered or resolved since they last looked.
-            else if (CanReportProblems)
-                rail.AddChild(RailButton(Icons.Report, "Your reports", "",
-                    active: Current.View is ApertureView.Issues or ApertureView.Issue,
-                    onClick: () => Navigate(new Route(ApertureView.Issues)),
-                    badge: MyIssueNewsCount, badgeWord: "new"));
+            rail.AddChild(PlaceDoor(ref _discoverDoor, RailDoor.Discover, door => RailButton(Icons.Discover, "Discover", "",
+                active: IsLit(door),
+                onClick: () => Navigate(new Route(ApertureView.Discover)))).FlexShrink(0));
+            rail.AddChild(PlaceDoor(ref _requestsDoor, RailDoor.Requests, BuildRequestsDoor).FlexShrink(0));
+            if (user.CanSeeIssues || CanReport(user))
+                rail.AddChild(PlaceDoor(ref _issuesDoor, RailDoor.Issues, BuildIssuesDoor).FlexShrink(0));
         }
 
         rail.AddChild(Box.New().FlexGrow(1));
-        rail.AddChild(RailButton(Icons.FavoriteOn, "Favourites", "0",
-            active: Current.View == ApertureView.Favourites,
-            onClick: () => Navigate(new Route(ApertureView.Favourites))));
-        rail.AddChild(RailButton(Icons.Search, "Search", "/",
-            active: Current.View == ApertureView.Search,
-            onClick: () => Navigate(new Route(ApertureView.Search))));
-        rail.AddChild(RailButton(Icons.Settings, "Settings", "",
-            active: Current.View == ApertureView.Settings,
-            onClick: () => Navigate(new Route(ApertureView.Settings))));
+        rail.AddChild(PlaceDoor(ref _favouritesDoor, RailDoor.Favourites, door => RailButton(Icons.FavoriteOn, "Favourites", "0",
+            active: IsLit(door),
+            onClick: () => Navigate(new Route(ApertureView.Favourites)))).FlexShrink(0));
+        rail.AddChild(PlaceDoor(ref _searchDoor, RailDoor.Search, door => RailButton(Icons.Search, "Search", "/",
+            active: IsLit(door),
+            onClick: () => Navigate(new Route(ApertureView.Search)))).FlexShrink(0));
+        rail.AddChild(PlaceDoor(ref _settingsDoor, RailDoor.Settings, door => RailButton(Icons.Settings, "Settings", "",
+            active: IsLit(door),
+            onClick: () => Navigate(new Route(ApertureView.Settings)))).FlexShrink(0));
         rail.AddChild(Box.New().Height(Halide.S2));
         return rail;
+    }
+
+    /// <summary>A library's door, from the library in its slot as the rail last built. A slot the
+    /// rail has since left builds nothing; the rail builds again in the same pass.</summary>
+    private Element BuildLibraryDoor(RailDoorPart door, int slot)
+    {
+        var libraries = _railShown.Libraries;
+        if (slot >= libraries.Count) return Box.New();
+        var lib = libraries[slot];
+        var id = lib.Id;
+        // 1 is Home; 2… are the libraries in the order the rail lists them.
+        string num = slot + 2 <= 9 ? (slot + 2).ToString() : "";
+        return RailButton(Icons.ForLibrary(lib.Kind), lib.Name, num, active: IsLit(door),
+            onClick: () => Navigate(new Route(ApertureView.Library, id, lib.Name)));
+    }
+
+    private Element BuildRequestsDoor(RailDoorPart door)
+    {
+        if (_railShown.Requests is not { } user) return Box.New();
+        return RailButton(Icons.Requests, "Requests", "",
+            active: IsLit(door),
+            onClick: () => Navigate(new Route(ApertureView.Requests)),
+            badge: user.CanManageRequests && _railShown.Waiting > 0 ? _railShown.Waiting : 0);
+    }
+
+    private Element BuildIssuesDoor(RailDoorPart door)
+    {
+        // Everyone's reports are for whoever looks after the library; the badge only for
+        // someone who can do something about them.
+        if (_railShown.Requests is { CanSeeIssues: true } reader)
+            return RailButton(Icons.Report, "Issues", "",
+                active: IsLit(door),
+                onClick: () => Navigate(new Route(ApertureView.Issues)),
+                badge: reader.CanManageIssues ? _railShown.Open : 0, badgeWord: "open");
+        // Someone who files reports but may not read everyone's: their own, and a
+        // badge for the ones answered or resolved since they last looked.
+        if (_railShown.Requests is { } reporter && CanReport(reporter))
+            return RailButton(Icons.Report, "Your reports", "",
+                active: IsLit(door),
+                onClick: () => Navigate(new Route(ApertureView.Issues)),
+                badge: _railShown.News, badgeWord: "new");
+        return Box.New();
     }
 
     private Element RailButton(string glyph, string label, string key, bool active, Action onClick, int badge = 0,

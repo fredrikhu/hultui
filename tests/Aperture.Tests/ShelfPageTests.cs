@@ -14,7 +14,8 @@ namespace Aperture.Tests;
 
 /// <summary>
 /// The cursor on a shelf that pages (plan 17 round 8 step 5): a card on another page of its shelf
-/// turns the shelf to that page, with one build, and takes the ring and the keyboard. It used to
+/// turns the shelf to that page, with one build (on Home, of that shelf alone: plan 17 round 18), and
+/// takes the ring and the keyboard. It used to
 /// walk on with no card ringed and the keyboard left behind. And a move that builds takes the ring
 /// off the live card it leaves first, as a build hands that card back as it was made.
 /// </summary>
@@ -22,8 +23,7 @@ namespace Aperture.Tests;
 public class ShelfPageTests
 {
     /// <summary>Home at 1000 px, four films a page: along the first library shelf onto its second
-    /// page, on into the next shelf and back. (The cards a turned page shows ask for their pictures,
-    /// and the answers build Home again: the counts are taken once those are in.)</summary>
+    /// page, on into the next shelf and back. Each turn builds that shelf alone.</summary>
     [Fact]
     public void OnHome_ACardOnTheNextPage_TurnsTheShelf()
     {
@@ -34,22 +34,28 @@ public class ShelfPageTests
             AssertRingAndKeyboardOnTheCursor(session, app);
             var onFirstPage = app.CursorItem?.Id;
 
-            int builds = app.Builds;
+            // The shelf builds alone (plan 17 round 18): no build of Home.
+            int builds = app.Builds, shelves = app.HomeShelvesMade;
             Keys(session, KeyCode.Right);
-            Assert.True(app.Builds > builds, "the move onto the next page built nothing");
+            Assert.Equal(shelves + 1, app.HomeShelvesMade);
+            Assert.Equal(builds, app.Builds);
             AssertRingAndKeyboardOnTheCursor(session, app);
             DiscoverCursorTests.Settle(session);
 
             builds = app.Builds;
+            shelves = app.HomeShelvesMade;
             foreach (var key in new[] { KeyCode.Right, KeyCode.Right, KeyCode.Right, KeyCode.Left, KeyCode.Left, KeyCode.Left })
             {
                 Keys(session, key);
                 AssertRingAndKeyboardOnTheCursor(session, app);
             }
-            Assert.Equal(builds, app.Builds);   // the page stays turned; the next shelf starts on its first
+            // The page stays turned; the next shelf starts on its first.
+            Assert.Equal(builds, app.Builds);
+            Assert.Equal(shelves, app.HomeShelvesMade);
 
             Keys(session, KeyCode.Left);
-            Assert.True(app.Builds > builds, "the move back onto the first page built nothing");
+            Assert.Equal(shelves + 1, app.HomeShelvesMade);
+            Assert.Equal(builds, app.Builds);
             Assert.Equal(onFirstPage, app.CursorItem?.Id);
             AssertRingAndKeyboardOnTheCursor(session, app);
         }, width: 1000);
@@ -84,8 +90,7 @@ public class ShelfPageTests
     {
         DiscoverCursorTests.Host((session, app) =>
         {
-            Keys(session, KeyCode.Right);
-            for (int i = 0; i < 6; i++) Keys(session, KeyCode.Right);
+            for (int i = 0; i < 6; i++) Keys(session, KeyCode.Right);   // from the first card
             AssertRingAndKeyboardOnTheCursor(session, app);
 
             foreach (var (key, at, turns) in new[]

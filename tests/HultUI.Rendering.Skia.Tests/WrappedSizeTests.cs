@@ -140,6 +140,85 @@ public class WrappedSizeTests
     }
 
     [Fact]
+    public void AReturnToTheWidthAViewOpenedAt_LeavesTheNextDragNoMoreToBreak()
+    {
+        var fonts = new SkiaFontCollection();
+        var shaper = new SkiaTextShaper();
+        const float opened = 640f;
+        var drag = Enumerable.Range(1, 30).Select(i => opened - 3f * i).ToArray();
+        int first = 0, again = 0;
+        foreach (var style in WrapRangeTests.Styles)
+        {
+            var sizes = new TextPipeline(fonts, shaper);
+            var reference = new TextPipeline(fonts, shaper) { KeepsWrapRanges = false };
+            // The view opens: every row seen for the first time, so laid out (and not drawn).
+            foreach (var text in WrapRangeTests.Texts) sizes.WrappedSize(text, style, opened, null);
+
+            // The asks of a drag that no kept range answered (the rows broken again, and the one-line ones).
+            int Drag()
+            {
+                int asks = 0, hits = sizes.WrapRangeHits;
+                foreach (float width in drag)
+                foreach (var text in WrapRangeTests.Texts)
+                {
+                    SameSize(reference.Layout(text, style, width, null).Size, sizes.WrappedSize(text, style, width, null),
+                        $"\"{text[..20]}\" w={width:R} {style}");
+                    asks++;
+                }
+                return asks - (sizes.WrapRangeHits - hits);
+            }
+
+            first += Drag();
+            // Back at the width it opened at: every row's layout there is in the width-keyed cache.
+            var (layouts, _) = sizes.LayoutCacheUse;
+            foreach (var text in WrapRangeTests.Texts)
+                SameSize(reference.Layout(text, style, opened, null).Size, sizes.WrappedSize(text, style, opened, null),
+                    $"\"{text[..20]}\" back at {opened:R} {style}");
+            Assert.Equal(layouts, sizes.LayoutCacheUse.Entries);
+            again += Drag();
+        }
+        Assert.True(first > 100, $"the first drag broke only {first} rows");
+        // Each row's range is its opening layout's again, as before the first drag; not the first drag's far end's.
+        Assert.True(again <= first, $"the drag after the return broke {again} rows, the first drag {first}");
+    }
+
+    [Fact]
+    public void ASizeAsk_AtAWidthLaidOutBefore_PutsTheLayoutsRangeBack_AndALayoutAskDoesNot()
+    {
+        var pipeline = new TextPipeline(new SkiaFontCollection(), new SkiaTextShaper());
+        var style = WrapRangeTests.Styles[0];
+        string paragraph = WrapRangeTests.Latin[3];
+        var laidOut = pipeline.Layout(paragraph, style, 640f, null);
+        Assert.True(pipeline.KeptWrapRange(paragraph, style, null, out float from, out float below));
+        var (_, counted) = pipeline.WrapRangeUse;
+        // Sized far from there: the range kept is that width's, a size's.
+        pipeline.WrappedSize(paragraph, style, 400f, null);
+        Assert.True(pipeline.KeptWrapRange(paragraph, style, null, out float sizedFrom, out float sizedBelow));
+        Assert.True(sizedBelow <= from, $"[{sizedFrom:R}, {sizedBelow:R}) meets [{from:R}, {below:R})");
+
+        // A layout asked at 640 is the one kept for that width, and leaves the range as it is: a row on screen is
+        // laid out at two widths a frame, and its range would go back and forth.
+        Assert.Same(laidOut, pipeline.Layout(paragraph, style, 640f, null));
+        Assert.True(pipeline.KeptWrapRange(paragraph, style, null, out float f, out float b));
+        Assert.Equal((sizedFrom, sizedBelow), (f, b));
+
+        // A size asked there puts the layout's own range back, allocating nothing, and the next width of a drag in
+        // it is answered from it, with that layout.
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        var size = pipeline.WrappedSize(paragraph, style, 640f, null);
+        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        SameSize(laidOut.Size, size, "back at 640");
+        Assert.True(pipeline.KeptWrapRange(paragraph, style, null, out f, out b));
+        Assert.Equal((from, below), (f, b));
+        Assert.Equal(counted, pipeline.WrapRangeUse.Bytes);   // counted for what the layout was counted for
+        float inside = from < 640f ? from : MathF.BitDecrement(below);
+        Assert.NotEqual(640f, inside);
+        int hits = pipeline.WrapRangeHits;
+        Assert.Same(laidOut, pipeline.Layout(paragraph, style, inside, null));
+        Assert.Equal(hits + 1, pipeline.WrapRangeHits);
+    }
+
+    [Fact]
     public void TextMeasure_AsksTheContextForTheSizeAlone()
     {
         var pipeline = new TextPipeline(new SkiaFontCollection(), new SkiaTextShaper());

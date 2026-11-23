@@ -5,6 +5,7 @@ using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
+using HultUI.Testing;
 using Xunit;
 
 namespace HultUI.Core.Tests.Elements;
@@ -16,9 +17,10 @@ public class TextElementSelectionTests
 
     // Builds a laid-out label and renders it once through a stub context, which
     // populates the cached line layout the pointer hit-testing relies on.
-    private TextElement CreateLabel(string text, bool selectable = true, int width = 400)
+    private TextElement CreateLabel(string text, bool selectable = true, int width = 400, IReadOnlyList<TextLink>? links = null)
     {
         var label = TextElement.New(text);
+        if (links is not null) label.Links = links;
         if (selectable) label.Selectable = true;
 
         var container = BoxElement.New();
@@ -201,6 +203,80 @@ public class TextElementSelectionTests
 
         Assert.True(live.Selectable);
         Assert.Equal("Hello", live.SelectedText);
+    }
+
+    /// <summary>
+    /// A selectable label's handlers are shared by every label and read the label they run on from
+    /// the event (plan 17 round 18): wired to each label they were six delegates, a closure and an
+    /// array grown 2 → 4 → 8 slots, 880 B a label, and every row a diff or a viewer makes carries one
+    /// or two. What is left is the one array that holds the six exactly (24 B a slot).
+    /// </summary>
+    [Fact]
+    public void MakingALabelSelectable_AllocatesOneArrayOfItsSixHandlers()
+    {
+        const int calls = 64;
+        var labels = new TextElement[Allocations.MaxRounds * calls];
+        for (int i = 0; i < labels.Length; i++)
+        {
+            labels[i] = TextElement.New("    var x = Something(i);");
+            _ = labels[i].Inherited;   // the style the cursor goes in is not the wiring's
+        }
+        int next = 0;
+
+        double perLabel = Allocations.PerCall(calls, () => labels[next++].Selectable = true, goal: 200);
+
+        Assert.True(perLabel <= 200, $"making a label selectable allocated {perLabel:0} B");
+        // A label that has links first wired its click handler then: the same six slots.
+        var linked = TextElement.New("see the docs");
+        linked.Links = [new TextLink(8, 4, "docs")];
+        linked.Selectable = true;
+        Assert.Equal(6, HandlerSlots(linked));
+        Assert.Equal(6, HandlerSlots(labels[0]));
+    }
+
+    private static int HandlerSlots(Element element) =>
+        ((Array)typeof(Element).GetField("_handlers", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .GetValue(element)!).Length;
+
+    /// <summary>The shared handlers act on the label the event is on: after a patch, on the live label,
+    /// not on the build's copy that was patched from.</summary>
+    [Fact]
+    public void AfterAPatch_TheSharedHandlers_ActOnTheLiveLabel()
+    {
+        var live = CreateLabel("Hello World");
+        var other = CreateLabel("Other words");
+        var incoming = TextElement.New("Hello World");
+        incoming.Selectable = true;
+        live.PatchFrom(incoming);
+
+        Drag(live, 0, 5);
+        Assert.Equal("Hello", live.SelectedText);
+        Assert.False(incoming.HasSelection);
+        Assert.False(other.HasSelection);
+
+        EventDispatcher.DispatchDirect(new PointerDownEvent { Position = CharPoint(live, 8), ClickCount = 2 }, live);
+        Assert.Equal("World", live.SelectedText);
+
+        var clipboard = new StubClipboard();
+        live.Clipboard = clipboard;
+        EventDispatcher.DispatchDirect(new KeyDownEvent { Key = KeyCode.C, Modifiers = KeyModifiers.Ctrl }, live);
+        Assert.Equal("World", clipboard.Text);
+
+        EventDispatcher.DispatchDirect(new BlurEvent(), live);
+        Assert.False(live.HasSelection);
+    }
+
+    /// <summary>A label with links made selectable keeps one click handler: a click follows the link once.</summary>
+    [Fact]
+    public void ALinkedLabelMadeSelectable_FollowsALinkOnce()
+    {
+        var label = CreateLabel("see the docs", links: [new TextLink(8, 4, "docs")]);
+        var followed = new List<string>();
+        label.LinkActivated = followed.Add;
+
+        EventDispatcher.DispatchDirect(new ClickEvent { Position = CharPoint(label, 9), ClickCount = 1 }, label);
+
+        Assert.Equal(["docs"], followed);
     }
 
     [Fact]

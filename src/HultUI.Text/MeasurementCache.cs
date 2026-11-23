@@ -321,6 +321,21 @@ internal sealed class LruCache<TKey, TValue> where TKey : notnull
         return false;
     }
 
+    /// <summary><see cref="TryGet(TKey, out TValue)"/>, and the weight the entry counts for: the one it
+    /// was put with, at most half the bound.</summary>
+    public bool TryGet(TKey key, out TValue value, out int weight)
+    {
+        if (_map.TryGetValue(key, out var node))
+        {
+            _order.Remove(node);
+            _order.AddFirst(node);
+            (value, weight) = (node.Value.Value, node.Value.Weight);
+            return true;
+        }
+        (value, weight) = (default!, 0);
+        return false;
+    }
+
     /// <summary>
     /// The cache looked up by keys of another type, which its comparer also implements
     /// <see cref="IAlternateEqualityComparer{TAlternate, TOther}"/> for — a segment of a longer

@@ -260,4 +260,61 @@ public class VulkanSwapchainChoiceTests
         Assert.False(DestroyBeforeReplacing(isWindows: false, VkFormat.R16G16B16A16Sfloat, VkPresentModeKHR.Mailbox));
     }
 
+    /// <summary>
+    /// The 8-bit swapchain under MAILBOX on Windows asks for the surface's minimum: 2 on the RTX
+    /// 4080 (610), which offers 2 to 8. It saved 3–18 % of DXGI's local memory in Reel and
+    /// Aperture with no acquire waiting in playback (plan 17 round 18, question 74).
+    /// </summary>
+    [Fact]
+    public void The8BitMailboxSwapchainOnWindows_HasTheSurfacesMinimum()
+    {
+        Assert.Equal(2u, ImageCount(isWindows: true, halfFloat: false, VkPresentModeKHR.Mailbox, oneToOne: false, 2, 8));
+        Assert.Equal(3u, ImageCount(isWindows: true, halfFloat: false, VkPresentModeKHR.Mailbox, oneToOne: false, 3, 0));
+    }
+
+    /// <summary>Never fewer than the surface's minimum, never more than its maximum, and never a
+    /// single image, which would make every frame wait for the one before it to leave the screen.</summary>
+    [Fact]
+    public void TheImageCount_StaysInsideWhatTheSurfaceAllows_AndIsNeverOne()
+    {
+        Assert.Equal(2u, ImageCount(isWindows: true, halfFloat: false, VkPresentModeKHR.Mailbox, oneToOne: false, 1, 8));
+        Assert.Equal(2u, ImageCount(isWindows: true, halfFloat: false, VkPresentModeKHR.Mailbox, oneToOne: false, 1, 0));
+        Assert.Equal(4u, ImageCount(isWindows: true, halfFloat: false, VkPresentModeKHR.Mailbox, oneToOne: false, 4, 4));
+        Assert.Equal(2u, ImageCount(isWindows: true, halfFloat: true, VkPresentModeKHR.Mailbox, oneToOne: false, 2, 2));
+        Assert.Equal(3u, ImageCount(isWindows: false, halfFloat: false, VkPresentModeKHR.Mailbox, oneToOne: false, 3, 3));
+        foreach (bool windows in new[] { false, true })
+            foreach (bool halfFloat in new[] { false, true })
+                foreach (bool oneToOne in new[] { false, true })
+                    foreach (var mode in new[] { VkPresentModeKHR.Mailbox, VkPresentModeKHR.Fifo, VkPresentModeKHR.Immediate })
+                        for (uint min = 1; min <= 4; min++)
+                            foreach (uint max in new uint[] { 0, min, min + 1, 8 })
+                            {
+                                uint count = ImageCount(windows, halfFloat, mode, oneToOne, min, max);
+                                Assert.True(count >= min, $"{count} for min {min}");
+                                Assert.True(max == 0 || count <= max, $"{count} for max {max}");
+                                Assert.True(count >= 2 || max == 1, $"{count} for {min}..{max}");
+                            }
+    }
+
+    /// <summary>
+    /// Everything else keeps one more than the minimum, as before: the half-float swapchain (a drag
+    /// during HDR playback with two was not measured), FIFO and IMMEDIATE (not measured), other
+    /// platforms (not measured), and the swapchain a drag over-allocates, where two images made
+    /// about 40 % of the frames wait up to one refresh while a video played, against 2 of 57 with
+    /// three.
+    /// </summary>
+    [Fact]
+    public void EveryOtherSwapchain_KeepsOneImageMoreThanTheMinimum()
+    {
+        Assert.Equal(3u, ImageCount(isWindows: true, halfFloat: true, VkPresentModeKHR.Mailbox, oneToOne: false, 2, 8));
+        Assert.Equal(3u, ImageCount(isWindows: true, halfFloat: false, VkPresentModeKHR.Fifo, oneToOne: false, 2, 8));
+        Assert.Equal(3u, ImageCount(isWindows: true, halfFloat: false, VkPresentModeKHR.FifoRelaxed, oneToOne: false, 2, 8));
+        Assert.Equal(3u, ImageCount(isWindows: true, halfFloat: false, VkPresentModeKHR.Immediate, oneToOne: false, 2, 8));
+        Assert.Equal(3u, ImageCount(isWindows: true, halfFloat: false, VkPresentModeKHR.Mailbox, oneToOne: true, 2, 8));
+        Assert.Equal(3u, ImageCount(isWindows: true, halfFloat: true, VkPresentModeKHR.Mailbox, oneToOne: true, 2, 8));
+        Assert.Equal(3u, ImageCount(isWindows: false, halfFloat: false, VkPresentModeKHR.Mailbox, oneToOne: false, 2, 8));
+        Assert.Equal(4u, ImageCount(isWindows: false, halfFloat: false, VkPresentModeKHR.Mailbox, oneToOne: false, 3, 0));
+        Assert.Equal(3u, ImageCount(isWindows: false, halfFloat: true, VkPresentModeKHR.Fifo, oneToOne: false, 2, 0));
+    }
+
 }

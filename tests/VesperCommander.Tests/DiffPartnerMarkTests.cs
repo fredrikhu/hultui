@@ -67,6 +67,34 @@ public class DiffPartnerMarkTests
         Assert.Equal(Color.Transparent, Border(t, 'R', "a.txt"));
     }
 
+    /// <summary>A file is never ringed as its own partner. With both panes on one folder and the
+    /// other cursor on "..", a folder or the cursor's own file, the only partner would be the file
+    /// itself, so F3 does nothing there and nothing is ringed; the other cursor on another file is
+    /// a real partner and is ringed.</summary>
+    [Theory]
+    [InlineData("..")]
+    [InlineData("sub")]
+    [InlineData("a.txt")]
+    public void WithBothPanesOnOneFolder_AFileIsNotRingedAsItsOwnPartner(string other)
+    {
+        using var t = new DiffViewTests.Fixture();
+        System.IO.Directory.CreateDirectory(System.IO.Path.Combine(t.Left, "sub"));
+        t.WriteLeft("a.txt", "one\n");
+        t.WriteLeft("b.txt", "two\n");
+        t.Open();
+        t.Invoke("NavigateTo", 'R', t.Left, null, false);
+        t.Session.PumpUntil(() => t.Rows('R').Count == t.Rows('L').Count);
+
+        t.PutCursorOn('R', other);
+        t.PutCursorOn('L', "a.txt");
+        Assert.Equal(Color.Transparent, Border(t, 'R', "a.txt"));
+        Assert.Equal(Color.Transparent, Border(t, 'R', "b.txt"));
+
+        t.PutCursorOn('R', "b.txt");
+        Assert.Equal(Nocturne.Accent700, Border(t, 'R', "b.txt"));
+        Assert.Equal(Color.Transparent, Border(t, 'R', "a.txt"));
+    }
+
     /// <summary>
     /// The two marks differ in kind, not merely in brightness: the cursor is filled and the
     /// partner is a hollow ring. A dimmer copy of the same treatment reads as the same thing

@@ -208,8 +208,21 @@ public class TextElement : Element
     {
         if (_clickWired) return;
         _clickWired = true;
-        OnOwn<ClickEvent>(OnClick);
+        OnOwn(ClickHandler);
     }
+
+    // The handlers every selectable or linked label is wired with, shared by all of them: each reads
+    // the label it runs on from the event, as an element's own handlers only ever run on it (a patch
+    // keeps the live element's, EventDispatcher sets CurrentTarget). Bound to each label they were
+    // six delegates, a closure for the blur and a handler array grown 2 → 4 → 8 slots: 880 B a
+    // selectable label on top of a plain one's 672, and every row a diff or a viewer makes has one
+    // or two (plan 17 round 18).
+    private static readonly Action<PointerDownEvent> PointerDownHandler = static e => ((TextElement)e.CurrentTarget).OnPointerDown(e);
+    private static readonly Action<PointerMoveEvent> PointerMoveHandler = static e => ((TextElement)e.CurrentTarget).OnPointerMove(e);
+    private static readonly Action<PointerUpEvent> PointerUpHandler = static e => ((TextElement)e.CurrentTarget).OnPointerUp(e);
+    private static readonly Action<ClickEvent> ClickHandler = static e => ((TextElement)e.CurrentTarget).OnClick(e);
+    private static readonly Action<KeyDownEvent> KeyDownHandler = static e => ((TextElement)e.CurrentTarget).OnKeyDown(e);
+    private static readonly Action<BlurEvent> BlurHandler = static e => ((TextElement)e.CurrentTarget).OnBlur();
 
     /// <summary>The link under a screen point, if any.</summary>
     private TextLink? LinkAt(Point screenPos)
@@ -298,18 +311,28 @@ public class TextElement : Element
         if (_selectionWired) return;
         _selectionWired = true;
 
-        OnOwn<PointerDownEvent>(OnPointerDown);
-        OnOwn<PointerMoveEvent>(OnPointerMove);
-        OnOwn<PointerUpEvent>(OnPointerUp);
+        // The six in one array that holds them exactly (the click one may be there already).
+        ReserveHandlers(_clickWired ? 5 : 6);
+        OnOwn(PointerDownHandler);
+        OnOwn(PointerMoveHandler);
+        OnOwn(PointerUpHandler);
         WireClick();
-        OnOwn<KeyDownEvent>(OnKeyDown);
-        // A grouped label keeps its selection on blur: focus moves between the group's own
-        // labels during a drag, and a virtualized row loses focus merely by scrolling out of
-        // view. The window clears the group when the user presses outside it.
-        OnOwn<BlurEvent>(_ => { if (!InGroup && HasSelection) { ClearSelection(); MarkPaintDirty(); } });
+        OnOwn(KeyDownHandler);
+        OnOwn(BlurHandler);
 
-        ContextMenuItems = BuildContextMenuItems;
+        UseOwnContextMenu();
     }
+
+    // A grouped label keeps its selection on blur: focus moves between the group's own
+    // labels during a drag, and a virtualized row loses focus merely by scrolling out of
+    // view. The window clears the group when the user presses outside it.
+    private void OnBlur()
+    {
+        if (!InGroup && HasSelection) { ClearSelection(); MarkPaintDirty(); }
+    }
+
+    private protected override Func<IReadOnlyList<ContextMenuItem>>? OwnContextMenuItems() =>
+        _selectionWired ? BuildContextMenuItems : null;
 
     private void ClearSelection() => _anchor = _caret = 0;
 

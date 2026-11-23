@@ -66,9 +66,18 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     // client's thread making an item node's wrapper (TryMakeItemWrapper). Never across a call into UI
     // Automation: the providers an apply lets go are told after (_disconnects).
     private readonly object _applyLock = new();
-    // The elements an apply let go of, with their native objects, told to UI Automation once it has
-    // let go of the lock. UI thread only.
+    // The elements an apply let go of, with their native objects, handed to the disconnect thread once
+    // it has let go of the lock (Disconnect). UI thread only.
     private readonly List<(ElementId Id, IntPtr Native)> _disconnects = [];
+    // Handed to the disconnect thread and not taken yet, in order. Its own lock guards it and the three
+    // fields after it.
+    private readonly List<(ElementId Id, IntPtr Native)> _handed = [];
+    // The elements whose providers a thread is telling UI Automation of now (TellNext).
+    private readonly List<ElementId> _telling = [];
+    // Whether the disconnect thread has this bridge to visit (DisconnectThread.Wake), so it is woken once.
+    private bool _handedOn;
+    // Handed and not yet told: _handed's count and _telling's. Written under the lock, read without it.
+    private int _untold;
     private IntPtr _hostProviderPtr;
     private AccessibilityNode? _rootNode;
     // ElementId? (nullable ulong) isn't torn-read-safe across threads; store the
@@ -201,6 +210,10 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     private IntPtr ElementRef(ElementId id, NativeProvider.As which)
     {
         if (!TryWrapper(id, out var wrapper)) return IntPtr.Zero;
+        // An element back in the tree whose last provider is not told gone yet (the disconnect thread a
+        // frame behind): that one is told first, so UI Automation never hears of the old one after it has
+        // the new one, which has the same runtime id.
+        if (Volatile.Read(ref _untold) != 0 && !_nativeByElement.ContainsKey(id)) TellFirst(id);
         lock (_nativeLock)
         {
             if (!_nativeByElement.TryGetValue(id, out var p))
@@ -739,7 +752,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
             if (Rebase(root, generation) != _wrappers.Count)
                 DropStale(generation);
         }
-        // UI Automation is told of the providers let go once the lock is free.
+        // The providers let go are handed to the disconnect thread once the lock is free.
         Disconnect();
 
         // 5) Now that every wrapper exists (adds) or is gone (removes) and points
@@ -913,7 +926,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     /// <summary>
     /// Lets go of an element that left the tree: its wrapper, and its native object, which a client
     /// may still hold, kept for <see cref="Disconnect"/>. Under the apply's lock; tells UI
-    /// Automation nothing.
+    /// Automation nothing. Its patterns answer that it is gone from now on (<see cref="IsGone"/>).
     /// </summary>
     private void Unlink(ElementId id)
     {
@@ -933,23 +946,168 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     /// old tree alive. A locked screen that replaced a person's details left them readable from every
     /// element a client had held.
     /// </summary>
+    /// <remarks>
+    /// Told on a thread of its own (<see cref="DisconnectThread"/>), not on the UI thread inside the
+    /// frame: with a UI Automation client asking, a <c>UiaDisconnectProvider</c> took 0.56–0.73 ms on the
+    /// UI thread (the first of a session 3.5–4.0 ms), whether or not the client held the object, and
+    /// 5–11 µs on a thread of its own; Junction's palette closed with 13–14 of them in one frame (plan 17
+    /// round 18, a real window with an out-of-process client). The patterns of an element let go of
+    /// answer UIA_E_ELEMENTNOTAVAILABLE at once (<see cref="IElementBound"/>); its provider is told gone
+    /// and cut from its wrapper a moment later. Every one is told before the window's providers are let
+    /// go (<see cref="Dispose"/>), and an element's old provider before a new one is made for it
+    /// (<see cref="TellFirst"/>).
+    /// </remarks>
     private void Disconnect()
     {
         if (_disconnects.Count == 0) return;
-        foreach (var (id, native) in _disconnects)
+        bool wake;
+        lock (_handed)
         {
-            // Told while the object still answers: UI Automation may ask it for its runtime id.
-            IntPtr simple = NativeProvider.Tearoff(native, NativeProvider.As.Simple);
-            try { UiaInterop.UiaDisconnectProvider(simple); }
-            finally { Marshal.Release(simple); }
-            NativeProvider.Detach(native);
-            Marshal.Release(native);
-            ProviderDisconnected?.Invoke(id);
+            _handed.AddRange(_disconnects);
+            Volatile.Write(ref _untold, _untold + _disconnects.Count);
+            wake = !_handedOn;
+            _handedOn = true;
         }
         _disconnects.Clear();
+        if (wake) DisconnectThread.Wake(this);
     }
 
-    /// <summary>For tests: told of each element whose provider the bridge disconnected (<see cref="Disconnect"/>).</summary>
+    /// <summary>
+    /// Takes the next provider handed to the disconnect thread — the first, or <paramref name="only"/>'s —
+    /// and tells UI Automation it is gone, on this thread; false when there is none. Counted as being told
+    /// (<see cref="_telling"/>) until it is, so a thread that needs it told waits for it.
+    /// </summary>
+    private bool TellNext(ElementId? only = null)
+    {
+        (ElementId Id, IntPtr Native) next = default;
+        lock (_handed)
+        {
+            for (int i = 0; i < _handed.Count; i++)
+            {
+                if (only is { } id && _handed[i].Id != id) continue;
+                next = _handed[i];
+                _handed.RemoveAt(i);
+                _telling.Add(next.Id);
+                break;
+            }
+            if (next.Native == IntPtr.Zero)
+            {
+                if (only is null) _handedOn = false;   // the disconnect thread's visit ends
+                return false;
+            }
+        }
+        t_telling = true;
+        try { Tell(next.Id, next.Native); }
+        catch (Exception ex) { Console.Error.WriteLine($"[HultUI] accessibility disconnect failed: {ex}"); }
+        finally
+        {
+            t_telling = false;
+            lock (_handed)
+            {
+                _telling.Remove(next.Id);
+                Volatile.Write(ref _untold, _untold - 1);
+            }
+        }
+        return true;
+    }
+
+    // Whether this thread is in Tell: UI Automation may call a provider back meanwhile, and a thread
+    // never waits for itself.
+    [ThreadStatic] private static bool t_telling;
+
+    /// <summary>Tells UI Automation an element's provider is gone, and cuts it from its wrapper.</summary>
+    private void Tell(ElementId id, IntPtr native)
+    {
+        // Told while the object still answers: UI Automation may ask it for its runtime id.
+        IntPtr simple = NativeProvider.Tearoff(native, NativeProvider.As.Simple);
+        try { UiaInterop.UiaDisconnectProvider(simple); }
+        finally { Marshal.Release(simple); }
+        NativeProvider.Detach(native);
+        Marshal.Release(native);
+        ProviderDisconnected?.Invoke(id);
+    }
+
+    /// <summary>
+    /// Tells on this thread what the disconnect thread has not taken — every one, or <paramref name="only"/>'s
+    /// — then waits for what another thread is telling of them: one call, microseconds off the UI thread.
+    /// The wait spins, never pumps messages, and gives up after two seconds.
+    /// </summary>
+    private void TellNow(ElementId? only)
+    {
+        while (TellNext(only) && only is null) { }
+        if (t_telling) return;
+        var spin = new SpinWait();
+        long until = Environment.TickCount64 + 2000;
+        while (Environment.TickCount64 <= until)
+        {
+            lock (_handed)
+                if (only is { } id ? !_telling.Contains(id) : _telling.Count == 0) return;
+            spin.SpinOnce(sleep1Threshold: -1);
+        }
+    }
+
+    /// <summary>An element's provider is about to be made again: its last one, if not yet told gone, is
+    /// told first (<see cref="ElementRef"/>).</summary>
+    private void TellFirst(ElementId id) => TellNow(id);
+
+    /// <summary>For tests: waits until the disconnect thread has told every provider handed to it, or
+    /// <paramref name="timeout"/> passes; true when none is left.</summary>
+    internal bool FlushDisconnects(TimeSpan timeout)
+    {
+        long until = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
+        var spin = new SpinWait();
+        while (Volatile.Read(ref _untold) != 0)
+        {
+            if (Environment.TickCount64 > until) return false;
+            spin.SpinOnce();
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// The thread the providers an apply lets go are told gone on (<see cref="Disconnect"/>): one for the
+    /// process, made at the first, in the multithreaded apartment (the providers are free-threaded: no
+    /// ProviderOptions_UseComThreading, and IAgileObject). It visits each bridge that handed it providers,
+    /// in turn; the UI thread never waits for it, but for the one call it may be in at a window's close.
+    /// A background thread: what is left at the process's exit is not told.
+    /// </summary>
+    private static class DisconnectThread
+    {
+        private static readonly Queue<WindowsAccessibilityBridge> s_bridges = new();
+        private static Thread? s_thread;
+
+        public static void Wake(WindowsAccessibilityBridge bridge)
+        {
+            lock (s_bridges)
+            {
+                s_bridges.Enqueue(bridge);
+                if (s_thread is null)
+                {
+                    s_thread = new Thread(Run) { IsBackground = true, Name = "HultUI UIA disconnects" };
+                    s_thread.SetApartmentState(ApartmentState.MTA);
+                    s_thread.Start();
+                }
+                else Monitor.Pulse(s_bridges);
+            }
+        }
+
+        private static void Run()
+        {
+            while (true)
+            {
+                WindowsAccessibilityBridge bridge;
+                lock (s_bridges)
+                {
+                    while (s_bridges.Count == 0) Monitor.Wait(s_bridges);
+                    bridge = s_bridges.Dequeue();
+                }
+                while (bridge.TellNext()) { }
+            }
+        }
+    }
+
+    /// <summary>For tests: told of each element whose provider the bridge disconnected (<see cref="Disconnect"/>),
+    /// on the thread that told it.</summary>
     internal Action<ElementId>? ProviderDisconnected;
 
     /// <summary>Whether a provider's element left the tree (or the bridge is gone): a node's
@@ -1451,6 +1609,10 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
         if (_originalWndProc != IntPtr.Zero)
             UiaInterop.SetWindowLongPtr(_hwnd, UiaInterop.GWLP_WNDPROC, _originalWndProc);
         _byHwnd.TryRemove(_hwnd, out _);
+
+        // Every provider an apply let go is told gone before UI Automation lets go of the window's: what
+        // the disconnect thread has not taken is told here, and the one it may be telling waited for.
+        TellNow(null);
 
         // After the window procedure is restored, so no WM_GETOBJECT hands out a provider being
         // torn down; the window itself is destroyed after its bridge, so it still exists here.

@@ -516,6 +516,7 @@ public sealed class VulkanProbeTests
             int expected = !OperatingSystem.IsWindows() ? 1 : run.Output.Contains("fixed extent available") ? 6 : 4;
             Assert.True(captures.Count >= expected, $"{captures.Count} captures, expected {expected}:\n{run.Output}");
             Assert.DoesNotContain("probe: capture WRONG", run.Output);
+            AssertImageCounts(run.Output);
 
             if (run.Output.Contains("\"VK_LAYER_KHRONOS_validation\" forced enabled"))
             {
@@ -1131,6 +1132,34 @@ public sealed class VulkanProbeTests
         finally
         {
             File.Delete(png);
+        }
+    }
+
+    /// <summary>
+    /// Every swapchain the run built has the images <c>VulkanSwapchainChoice.ImageCount</c> asks
+    /// for, read from the start-up trace: on Windows the surface's minimum (never fewer than two)
+    /// for the 8-bit swapchain under MAILBOX at the window's size, and one more than the minimum
+    /// for the half-float one, for FIFO and IMMEDIATE, for the swapchain a drag over-allocates and
+    /// everywhere off Windows (plan 17 round 18, question 74). The driver may make more than it was
+    /// asked for, so a surface that answers with more fails here rather than being taken on trust.
+    /// </summary>
+    private static void AssertImageCounts(string output)
+    {
+        var mode = System.Text.RegularExpressions.Regex.Match(output, @"vulkan present mode (\w+)");
+        Assert.True(mode.Success, output);
+        bool mailbox = mode.Groups[1].Value == "Mailbox";
+        var builds = System.Text.RegularExpressions.Regex.Matches(output,
+            @"vulkan swapchain \d+x\d+ x(\d+) (\w+)/\S+( \(allocated \d+x\d+, one-to-one\))? \(surface (\d+)\.\.(\d+)\)");
+        Assert.True(builds.Count > 0, "no swapchain line:\n" + output);
+        foreach (System.Text.RegularExpressions.Match build in builds)
+        {
+            int images = int.Parse(build.Groups[1].Value);
+            bool halfFloat = build.Groups[2].Value == "R16G16B16A16Sfloat";
+            bool oneToOne = build.Groups[3].Success;
+            int min = int.Parse(build.Groups[4].Value), max = int.Parse(build.Groups[5].Value);
+            int wanted = OperatingSystem.IsWindows() && !halfFloat && mailbox && !oneToOne ? Math.Max(min, 2) : min + 1;
+            if (max > 0) wanted = Math.Min(wanted, max);
+            Assert.True(images == wanted, $"{build.Value}: {images} images, expected {wanted}\n{output}");
         }
     }
 

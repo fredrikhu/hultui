@@ -1634,14 +1634,19 @@ public partial class JunctionApp
             row.AddChild(mark);
         }
 
-        row.AddChild(NumCell(line.OldLineNumber, 46f));
-        row.AddChild(NumCell(line.NewLineNumber, 46f));
-        // Wrapped, a fixed column: only the code label gives way when its basis is more than the
-        // row has (DiffCodeCell). Unwrapped it shrinks with the panned cell as it always has (the
-        // cell's basis is the line, so the two share what the row lacks: 2-3 px of the 16).
-        var signCell = Box.New().Width(16).JustifyContent(JustifyContent.Center);
-        if (_diffWrap) signCell.FlexShrink(0);
-        row.AddChild(signCell.Children(CodeText(sign, signColor)));
+        // The numbers and the sign are labels of the row itself (NumLabel). Wrapped, the sign is a
+        // fixed column: only the code label gives way when its basis is more than the row has
+        // (DiffCodeCell), so a context line's blank sign draws nothing and needs no label.
+        // Unwrapped it shrinks with the panned cell as it always has (the cell's basis is the
+        // line, so the two share what the row lacks: 2-3 px of the 16), so it stays a label.
+        bool blankSign = _diffWrap && line.Kind is not (DiffLineKind.Addition or DiffLineKind.Deletion);
+        AddNumbers(row, line.OldLineNumber, line.NewLineNumber, 46f, blankSign ? 16f : 0f);
+        if (!blankSign)
+        {
+            var signLabel = CodeText(sign, signColor).Width(16).AlignSelf(AlignSelf.Center);
+            if (_diffWrap) signLabel.FlexShrink(0);
+            row.AddChild(signLabel);
+        }
         // Clip rather than ellipsise: the line is scrollable now, so cutting it at the edge
         // says "there is more that way", where an ellipsis says "this is all there is".
         row.AddChild(DiffCodeCell(
@@ -1708,21 +1713,59 @@ public partial class JunctionApp
         var half = Flex.Row(gap: 0).AlignItems(AlignItems.Stretch).FlexGrow(1).FlexBasis(Dimension.Px(0))
             .Background(bg);
         if (isLeft) half.BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 1, 0, 0));
-        half.AddChild(NumCell(num, 44f));
+        if (num is { } n) half.AddChild(NumLabel(n, 44f));
         // Both halves share one offset, so the two files stay aligned as they move.
-        half.AddChild(DiffCodeCell(
+        var cell = DiffCodeCell(
             CodeText(ExpandTabs(text), code).Selectable()
                 .SelectionGroup(isLeft ? _diffGroupLeft : _diffGroupRight, rowIndex)
                 .Spans(RemapSpans(spans, text))
-                .Padding(new Thickness(2, SplitCodePadX, 2, 0)), SplitCodePadX));
+                .Padding(new Thickness(2, SplitCodePadX, 2, 0)), SplitCodePadX);
+        // A blank half has no number: the column is the cell's margin. The cell is all that
+        // shrinks in a half, so the margin takes nothing from anything else (AddNumbers).
+        if (num is null) cell.Margin(new Thickness(0, 0, 0, 44f));
+        half.AddChild(cell);
         return half;
     }
 
-    private static Element NumCell(int? n, float width) =>
-        Box.New().Width(width).FlexShrink(0)
-            .JustifyContent(JustifyContent.FlexEnd)
+    /// <summary>
+    /// A line number as a label of its row: the column's width, its text at the column's left edge
+    /// less the padding on its right, at the foot of the row (the last line of a wrapped one).
+    /// </summary>
+    /// <remarks>
+    /// Until plan 17 round 18 each number and the sign were a label in a box that placed it: a diff
+    /// row was 9 elements unified and 11 split (8 and 9 wrapped). A label places itself as the box
+    /// did (its width, its padding and its own cross-axis alignment), and a missing number is a
+    /// margin (<see cref="AddNumbers"/>), so a unified row is 5 or 6 elements (4 wrapped) and a split
+    /// row 8 or 9 (6 or 7): 984 B to make a number or sign instead of 1,656, nothing for an empty one,
+    /// and a row made and drawn 5.0–5.2 KB instead of 7.3–8.2 (unified). The frames are the same,
+    /// byte for byte.
+    /// </remarks>
+    private static TextElement NumLabel(int n, float width) =>
+        Ui.Mono(n.ToString(), 11f, Nocturne.On(0.30))
+            .Width(width).FlexShrink(0)
             .Padding(new Thickness(0, 8, 0, 0))
-            .Children(Ui.Mono(n?.ToString() ?? "", 11f, Nocturne.On(0.30)));
+            .AlignSelf(AlignSelf.FlexEnd);
+
+    /// <summary>
+    /// Adds a unified row's two number columns: a label for each number there is. A missing one (an
+    /// added line's old number, a removed line's new one) drew nothing, and nor does an empty column
+    /// <paramref name="after"/> them: those are margins of the number label beside them.
+    /// </summary>
+    /// <remarks>
+    /// On a number, never on the sign or the code cell: a number does not shrink, and a row that lacks
+    /// room shares the shortfall among the items that do by their sizes with their margins, so a
+    /// margin on the sign would have it give up more of its 16 px than the boxes' sign did.
+    /// </remarks>
+    private static void AddNumbers(Element row, int? oldNumber, int? newNumber, float width, float after)
+    {
+        var first = oldNumber is { } o ? NumLabel(o, width) : null;
+        var second = newNumber is { } n ? NumLabel(n, width) : null;
+        if (first is null) second?.Margin(new Thickness(0, after, 0, width));
+        else if (second is null) first.Margin(new Thickness(0, width + after, 0, 0));
+        else if (after > 0f) second.Margin(new Thickness(0, after, 0, 0));
+        if (first is not null) row.AddChild(first);
+        if (second is not null) row.AddChild(second);
+    }
 
     // ── Fullscreen diff overlay ──────────────────────────────────────────
 

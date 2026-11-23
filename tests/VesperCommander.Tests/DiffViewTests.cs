@@ -416,6 +416,52 @@ public class DiffViewTests
         Assert.Equal("Missing", t.DiffState);
     }
 
+    /// <summary>With both panes on one folder and the other cursor on "..", a folder or the
+    /// cursor's own file, the only partner would be the file itself. F3 does nothing there, as on
+    /// a folder; it used to compare the file with itself and say "Files are identical".</summary>
+    [Theory]
+    [InlineData("..")]
+    [InlineData("sub")]
+    [InlineData("a.txt")]
+    public void WithBothPanesOnOneFolder_F3DoesNothingWhenTheFileWouldBeItsOwnPartner(string other)
+    {
+        using var t = new Fixture();
+        Directory.CreateDirectory(Path.Combine(t.Left, "sub"));
+        t.WriteLeft("a.txt", "one\n");
+        t.WriteLeft("b.txt", "two\n");
+        t.Open();
+        t.Invoke("NavigateTo", 'R', t.Left, null, false);
+        t.Session.PumpUntil(() => t.Rows('R').Count == t.Rows('L').Count);
+        t.PutCursorOn('R', other);
+        t.PutCursorOn('L', "a.txt");
+
+        t.Press(KeyCode.F3);
+        t.Session.PumpFrames(2);
+
+        Assert.False(t.Field<bool>("_diffOpen"));
+        Assert.Equal("", t.Field<string>("_diffRightPath"));
+    }
+
+    /// <summary>With both panes on one folder the other cursor on another file is still a real
+    /// partner: F3 compares the two.</summary>
+    [Fact]
+    public void WithBothPanesOnOneFolder_F3ComparesWithTheOtherCursorsFile()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.txt", "one\ntwo\n");
+        t.WriteLeft("b.txt", "one\nTWO\n");
+        t.Open();
+        t.Invoke("NavigateTo", 'R', t.Left, null, false);
+        t.Session.PumpUntil(() => t.Rows('R').Count == t.Rows('L').Count);
+        t.PutCursorOn('R', "b.txt");
+
+        t.OpenDiffOn("a.txt");
+
+        Assert.True(t.Field<bool>("_diffOpen"));
+        Assert.Equal(Path.Combine(t.Left, "b.txt"), t.Field<string>("_diffRightPath"));
+        Assert.Equal("Ok", t.DiffState);
+    }
+
     // ── Syntax colouring ─────────────────────────────────────────────────
     [Fact]
     public void ARecognisedFileTypeGetsSyntaxColours()

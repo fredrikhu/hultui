@@ -323,9 +323,9 @@ public class TextInputElement : BoxElement
         OnOwn<PointerDownEvent>(OnPointerDown);
         OnOwn<PointerMoveEvent>(OnPointerMove);
         OnOwn<PointerUpEvent>(OnPointerUp);
-
-        ContextMenuItems = BuildContextMenuItems;
     }
+
+    private protected override Func<IReadOnlyList<ContextMenuItem>>? OwnContextMenuItems() => BuildContextMenuItems;
 
     private IReadOnlyList<ContextMenuItem> BuildContextMenuItems()
     {

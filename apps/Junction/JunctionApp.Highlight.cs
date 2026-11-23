@@ -145,6 +145,9 @@ public partial class JunctionApp
     /// <summary>Lines walked by the tokenizes that landed so far, for tests.</summary>
     internal int HighlightLinesTokenized { get; private set; }
 
+    /// <summary>Bytes the tokenizes so far allocated on their worker, cancelled ones too, for tests.</summary>
+    internal long HighlightBytesWalked { get; private set; }
+
     /// <summary>Tokenizes that got past their rest, to read the file or go on with its kept texts
     /// (<see cref="HighlightFileReads"/> counts the reads), for tests.</summary>
     internal int HighlightsRead => _highlightsRead;
@@ -293,26 +296,58 @@ public partial class JunctionApp
     // the system, 202.7 -> 134.0 MB in that window, in 8-12 ms. The kept texts stay. A compacting
     // gen-2 collection (the large objects too) kept the committed memory, 182 MB; a smaller bound or
     // ConserveMemory brought the gen-2s back and kept more (docs/DECISIONS.md).
+    //
+    // A big walk that finishes keeps nothing and leaves the same committed memory: after bigrepo's
+    // Commit open the window rested at 123.1 MB working set, 33.5 MB committed, for as long as it
+    // rested, and after three first visits at 133.0 MB, 40.9 MB committed (plan 17 round 18). So a
+    // big walk, kept or not, also asks for the one collection (BigWalkLines, BigWalkBytes): 98.0 and
+    // 101.5 MB, 8.4 and 10.1 MB committed. Nor does it run while the window has input: a reader
+    // scrolling the diff its colours landed in would have a frame late by the 4-7 ms it takes.
 
-    /// <summary>How long the worker stands idle, nothing started and nothing waiting, before the one
-    /// collection that gives a walk's memory back; set by tests.</summary>
+    /// <summary>How long the worker stands idle, nothing started and nothing waiting, and the window
+    /// without input, before the one collection that gives a walk's memory back; set by tests.</summary>
     internal TimeSpan HighlightIdleCollect { get; set; } = TimeSpan.FromSeconds(2);
 
     /// <summary>The idle collections run so far, for tests.</summary>
     internal int HighlightIdleCollections { get; private set; }
 
-    // Texts were kept since the last idle collection; tokenizes started so far, which an idle check
-    // compares with the count when it was scheduled.
+    /// <summary>A walk of this many lines or more is big, and its memory is given back at rest. Real
+    /// C# (HultUI's own sources) allocates 5.5 KB a line in the walk: one collection after a walk of
+    /// 2,000 lines gave back 12.8 MB of working set (13 %), after 1,000 lines 8.1 MB and after 500
+    /// 3.3 MB, less than the gen-0 space the window keeps committed in ordinary use (22-30 MB); a
+    /// commit's files in HultUI's history walk some 30 lines each (plan 17 round 18).</summary>
+    internal const int BigWalkLines = 2_000;
+
+    /// <summary>A walk that allocated this much or more on its worker is big, whatever its lines (a
+    /// minified or generated file has few and long ones): past the 15-20 MB from which a
+    /// collection gives back no more, and four times the 8.3 MB the first walk of a language
+    /// allocates loading its grammar.</summary>
+    internal const long BigWalkBytes = 32L << 20;
+
+    // Texts were kept, or a walk was big, since the last idle collection; tokenizes started so far,
+    // which an idle check compares with the count when it was scheduled; when the window last had
+    // input (Environment.TickCount64).
     private bool _collectWhenIdle;
     private int _highlightStarts;
+    private long _lastInput;
 
-    private void CollectWhenIdle()
+    private void NoteInput() => _lastInput = Environment.TickCount64;
+
+    private void CollectWhenIdle() => CollectWhenIdle(HighlightIdleCollect);
+
+    private void CollectWhenIdle(TimeSpan after)
     {
         int starts = _highlightStarts;
-        _ = Task.Delay(HighlightIdleCollect).ContinueWith(_ => Application.InvokeOnMainThread(() =>
+        _ = Task.Delay(after).ContinueWith(_ => Application.InvokeOnMainThread(() =>
         {
             if (!_collectWhenIdle || starts != _highlightStarts || _highlightRunning is not null || _highlightNext is not null)
                 return;
+            var quiet = TimeSpan.FromMilliseconds(Environment.TickCount64 - _lastInput);
+            if (quiet < HighlightIdleCollect)
+            {
+                CollectWhenIdle(HighlightIdleCollect - quiet);   // keys, the wheel or the pointer: once they stop
+                return;
+            }
             _collectWhenIdle = false;
             HighlightIdleCollections++;
             GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
@@ -471,6 +506,7 @@ public partial class JunctionApp
         {
             FileHighlight? result = null;
             int lines = 0;
+            long allocated = 0;
             try
             {
                 if (ask.Rest) await Task.Delay(rest, token);
@@ -490,7 +526,9 @@ public partial class JunctionApp
                     // when they hold the diff's (a save's ask reaches past them).
                     var shown = texts.Walked is { } walked && walked.Holds(ask.DiffLines) ? walked : ask.Shown;
                     if (!ReferenceEquals(shown, texts.Walked)) texts = texts with { Walked = shown };
-                    (result, lines) = Tokenize(ask.Path, shown, texts, clock, token);
+                    long before = GC.GetAllocatedBytesForCurrentThread();   // the walk runs on this thread alone
+                    try { (result, lines) = Tokenize(ask.Path, shown, texts, clock, token); }
+                    finally { allocated = GC.GetAllocatedBytesForCurrentThread() - before; }
                 }
             }
             catch (OperationCanceledException)
@@ -502,7 +540,7 @@ public partial class JunctionApp
                 result = FileHighlight.None;   // cache the failure so it isn't retried every build
             }
 
-            Application.InvokeOnMainThread(() => HighlightLanded(ask, result, lines, texts));
+            Application.InvokeOnMainThread(() => HighlightLanded(ask, result, lines, allocated, texts));
             Interlocked.Increment(ref _highlightsPosted);
         });
     }
@@ -565,12 +603,15 @@ public partial class JunctionApp
         return (new FileHighlight(sides.Old, sides.New, shown), sides.LinesWalked);
     }
 
-    private void HighlightLanded(HighlightAsk ask, FileHighlight? result, int lines, HighlightTexts? texts)
+    private void HighlightLanded(HighlightAsk ask, FileHighlight? result, int lines, long allocated,
+        HighlightTexts? texts)
     {
         _highlightRunning = null;
         _highlightCancel?.Dispose();
         _highlightCancel = null;
         HighlightLinesTokenized += lines;
+        HighlightBytesWalked += allocated;
+        if (lines >= BigWalkLines || allocated >= BigWalkBytes) _collectWhenIdle = true;   // kept or not
 
         // A cancelled tokenize keeps its texts, and so where it got to, for the next ask of the
         // file; one that landed has no more use for them. Before the next ask starts: it may be

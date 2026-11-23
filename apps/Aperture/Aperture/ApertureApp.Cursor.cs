@@ -71,8 +71,10 @@ public sealed partial class ApertureApp
     /// Called from a view's build: this is what the arrows are walking now. Changing the
     /// key resets the cursor, because "the third poster" means nothing in a different list.
     /// <paramref name="total"/> is how many the list holds in all when only part has loaded.
+    /// <paramref name="firstCard"/> is the list's first card on screen: its first, unless the view
+    /// opens scrolled (a library returned to where it was scrolled).
     /// </summary>
-    private void SetCursorList(string key, IReadOnlyList<object> items, int perRow, int total = 0)
+    private void SetCursorList(string key, IReadOnlyList<object> items, int perRow, int total = 0, int firstCard = 0)
     {
         _cursorListSet = true;
         _cursorShelves.Clear();   // a view of shelves adds them after (AddCursorShelf)
@@ -92,11 +94,45 @@ public sealed partial class ApertureApp
             // one is still loading (a library opened again, its place kept from the last visit)
             // or filtered to nothing: the place is kept for the cards to come.
             else if (_cursorIndex >= items.Count && items.Count > 0) _cursorIndex = items.Count - 1;
-            return;
         }
-        _cursorKey = key;
-        _cursorIndex = -1;
-        _cursorToEnd = false;
+        else
+        {
+            _cursorKey = key;
+            _cursorIndex = -1;
+            _cursorToEnd = false;
+        }
+        // A page arrived at whose cursor is nowhere: it starts on the first card on screen, which
+        // takes the keyboard (Arrive) unless something else took it meanwhile. A list still loading
+        // waits for its cards.
+        if (_pendingFirstCard && items.Count > 0)
+        {
+            _pendingFirstCard = false;
+            if (_cursorIndex < 0)
+            {
+                _cursorIndex = Math.Clamp(firstCard, 0, items.Count - 1);
+                _pendingCursorFocus = true;
+                _firstCardFocus = true;
+            }
+        }
+    }
+
+    /// <summary>Set on arriving at a page with no cursor (<see cref="Arrive"/>): the next list the
+    /// page registers starts the cursor on its first card on screen.</summary>
+    private bool _pendingFirstCard;
+
+    /// <summary>The cursor's card is the first card an arrival put it on, and has not had the
+    /// keyboard yet: it takes it only from what had it when the page was opened.</summary>
+    private bool _firstCardFocus;
+
+    /// <summary>Whether the keyboard stays where it went since the page was opened, rather than
+    /// going to the first card the arrival put the cursor on: a click or a Tab while the page's
+    /// cards were loading. Asked when the keyboard is handed over, after the build, when the tree
+    /// it went to is the window's.</summary>
+    private bool KeyboardStaysWhereItWent()
+    {
+        if (!_firstCardFocus) return false;
+        _firstCardFocus = false;
+        return KeyboardMovedSinceArrival();
     }
 
     /// <summary>Whether the view being built registered a list (<see cref="SetCursorList"/>); one
@@ -275,7 +311,8 @@ public sealed partial class ApertureApp
     /// every shelf, the LINQ that finds them and the walk's key with them.</item>
     /// <item>On both, a card on another page of its shelf turns the shelf to that page, and a build
     /// draws it, the ring and the keyboard on the card (one build a page turned). The shelf used to
-    /// stay where it was, and the cursor walked on with no card ringed.</item>
+    /// stay where it was, and the cursor walked on with no card ringed. On Home that build is the
+    /// shelf's own (a part, ApertureApp.Home.cs); it used to be all of Home's, every shelf with it.</item>
     /// <item>The library grid, while its latest build drew it. The grid is scrolled to the cursor as a
     /// build does it, and the rows that brings in are made in the frame, the ring on the cursor's. A
     /// key used to build the view and make the two rows it moved between, and never handed over the
@@ -292,6 +329,7 @@ public sealed partial class ApertureApp
     {
         Element? left, reached;
         bool build = false;
+        HomeShelfPart? turned = null;
         // The card the move leaves is the list's Tab stop, which before the first move is the first.
         from = Math.Max(from, 0);
         switch (Current.View)
@@ -299,7 +337,12 @@ public sealed partial class ApertureApp
             case ApertureView.Home:
                 if (_homeBuild != Builds || !HomeCardAt(from, out left)) return false;
                 if (!HomeCardAt(_cursorIndex, out reached)) build = true;
-                build |= TurnHomeShelfToCursor();
+                // A shelf of library cards turns alone; the watchlist's page turns with a build of Home.
+                if (TurnHomeShelfToCursor() is { } shelf)
+                {
+                    if (!build && shelf.Part is { } part) turned = part;
+                    else build = true;
+                }
                 break;
             case ApertureView.Discover:
                 if (_discoverBuild != Builds || !DiscoverCardAt(from, out left) || !DiscoverCardAt(_cursorIndex, out reached)) return false;
@@ -326,7 +369,10 @@ public sealed partial class ApertureApp
             _cursorCardIndex = _cursorIndex;
         }
         if (build) return false;
-        FocusCursorCard(laidOut: true);
+        // The shelf builds its new page alone, the cursor's card ringed, and hands that card the keyboard
+        // (AfterHomeShelfBuild), which brings it into view after the frame lays it out.
+        if (turned is not null) turned.Turned.Value++;
+        else FocusCursorCard(laidOut: true);
         return true;
     }
 
@@ -418,6 +464,8 @@ public sealed partial class ApertureApp
         _pendingCursorFocus = false;
         if (_cursorCardIndex == _cursorIndex)
         {
+            // The keyboard went somewhere while the page loaded: it stays there, and so does the view.
+            if (KeyboardStaysWhereItWent()) return;
             _cursorCard.Current?.Focus();
             RevealCursorCard(laidOut);
         }
@@ -465,6 +513,7 @@ public sealed partial class ApertureApp
     /// a card that left keeps the focus manager it had.</summary>
     private void FocusCursorCardMadeInTheFrame()
     {
+        if (KeyboardStaysWhereItWent()) return;
         if (Current.View == ApertureView.Library && _cursorCardIndex == _cursorIndex
             && _cursorCard.Current is { IsHosted: true } card)
             card.Focus();

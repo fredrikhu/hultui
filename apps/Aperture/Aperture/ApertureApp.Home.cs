@@ -6,6 +6,7 @@ using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Core.Styling;
 
 namespace Aperture;
@@ -46,8 +47,8 @@ public sealed partial class ApertureApp
     /// before (REACTIVITY.md, "Hand back the elements a key does not change"): its item, its place in
     /// the walk, the cursor on it, the picture it draws, the caption setting and the scale its glyphs
     /// are cut at. A cursor key makes the two cards it moved between instead of every card on Home.
-    /// The picture is asked for either way, which keeps one on screen recent in the cache and is how a
-    /// card finds the one that landed.
+    /// The picture is asked for either way, which keeps one on screen recent in the cache and finds a
+    /// card whose picture the cache let go of; a picture that lands goes into its card in place.
     /// </summary>
     private Element HomeCard(KeptElements<HomeCardState> cards, MediaItem item, bool still, int index,
         SeasonNotice? notice = null, OutSeasonCard? outCard = null)
@@ -70,24 +71,14 @@ public sealed partial class ApertureApp
 
     /// <summary>What a card on a shelf shows; see <see cref="HomeCard"/>.</summary>
     private readonly record struct HomeCardState(MediaItem Item, int Index, CardMark Mark,
-        HultUI.Core.Rendering.IImageSource? Picture, bool Titles, float Scale, string? Note = null);
-
-    /// <summary>Each shelf's cards, by the shelf's key: an item can be on two shelves. The watchlist's
-    /// title cards are made every build.</summary>
-    private readonly Dictionary<string, KeptElements<HomeCardState>> _homeCards = new(StringComparer.Ordinal);
-
-    private KeptElements<HomeCardState> HomeCardsOf(string rowKey)
-    {
-        if (!_homeCards.TryGetValue(rowKey, out var cards)) _homeCards[rowKey] = cards = new();
-        cards.Begin(Builds);
-        return cards;
-    }
+        CardArt Picture, bool Titles, float Scale, string? Note = null);
 
     /// <summary>A shelf as Home's latest build drew it: where it starts in the walk, how many it
     /// holds, its items and its cards (null for the watchlist's titles), and its row, how many a page
-    /// holds and the page it showed.</summary>
+    /// holds and the page it shows (moved by a turn the shelf builds alone), and its part (null for the
+    /// watchlist, which the app's build makes).</summary>
     private readonly record struct HomeShelf(int Start, int Count, IReadOnlyList<MediaItem> Items,
-        KeptElements<HomeCardState>? Cards, string RowId, int PerPage, int Page);
+        KeptElements<HomeCardState>? Cards, string RowId, int PerPage, int Page, HomeShelfPart? Part);
 
     private readonly List<HomeShelf> _homeShelves = [];
 
@@ -101,16 +92,77 @@ public sealed partial class ApertureApp
     private readonly record struct HomeShelfState(string Title, int Count, int Page, int PerPage, bool SeeAll,
         int Place, int Rows, float Scale);
 
-    /// <summary>Home's shelves of library cards, by the row's key, handed back whole by a build that
-    /// would make one from the same heading around the same cards (see <see cref="HomeShelfRow"/>).</summary>
-    private readonly KeptElements<HomeShelfState> _homeShelfRows = new();
+    /// <summary>
+    /// A shelf of library cards on Home, a part (HultUI.Core.Components.Part) of its own, made once for
+    /// its row and kept by the row's key: an item can stand on two shelves, so a part only ever shows its
+    /// own row's cards. A turn of its page (a cursor key onto a card on another page, its Previous and
+    /// Next) writes <see cref="Turned"/>, and the shelf builds alone: it used to build all of Home, every
+    /// shelf's cards asked for again around the seven the turn makes. The app's build asks for the cards
+    /// on each shelf's page as before and places the part stale when one of them was made or the heading
+    /// moved, so a shelf whose items changed still shows them; the forced <c>MarkDirty</c> builds every
+    /// shelf. See ApertureApp.Parts.cs.
+    /// </summary>
+    private sealed class HomeShelfPart
+    {
+        /// <summary>The part's own revision: written by a turn of the shelf's page.</summary>
+        public readonly Signal<int> Turned = new(0);
+        public readonly Part Part;
+
+        /// <summary>The row's cards, with what each was made from (<see cref="HomeCard"/>), numbered by
+        /// <see cref="CardBuilds"/>: the app's builds ask for them and so does a turn.</summary>
+        public readonly KeptElements<HomeCardState> Cards = new();
+        public int CardBuilds;
+
+        /// <summary>The heading's menu and "See all", numbered by <see cref="ExtraBuilds"/>.</summary>
+        public readonly KeptElements<HomeShelfExtraState> Extra = new();
+        public int ExtraBuilds;
+
+        /// <summary>What the app's latest build placed the shelf with: its row, every row Home could draw
+        /// (its menu's), where it starts in the walk and its place in <see cref="_homeShelves"/>.</summary>
+        public HomeRow Row = null!;
+        public List<HomeRow> All = null!;
+        public int Start, Slot;
+
+        /// <summary>The app build that last placed the shelf.</summary>
+        public int Placed;
+
+        /// <summary>The heading the shelf's latest build made.</summary>
+        public HomeShelfState Shown;
+
+        /// <summary>While the app's build places the shelf: the cards on its page it made or handed back,
+        /// for the shelf's build to put in its row. Null otherwise: a turn asks for its own.</summary>
+        public List<Element>? Asked;
+
+        /// <summary>Set by a build of the shelf from <see cref="Asked"/>: the placing built it.</summary>
+        public bool BuiltFromAsked;
+
+        public HomeShelfPart(PartGroup group, Func<HomeShelfPart, Element> build, Action afterBuild) =>
+            Part = new Part(group, () => build(this), own: Turned, afterBuild: afterBuild);
+
+        public KeptElements<HomeCardState> BeginCards()
+        {
+            Cards.Begin(++CardBuilds);
+            return Cards;
+        }
+    }
+
+    /// <summary>Home's shelves of library cards, by the row's key; a row Home no longer draws lets its
+    /// part go.</summary>
+    private readonly Dictionary<string, HomeShelfPart> _homeShelfParts = new(StringComparer.Ordinal);
+
+    /// <summary>The shelves' parts: the forced <c>MarkDirty</c> builds them all.</summary>
+    private readonly PartGroup _homeShelfGroup = new();
+
+    /// <summary>While the app's build places the shelves: a shelf built then leaves the keyboard to the
+    /// app's own after-build.</summary>
+    private bool _placingHomeShelves;
 
     /// <summary>The cards on the page of the shelf being built, reused from shelf to shelf and emptied
     /// once Home's shelves are made: left full, it held the last shelf's cards, and through them the
     /// whole Home its build made, behind every other view.</summary>
     private readonly List<Element> _homeShelfCards = [];
 
-    /// <summary>Shelves of library cards made, not handed back, for tests.</summary>
+    /// <summary>Builds of Home's shelves of library cards (each made again), for tests.</summary>
     internal int HomeShelvesMade { get; private set; }
 
     /// <summary>The app build that last built Home, or -1.</summary>
@@ -136,12 +188,22 @@ public sealed partial class ApertureApp
     }
 
     /// <summary>Turns the shelf the cursor is on to the cursor's page when it shows another
-    /// (<see cref="TurnShelfTo"/>): true when it turned.</summary>
-    private bool TurnHomeShelfToCursor()
+    /// (<see cref="TurnShelfTo"/>): the shelf, when it turned.</summary>
+    private HomeShelf? TurnHomeShelfToCursor()
     {
         foreach (var shelf in _homeShelves)
-            if (TurnShelfTo(_cursorIndex, shelf.Start, shelf.Count, shelf.RowId, shelf.PerPage, shelf.Page)) return true;
-        return false;
+            if (TurnShelfTo(_cursorIndex, shelf.Start, shelf.Count, shelf.RowId, shelf.PerPage, shelf.Page)) return shelf;
+        return null;
+    }
+
+    /// <summary>The part of the Home shelf <paramref name="rowId"/>, while Home is on screen as its latest
+    /// build left it; null for the watchlist, which the app's build makes.</summary>
+    private HomeShelfPart? HomeShelfShowing(string rowId)
+    {
+        if (Current.View != ApertureView.Home || _homeBuild != Builds) return null;
+        foreach (var shelf in _homeShelves)
+            if (shelf.RowId == rowId) return shelf.Part;
+        return null;
     }
 
     private Element BuildHomeView()
@@ -207,34 +269,50 @@ public sealed partial class ApertureApp
 
         _homeBuild = Builds;
         _homeShelves.Clear();
-        _homeShelfRows.Begin(Builds);
-        int cursorBase = 0;
-        for (int index = 0; index < shown.Count; index++)
+        int cursorBase = 0, parts = 0;
+        _placingHomeShelves = true;
+        try
         {
-            var row = shown[index];
-            int start = cursorBase;
-            var titles = row.Titles;
-            var cards = titles is null ? HomeCardsOf(row.Key) : null;
-            string rowId = "row-" + row.Key;
-            int shownPage = ShelfPage(rowId, row.Count, row.CardWidth, out int perPage);
-            _homeShelves.Add(new HomeShelf(start, row.Count, row.Items, cards, rowId, perPage, shownPage));
-            AddCursorShelf(start, row.Count, row.CardWidth, rowId);
-            // Every child of the page is keyed: a shelf handed back comes back through the keyed reconcile.
-            if (cards is null)
+            for (int index = 0; index < shown.Count; index++)
             {
-                var shelf = CardRow(row.Title, row.Count,
-                    i => DiscoverCard(titles![i], row.CardWidth, cursorIndex: start + i),
-                    row.CardWidth, rowId, headingExtra: HomeRowHeadingExtra(row, all));
-                shelf.Key = row.Key;
-                page.AddChild(shelf);
+                var row = shown[index];
+                int start = cursorBase;
+                var titles = row.Titles;
+                string rowId = "row-" + row.Key;
+                int shownPage = ShelfPage(rowId, row.Count, row.CardWidth, out int perPage);
+                AddCursorShelf(start, row.Count, row.CardWidth, rowId);
+                // Every child of the page is keyed: a part's host is keyed by its part, and comes back
+                // through the keyed reconcile with nothing marked.
+                if (titles is not null)
+                {
+                    _homeShelves.Add(new HomeShelf(start, row.Count, row.Items, null, rowId, perPage, shownPage, null));
+                    var shelf = CardRow(row.Title, row.Count,
+                        i => DiscoverCard(titles[i], row.CardWidth, cursorIndex: start + i),
+                        row.CardWidth, rowId, headingExtra: HomeRowHeadingExtra(row, all));
+                    shelf.Key = row.Key;
+                    page.AddChild(shelf);
+                }
+                else
+                {
+                    var part = HomeShelfPartOf(row.Key);
+                    _homeShelves.Add(new HomeShelf(start, row.Count, row.Items, part.Cards, rowId, perPage, shownPage, part));
+                    page.AddChild(PlaceHomeShelf(part, row, all, start, shownPage, perPage).FlexShrink(0));
+                    parts++;
+                }
+                cursorBase += row.Count;
             }
-            else
-            {
-                page.AddChild(HomeShelfRow(row, all, cards, start, rowId, shownPage, perPage));
-            }
-            cursorBase += row.Count;
+        }
+        finally
+        {
+            _placingHomeShelves = false;
         }
         _homeShelfCards.Clear();
+        // A row Home no longer draws (hidden, or gone with its library) lets its part go.
+        if (_homeShelfParts.Count > parts)
+        {
+            foreach (var (key, part) in _homeShelfParts)
+                if (part.Placed != Builds) _homeShelfParts.Remove(key);
+        }
 
         if (shown.Count < all.Count)
         {
@@ -247,39 +325,131 @@ public sealed partial class ApertureApp
         return scroll;
     }
 
-    /// <summary>
-    /// A shelf of library cards, handed back whole when its heading would be made from the same
-    /// <see cref="HomeShelfState"/> and every card on its page is handed back (REACTIVITY.md, "Hand back
-    /// the elements a key does not change"). A Home build runs mostly when pictures land, and made every
-    /// shelf's heading and row around the kept cards: 39 of the 46 elements of a build with every card
-    /// kept. The cards are asked for first, whatever comes of the shelf: that asks for each picture, and
-    /// keeps each card's entry for the next build and for a ring moved with no build.
-    /// </summary>
-    private Element HomeShelfRow(HomeRow row, List<HomeRow> all, KeptElements<HomeCardState> cards, int start,
-        string rowId, int page, int perPage)
+    private HomeShelfPart HomeShelfPartOf(string rowKey)
     {
+        if (!_homeShelfParts.TryGetValue(rowKey, out var part))
+            _homeShelfParts[rowKey] = part = new HomeShelfPart(_homeShelfGroup, BuildHomeShelf, AfterHomeShelfBuild);
+        return part;
+    }
+
+    /// <summary>
+    /// A shelf of library cards for the app's build: its part's host, the part built first when a card on
+    /// its page was made or its heading would say something else (REACTIVITY.md, "Hand back the elements a
+    /// key does not change"). A Home build runs mostly when data lands, and made every shelf's heading and
+    /// row around the kept cards: 39 of the 46 elements of a build with every card kept. The cards are
+    /// asked for first, whatever comes of the shelf: that asks for each picture, and keeps each card's
+    /// entry for the next build and for a ring moved with no build.
+    /// </summary>
+    private ComponentHost PlaceHomeShelf(HomeShelfPart part, HomeRow row, List<HomeRow> all, int start, int page, int perPage)
+    {
+        part.Row = row;
+        part.All = all;
+        part.Start = start;
+        part.Slot = _homeShelves.Count - 1;
+        part.Placed = Builds;
+        var asked = _homeShelfCards;
+        bool cardsKept = AskForShelfCards(part, page, perPage, asked);
+        part.Asked = asked;
+        part.BuiltFromAsked = false;
+        try
+        {
+            // A shelf with no host yet (Home opened) builds as its host is made, from the cards asked for.
+            var host = part.Part.Mount();
+            part.Part.Place(stale: !part.BuiltFromAsked && (!cardsKept || HomeShelfStateOf(row, all, page, perPage) != part.Shown));
+            return host;
+        }
+        finally
+        {
+            part.Asked = null;
+            asked.Clear();
+        }
+    }
+
+    /// <summary>Asks for the cards on the shelf's page <paramref name="page"/> into <paramref name="cards"/>,
+    /// each handed back when what it shows is what it was made with: true when every one was.</summary>
+    private bool AskForShelfCards(HomeShelfPart part, int page, int perPage, List<Element> cards)
+    {
+        var row = part.Row;
+        var kept = part.BeginCards();
         int first = page * perPage, end = Math.Min(row.Count, first + perPage);
-        var shown = _homeShelfCards;
-        shown.Clear();
+        cards.Clear();
         bool cardsKept = true;
         bool newSeasons = row.Key == NewSeasonsRowKey;
         for (int i = first; i < end; i++)
         {
-            var card = HomeCard(cards, row.Items[i], row.Stills, start + i,
+            var card = HomeCard(kept, row.Items[i], row.Stills, part.Start + i,
                 newSeasons ? NoticeFor(row.Items[i]) : null, newSeasons ? OutCardFor(row.Items[i]) : null);
             cardsKept &= card.IsHosted;   // a card handed back is the live one
-            shown.Add(card);
+            cards.Add(card);
         }
-        var state = new HomeShelfState(row.Title, row.Count, page, perPage, row.SeeAll is not null,
-            all.IndexOf(row), all.Count, Ui.DisplayScale);
-        if (cardsKept && _homeShelfRows.TryKeep(row.Key, state, out var kept)) return kept;
-        HomeShelvesMade++;
-        return _homeShelfRows.Made(row.Key, state, MakeHomeShelf(row, all, rowId, first));
+        return cardsKept;
     }
 
-    private Element MakeHomeShelf(HomeRow row, List<HomeRow> all, string rowId, int first) =>
-        CardRow(row.Title, row.Count, i => _homeShelfCards[i - first], row.CardWidth, rowId,
-            headingExtra: HomeRowHeadingExtra(row, all));
+    private HomeShelfState HomeShelfStateOf(HomeRow row, List<HomeRow> all, int page, int perPage) =>
+        new(row.Title, row.Count, page, perPage, row.SeeAll is not null, all.IndexOf(row), all.Count, Ui.DisplayScale);
+
+    /// <summary>
+    /// A shelf part's build: the heading and the row around the cards on its page. Placed by the app's
+    /// build, it puts in the cards that build asked for; on a turn it asks for its own, with nothing read
+    /// tracked: its own effect hears only <see cref="HomeShelfPart.Turned"/>, as a loader that lands builds
+    /// the app, which places the part.
+    /// </summary>
+    private Element BuildHomeShelf(HomeShelfPart part) => ReactiveScope.Untracked(() =>
+    {
+        HomeShelvesMade++;
+        var row = part.Row;
+        string rowId = "row-" + row.Key;
+        int page = ShelfPage(rowId, row.Count, row.CardWidth, out int perPage);
+        var cards = part.Asked;
+        if (cards is null)
+        {
+            cards = _homeShelfCards;
+            AskForShelfCards(part, page, perPage, cards);
+            _homeShelves[part.Slot] = _homeShelves[part.Slot] with { Page = page, PerPage = perPage };
+        }
+        else
+        {
+            part.BuiltFromAsked = true;
+        }
+        try
+        {
+            var shown = part.Shown = HomeShelfStateOf(row, part.All, page, perPage);
+            // The heading's menu and "See all" show nothing of the page: a turn hands them back.
+            var extraState = new HomeShelfExtraState(shown.Title, shown.SeeAll, shown.Place, shown.Rows, shown.Scale);
+            part.Extra.Begin(++part.ExtraBuilds);
+            var extra = part.Extra.TryKeep(row.Key, extraState, out var kept) ? kept
+                : part.Extra.Made(row.Key, extraState, HomeRowHeadingExtra(row, part.All));
+            int first = page * perPage;
+            return CardRow(row.Title, row.Count, i => cards[i - first], row.CardWidth, rowId, headingExtra: extra);
+        }
+        finally
+        {
+            if (part.Asked is null) cards.Clear();
+        }
+    });
+
+    /// <summary>What a shelf's heading menu and its "See all" show and do (<see cref="HomeShelfState"/>
+    /// without the page).</summary>
+    private readonly record struct HomeShelfExtraState(string Title, bool SeeAll, int Place, int Rows, float Scale);
+
+    /// <summary>After a shelf built alone (a turn): the cursor's card, made by that build, takes the
+    /// keyboard, and a cursor card the turn took off screen is let go of. A shelf the app's build placed
+    /// leaves that to the app's own after-build.</summary>
+    private void AfterHomeShelfBuild()
+    {
+        if (_placingHomeShelves) return;
+        FocusCursorCard();
+        LetGoOfLeftCursorCard();
+    }
+
+    /// <summary>Turns the row <paramref name="rowId"/> to <paramref name="page"/>: a Home shelf builds alone,
+    /// any other row with the view.</summary>
+    private void TurnRowTo(string rowId, int page)
+    {
+        _rowPages[rowId] = Math.Max(0, page);
+        if (HomeShelfShowing(rowId) is { } shelf) shelf.Turned.Value++;
+        else Rerender();
+    }
 
     /// <summary>
     /// Every row home could draw, in the order it will draw them: the built-in order,

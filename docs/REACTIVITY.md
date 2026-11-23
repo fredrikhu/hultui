@@ -563,7 +563,10 @@ Three things decide whether it stays right and stays cheap:
   call `PartGroup.Invalidate()`, so every rebuild builds the parts too, and only the paths that
   change nothing the parts show — selection moves, cursors, typing in a field of the view, search
   boxes — call `MarkViewDirty()` or `RerenderView()`, which do not. Forgetting to opt out costs a
-  build; forgetting to opt in shows a stale toolbar, so make the safe one the default.
+  build; forgetting to opt in shows a stale toolbar, so make the safe one the default. Better
+  still, when what the part shows fits in a small value, compare that value on every build and
+  place the part stale when it moved (`Place(stale:)`, Aperture's title bar and rail below): then
+  no path has to say anything, and nothing is built for a change the part does not show.
   A dialog splits in two (Junction, round 10 step 8): opening it and closing it without acting
   (Escape, Cancel, a click beside it) change only the view, but a confirm runs whatever the card
   was for, which may be the chrome's (a branch checked out, an account signed out), so the confirm
@@ -732,11 +735,60 @@ Aperture's title bar and rail are its first use, and add one lesson: **a build a
 a full one.** A loader that lands builds the app through a signal, with no `MarkDirty()` or
 `Rerender()` to invalidate the group, and what it brought can move a plain field a part reads:
 opening a report marks it read as its loader lands, and that takes a badge off the rail. So the
-app's `Build()` invalidates the group unless the path that asked said view-only, with a flag
-`RerenderView()` and `MarkViewDirty()` set, and `Rerender()` and `MarkDirty()` still invalidate it
-themselves, since a batch can hold a view-only rebuild and a full one. Headless, 600 films, 1440×900,
-a key and two frames, NativeAOT within 1 %: Right 87.3 → 49.2 KB (−44 %), Down 114.1 → 75.9 KB
-(−33 %), a resize across a column count 118.9 → 80.8 KB (−32 %), no part built on any of them.
+app's `Build()` invalidated the group unless the path that asked said view-only, with a flag
+`RerenderView()` and `MarkViewDirty()` set. Headless, 600 films, 1440×900, a key and two frames,
+NativeAOT within 1 %: Right 87.3 → 49.2 KB (−44 %), Down 114.1 → 75.9 KB (−33 %), a resize across a
+column count 118.9 → 80.8 KB (−32 %), no part built on any of them.
+
+That still built both parts, 49 KB, on every page opened, every Back and Forward and every load
+that landed, though most of those move nothing either part shows. Plan 17 round 18 gave each part
+**a value of what it shows** instead: a record struct (the title bar: the server, the user and the
+display scale; the rail: the door lit for the page, the libraries, the request server's user, the
+three badge counts and the scale) that the part's build records and builds from alone, and that
+every build of the app compares with the value now, placing the part with `Place(stale: now !=
+shown)`. No path has to say what it changed, a view-only flag included; only the forced
+`MarkDirty()` still invalidates the group, and PartTests' oracle still checks each part against
+what that full build makes. Read loaders untracked for the comparison
+(`ReactiveScope.Untracked`, with the delegate kept in a field): the part's own effect hears them,
+and a tracked read would build the whole app on each count that lands. Prefer this to a list of
+paths that remember to mark the part. Headless, JIT, 300 films, 1440×900: a film's page opened
+167.4 → 100.8 KB (−40 %; part builds 4 → 1, the rail's light going out), a library's first open
+753.6 → 589.4 (−22 %, 8 → 1), Forward to a film 78.7 → 61.1 (−22 %), Back, Escape, a number key and
+the rail −17.6 KB each (−5 %), a page fetched while wheeling 237.6 → 139.9 (−41 %, 4 → 0).
+
+Most of what was left of a page opened was the rail's light: the whole rail, nine doors, built for
+the two whose light moved. Each door is now a part of its own inside the rail's, as Junction's view
+tabs are: the app's build compares the light (the door lit for the page) as it compares the values,
+and when the rest of the rail is unchanged writes the `own:` revision of the door going dark and of
+the one lighting up; whatever builds the rail builds every door with it. Make such parts once and
+keep them, the fixed ones by name and a list's by place, so a list that changes makes and drops none:
+a film's page 100.8 → 72.9 KB (−56 % of the 167.4 before both), Forward 61.1 → 32.9, Back −9 %.
+
+Aperture's Home makes each shelf of library cards a part in the same way (round 18, step 9), kept by the
+row's key rather than its place: one film can stand on two shelves, and a part must never be handed
+another row's cards. A turn of a shelf's page (a cursor key onto a card on another page, the shelf's Next
+and Previous) writes that shelf's `own:` revision and builds it alone; it used to build all of Home, every
+shelf's cards asked for again. The app's build still asks for the cards on each shelf's page, as before,
+and places the shelf stale only when one of them was made or its heading would read otherwise, so a shelf
+whose data changed shows it; the forced `MarkDirty()` invalidates the shelves' group as well. Three
+lessons:
+
+- **A part's own build reads untracked what its owner's build reads.** A turn asks for the cards itself,
+  and the new-season row's cards read a loader: tracked, a load that lands would build the shelf and the
+  app.
+- **Hand over the keyboard only from a build the part ran alone.** `afterBuild:` runs for every build but
+  the first, a build that `Place` starts inside the owner's build among them, before the owner's own
+  after-build: a shelf focuses the cursor's card after a turn, and leaves it to the app otherwise.
+- **`Mount()` before `Place(stale:)` when the comparison needs the part's last build.** A part with no
+  host builds as `Mount()` makes one; the value compared before that is the one before its first build,
+  and a stale flag computed from it builds it twice.
+
+Headless (JIT, three shelves of 30 films, 1440×900, a key and its frames): a turn whose pictures are cached
+67.0–68.4 → 50.9 KB (−24…−26 %; 61 → 52 elements made and no build of the app), with seven pictures to
+fetch 93.1–98.0 → 77.0–80.2 (−17…−18 %), one that also made again the shelf the cursor left 121.4 → 81.1
+(−33 %); with eight shelves 72.9–73.3 → 51.0 (−30 %). Home's start +1.0 % (+2.8 % with eight shelves) and
+Back to Home +2.1 % (−1.3 %): the parts and their hosts. What is left of a turn is the shelf: the seven
+cards it makes (39 KB) and the heading's page count and buttons, its menu and "See all" handed back.
 
 A worker's progress tick is a view-only change too. Vesper's copy, pack and folder-size workers
 asked for a full rebuild about every 40 ms, so all eleven parts were built some 25 times a second
@@ -799,9 +851,11 @@ Aperture's library is the same shape (round 6, step 13), and adds four lessons:
 
 - **Compare what the card shows, not how it got there.** A poster's state holds the picture it
   draws, or null for the placeholder: loading and failed look the same, so a failure makes no card.
+  A picture that lands goes into the card in place, and the state compares what it shows since
+  (round 18; see the end of [Keep the index out of a list's item](#keep-the-index-out-of-a-lists-item)).
 - **Ask for what a make keeps fresh before deciding.** The picture cache is asked for every card of
   a row made again, handed back or not: that keeps a picture on screen recent in the cache, and is
-  how a row made for a landing finds the one card that landed. A kept card keeps its image element,
+  how a card whose picture the cache let go of is found. A kept card keeps its image element,
   and a card patched keeps it too, so nothing flashes.
 - **What a card needs is a row still in the list.** Its row's parent is the list: a row the list
   let go of is out of the tree. A row on screen is not asked for its cards, since a row is made for
@@ -858,7 +912,7 @@ pictures land, and with every card handed back it still made each shelf's headin
 the cards':
 
 - **Ask for the children first, every build.** Each card on the page is asked for before the shelf is
-  decided: that asks for its picture (how a landing finds the card it changed) and keeps its entry
+  decided: that asks for its picture (how a card whose picture the cache let go of is made again) and keeps its entry
   current for the next build and for a ring moved with no build. The shelf comes back only when every
   card came back as the live element (`IsHosted`).
 - **The state is what the heading's handlers read, not only what it draws.** The row's menu worked out
@@ -1197,6 +1251,40 @@ landing 335–347 → 80–94 KB, rows made 34 → 0, text measures 249 → 0, a
 landing 436–438 → 216 KB, and a control focused in its rows keeps the focus (the landing used to weave
 again and make the row it was in). Pixels are byte-identical to the rows made afresh in colour. A span
 that sets a weight, slant, size or family moves where a line breaks: make that row again.
+
+And make a row of no more elements than it draws, since every row scrolled in or made again pays for
+each. A label places itself: its `Width`, `Padding` and `AlignSelf` do what a box around it did, so a
+cell that is one label needs no box. A cell that draws nothing (an empty value, a blank column) is a
+margin of a neighbour that does not shrink, not an empty label in a box (a margin on an item that
+shrinks changes its share of the shrink: LAYOUT.md, "Flex Grow and Shrink"). Junction's diff rows held
+each line number and the sign as a label in a box, and a missing number as an empty one (round 18 step
+14): a unified row went from 9 elements to 5 or 6 (8 → 4 wrapped), a split row from 11 to 8 or 9 (9 →
+6 or 7), and a row made and drawn from 7.3–8.2 to 5.0–5.2 KB (headless JIT, 1,440×900). The Commit
+view's unified diff of a commit of C# files: a first visit 827–864 → 733–770 KB (−11 %), a revisit
+631 → 537 KB (−15 %), ten wheel notches 280 → 231 KB (−17 %); split −3…−13 %, where the code cells are
+more of a row. The frames are byte-identical, wrapped or not, at 1.0 and 1.5.
+
+A picture that lands is the same: put it into the image element that waits for it, don't build the
+view to make the cards that show it again. Aperture's cards, heroes and faces make their placeholder
+(the glyph, or an empty image for a hero) as the image element the picture goes into, and the landing
+turns that element into what a make with the picture makes: the source, a cover fit, the full box
+(`ApertureApp.OnArtworkLanded`). Three things keep it right. **Key the waiting element by its
+picture's URL** and drop the key when it lands: the reconcile patches an element from one with the
+same key only, so a card made again for another item (a search that changed, a page that reuses its
+places) gets a new element and never takes the old card's picture; the landing takes only elements
+still in the window with that key. **A kept element's state compares what it shows** (`CardArt`): a
+card made while its picture was on the way and given it in place since equals one made now with the
+picture, so a later build hands it back; one whose picture the cache let go of does not, and is made
+again. **Build when it cannot go in place**: a picture asked for by something made again to show it,
+one that failed under the stand-in of another scale (the cache drops the stand-in once every download
+has landed), one the cache let go of before it was taken. A picture that fails changes nothing.
+Setting the source marks the layout up to the root, and the frame lays out the element and its
+ancestors again and measures nothing beside them: 9 elements and 10 measures for a library card,
+against 20 and 15 for the build it replaced. Plan 17 round 18 (headless JIT, 1,440×900, 300 films,
+posters served after 15 ms): a library's first open 1,109–1,150 → 594–600 KB, builds 12–13 → 4; a Down
+that brings a row 145–205 → 59–82 KB and no build; Home's start 1,236 → 865 KB, builds 8 → 3; a film
+page with its cast 376–378 → 210–212 KB; one landing 31–84 → 0.2–0.5 KB. Frames are byte-identical to
+the builds', before a picture lands and after.
 
 ---
 

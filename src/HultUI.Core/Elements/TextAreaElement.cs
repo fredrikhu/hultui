@@ -433,9 +433,9 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         OnOwn<PointerMoveEvent>(OnPointerMove);
         OnOwn<PointerUpEvent>(OnPointerUp);
         OnOwn<ScrollEvent>(OnScroll);
-
-        ContextMenuItems = BuildContextMenuItems;
     }
+
+    private protected override Func<IReadOnlyList<ContextMenuItem>>? OwnContextMenuItems() => BuildContextMenuItems;
 
     private IReadOnlyList<ContextMenuItem> BuildContextMenuItems()
     {

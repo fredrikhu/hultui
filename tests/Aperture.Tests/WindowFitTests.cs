@@ -62,8 +62,7 @@ public class WindowFitTests
             Assert.Equal(1, app.Builds - builds);
             Assert.Equal(6, app.VisibleCards(Halide.PosterWidth));
             Assert.Equal(6, Cards(session, "library-grid").Count(c => c.Layout.AbsoluteBorderBox.Y == FirstRowY(session)));
-            session.Window.PressKey(KeyCode.Right);
-            session.PumpFrames(2);
+            Assert.Equal(0, app.CursorIndex);   // the first card, which the grid opened with
             session.Window.PressKey(KeyCode.Down);
             session.PumpFrames(2);
             Assert.Equal(6, app.CursorIndex);

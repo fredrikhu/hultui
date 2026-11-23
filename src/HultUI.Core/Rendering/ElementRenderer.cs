@@ -177,6 +177,22 @@ public static class ElementRenderer
         return element.Transform!.Value.ToMatrix(b.X + b.Width * 0.5f, b.Y + b.Height * 0.5f);
     }
 
+    /// <summary>
+    /// What <see cref="RenderTree"/> paints for <paramref name="root"/> lies inside, in the
+    /// coordinates it is drawn in (the root's own transform and sticky shift applied); null when an
+    /// element in it cannot say (<see cref="Element.PaintBounds"/>). The window's drag ghost fades
+    /// through a group of this size rather than one the window's size.
+    /// </summary>
+    internal static Rect? TreePaintBounds(Element root, IRenderContext ctx)
+    {
+        Point shift = root.PositionRead.Type == PositionType.Sticky ? root.StickyShift : default;
+        if (SubtreePaintBounds(root, ctx, shift.X, shift.Y, cull: null) is not Rect bounds)
+            return null;
+        if (root.Transform is { } tf && !tf.IsIdentity)
+            bounds = Transformed(bounds, TransformMatrix(root));
+        return bounds.Translate(shift.X, shift.Y);
+    }
+
     // What `element` and the part of its subtree RenderInPlace would draw paint inside, in the
     // element's own coordinates (inside its transform); null when an element in it cannot say
     // (Element.PaintBounds). The walk follows the render's: the same cull, the same offsets.

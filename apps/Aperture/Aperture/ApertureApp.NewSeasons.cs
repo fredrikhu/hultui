@@ -383,8 +383,7 @@ public sealed partial class ApertureApp
     /// the series' name and the line under it. Enter opens the episode and Space plays it, as on a
     /// Next up card; its menu adds Dismiss and Stop watching.
     /// </summary>
-    private BoxElement NewSeasonCard(MediaItem item, SeasonNotice notice, int cursorIndex,
-        HultUI.Core.Rendering.IImageSource? picture)
+    private BoxElement NewSeasonCard(MediaItem item, SeasonNotice notice, int cursorIndex, CardArt picture)
     {
         const float width = Halide.PosterWidth;
         float height = MathF.Round(width * 1.5f);

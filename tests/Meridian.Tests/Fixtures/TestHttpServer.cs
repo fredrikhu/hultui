@@ -73,6 +73,8 @@ public sealed class TestHttpServer : IDisposable
                     return;
                 }
 
+                if (Gate is { } gate) await gate.WaitAsync(_cts.Token);
+
                 await (path switch
                 {
                     "/ok" => Respond(stream, 200, "OK", "application/json", """{"ok":true}"""u8.ToArray()),
@@ -108,6 +110,10 @@ public sealed class TestHttpServer : IDisposable
             lock (_held) { if (!_held.Contains(client)) client.Dispose(); }
         }
     }
+
+    /// <summary>When set, every request (but /stall) waits for one release of it before it is
+    /// answered, so a test can let a run's requests finish one at a time. Null answers at once.</summary>
+    public SemaphoreSlim? Gate { get; set; }
 
     private string? _lastCookieHeader;
     /// <summary>The full request line of the last request, so a test can see

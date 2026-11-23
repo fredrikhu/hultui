@@ -8,7 +8,8 @@ namespace Aperture;
 /// Artwork, fetched and decoded off the UI thread and kept in a bounded LRU. Tiles ask for
 /// a poster during <c>Build()</c>; a miss starts a download and returns
 /// <see cref="Status.Pending"/>, and when the bytes land and decode the supplied callback
-/// marshals a rebuild so the tile swaps its picture in.
+/// marshals to the UI thread, which takes what landed (<see cref="TakeLanded"/>): a tile that
+/// waits for its picture in place is given it there, and anything else is built again.
 ///
 /// <para>Vesper's thumbnail cache is the same shape over the file system; the differences
 /// are the two that matter for a server: the work is I/O-bound rather than CPU-bound (so
@@ -66,6 +67,11 @@ public sealed class PosterCache : IDisposable
     /// <summary>Downloads retired one by one (<see cref="Retire(Uri)"/>) before they landed:
     /// they land retired.</summary>
     private readonly HashSet<string> _retireOnLanding = new(StringComparer.Ordinal);
+    /// <summary>Downloads a caller that builds to show them asked for (<see cref="Get(Uri?, Uri?)"/>):
+    /// their landing says to build.</summary>
+    private readonly HashSet<string> _buildOnLanding = new(StringComparer.Ordinal);
+    /// <summary>Downloads landed and not yet taken (<see cref="TakeLanded"/>).</summary>
+    private readonly List<Landing> _landed = new();
     /// <summary>Pictures the count cap pushed out, waiting for the next <see cref="Get"/> to
     /// dispose them. The cap is enforced where a download lands, on the thread pool, and the
     /// UI thread may be drawing the very picture it pushes out: disposed there, the native
@@ -129,9 +135,22 @@ public sealed class PosterCache : IDisposable
     /// <paramref name="url"/> has landed, asking again drops the stand-in.</para>
     ///
     /// <para>Call it on the UI thread: it is where retired pictures and those the count cap
-    /// pushed out are disposed, and that thread is the one that may be drawing them.</para></summary>
-    public (IImageSource? Image, Status Status) Get(Uri? url, Uri? standIn = null)
+    /// pushed out are disposed, and that thread is the one that may be drawing them.</para>
+    ///
+    /// <para>The caller builds again when the picture lands: <see cref="TakeLanded"/> says so for
+    /// each URL asked for here before it landed.</para></summary>
+    public (IImageSource? Image, Status Status) Get(Uri? url, Uri? standIn = null) =>
+        Get(url, standIn, inPlace: false, out _);
+
+    /// <summary>
+    /// <see cref="Get(Uri?, Uri?)"/>, for a caller that puts the picture into what it drew itself
+    /// when it lands (<paramref name="inPlace"/>), so the landing asks for no build on its behalf.
+    /// <paramref name="own"/> is true when the picture returned is the URL's own, landed: false for
+    /// a stand-in, a download still running, and a failure.
+    /// </summary>
+    internal (IImageSource? Image, Status Status) Get(Uri? url, Uri? standIn, bool inPlace, out bool own)
     {
+        own = false;
         if (url is null) return (null, Status.Failed);
         var key = url.ToString();
         var standInKey = standIn?.ToString();
@@ -150,6 +169,7 @@ public sealed class PosterCache : IDisposable
                 // Back at the scale it was fetched for: it is the right size again.
                 if (e.Retired) { e.Retired = false; _retiredCount--; }
                 if (standInKey is not null) DropRetired(standInKey);
+                own = e.Status == Status.Ready;
                 return (e.Image, e.Status);
             }
             if (standInKey is not null && _map.TryGetValue(standInKey, out var s)
@@ -160,11 +180,58 @@ public sealed class PosterCache : IDisposable
             }
             // Asked for again before it landed: it is wanted after all.
             _retireOnLanding.Remove(key);
+            if (!inPlace) _buildOnLanding.Add(key);
             if (!_inFlight.Add(key)) return stand is null ? (null, Status.Pending) : (stand.Image, Status.Ready);
             generation = _scaleGeneration;
         }
         _ = FetchQueued(key, url, generation);
         return stand is null ? (null, Status.Pending) : (stand.Image, Status.Ready);
+    }
+
+    /// <summary>A download that landed: its URL, as the key and as asked for, and whether a caller
+    /// that builds to show it asked for it (<see cref="Get(Uri?, Uri?)"/>).</summary>
+    internal readonly record struct Landing(string Key, Uri Url, bool Build);
+
+    /// <summary>The downloads that landed since the last call, oldest first, added to
+    /// <paramref name="into"/>. On the UI thread, after the callback.</summary>
+    internal void TakeLanded(List<Landing> into)
+    {
+        lock (_lock)
+        {
+            into.AddRange(_landed);
+            _landed.Clear();
+        }
+    }
+
+    /// <summary>What the cache holds for a URL now, without asking for it: no download starts,
+    /// and its place in the LRU does not move. False when it holds nothing for it.</summary>
+    internal bool TryPeek(string key, out IImageSource? image, out Status status)
+    {
+        lock (_lock)
+        {
+            if (_map.TryGetValue(key, out var e))
+            {
+                (image, status) = (e.Image, e.Status);
+                return true;
+            }
+            (image, status) = (null, Status.Pending);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Drops the pictures fetched for an earlier scale or hero size once every download has landed,
+    /// as the next <see cref="Get(Uri?, Uri?)"/> would: for a landing put into the page in place, with
+    /// no build to ask. On the UI thread, once the pictures that landed are on screen, so nothing
+    /// drawn is a stand-in any more. Pictures the count cap pushed out wait for the next build's ask,
+    /// which makes the cards still drawing one again.
+    /// </summary>
+    internal void Collect()
+    {
+        lock (_lock)
+        {
+            if (!_disposed && _sweepRetired) SweepRetired(null);
+        }
     }
 
     /// <summary>Whether anything fetched for an earlier display scale is still held — the
@@ -213,6 +280,46 @@ public sealed class PosterCache : IDisposable
         }
     }
 
+    /// <summary>
+    /// A picture no longer wanted, dropped now: its pixels go at once, and so does the texture a
+    /// GPU window made of it, at the frame after; <see cref="Retire(Uri)"/> keeps a picture until
+    /// the downloads that follow have landed. Asked for again, it is fetched again. Still
+    /// downloading, it lands retired and goes with the retired ones.
+    ///
+    /// <para>Call it on the UI thread, the one that draws pictures, and only for a picture no
+    /// page on screen draws.</para>
+    /// </summary>
+    internal void Drop(Uri url)
+    {
+        var key = url.ToString();
+        lock (_lock)
+        {
+            if (_disposed) return;
+            if (_map.Remove(key, out var e))
+            {
+                _lru.Remove(key);
+                if (e.Retired) _retiredCount--;
+                (e.Image as IDisposable)?.Dispose();
+            }
+            else if (_inFlight.Contains(key))
+            {
+                _retireOnLanding.Add(key);
+            }
+        }
+    }
+
+    /// <summary>The bytes this URL's own picture holds decoded, four a pixel (see
+    /// <see cref="Decode"/>); 0 when it has not landed.</summary>
+    internal long DecodedBytes(Uri url)
+    {
+        lock (_lock)
+        {
+            if (!_map.TryGetValue(url.ToString(), out var e) || e.Image is not { IsLoaded: true } image) return 0;
+            var size = image.IntrinsicSize;
+            return (long)size.Width * (long)size.Height * 4;
+        }
+    }
+
     /// <summary>Whether this URL's own picture has landed — not a stand-in for it, and not a
     /// download that failed.</summary>
     public bool IsReady(Uri url)
@@ -238,6 +345,7 @@ public sealed class PosterCache : IDisposable
                 if (retired) _retiredCount++;
                 _lru.AddLast(key);
                 _inFlight.Remove(key);
+                _landed.Add(new Landing(key, url, _buildOnLanding.Remove(key)));
                 // The last download has landed: every tile that asked has its picture at the
                 // new size, so what is left from the old scale is drawn nowhere.
                 if (_inFlight.Count == 0 && _retiredCount > 0) _sweepRetired = true;
@@ -374,6 +482,7 @@ public sealed class PosterCache : IDisposable
             DisposeEvicted();
             _map.Clear();
             _lru.Clear();
+            _landed.Clear();
         }
         _http.Dispose();
         // _slots is deliberately not disposed: disposing a SemaphoreSlim with waiters

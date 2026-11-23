@@ -310,6 +310,16 @@ Text.New("Send").MaxLines(1).FlexShrink(0);   // never truncated by the row
 A label that wraps (no `MaxLines`, or more than one) keeps its widest word as its floor, and
 down a column a one-line label keeps its line's height.
 
+**A margin counts in an item's share of the shrink.** When a row lacks room, each item that
+shrinks gives up a share weighted by its `FlexShrink` times its outer size, margins included,
+where CSS weighs the flex basis alone. A margin on an item that shrinks therefore makes it give
+up more than the same item beside an empty box of the margin's width. An empty column (a cell
+with nothing to draw) goes as a margin on a neighbour that does not shrink, or stays a fixed
+box. Junction's diff rows found it (plan 17 round 18 step 14): a removed line's empty number
+column as the sign's margin had the 16 px sign give up 2.7 px of a row's shortfall where it had
+given up 0.8, and the code moved 1.9 px left; on the other number, which never shrinks, the
+frames are byte-identical.
+
 The related trap in the other direction is in `TODO.md`'s durable notes: **`FlexGrow(1)`
 alone does not mean "take the leftover space"**, because the default `auto` basis sizes
 the item to its own content first. `FlexBasis(0)` is what says "start from nothing".

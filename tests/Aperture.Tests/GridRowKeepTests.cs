@@ -31,8 +31,7 @@ public class GridRowKeepTests
     {
         Host((session, app, _, _) =>
         {
-            Keys(session, KeyCode.Right);   // the first press lands on the first card
-            Keys(session, KeyCode.Right);
+            Keys(session, KeyCode.Right);   // the grid opened with the cursor on its first card
             int made = app.GridRowsMade;
 
             Rebuild(session, app);
@@ -186,8 +185,7 @@ public class GridRowKeepTests
     {
         Host((session, app, _, _) =>
         {
-            Keys(session, KeyCode.Right);
-            Rebuild(session, app);
+            Rebuild(session, app);   // the grid opened with the cursor on its first card
             var row = Rows(session)[0];
             var cards = Cards(row);
             Stamp(cards);
@@ -209,8 +207,7 @@ public class GridRowKeepTests
     {
         Host((session, app, _, _) =>
         {
-            Keys(session, KeyCode.Right);
-            Rebuild(session, app);
+            Rebuild(session, app);   // the grid opened with the cursor on its first card
             var rows = Rows(session);
             var cards = rows.SelectMany(Cards).ToList();
             Stamp(cards);
@@ -234,7 +231,6 @@ public class GridRowKeepTests
     {
         Host((session, app, _, _) =>
         {
-            Keys(session, KeyCode.Right);
             Keys(session, KeyCode.Right);
             var focused = session.Window.Window.FocusedElement;
             Assert.Equal("card-m001", focused?.AutomationId);
@@ -285,8 +281,7 @@ public class GridRowKeepTests
     {
         Host((session, app, _, _) =>
         {
-            Keys(session, KeyCode.Right);
-            Keys(session, KeyCode.Down);
+            Keys(session, KeyCode.Down);   // from the first card, which the grid opened with
             Rebuild(session, app);
             var card = Card(session, "m007");
             var row = card.Parent;
@@ -403,9 +398,11 @@ public class GridRowKeepTests
         });
     }
 
-    /// <summary>One picture landing makes the rows on screen again, and only its card.</summary>
+    /// <summary>One picture landing goes into its card in place: no build, no row and no card made,
+    /// and the card's own image element takes it. Until plan 17 round 18 each landing built the view
+    /// and made the rows on screen again, and the card.</summary>
     [Fact]
-    public void APictureThatLands_MakesItsCardAlone()
+    public void APictureThatLands_GoesIntoItsCard_AndMakesNothing()
     {
         var artwork = new GatedArtwork(open: true) { HeldBack = "m003" };
         Host((session, app, _, _) =>
@@ -415,21 +412,27 @@ public class GridRowKeepTests
             Rest(session);
             var cards = Rows(session).SelectMany(Cards).ToList();
             Stamp(cards);
+            var placeholder = Descendants(Card(session, "m003")).OfType<ImageElement>().Single();
+            int builds = app.Builds, rows = app.GridRowsMade;
 
             artwork.ReleaseHeld();
             session.PumpUntil(() => HasPicture(Card(session, "m003")), TimeSpan.FromSeconds(5));
+            Rest(session);
 
+            Assert.Equal(0, app.Builds - builds);
+            Assert.Equal(0, app.GridRowsMade - rows);
             Assert.Equal(cards, Rows(session).SelectMany(Cards));
-            Assert.Equal(["card-m003"], cards.Where(c => c.AccessibleDescription is null).Select(c => c.AutomationId));
+            Assert.All(cards, c => Assert.Equal(Untouched, c.AccessibleDescription));
+            Assert.Same(placeholder, Descendants(Card(session, "m003")).OfType<ImageElement>().Single());
         }, artwork: artwork);
     }
 
-    /// <summary>Pictures that land together build the view once: the cache calls back once per
-    /// picture, and the app posts one build at a time, which shows every picture landed before
-    /// it ran. A build posted per picture made a screenful of posters a screenful of builds in
-    /// one frame (46 builds for the grid's 42 posters, up to 13 in a frame).</summary>
+    /// <summary>Pictures that land together build nothing: the cache calls back once per picture,
+    /// the app takes the ones landed so far at once, and each goes into its card in place. A build
+    /// posted per picture made a screenful of posters a screenful of builds in one frame (46 builds
+    /// for the grid's 42 posters, up to 13 in a frame); one at a time, a build per batch.</summary>
     [Fact]
-    public void PicturesThatLandTogether_BuildTheViewOnce()
+    public void PicturesThatLandTogether_BuildNothing()
     {
         var artwork = new GatedArtwork(open: false);
         Host((session, app, _, _) =>
@@ -449,7 +452,8 @@ public class GridRowKeepTests
             int builds = app.Builds;
             session.PumpFrame();
 
-            Assert.Equal(1, app.Builds - builds);
+            Assert.Equal(0, app.Builds - builds);
+            Assert.Equal(cards, Rows(session).SelectMany(Cards));
             Assert.All(Rows(session).SelectMany(Cards), card => Assert.True(HasPicture(card), $"{card.AutomationId} has no picture"));
         }, artwork: artwork);
     }

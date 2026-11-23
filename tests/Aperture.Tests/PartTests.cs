@@ -14,9 +14,10 @@ namespace Aperture.Tests;
 
 /// <summary>
 /// The title bar and the rail are parts, kept while the app rebuilds around them
-/// (ApertureApp.Parts.cs). A cursor key, a resize, a picture landing build neither. The risk is a
-/// value they show changing while they are kept: a rail still lit for the view you left, a badge
-/// with an old count, a door to a request server that has gone.
+/// (ApertureApp.Parts.cs), each built only when the value of what it shows moved. A cursor key, a
+/// resize, a picture landing, a load that lands build neither. The risk is a value they show
+/// changing while they are kept: a rail still lit for the view you left, a badge with an old
+/// count, a door to a request server that has gone, the last session's user.
 ///
 /// <para>The oracle is a full build: each check compares the parts on screen with what a forced
 /// rebuild of both makes, after each value they show changes the way the app changes it.</para>
@@ -67,8 +68,10 @@ public class PartTests
         });
     }
 
+    /// <summary>A picture that fails to land (a 404) builds nothing at all: the card keeps its
+    /// placeholder, in place. Each used to build the view, 30 KB for nothing to show.</summary>
     [Fact]
-    public void APictureLanding_BuildsNoPart()
+    public void APictureLanding_BuildsNothing()
     {
         var artwork = new GateArtwork();
         Host((session, app, _) =>
@@ -76,39 +79,276 @@ public class PartTests
             OpenGrid(session);
             int builds = app.Builds, partBuilds = app.PartBuilds;
 
-            // The pictures that land together share a build (ApertureApp.PostArtworkLanded), so
-            // this waits for all of them rather than for a build each.
             artwork.Gate.SetResult();
-            session.PumpUntil(() => app.Builds > builds && app.Posters.PendingCount == 0, TimeSpan.FromSeconds(5));
+            session.PumpUntil(() => app.Posters.PendingCount == 0, TimeSpan.FromSeconds(5));
             for (int i = 0; i < 20; i++) { session.PumpFrame(); Thread.Sleep(2); }
 
+            Assert.Equal(0, app.Builds - builds);
             Assert.Equal(0, app.PartBuilds - partBuilds);
         }, artwork: artwork);
     }
 
-    /// <summary>A loader that lands builds the app through a signal, with no Rerender: what it
-    /// brought can move a plain field a part reads, so that build builds the parts too.</summary>
+    /// <summary>A part builds when what it shows moved, whichever path built the app, and only
+    /// then: a film's page opened builds the door whose light went out, not the rest of the rail
+    /// nor the title bar, and the loads that land on the page build none of them; another
+    /// library's page the two doors whose light moved; F5's libraries, a list of their own, the
+    /// rail, every door with it. Until plan 17 round 18 every one of those builds built the title
+    /// bar and the whole rail, 49 KB a build: a film's page 4 part builds, a library's first open 8.</summary>
     [Fact]
-    public void ABuildALoaderAsksFor_BuildsTheParts()
+    public void APartBuildsWhenWhatItShowsMoved_AndOnlyThen()
     {
         Host((session, app, _) =>
         {
             OpenGrid(session);
-            int partBuilds = app.PartBuilds;
-
-            session.Window.FindByAutomationId("rail-series")!.Click();
+            session.Window.PressKey(KeyCode.Right);
             session.PumpFrames(2);
-            int afterClick = app.PartBuilds;
-            Assert.True(afterClick > partBuilds, "the click built no part");
+            var was = Built(app);
+            int builds = app.Builds;
+            session.Window.PressKey(KeyCode.Enter);
+            session.PumpUntil(() => session.Window.FindByAutomationId("detail-play") is not null, TimeSpan.FromSeconds(5));
+            session.PumpFrames(3);
+            Assert.True(app.Builds - builds >= 2, $"{app.Builds - builds} builds: the page's loads landed in its first");
+            Assert.Equal((0, 0, 1), Since(app, was));
+            Assert.Equal("", Lit(session));
 
-            app.Refresh();   // the page that lands comes through the loader's signal alone
-            int beforeLanding = app.PartBuilds, builds = app.Builds;
+            was = Built(app);
+            typeof(ApertureApp).GetMethod("Rerender", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(app, null);
+            session.PumpFrames(3);
+            Assert.Equal((0, 0, 0), Since(app, was));
+
+            session.Window.PressKey(KeyCode.Left, KeyModifiers.Alt);   // Films again: lit
+            session.PumpFrames(3);
+            was = Built(app);
+            session.Window.FindByAutomationId("rail-series")!.Click();
+            session.PumpFrames(3);
+            Assert.Equal((0, 0, 2), Since(app, was));
+
+            app.Refresh();   // the page and the libraries again, through the loaders' signals alone
+            was = Built(app);
+            builds = app.Builds;
             session.PumpUntil(() => app.Builds > builds, TimeSpan.FromSeconds(5));
             session.PumpFrames(3);
-            Assert.True(app.PartBuilds - beforeLanding >= 2, $"{app.PartBuilds - beforeLanding} part builds");
             // The page's loads land in one pass, and the pass's posted work is one batch: one build
             // for all of them (two, five part builds, until plan 17 round 15).
             Assert.Equal(builds + 1, app.Builds);
+            var f5 = Since(app, was);
+            Assert.Equal((0, 1), (f5.Title, f5.Rail));
+            Assert.Equal(Doors(app).Count, f5.Doors);
+            AssertPartsAreAFullBuild(session, app, "after F5");
+        });
+    }
+
+    /// <summary>Each door on the rail is a part of its own, lit by the light the app's build
+    /// compares (ApertureApp.Parts.cs, as Junction's view tabs, 3ea96588): every way into a page
+    /// builds the door that goes dark and the one that lights up, and no more of the rail nor the
+    /// title bar (the whole rail built, 31.3 KB, until plan 17 round 18; a door is about 3.5 KB).</summary>
+    [Fact]
+    public void AnyWayIntoAPage_BuildsTheDoorsWhoseLightMoved_AndNoMoreOfTheRail()
+    {
+        Host((session, app, _) =>
+        {
+            OpenGrid(session);
+            void Side(MouseButton button)
+            {
+                session.Window.MouseDown(700, 400, button);
+                session.Window.MouseUp(700, 400, button);
+            }
+            void Step(string how, Action act)
+            {
+                var doors = Doors(app);
+                var before = doors.Select(d => d.Builds).ToArray();
+                var was = Built(app);
+                string from = Lit(session);
+                act();
+                session.PumpFrames(3);
+                string to = Lit(session);
+                var built = doors.Where((d, i) => d.Builds != before[i]).Select(DoorId).Order().ToArray();
+                var lights = new[] { from, to }.Where(id => id != "").Distinct().Order().ToArray();
+                Assert.True(built.SequenceEqual(lights),
+                    $"{how} ({from} to {to}) built the doors [{string.Join(", ", built)}], not [{string.Join(", ", lights)}]");
+                var since = Since(app, was);
+                Assert.True(since.Title == 0 && since.Rail == 0, $"{how} built the title bar {since.Title} and the rail {since.Rail} times");
+            }
+            Step("a film's page", () =>
+            {
+                session.Window.PressKey(KeyCode.Right);
+                session.PumpFrames(2);
+                session.Window.PressKey(KeyCode.Enter);
+            });
+            Step("Back", () => session.Window.PressKey(KeyCode.Left, KeyModifiers.Alt));
+            Step("Forward", () => session.Window.PressKey(KeyCode.Right, KeyModifiers.Alt));
+            Step("Escape", () => session.Window.PressKey(KeyCode.Escape));
+            Step("the mouse's back button", () => Side(MouseButton.Back));
+            Step("the mouse's forward button", () => Side(MouseButton.Forward));
+            Step("a number key", () => session.Window.PressKey(KeyCode.Digit3));
+            Step("0", () => session.Window.PressKey(KeyCode.Digit0));
+            Step("/", () => session.Window.PressKey(KeyCode.Slash));
+            Step("Escape from the search field", () => session.Window.PressKey(KeyCode.Escape));
+            Step("Discover on the rail", () => session.Window.FindByAutomationId("rail-discover")!.Click());
+            Step("Issues on the rail", () => session.Window.FindByAutomationId("rail-issues")!.Click());
+            Step("the title bar's user", () => session.Window.FindByAutomationId("titlebar-user")!.Click());
+            Step("1", () => session.Window.PressKey(KeyCode.Digit1));
+            AssertPartsAreAFullBuild(session, app, "after the walk");
+        }, requests: true);
+    }
+
+    /// <summary>The doors are made once and kept: a library added makes the door for its slot, and
+    /// a sign-in to a server with fewer libraries reuses the first slot and keeps the rest, unplaced,
+    /// for the next rail that has them. A part made per library would leave one behind for every
+    /// library ever shown.</summary>
+    [Fact]
+    public void TheDoors_AreMadeOnceAndKept()
+    {
+        Host((session, app, _) =>
+        {
+            OpenGrid(session);
+            var made = Doors(app);
+            Assert.Equal(6, made.Count);   // Home, Films, Series, Favourites, Search, Settings
+
+            var library = (FakeMediaLibrary)app.Library!;
+            library.AddLibrary("docs", "Documentaries");
+            app.Refresh();
+            session.PumpUntil(() => session.Window.FindByAutomationId("rail-documentaries") is not null, TimeSpan.FromSeconds(5));
+            session.PumpFrames(3);
+            var more = Doors(app);
+            Assert.Equal(made.Count + 1, more.Count);
+            Assert.True(made.All(d => more.Contains(d)), "a door was made again");
+
+            app.SignOut(keepAccount: true);
+            session.PumpFrames(3);
+            var other = new FakeMediaLibrary(
+                    new ServerInfo("http://other.test:8096", "Other server", "12.1.0", "other-server-id"),
+                    new SignedInUser(Guid.Parse("22222222-2222-2222-2222-222222222222"), "second", "other-token", null))
+                .AddLibrary("music", "Concerts");
+            typeof(ApertureApp).GetMethod("Adopt", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(app, [other, false]);
+            session.PumpUntil(() => session.Window.FindByAutomationId("rail-concerts") is not null, TimeSpan.FromSeconds(5));
+            session.PumpFrames(3);
+            Assert.True(Doors(app).SequenceEqual(more), "a sign-in made or dropped doors");
+            Assert.Null(session.Window.FindByAutomationId("rail-films"));
+            Assert.Equal("Concerts (2)", RailName(session, "rail-concerts"));
+            AssertPartsAreAFullBuild(session, app, "signed in elsewhere");
+        });
+    }
+
+    /// <summary>Every way into a page lights its door, and the rail is what a full build of it
+    /// makes after each: Back, Forward, Escape, the mouse's side buttons, a number key, 0 and /,
+    /// a rail button. The rail lit for the view it left is the risk.</summary>
+    [Fact]
+    public void TheRailFollowsEveryWayIntoAPage()
+    {
+        Host((session, app, _) =>
+        {
+            OpenGrid(session);
+            void Step(string how, Action act, string lit)
+            {
+                act();
+                session.PumpFrames(3);
+                Assert.True(lit == Lit(session), $"{how}: lit {Lit(session)}, not {lit}");
+                AssertPartsAreAFullBuild(session, app, how);
+            }
+            void Side(MouseButton button)
+            {
+                session.Window.MouseDown(700, 400, button);
+                session.Window.MouseUp(700, 400, button);
+            }
+            Step("a film's page", () =>
+            {
+                session.Window.PressKey(KeyCode.Right);
+                session.PumpFrames(2);
+                session.Window.PressKey(KeyCode.Enter);
+            }, "");
+            Step("Back", () => session.Window.PressKey(KeyCode.Left, KeyModifiers.Alt), "rail-films");
+            Step("Forward", () => session.Window.PressKey(KeyCode.Right, KeyModifiers.Alt), "");
+            Step("Escape", () => session.Window.PressKey(KeyCode.Escape), "rail-films");
+            Step("the mouse's back button", () => Side(MouseButton.Back), "rail-home");
+            Step("the mouse's forward button", () => Side(MouseButton.Forward), "rail-films");
+            Step("a number key", () => session.Window.PressKey(KeyCode.Digit3), "rail-series");
+            Step("0", () => session.Window.PressKey(KeyCode.Digit0), "rail-favourites");
+            Step("/", () => session.Window.PressKey(KeyCode.Slash), "rail-search");
+            Step("Escape from the search field", () => session.Window.PressKey(KeyCode.Escape), "rail-favourites");
+            Step("a rail button", () => session.Window.FindByAutomationId("rail-films")!.Click(), "rail-films");
+            Step("the title bar's user", () => session.Window.FindByAutomationId("titlebar-user")!.Click(), "rail-settings");
+            Step("1", () => session.Window.PressKey(KeyCode.Digit1), "rail-home");
+        });
+    }
+
+    /// <summary>Signing out and in as someone else on another server: the title bar names the new
+    /// server and user, the rail the new libraries, lit at Home. Kept parts would show the last
+    /// session's.</summary>
+    [Fact]
+    public void SigningInAsSomeoneElse_ReachesBothParts()
+    {
+        Host((session, app, _) =>
+        {
+            OpenGrid(session);
+            Assert.Equal("Signed in as tester", RailName(session, "titlebar-user"));
+
+            app.SignOut(keepAccount: true);
+            session.PumpFrames(3);
+            AssertPartsAreAFullBuild(session, app, "signed out");
+
+            var other = new FakeMediaLibrary(
+                    new ServerInfo("http://other.test:8096", "Other server", "12.1.0", "other-server-id"),
+                    new SignedInUser(Guid.Parse("22222222-2222-2222-2222-222222222222"), "second", "other-token", null))
+                .AddLibrary("docs", "Documentaries");
+            typeof(ApertureApp).GetMethod("Adopt", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(app, [other, false]);
+            session.PumpUntil(() => session.Window.FindByAutomationId("rail-documentaries") is not null, TimeSpan.FromSeconds(5));
+            session.PumpFrames(3);
+
+            Assert.Equal("Signed in as second", RailName(session, "titlebar-user"));
+            Assert.Contains(Descendants(PartHosts(session)[0]).OfType<TextElement>(), t => t.Content == "Other server");
+            Assert.Null(session.Window.FindByAutomationId("rail-films"));
+            Assert.Equal("rail-home", Lit(session));
+            AssertPartsAreAFullBuild(session, app, "signed in as someone else");
+        });
+    }
+
+    /// <summary>A library added or renamed on the server reaches the rail with F5.</summary>
+    [Fact]
+    public void ALibraryAddedOrRenamed_ReachesTheRail()
+    {
+        Host((session, app, _) =>
+        {
+            OpenGrid(session);
+            var library = (FakeMediaLibrary)app.Library!;
+            library.AddLibrary("docs", "Documentaries");
+            library.RenameLibrary("shows", "Anime");
+            app.Refresh();
+            session.PumpUntil(() => session.Window.FindByAutomationId("rail-documentaries") is not null, TimeSpan.FromSeconds(5));
+            session.PumpFrames(3);
+
+            Assert.Equal("Anime (3)", RailName(session, "rail-anime"));
+            Assert.Equal("Documentaries (4)", RailName(session, "rail-documentaries"));
+            Assert.Equal("rail-films", Lit(session));
+            AssertPartsAreAFullBuild(session, app, "a library added and one renamed");
+        });
+    }
+
+    /// <summary>The request server's doors follow the server and its user: an admin's three, gone
+    /// with the server, a reporter's own "Your reports" door with the next one.</summary>
+    [Fact]
+    public void TheRequestDoors_FollowTheServerAndItsUser()
+    {
+        Host((session, app, _) =>
+        {
+            OpenGrid(session);
+            var adopt = typeof(ApertureApp).GetMethod("AdoptRequestServer", BindingFlags.NonPublic | BindingFlags.Instance)!;
+            adopt.Invoke(app, [new FakeRequestServer(null, new RequestUser(1, "tester", RequestPermission.Admin))]);
+            session.PumpFrames(3);
+            Assert.NotNull(session.Window.FindByAutomationId("rail-issues"));
+            AssertPartsAreAFullBuild(session, app, "an admin's server");
+
+            app.DisconnectRequestServer();
+            session.PumpFrames(3);
+            Assert.Null(session.Window.FindByAutomationId("rail-discover"));
+            AssertPartsAreAFullBuild(session, app, "no server");
+
+            adopt.Invoke(app, [new FakeRequestServer(null,
+                new RequestUser(1, "tester", RequestPermission.Request | RequestPermission.CreateIssues))]);
+            session.PumpFrames(3);
+            Assert.NotNull(session.Window.FindByAutomationId("rail-your-reports"));
+            Assert.Null(session.Window.FindByAutomationId("rail-issues"));
+            AssertPartsAreAFullBuild(session, app, "a reporter's server");
         });
     }
 
@@ -363,10 +603,43 @@ public class PartTests
 
     private static string? RailName(HeadlessSession session, string id) => session.Window.FindByAutomationId(id)?.Element.AccessibleName;
 
-    /// <summary>The rail button lit for where the app is: the only one with an accent background.</summary>
+    /// <summary>Builds of the title bar, of the rail and of the rail's doors so far.</summary>
+    private static (int Title, int Rail, int Doors) Built(ApertureApp app)
+    {
+        static object? Field(ApertureApp app, string name) =>
+            typeof(ApertureApp).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app);
+        return ((Field(app, "_titleBarPart") as Part)?.Builds ?? 0, (Field(app, "_railPart") as Part)?.Builds ?? 0,
+            ((PartGroup)Field(app, "_railDoors")!).Builds);
+    }
+
+    private static (int Title, int Rail, int Doors) Since(ApertureApp app, (int Title, int Rail, int Doors) was)
+    {
+        var now = Built(app);
+        return (now.Title - was.Title, now.Rail - was.Rail, now.Doors - was.Doors);
+    }
+
+    /// <summary>The parts of the rail's doors made so far: the fixed doors', then the library
+    /// slots', in that order.</summary>
+    private static List<Part> Doors(ApertureApp app)
+    {
+        const BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Instance;
+        var doors = new List<object>();
+        foreach (var name in new[] { "_homeDoor", "_discoverDoor", "_requestsDoor", "_issuesDoor", "_favouritesDoor", "_searchDoor", "_settingsDoor" })
+            if (typeof(ApertureApp).GetField(name, flags)!.GetValue(app) is { } door) doors.Add(door);
+        foreach (var door in (System.Collections.IEnumerable)typeof(ApertureApp).GetField("_libraryDoors", flags)!.GetValue(app)!)
+            doors.Add(door);
+        return doors.Select(d => (Part)d.GetType().GetField("Part")!.GetValue(d)!).ToList();
+    }
+
+    /// <summary>The rail button a door's part shows.</summary>
+    private static string DoorId(Part door) =>
+        Descendants(door.Mount()).OfType<BoxElement>().First(b => b.AutomationId?.StartsWith("rail-", StringComparison.Ordinal) == true).AutomationId!;
+
+    /// <summary>The rail button lit for where the app is: the only one with an accent background. (The
+    /// rail is the part after the title bar; Home's shelves are parts too.)</summary>
     private static string Lit(HeadlessSession session)
     {
-        var rail = PartHosts(session).Last();
+        var rail = PartHosts(session).First(h => Descendants(h).Any(e => e.AutomationId == "rail-home"));
         return Descendants(rail).OfType<BoxElement>()
             .FirstOrDefault(b => b.AutomationId?.StartsWith("rail-", StringComparison.Ordinal) == true
                 && b.BorderColor != HultUI.Core.Primitives.Color.Transparent)?.AutomationId ?? "";

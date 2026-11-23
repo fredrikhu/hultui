@@ -716,7 +716,42 @@ public abstract class Element
     public string? TooltipText { get; set; }
 
     // ──── Context Menu ────
-    public Func<IReadOnlyList<ContextMenuItem>>? ContextMenuItems { get; set; }
+    /// <summary>
+    /// What the element's right-click menu holds, asked each time it opens; null when the element has
+    /// no menu (the window then asks its ancestors). A text field or a selectable label answers with
+    /// its own menu (Cut, Copy, Paste, Select All) until the app sets one; setting null takes that
+    /// one away too.
+    /// </summary>
+    public Func<IReadOnlyList<ContextMenuItem>>? ContextMenuItems
+    {
+        get
+        {
+            var items = _contextMenuItems;
+            return items is null ? OwnContextMenuItems() : ReferenceEquals(items, NoContextMenu) ? null : items;
+        }
+        set => _contextMenuItems = value ?? NoContextMenu;
+    }
+
+    /// <summary>
+    /// The menu the app set: <see cref="NoContextMenu"/> when it set null, null when it set none.
+    /// The element's own menu is not kept here but asked of the element (<see cref="OwnContextMenuItems"/>),
+    /// so a rebuild, which hands the live element what the build set, leaves it to the live element.
+    /// Kept here, the own menu the build's fresh copy made for itself came across with the patch and
+    /// acted on that copy, out of the window: after one rebuild a field's Cut, Copy and Paste were
+    /// off, and Select All selected the copy.
+    /// </summary>
+    private Func<IReadOnlyList<ContextMenuItem>>? _contextMenuItems;
+
+    /// <summary>What an app's null is kept as: no menu, not even the element's own.</summary>
+    private static readonly Func<IReadOnlyList<ContextMenuItem>> NoContextMenu = () => [];
+
+    /// <summary>The element's own menu, on this element, for when the app set none; null when it has
+    /// none. Asked each time the menu is read.</summary>
+    private protected virtual Func<IReadOnlyList<ContextMenuItem>>? OwnContextMenuItems() => null;
+
+    /// <summary>Drops a menu the app set, so the element's own one is served: a label made selectable
+    /// after the app gave it a menu takes its own, as it always has.</summary>
+    private protected void UseOwnContextMenu() => _contextMenuItems = null;
 
     /// <summary>
     /// The box, in window coordinates, that a context menu opened from the keyboard (the Menu
@@ -1053,6 +1088,22 @@ public abstract class Element
 
     private void AddHandler<TEvent>(EventPhase phase, Action<TEvent> handler, bool owned, bool passive = false) where TEvent : ElementEvent =>
         AddEntry(new EventHandlerEntry(EventKind<TEvent>.Instance, handler, phase, owned, passive));
+
+    /// <summary>
+    /// Makes room for <paramref name="more"/> handlers after the ones the element has, in an array
+    /// of exactly that many slots, for an element about to add several at once: added one at a
+    /// time, the array is made at 2, 4 and then 8 slots on its way to 6. Replaces the array rather
+    /// than writing to it, as every change does (a dispatch may be walking it).
+    /// </summary>
+    private protected void ReserveHandlers(int more)
+    {
+        var items = _handlers;
+        int count = items is null ? 0 : CountOf(items);
+        if (items is not null && items.Length - count >= more) return;
+        var copy = new EventHandlerEntry[count + more];
+        if (count > 0) Array.Copy(items!, copy, count);
+        _handlers = copy;
+    }
 
     internal bool HasEventHandler<TEvent>() where TEvent : ElementEvent => Listens(_handlers, typeof(TEvent));
 
@@ -1521,20 +1572,30 @@ public abstract class Element
         // leaving — not those that reappear in the new list.
         if (_children is { Count: > 0 } current)
         {
-            // Asking whether an old child stays costs a search of the new list; a set pays for
-            // itself only when there are many of both. Most calls have no old children at all —
-            // every builder .Children(...) on a fresh element — and made a set anyway: 208 of
-            // the 272–288 bytes such a call allocated.
-            var staying = (long)current.Count * children.Length > SearchBeforeSet ? SetOf(children) : null;
-            foreach (var old in current)
+            // Asking whether an old child stays costs a search of the new list; with many of both
+            // the new children are marked instead, and the marks taken off after. A set of them,
+            // as before, was about 1 KB each time a list's window moved by a row (~40 children
+            // either side): 1.7 KB of a 19.4 KB wheel notch in Vesper's reader (plan 17 round 18).
+            bool marked = (long)current.Count * children.Length > SearchBeforeMarking;
+            if (marked)
+                foreach (var child in children) child._staying = true;
+            try
             {
-                if (!(staying?.Contains(old) ?? Array.IndexOf(children, old) >= 0))
+                foreach (var old in current)
                 {
-                    ClearFocusIfRemoved(old);
-                    old.Unmount();
-                    old.OverlayHost = null; // see RemoveChild
+                    if (!(marked ? old._staying : Array.IndexOf(children, old) >= 0))
+                    {
+                        ClearFocusIfRemoved(old);
+                        old.Unmount();
+                        old.OverlayHost = null; // see RemoveChild
+                    }
+                    old.Parent = null;
                 }
-                old.Parent = null;
+            }
+            finally
+            {
+                if (marked)
+                    foreach (var child in children) child._staying = false;
             }
             current.Clear();
         }
@@ -1560,17 +1621,12 @@ public abstract class Element
     }
 
     /// <summary>Old × new children up to which <see cref="ReplaceChildren"/> searches the new
-    /// list for each old child rather than building a set of it.</summary>
-    internal const int SearchBeforeSet = 64;
+    /// list for each old child rather than marking the new ones.</summary>
+    internal const int SearchBeforeMarking = 64;
 
-    /// <summary>A set of <paramref name="children"/>, filled by index: the set's own constructor
-    /// enumerates an array through its interface, boxing the enumerator.</summary>
-    private static HashSet<Element> SetOf(Element[] children)
-    {
-        var set = new HashSet<Element>(children.Length);
-        for (int i = 0; i < children.Length; i++) set.Add(children[i]);
-        return set;
-    }
+    /// <summary>Set on each of the new children only while <see cref="ReplaceChildren"/> asks which
+    /// old ones stay; false at any other time.</summary>
+    private bool _staying;
 
     /// <summary>
     /// Removes <paramref name="child"/> from its current parent, on its way to
@@ -1802,7 +1858,8 @@ public abstract class Element
         IsWindowDragRegion = source.IsWindowDragRegion;
         IsWindowMaximizeButton = source.IsWindowMaximizeButton;
         TooltipText = source.TooltipText;
-        ContextMenuItems = source.ContextMenuItems;
+        // The menu the build set, if any; the element's own stays this element's (see _contextMenuItems).
+        _contextMenuItems = source._contextMenuItems;
         _opacity = source._opacity;
         Transform = source.Transform;
         // Interaction config follows the latest build, like event handlers: overrides

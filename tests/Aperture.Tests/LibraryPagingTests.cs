@@ -27,7 +27,7 @@ public class LibraryPagingTests
     {
         Host(films, (session, app, library) =>
         {
-            Keys(session, KeyCode.Right);   // the first press lands on the first card
+            Keys(session, KeyCode.Right);   // on from the first card, which the page opened with
             Keys(session, KeyCode.End);
 
             Pump(session, () => app.GridItems.Count == films && app.CursorIndex == films - 1,

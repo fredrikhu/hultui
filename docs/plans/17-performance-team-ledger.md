@@ -4,25 +4,33 @@ State of [the performance team](17-performance-team.md). The orchestrator update
 file after every step and commits it with the step's work. Full survey reports are in
 [`17-reports/`](17-reports/).
 
-- **Round:** 17
-- **Phase:** release — round 17 (session 35903ed7). The full suite passed at 45cbde7b (main merged in); merge into main
-  and push per memory `merge-race-shared-checkout`, wait for CI, record the merge and CI here, then Round → 18, Phase
-  survey in a fresh context. Open for the user: question 72b (step 11 waits). Steps 9 and 10 stay queued for round 18's
-  survey. To resume in a fresh context, run in this worktree: `/loop Run the next step of the performance team: follow
+- **Round:** 18
+- **Phase:** release — round 18 (14 build steps, the pre-suite work, main merged twice (87a0d35e, 2eba86c9); the full suite green at 2eba86c9): merge into main, push, wait for CI. The survey ran 2026-11-22 in session
+  00f54f03 (reports `17-reports/r18-*`; usage 1 → 8 % of the week, the 5-hour window 7 → 54 %). Questions 73–77 are answered (73 → (b), 74 → (c), 75 → (a), 76 → (a), 77 → (a) on
+  2026-11-23, its commit riding with step 7); question 78 (asked at step 14, not perf) is open. Round 18's files (the survey brief `brief-r18-survey.md`, build
+  briefs `brief-r18b<N>.md`, `archive_r18.py`, `merge_r18.py`, `desk.ps1`, agent ids `r18-agents.txt`, probes
+  `r18-<area>\` and `r18b<N>\`) are in session 00f54f03's scratchpad
+  `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\00f54f03-b511-4949-9273-30fe719e1bbb\scratchpad\`. Round
+  17's are in session 35903ed7's scratchpad
+  `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\35903ed7-ff10-416d-84e9-b6c09675ab6b\scratchpad\`
+  (`fullsuite-r17.sh` with `fedora-r17.sh` is the model for round 18's full suite, `brief-r17b<N>.md` for its build
+  briefs). Older scratch publishes have lost their DLLs (r18-8): re-publish rather than reuse them. Round 17 RELEASED
+  2026-11-20: main e799c23b, CI run 44653899561 green on the first attempt. The Jellyfin account to browse as is in
+  memory `aperture-jellyfin` (never in committed docs). Read the desk at the start and before every hold. To resume in a
+  fresh context, run in this worktree: `/loop Run the next step of the performance team: follow
   docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md. Read both once per session
   (afterwards only the ledger's Phase and the part the step needs), do the step the ledger's Phase calls for, record it
-  in the ledger, and commit.` Round 17's files are in session 35903ed7's scratchpad (briefs `brief-r17*.md`, agent ids
-  `r17-agents.txt`, probes `r17-<area>\` and `r17b<N>\`, `archive_r17.py`, `merge_r17.py`, `land_r17.py`,
-  `fullsuite-r17.sh` with `fedora-r17.sh`). Older rounds are in [the archive](17-performance-team-ledger-archive.md)
-  (search it, don't read it whole). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a
-  pre-push hook refuses pushes built on the old history).
+  in the ledger, and commit.` Before resuming, `git fetch` and merge main if it moved; build steps use
+  `scripts/perf/step-ab.ps1`. Older rounds are in [the archive](17-performance-team-ledger-archive.md) (search it, don't
+  read it whole). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a pre-push hook refuses
+  pushes built on the old history).
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`)
-- **Review commits since:** round 17's survey reviews round 16's build, 32c85e81..b131ae85 (the last survey report to the round 16 release; 50 commits not merges), with main's 8 commits outside plan 17 that its merges 666e6486 and 5e180d17 brought in (266d6aee, 4917f40d, 23b552d8, 38ec9773, b8a3dcf5, d3e40ecb, 22c6e002, 791d1a44); main gained nothing after b131ae85. Earlier: round 16's survey reviewed round 15's build, 587f1767..75f2288a (the last survey report to the round 15 release; the one merge is round 15's own into main), and main's 41 commits outside plan 17 since that release, `git log --no-merges 75f2288a..3038f82b ^9550ecec` (42 with the ledger's cc093b50) (SkiaSharp 4 043f5b38, SDL 3.5.0 fd0cccb7, the app team's fixes; the screen-reader fix counts as reviewed). Earlier: round 15's survey reviewed round 14's build, 06d4db59..5b2985be (the last survey report to the round 14 release; the one merge is round 14's own into main). Earlier: round 14's survey reviewed round 13's build, 8f01b6fd..e432c224 (the last survey report to the round 13 release; its two merges are round 13's own into main). Round 13's survey reviewed round 12's build, 5f1744ca..afc1ed40 (the last survey report to the round 12 release; the one merge is round 12's own into main). Round 12's survey reviewed round 11's build, 5731ee58..b0dd1954 (the last survey report to the
+- **Review commits since:** round 18's survey reviews round 17's build, `git log --no-merges 0df5e3ea..e799c23b^2 ^45cbde7b^2` (the archive commit to the round 17 release; 41 commits not merges), with main's 13 commits outside plan 17 that 45cbde7b merged (781a857f, ba15d841, 78a69ee5, 52acb2f2 with their plan 19 notes and rows; 3490ba67; e66ead9f) and main's 5 that b28e9128 merged (fe8f4ecf, 0f9c8477, ee044d36, f67b25ec, 93f8a26d). Earlier: round 17's survey reviewed round 16's build, 32c85e81..b131ae85 (the last survey report to the round 16 release; 50 commits not merges), with main's 8 commits outside plan 17 that its merges 666e6486 and 5e180d17 brought in (266d6aee, 4917f40d, 23b552d8, 38ec9773, b8a3dcf5, d3e40ecb, 22c6e002, 791d1a44); main gained nothing after b131ae85. Earlier: round 16's survey reviewed round 15's build, 587f1767..75f2288a (the last survey report to the round 15 release; the one merge is round 15's own into main), and main's 41 commits outside plan 17 since that release, `git log --no-merges 75f2288a..3038f82b ^9550ecec` (42 with the ledger's cc093b50) (SkiaSharp 4 043f5b38, SDL 3.5.0 fd0cccb7, the app team's fixes; the screen-reader fix counts as reviewed). Earlier: round 15's survey reviewed round 14's build, 06d4db59..5b2985be (the last survey report to the round 14 release; the one merge is round 14's own into main). Earlier: round 14's survey reviewed round 13's build, 8f01b6fd..e432c224 (the last survey report to the round 13 release; its two merges are round 13's own into main). Round 13's survey reviewed round 12's build, 5f1744ca..afc1ed40 (the last survey report to the round 12 release; the one merge is round 12's own into main). Round 12's survey reviewed round 11's build, 5731ee58..b0dd1954 (the last survey report to the
   round 11 release; it includes the .NET 11 upgrade's step 0 only as already reviewed). Earlier: round 11's survey reviewed round 10's build and the .NET 11 upgrade, f4d6050d..868e2ffc
   (the last survey report to the upgrade's captures; round 10's merge into main cc55bdcc is in the range). Earlier: round 10's survey reviewed round 9's build, 4919ac40..facced69 (the last survey report
   to the round 9 release; 82 commits, 81 not merges; no merge from main this round). Round 9's survey reviewed
   eaa1ec29..10acc8c0 (round 8's build, with main's merge 3a15b5b1); round 8's survey reviewed 17d4220a..df45b4a2.
-- **Probe code:** round 17 surveys in session 35903ed7's scratchpad
+- **Probe code:** round 18 surveys in session 00f54f03's scratchpad `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\00f54f03-b511-4949-9273-30fe719e1bbb\scratchpad\r18-<area>\`; round 17 surveys in session 35903ed7's scratchpad
   `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\35903ed7-ff10-416d-84e9-b6c09675ab6b\scratchpad\r17-<area>\`
   (the common brief `brief-r17-survey.md` and `archive_r17.py` beside them); round 16 surveys and build probes in session
   b6ef64d9's scratchpad `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\b6ef64d9-4ed1-4793-9955-6a986d74de79\scratchpad\`
@@ -74,156 +82,141 @@ memory `release-tagging` (≤3 tags per push).
 
 | Expert | Round | Satisfied | Review objections |
 |---|---|---|---|
-| 1. Layout | 17 | no | b8a3dcf5: the suite row `virtual/columns cursor walk 100k item rows` measures nothing (its list is never focused) and makes every suite run that includes it exit 1, which step-ab refuses → step 1 (a); 38ec9773, b8a3dcf5, 266d6aee: no O(n) work a step (1M rows cost what 100k do); round 16's wrapped fits hold. Real window (1 hold): an ancestor measures a VirtualList through its rows, each visible row laid out at 3 widths it is never drawn at → step 1 (b) |
-| 2. SkiaSharp: painting | 17 | no | none (96d00ab3: every app's palette draws 14 bounded layers an open, 0 unbounded; 89732bec: 2 misses in 20 History keys, 0.02 KB a frame; main's 8 change no paint code). Real window (1 hold, 6 launches): the video player's control bar fades through a window-sized layer Skia keeps (Reel +12 / +32 MB DXGI local) → step 6, question 69 |
-| 3. GL and Vulkan | 17 | no | none (the dialog fade's layer is the panel's size in every app, GL and Vulkan; 5766a137: one swapchain rebuild a toggle; 23b552d8 has no caller). Real windows (4 holds, 28 launches): the same player-bar layer with real mpv (+12 MB) → step 6; Vulkan's 3 swapchain images (~19.5 B a pixel against GL's 13) → step 10; 5da967d2's swap-interval lever changes nothing (Examined) |
-| 4. .NET runtime | 17 | no | 80e94eeb: Changes-mode kept texts are unreachable after any working-tree event (the key carries the data generation) → step 2 (a); main's columns row measures nothing (as expert 1). Element sizes unchanged; no leaks in open/close cycles of palettes, viewers, views and repos. Real window (1 hold): TokenizeDiff walks the stretches both versions share twice (−45 % lines with a skip) → step 3 |
-| 5. Text pipeline | 17 | no | none (40cadb57: 0 of 5,038,170 layouts differ; every text counter equals round 16's). Junction's wrapped labels laid out at 4 widths a frame thrash the one-range wrap memo (text-wrap-ranges-per-width, Waiting until step 1 (b), the root-cause fix, is measured). Real window (1 hold): equal to headless AOT |
-| 6. Reactivity and reconcile | 17 | no | none (ec57c4ee, 5766a137, 49b0da84, 80e94eeb, 791d1a44 read and counted; d3e40ecb's generator DLL byte-identical). Colours landing remake every row on every first file visit, not only the first Commit open → step 4, question 70; every view switch builds the whole toolbar → step 5. Real window (1 hold): equal to headless within 0.5 % |
-| 7. Accessibility bridges | 17 | no | none (the gate closed equals `HULTUI_A11Y=0`, 0 B a frame; a first ask builds the visible tree only, 46–58 KB; 41ecec65, 38ec9773, b8a3dcf5, 266d6aee nothing O(n)). Correctness: a Linux reader that starts after the app hears no focus moves → step 7. Real window (2 holds, 13 launches): with a client 80 provider calls a key on the UI thread; two Waiting items closed |
-| 8. App workloads | 17 | no | 80e94eeb bisected: +48 MB working set after a big-file walk, +38 MB after a full GC (committed 34.5 → 72.8 MB) → step 2 (b); main's 8: no real-app regression. Round 16 helped: Junction start −18 %, a ref move −57 %, Commit → History −54 %, a wrapped drag −87 %, the first palette open DXGI +18 → +8 MB, Vesper's reader open −28 %. Real windows (4 holds, 21 launches); Jellyfin needs a user name (question 71) |
+| 1. Layout | 18 | no | none (dd3ad712: every list is sized from outside; e790d321: no layout objection; 0f9c8477's ring and Tab stop only paint). Real window (1 hold, 2 launches): selectable labels' wiring and the VirtualList's children set → step 4 (Junction Commit −11.6 %, Vesper reader −15.5 % a wheel notch); found on the way, a text field's right-click menu acts on a detached copy after a rebuild → step 4 (a) |
+| 2. SkiaSharp: painting | 18 | no | none (0a7bb324 saves CPU only: Skia drops alpha-0 layers itself; c23edfb9's bounds right). Real window (3 holds, 9 launches): Vesper's Multi-rename fades three NumericUpDowns through the card's layer (+9 MB GPU) → step 11 (a); Junction's drag ghost is a window-sized layer (+18 MB) → step 11 (b), question 73 |
+| 3. GL and Vulkan | 18 | no | none (c23edfb9 and 0a7bb324 flat over a 50 s session with mpv; b1423e6e costs one late frame at most). Real windows (4 holds, 17 launches): two swapchain images −8…−180 MB DXGI local → step 12, question 74; a timer-step resize rebuilds Vulkan's swapchain every step, a modal-loop drag 1–2 times (vk-drag-steps-dropped closed) |
+| 4. .NET runtime | 18 | no | none (a787c194 clean on AOT; 3ea96588 keeps ~2 KB; Aperture's history bounded at 100 visits; element sizes unchanged, `MediaItem` +72 B); b1423e6e never collects after a big walk that finished → step 10. Real window (1 hold, 2 launches) |
+| 5. Text pipeline | 18 | no | e790d321: a size ask answered from `_cache` leaves the wrap range stale after a return to the opening width (Vesper zh drag +19 % characters itemized) → step 2; 781a857f proves ~125 HarfBuzz calls a mark on first frames (Junction first frame +13 % UI bytes, Meridian's open −4.6 %; deferring it is under the bar on AOT); 78a69ee5 a large win (Arabic reader open 39,963 → 3,871 calls). Right-to-left text has no wrap ranges → step 13. Real window (1 hold, 4 launches) |
+| 6. Reactivity and reconcile | 18 | no | 0f9c8477: Back to a scrolled library grid lands at the top, against its own promise → step 3; Aperture's parts build on every load (step 7), each poster landing makes the cards again (step 8); keeping the page Back returns to → question 75. Real window (1 hold, 4 launches) |
+| 7. Accessibility bridges | 18 | no | none on 13fee514; 0f9c8477: Escape to Home leaves the focus on nothing and Play does not name the film → question 76; round 17's 82.8 % "other" share was a frame-log trap (each row read the previous frame's total). With a real client each `UiaDisconnectProvider` is 0.56–0.73 ms on the UI thread → step 5. Real window (2 holds, 7 launches) |
+| 8. App workloads | 18 | no | round 17 helped: Junction first file visits −22 %, view switches −4…−40 %, bigrepo working set at rest 202.4 → 134.9 MB, the player bar's first fade +12 → +2 MB; 45cbde7b: Junction start +7.7 % once a session, History Down +5 % (low). Aperture's picture cache keeps ~30 MB a page opened → step 6; a shelf turn builds all of Home → step 9. Real windows (4 holds, 30 launches); round 17's scratch publishes lost their DLLs |
 
 ## Queued candidates
 
-Rounds 1–16's build orders all landed but round 6's step 8, round 10's step 14, round 11's step 1 (c), round 14's
+Rounds 1–17's build orders all landed but round 6's step 8, round 10's step 14, round 11's step 1 (c), round 14's
 step 8 and round 15's step 8 (a), measured and declined, round 11's steps 13 and 14, round 13's step 5 (b),
-round 15's step 1 and round 16's step 10, measured with nothing to change, and round 13's step 6 (c), not attempted
-(back to Waiting) (rounds 5–16 are in [the archive](17-performance-team-ledger-archive.md#round-16-build-order), with each survey's
-closed-from-Waiting note). Round 17's build order comes from its survey.
+round 15's step 1 and round 16's step 10, measured with nothing to change, round 13's step 6 (c), not attempted
+(back to Waiting), and round 17's steps 9 and 10, not taken, and step 11, stopped for question 72b (all three back
+to Waiting) (rounds 5–17 are in [the archive](17-performance-team-ledger-archive.md#round-17-build-order), with each survey's
+closed-from-Waiting note). Round 18's build order follows, from its survey.
 A build step may bundle one expert's related small candidates as separate commits. Items marked **(user)** wait for a
 decision in Needs the user; the rest of their step goes ahead.
 
-### Round 17 build order
+### Round 18 build order
 
-Ranked by expected effect in the real apps over cost (the brief's "Real apps first"); the harness fix first (every
-step-ab needs it), then the review objection to 80e94eeb. Each step names the report lines its brief quotes (`r17-k` =
-`17-reports/r17-k-<area>.md`) and measures its real-app case in a guarded real window (the lock
-`Global\HultUI-r17-desktop`, the harnesses in session 35903ed7's scratchpad `r17-<area>\`) as well as by step-ab. Resize
-steps come from a Win32 timer callback on the UI thread (`dragrelT`).
+Ranked by expected effect in the real apps over cost (the brief's "Real apps first"); the decided item first, then the
+two review objections. Each step names the report lines its brief quotes (`r18-k` = `17-reports/r18-k-<area>.md`) and
+measures its real-app case in a guarded real window (the lock `Global\HultUI-r18-desktop`, the harnesses in session
+00f54f03's scratchpad `r18-<area>\`) as well as by step-ab. Resize steps that stand for a user's drag are framed by
+`WM_ENTERSIZEMOVE`/`WM_EXITSIZEMOVE` (r18-3's `dragrelM`); a bare timer step rebuilds a Vulkan swapchain every step.
 
-1. **perfsuite-columns-walk-focus + layout-virtuallist-measure-through-rows** (1; r17-1 REVIEW and Candidate 1, r17-4
-   REVIEW, r17-5's lead) — separate commits. (a) First, a harness fix: `ColumnsWalk` (Scenarios.Virtual.cs:127, the
-   class at :927) never focuses its list, so `virtual/columns cursor walk 100k item rows` prints "25/25 steps rendered
-   nothing", and since b8a3dcf5 every suite run that includes it exits 1 (Program.cs:120), which `step-ab.ps1` (:212)
-   refuses: `list.Focus()` after mount (focused: 26.8 cells, 262 KB a step). Check the row renders and a full suite run
-   exits 0; (a) is the base for (b)'s step-ab. (b) An ancestor measuring a VirtualList measures it as a leaf, not
-   through its realized rows (`LayoutEngine.MeasureSize` :619, an internal virtual on ScrollViewElement): today each
-   visible row is laid out at up to three widths it is never drawn at (`RemeasureFlexedCrossSizes` :760 under 8 nested
-   `MeasureFlexItems` levels; Junction's code labels at 642 drawn, then 1152, 908, 886). Headless 6 px steps, KB a
-   step: Commit unwrapped 66.4–82.9 → 28.2–31.4, Changes unwrapped 70.1–74.8 → 29.5, Commit wrapped 94.0/97.5 →
-   62.4/65.7, Changes wrapped 165.5/167.0 → 136.7/136.3, expert 5's a359e426 split 71.5–80.2 → 24.0 (re-breaks 3,905 →
-   1,396 per 40 steps); real window (AOT, 150 %) Commit unwrapped 70.5/71.9 → 37.5/34.3, Changes 74.8/76.3 → 36.3/36.1.
-   Layout boxes and pixels equal in 30 of 30 cases; four suites pass with it on. Behaviour: a VirtualList in a container
-   sized from its content loses the width its realized rows gave it (audit: CommandPalette, TableView, InspectorView and
-   16 app sites). Prototype `r17-layout\probe-r17.patch`. Run the full suites, the goldens, Meridian and Aperture.
-   Afterwards re-count Waiting text-wrap-ranges-per-width's misses and say what is left for it; layout-virtuallist-
-   spacer-stale closes if (b) removes the spacer's last reader outside the list. Small; no API, no pixels.
-2. **The 80e94eeb objection: apps-junction-changes-recolour-same-texts + dotnet-junction-kept-texts-working-set** (4
-   with 5; r17-4 REVIEW and Candidate 2, r17-8 REVIEW and Candidate 1) — separate commits. (a) Junction keys a
-   working-tree diff's colours by the data generation (JunctionApp.Highlight.cs:285), which every working-tree event
-   moves (JunctionApp.cs:887): a save of any file, or a new untracked file, re-reads and re-colours the diff on screen
-   from line 1 though its texts did not change, and its colours blink off (bigrepo: 323.6 MB and 13,623 lines,
-   uncoloured from 484 to 3,224 ms; Window.cs 27 MB, TextPipeline.cs 6.4 MB), and every kept text becomes unreachable.
-   Keep a 64-bit hash of each text with the Working/Staged highlights (repo|mode|path); when the new generation's texts
-   hash the same, land the old colours under the new key and carry the kept texts (expected −98…−99 % of the event's
-   colour bytes, no uncoloured frames). (b) After a big-file walk Junction holds +48 MB working set since 80e94eeb
-   (ws/private 154.1/163.4 → 202.6/212.2 MB); after a forced compacting full GC heap 12.7 → 23.6, committed 34.5 → 72.8,
-   ws 144.9 → 183.1 MB, gen-2s over the scene 9 → 3: the kept LOH strings move when gen-2 runs and leave ~27 MB
-   committed free. Measure r17-8's options (UTF-8 or pooled texts, a smaller bound, one aggressive collection when the
-   walk goes idle, `System.GC.ConserveMemory`) and r17-4's idle expiry against f76cb440 alone, in a real window with
-   `gcmem`/`gcfull` (`r17-apps\aotx-*`); keep the one that brings ws within ~10 MB of f76cb440's and keeps the
-   revisits' gen-2 win. If none does, stop and bring the trade to the user with the numbers (not needed:
-   step 2 landed an aggressive collection at rest). Expert 8's suite proposal (h) as the guard if it can be built without Junction (an AsyncLoader per selection
-   of ~30 MB cancelled at 400 ms; committed and ws after a full GC as well as all-thread bytes and gen counts).
-   Small–medium; app + Syntax; no API.
-3. **syntax-diff-skip-shared-stretches** (4; r17-4 Candidate 1) — `TokenizeDiff`'s old-version walk takes a line's end
-   state and spans from the new version's walk when the line has the same text and an equal start state (stage 1 keeps
-   each new line's end state, 8 B a line, and a reuse flag; stage 2 tries the expected line, then a hash index of line
-   texts, at most 16 tries). Prototype `r17-dotnet\skip\skip-prototype.diff` (CRLF; `git apply --ignore-whitespace`):
-   bit-for-bit spans on 9 real pairs, also cancelled every 150 ms and resumed; lines walked bigrepo 13,626 → 7,453
-   (285.1 → 156.9 MB), Window.cs @41ecec65 3,156 → 1,668 (14.9 → 8.0 MB), VirtualListElement.cs @b8a3dcf5 3,654 →
-   2,064, the ledger archive 7,681 → 4,240; single-hunk diffs gain nothing. Junction headless, a stop on an unvisited
-   big file 295.0 → 172.7–175.0 MB all threads, GCs 18/0/0 → 10/0/0; real window Commit open 229.0/258.5 → 169.0 MB. Add
-   the 9 B a line kept to Junction's `Bytes`. After step 2. Medium-small; Syntax; no API, no pixels.
-4. **reactivity-junction-colours-before-rows, route (b)** (6 with 5; r17-6 Candidate 1, r17-5 and r17-2 on it; Waiting
-   junction-review-focus-colours) — when a file's colours land after its rows' first frame, the row shape changes with
-   `hl` and `InvalidateRows` makes every row on screen again (JunctionApp.Diff.cs:629–639): a first visit 744.1–822.5
-   KB, 2 builds, 2 frames, 68 rows, 514 measures, against a revisit's 365.3–378.4 KB (real window 744.4–817.4 against
-   362.5–375.6; the first Commit open 1,202.2–1,221.2 KB). Recolour the realized code labels in place
-   (`TextElement.Spans` value-compares and marks only paint for colour-only spans, TextElement.cs:88–103: 0 text
-   layouts, r17-5) and skip `InvalidateRows` when the row shape differs only in its highlight; a floor probe that
-   skipped the invalidation gave a first visit 474.0–545.6 KB (−36…−40 %). Find out why an invalidated row costs ~7.8 KB
-   at paint even when patched in place (keyed rows and no spans: render 263.6–265.4 KB; r17-2: those bytes are rows
-   realized in `ScrollViewElement.UpdateContentSize` inside the render pass), its own commit if it pays. Keep a focused
-   review control across a landing (junction-review-focus-colours). Probe `r17-reactivity\probe17.patch`
-   (`PROBE_KEYROWS`, `PROBE_NOSPANS`, `PROBE_NOINVAL`), `ProbeR17Tests.cs`. Route (a), holding the first frame until
-   short colours land, was question 70 (the user: the recommendation, (b) now). After step 3 (it moves when colours land). Small–medium; app; no API;
-   the same settled pixels.
-5. **reactivity-junction-view-tabs-part** (6; r17-6 Candidate 2; with r17-8's reactivity-vesper-same-folder-down lead) —
-   every view switch builds the whole toolbar part (it reads `View`: 52.6–53.1 KB, the tabs 33.8–34.2, the git buttons
-   15.9): the seven view tabs in a part of their own (prototype `PROBE_TABSPLIT`, `patch_tabs.py`): headless History
-   136.2 → 117.8 KB (−13.5 %), Tags 98.0 → 79.6 (−18.8 %), Overview −12.1 %, Branches −11.5 %, Changes −9.1 %, Commit
-   −4.0 %; real window History 134.5–135.2 → 116.3–117.0, Tags 96.9 → 78.7. Try the per-tab form too (tabs read `View`
-   untracked and `SetView` bumps the two tabs' revisions: ~24 KB more, History about −31 %, Tags −43 %). Extend
-   ChromePartTests; check pixels by frame hashes. In the same step, measure first: with both of Vesper's panes on one
-   folder a Down costs 32.9 KB (18 KB in its input) against 2.8 KB (r17-8, not compared with base); a commit only if it
-   is ours and clears the churn bar. Small; app; no API.
-6. **painting-player-bar-fade-layer** (2 with 3; r17-2 Candidate, r17-3 Candidate 1; question 69: (b), the user 2026-11-19) —
-   the video player's control bar fades by its `Opacity` (VideoPlayer.cs:275, :833–870) and holds two Sliders
-   (`PaintBounds` null, SliderElement.cs:216) and three Canvas glyphs, so every fade frame draws through a window-sized
-   layer that Skia keeps for the window's life: real window Reel (NativeAOT, `ProceduralBackend`) first fade DXGI local
-   +12.0 MB, private +13.5 (Vulkan 1920×1140), +32.0 / +22.5 (3778×2044), GL +12.0 / +23.2; with real mpv playing
-   (r17-3) Skia's cache 4.27 → 16.27 MB at the first auto-hide. (a) Pixel-identical: skip a subtree whose
-   `RenderOpacity` is 0 in `ElementRenderer` (the hidden bar is drawn on every video frame at alpha 0; elements rendered
-   a hidden frame 24 → 8, 220 of 220 frames byte-identical). (b) Bounds for the Slider (its content box grown by
-   ThumbRadius + 4) and the glyphs (a private `CanvasElement` subclass reporting its border box grown by 2): layer area
-   2.19 → 0.152 Mpx; first fade DXGI local +12.0 → +0.0 (Vulkan), +32.0 → +2.0 (3778×2044), +12.0 → +2.0 (GL); scene end
-   local −15…−20 %, private −14…−16 %; 4K fullscreen ~48 MB by arithmetic (~96 on F16). Pixels: 50 of 111 fade frames
-   differ in 1–2 pixels of the full-screen icon by 1/255 (question 69). Optional in the same step: give Checkbox,
-   RadioButton, ToggleSwitch, Dropdown, NumericUpDown, ProgressBar, Spinner, the pickers, Calendar and Expander's part
-   their known reach (closes 96d00ab3's "unknown paint bounds" note; no app fades one today). Probe
-   `r17-painting\probe-r17.patch` with `LayerProbe.cs` (`PAINT_SLIDER_BOUNDS`, `PAINT_SKIP0`), hosts `headless\`,
-   `rw\`; r17-3's `rw\` and `fx\bands.y4m` for real mpv. A gated guard like `DialogFadeGpuMemoryTests` for the bar.
-   Small; no API.
-7. **a11y-atspi-adopt-focus-on-attach** (7; r17-7 Candidate; correctness) — on a tree built from nothing (a Linux reader
-   attached, or org.a11y.Status turned on after the app had the focus) `LinuxAccessibilityBridge.ApplyChanges` clears
-   `_holderId` (LinuxAccessibilityBridge.cs:340–344) and nothing about the focus is told until it moves; the UIA bridge
-   adopts it (WindowsAccessibilityBridge.cs:693–702). AtSpiRig, 1,000 items, the focus landed before the attach: a
-   cursor walk sends 0 signals a move (2 when it landed after), a selection Down 2 (4); served lists 0. Adopt the
-   focused node as the holder; a Linux bridge test with the focus set before the bridge. Small; no API, no pixels;
-   step-ab with `-Filter a11y/` is enough (no other row reaches the code).
-8. **text-heights-pass-height-only** (5 with 1; r17-1 Candidate 2, r17-5 EXAMINED; measure first, after step 1) —
-   Junction's heights pass asks a full wrapped layout of every row to read one height. The two surveys measured
-   different scenes: on 200 rows of real prose (mean 473 characters) the pass is 43–44 KB a Commit step (47 % of its
-   bytes, 66 % after step 1) and 105–112 KB a Changes step, with only 4–6 % of the heights moving (r17-1); on the ledger
-   commit a359e426 8.1 KB a pass (30 %), split 13.7 KB (16 %), C# 1.1 KB (r17-5). Build only the part with no public
-   API, an internal height-only ask that allocates nothing, if it clears the churn bar on a real document after step 1;
-   a "same line count" width range through `TextMeasure` is public API (not asked). Small–medium; text; no API.
-9. **a11y-client-frame-share** (7; r17-8 lead; measure first) — with a UIA client asking for the root, "other" (time
-   outside style, layout, render, flush and present) is 26.2 % of Junction's frame time against 3.7 % with none
-   (Commit → History 82.8 % against 7.7 %, Commit open 39.9 against 0.2, History Downs 19.3 against 4.4), bytes only
-   +2.8–6 %. Count what runs in those frames with a client asking (r17-7: 80 provider calls a key on the UI thread) and
-   say what is ours and removable; a fix only if it clears the time bar in timed runs. Medium to measure.
-10. **vk-swapchain-two-images** (3; r17-3 Candidate 2; measure first) — a Vulkan window takes 3 swapchain images
-   (`minImageCount + 1`, SdlVulkanHost.cs:835): ~19.5 B of DXGI local a pixel against GL's ~13; Reel and Aperture in 4K
-   fullscreen hold 3 × 31.6 MB, and two images would save ~32 MB (~8 % of local while playing). Count frames and
-   acquire waits in Reel playback and in a timer-step drag with 2 images first, on a maximized window (never fullscreen
-   on the user's monitors), mindful of HDR.md:484's image-count hazard; build only if pacing holds. Small code, medium
-   risk.
-11. **vesper-file-not-its-own-partner** (6; question 72: (b), the user 2026-11-19; step 5's 6751a51a) — with both panes on
-   one folder and the other pane's cursor on ".." or a folder, F3 pairs the cursor's file with the same file in the
-   other pane, rings it, and moves the ring with every key, so each key builds the window (29.5 KB a key against 2.2 KB;
-   expert 8's real window 32.9 KB). Never pair a file with itself: no ring there, F3 does what it does with no partner.
-   First check that F3 with no partner opens the file as usual (if it does not, stop and report); show the ring before
-   and after in headless frames. Small; app; no API.
-   **Stopped before any change** (r17b11, 2026-11-20): F3 is "Compare files (diff)" (the viewer is Shift+F3); with no
-   partner `DiffPartner` (CommanderApp.Diff.cs:254) falls back to `<otherDir>\<name>` and the diff opens in its Missing
-   state ("Right file missing", a "Copy left → right" button; `DiffViewTests.WithNothingToPairAgainstTheMissing…`). In
-   the self-pair layout that fallback is the cursor's own file, so F3 shows "Files are identical"; the no-partner path
-   would call an existing file "not found" and offer to copy it into its own folder. → question 72b.
-
-Steps 9 and 10 (measure-first leads) were not taken in round 17: the weekly usage budget was at 81 % after step 8,
-kept for step 11, the full suite and the release. They stay queued for round 18's survey to re-rank.
+1. **vesper-file-not-its-own-partner** (6; question 72b: (2), decided) — with both panes on one folder and the other
+   cursor on ".." or a folder, F3 ("Compare files") pairs the cursor's file with itself ("Files are identical"), rings
+   it and moves the ring with every key, so each key builds the window (headless 29.5 KB a key against 2.2; real window
+   50.8 KB, r18-8). (2): F3 does nothing there, as on a folder, and nothing is ringed; `PartnerStays`
+   (CommanderApp.cs:1517) and `DiffTargetPath` (the ring, Pane.cs:807/982) follow the same rule. Round 17's stopped
+   brief is `brief-r17b11.md` with `r17b11-*` in session 35903ed7's scratchpad. Small; app; no API.
+2. **text-wrapped-size-cache-hit-keeps-range** (5; r18-5 REVIEW and Candidate 1; the review objection to e790d321) — a
+   size ask answered from the width-keyed `_cache` leaves the row's wrap range at the last drag's far end, so after the
+   window returns to a width the view opened at, the next drag breaks every row again (Vesper zh drag: characters
+   itemized 364,749 → 434,070, +19 %; prefix tables +26 %). Re-put the layout's range on a size-path hit only (on
+   Layout's hits too it ping-pongs: the split view's first sweep 33.0 → 81.8 KB). Prototype `TEXT_SZRESTORE=2`
+   (`r18-text\r18-probe.patch`), the second sweep: a359e426 split AOT 23.6 → 18.5 KB a step (−22 %; real window 23.6 →
+   18.6), unified JIT 19.4 → 16.6, 574f43a7 split 45.6 → 22.8; re-breaks back to round 17's counts. Run round 15's
+   real-document equivalence. Small; no API, no pixels.
+3. **reactivity-aperture-back-lands-where-it-was** (6; r18-6 REVIEW and Candidate 1; the review objection to 0f9c8477) —
+   Back, Forward, Escape or a rail reopen to a scrolled library grid lands at the top (`LetGoOfGrid` empties
+   `_gridList`, so `RevealGridCursor` has no list), though 0f9c8477 and History.cs promise "back where you were
+   scrolled"; the first key after costs 279.1 + 75.6 KB, 2 builds, 361 elements. Keep the grid's scroll offset in the
+   `Visit` (mouse users too, as documented) and fall back to the cursor's row; make, ring and focus the cursor's card in
+   the Back's own frame (PROBE_REVEAL: lands at 2674 with card-m070 focused, the next keys 0.4 KB; PROBE_SCROLLKEEP: the
+   mouse case at 2400). Question 76 (a), if answered so, rides along as its own commit. Add a 300-film case to
+   ApertureAppHostTests.History. Probe `r18-reactivity\probe18.patch`, `ProbeR18Tests.cs`. Small; app; no API.
+4. **elements-context-menu-after-patch + elements-selectable-label-static-wiring + layout-list-children-without-set**
+   (1, expert 4 reviews the AOT bytes; r18-1 Candidates 1–3, r18-4's re-rank of elements-selectable-label-lazy-wiring) —
+   separate commits. (a) Correctness: `Element.PatchFrom` copies `ContextMenuItems` (Element.cs:1797), and for
+   TextInput, TextArea, RichTextEditor and selectable labels that provider is bound to the build's fresh copy, so after
+   one rebuild the right-click menu acts on a detached element (Cut, Copy and Paste off; Select All selects the copy).
+   Keep an element-owned provider across a patch (a flag set by the wiring), keeping the public getter. (b)
+   `WireSelection` (TextElement.cs:280): static handlers that read `e.CurrentTarget`, in one exact 6-entry array: 880 →
+   304 B a label (1,552 → 976). (c) `ReplaceChildren` builds a `HashSet` when old × new > 64 (`SetOf`, Element.cs:1523),
+   and `SyncVisibleItems` makes a new array at each window move (VirtualListElement.cs:1816): marks or a pooled set, and
+   a kept array. Real window (NativeAOT, (b) and (c) together, UI KB a wheel notch): Junction Commit unified 16.7 → 14.7
+   (−11.6 %), Vesper reader 15.3 → 12.9 (−15.5 %), compare −10.8 %, History −5.3 %; headless (b) alone −4…−6 % (r18-4: a
+   Junction Commit Down −4.3 %), (c) alone −2.8…−5.4 %. Each commit its own numbers; (b) and (c) together clear the
+   churn bar. Probe `r18-layout\probe-r18.patch`. Small; no API (a pooled set needs no new Element field).
+5. **a11y-uia-disconnect-off-ui-thread** (7; r18-7 Candidate; closes Waiting a11y-client-frame-share) — with a real UIA
+   client each `UiaDisconnectProvider` costs 0.56–0.73 ms on the UI thread (the first of a session 3.5–4.0 ms; headless
+   never shows it), whatever the client holds. Run the disconnects (and `Detach`/`Release`) for the providers an apply
+   lets go on a worker after the frame, drained on `Dispose` before `UiaReturnRawElementProvider(hwnd, 0, 0, 0)`; the
+   tests' `ProviderDisconnected` needs a flush. Prototype `ZZ_DISC_ASYNC=1` (`r18-a11y\src18\`): Junction's palette
+   close (13–14 disconnects) focus-only client 8.40 → 1.33 ms wall, reader-like 11.12 → 1.16; the first palette Down
+   3.48 → 0.12 ms; Commit open −7…−16 %; the client logs show the same events. Aperture's Enter disconnects 19 (~10–14
+   ms, extrapolated). The time bar: timed runs with a client asking (r18-7's FlaUI client, `--mode reader`) and step-ab
+   `-Filter a11y/`. r18-7's frame-log trap: measure around `RenderFrame` inside `Application`, or by `FrameLog`.
+   Small–medium; no API, no pixels.
+6. **apps-aperture-artwork-retained** (4 with 2; r18-8 Candidate 1, r18-2's PosterCache lead, Waiting
+   aperture-poster-as-hero's cost) — `PosterCache` is bounded by entries (400, PosterCache.cs:80), not bytes, and keeps
+   each picture decoded (`SKBitmap`) and as a GPU texture. Real Jellyfin, after 6 item pages: 47 entries, 65.1 MB
+   decoded (3 heroes at 2176×1224, 10.2 MB each; a 2000×3000 poster used as a hero, 22.9 MB), private 147 → 331 MB (313
+   after a full GC, heap 5.1 MB), working set 144 → 252, DXGI local 81 → 140 MB; O(pages visited). A byte budget for big
+   pictures (keep the last 2–3 heroes), and expert 2's answer whether the CPU bitmap can go once uploaded. Measure on
+   the real server as the named user (r18-8's `aotp` with `apcache`); only this step's agent signs in. Small–medium;
+   app; no API; an evicted hero loads again.
+7. **reactivity-aperture-parts-build-on-change** (6; r18-6 Candidate 2) — Aperture's title bar and rail build on every
+   `Rerender`, `MarkDirty` and build not marked view-only (17.6 + 31.3 = 49 KB each; Enter 2 + 2 part builds, a library
+   first open 4 + 4). Build them only when what they read changes (PROBE_PARTSHAPE: Enter 167.4 → 100.7 KB, −40 %;
+   library first open 784.6 → 620.6, −21 %; Forward 78.6 → 61.1, −22 %; part builds Enter 4 → 1), then per-button rail
+   parts lit through a `Computed` as 3ea96588 (Enter about −56 %, Forward about −58 %, not prototyped). The prototype
+   failed 13 of 120 PartTests and host tests (the oracle's forced full build goes through `MarkDirty`; 2 showed a stale
+   rail after sign-out): keep the oracle green. Small–medium; app; no API.
+8. **reactivity-aperture-poster-lands-in-place** (6; r18-6 Candidate 3 with r18-8's
+   apps-aperture-artwork-landing-rebuilds-view; measure first) — each picture landing calls `RerenderView()`
+   (ApertureApp.Cards.cs:339–344) and makes the cards again: a library first open with posters 1,263.0 KB, 12 builds,
+   1,039 elements, against 787.6 KB and 4 builds with 404s (real window 1,237.6–1,638.0 KB, 14–21 builds); a failed
+   fetch still costs a 32 KB build; an item page open has 6–8 whole-page builds of 92–107 KB (r18-8). Put a landed
+   picture into the live cards that show it (as `RecolourKeptRows` does for colours): expected −45 % a first open,
+   −45…−50 % a new row. Count data landings against picture landings first (r18-8). `ImageElement.Source` marks layout
+   dirty: check the re-measure. Suite proposal (k) as its guard if it can be built. After step 7. Medium; app; no API;
+   pixels equal once landed.
+9. **apps-aperture-home-shelf-turn-builds-home** (6; r18-8 Candidate 3) — a Down or Up onto a shelf showing another page
+   turns that shelf and builds all of Home (ApertureApp.Cursor.cs:243–245, Home.cs:140): real window 128–133 KB and
+   2.25–3 frames a Down after walking Right past the first page (a Right within a page 0.7 KB). Each shelf's page as its
+   own part: about −75 % a Down. Suite proposal (j) as its guard. After step 7. Small–medium; app; no API.
+10. **dotnet-junction-collect-after-big-walk** (4; r18-4 Candidate) — b1423e6e's one aggressive collection at rest runs
+    only after a walk whose texts were kept (`HighlightLanded`, JunctionApp.Highlight.cs:568, through
+    `KeepHighlightTexts`), so after a big walk that finished nothing collects: real window bigrepo, after the Commit
+    open committed 33.5 MB, working set 134.5; after 3 first visits committed 41.0, working set 144.7, private 155; a
+    collection brings the working set to ~120 (−11…−17 %), committed 13.6. Also set `_collectWhenIdle` when a landed
+    walk was big (≥ ~2,000 lines or ≥ ~32 MB allocated for it); jrepo's walks keep 0 collections. r18-3: the collection
+    costs at most one late frame (a 6–8 ms pause). Extend `HighlightResumeTests`' idle-collection test. Small; app; no
+    API.
+11. **painting-numericupdown-paint-bounds** (2; r18-2 Candidate 2) + **painting-drag-ghost-layer-bounds** ((user),
+    question 73; r18-2 Candidate 1) — separate commits. (a) `NumericUpDownElement.PaintBounds` returns null
+    (NumericUpDownElement.cs:342); Vesper's Multi-rename counter row (three of them at `Opacity(0.45f)` by default,
+    CommanderApp.Rename.cs:140) draws a layer of the card's clip every frame (1.198 → 0.041 Mpx): real window GL, first
+    open Skia +9.13 → +0.50 MB, DXGI local +9.1 → +0.5 (at the end 48.2 → 39.6, −18 %), first-open private +26.4/+27.0 →
+    +1.7/+2.4; pixels byte-identical. The border box ∪ the centred value line, grown by 1. (b) The in-window drag ghost
+    (`Window.cs:4083`, `:4094`) is an unbounded layer: Junction's repository reorder, real window GL first drag Skia
+    +18.25 → +0.50 MB, DXGI local at the end 64.9 → 47.1 (−27 %); 23 of 29 drag frames differ in 2–5 pixels by up to
+    6/255 — only on question 73's (b). Probe `r18-painting\probe-r18.patch`. Small; no API.
+12. **vk-swapchain-two-images** ((user), question 74; 3; r18-3 Candidate) — on Windows, `minImageCount` images (2 here)
+    instead of `minImageCount + 1` (SdlVulkanHost.cs:835): DXGI local Reel SDR playing at 1920×1140 −8.4 MB (−3.1 %),
+    maximized-sized −29.9 (−7.8 %); Aperture −16.8…−18.4 %; HDR (F16) −33.8 (−8.3 %) and −179.9 MB (−21.3 %, one pair);
+    playback and fades 0 acquire waits over 1 ms; modal-loop drags while a video plays wait up to one refresh in ~40 %
+    of frames (3 images: 2 of 57). Build as question 74 says, with `VulkanProbeTests` at 2 images under a validation
+    layer proven loaded; keep `+1` off Windows. vk-instance-extensions-once may ride along as its own commit. Small
+    code, medium risk.
+13. **text-bidi-wrap-ranges** (5; r18-5 Candidate 2) — right-to-left paragraphs have no wrap range, so a drag step lays
+    out every one of them again: Vesper's reader on the real README.ar.md, 477 BiDi layouts a step, 98.4–99.6 % with the
+    same line starts as before, 90–92 % of the drag's UI bytes (ar 83.4 → ~9 KB a step at 1,440 and 120.7 → ~11 at 960,
+    an upper bound; he 82–86 %); real window 97.3 % the same breaks. `ComputeWrappedBidi` tracks the widths its break
+    decisions hold for; an equivalence run on realar, realhe and emoji as round 15's. Rare for this user; the scaling
+    bar (O(paragraphs) a step). Medium; no API, no pixels.
+14. **junction-diff-row-cells-one-label** (6; Waiting, r17b4's lead, r18-6's re-rank; measure first) — a diff row is
+    8–10 elements; drawing its number and sign cells as one label each drops 3 elements, ~1.8 KB a made row: by
+    arithmetic a first visit −11…−12 %, a revisit −16 %, a row scrolled in −19…−24 %. Measure first; the number columns'
+    pixels must stay equal. After step 4. Small; app.
 
 ### Waiting
 
@@ -232,6 +225,7 @@ Re-ranked by the next survey.
 - **live-reader check of menus** (user) — the six-step script in ACCESSIBILITY-PLAN.md (round 7 step 13) for Narrator,
   NVDA and Orca; a silent move would mean moving focus to the selected item (needs the user's approval).
   Round 16 (r16-7): settled for Narrator and NVDA by the screen-reader fix (`fixed4`: menu bar, context menu, a one-level submenu right in both); still unchecked: the dropdown step (A7), submenus deeper than one level (e28d72f6), light-dismiss (2603955a), Orca.
+  Round 18 (r18-7): nothing changed (no menu or Windows-bridge commit since round 17).
 - **junction-changes-leads** (6/7/8, reader behaviour, no perf number) — only the caret is told to a reader, not a
   multi-selection's other members; a reader's "select" on a folder row clicks it, which opens or closes the folder. (The
   perf parts were examined by round 8: below the bars.) Round 13: still so (round 12 touched no selection pattern).
@@ -244,6 +238,7 @@ Re-ranked by the next survey.
 - **dropdown-follow-control-on-resize** (1, correctness, low) — a Dropdown list or DatePicker calendar stays at its
   opening point when a resize moves its control; anchoring changes how a press on the control behaves. Not perf.
   Round 16 (r16-1): partly settled by 2603955a (a press on the custom frame's edge closes light-dismiss popups), but `FramePressedPending` is read only after the size loop, so the list still floats during an edge drag; keyboard snaps and app-made resizes keep it open.
+  Round 18 (r18-1): unchanged (no commit touches DropdownElement, DatePickerElement or `FramePressedPending`).
 - **junction-leads (remaining)** (tests) — `SelectConflict` (JunctionApp.Changes.cs:1477) and a conflict row's
   right-click have no test of their own (not perf; still so in round 13).
   Round 16 (r16-6): unchanged; tests, outside plan 17 (surveys stop re-ranking it).
@@ -252,38 +247,53 @@ Re-ranked by the next survey.
   apply-after-layout form like the vertical one). The scrollbar half was fixed by round 10 step 15 (`BriefScrolled`,
   CommanderApp.Views.cs:616–625; r13-6).
   Round 16 (r16-1): `OnLayoutChanged` (7c0a3b79) on Brief's grid now gives the sideways reveal the after-layout form it lacked; small, not perf.
+  Round 18 (r18-1): unchanged (CommanderApp.Views.cs untouched).
 - **findbar-countonscreen-foreach** (4, nit) — `CountOnScreen` loops `foreach` over `bar.Children` (FindBar.cs:212; 32 B
   on AOT, 0.4 % of an 8 KB Enter), and `RewriteCount` (:317–319) calls it once a switch with the bar open; fix when
   FindBar is next touched.
+  Round 18 (r18-4): still a nit; FindBar untouched.
 - **textarea-chunked-document** (5/4; the user chose option B on 2026-10-25) — parked: Meridian's 89k body typing is
   ~238–241 KB/key, most of it the TextArea's new string; the user's 256k-character condition is unmet (round 13: still).
+  Round 18 (r18-4, r18-5): parked; no TextArea change.
 - **a11y-served-items-followups** — a live Orca check only (no desktop Orca here; optional).
   Round 17 (r17-7): add step 7's late-attach check.
+  Round 18 (r18-7): unchanged.
 - **gl-threaded-optimization-profile** (3; the user's driver setting, information only) — the walk lands while the
   window rests; the setting would remove only the per-frame spin (round 9: mean 357 JIT / 344 AOT, max 456/578
   `SwitchToThread` a paced frame; round 10: mean 378/376, max 723/644).
+  Round 18 (r18-3): unchanged, not measured again.
 - **text-open-measures-every-line (full)** (5; user: not now, 2026-10-13). Round 13 (r13-5), stronger on real CJK text:
   a 1 px drag step re-breaks every wrapped row of the document (Japanese at 1440: 1,040 prefix tables, 119,899
   characters itemized and 84,495 fallback questions a frame; real window at 960 logical: 2,618 tables, 166,806
   characters) with ~40 rows on screen; step 3 removes the shaping and bytes, not this O(document) itemizing.
   Round 14 (r14-5): asked again as question 57 (zh at 1440 1,140 tables and 131k characters itemized a drag frame;
   the 154k-character file 2,178–5,288 tables and 9,900–13,550 HarfBuzz calls a frame; Arabic 1,846 BiDi probes a frame).
+  Round 18 (r18-5): unchanged (Vesper zh open 211,248 characters itemized, 3,059 tables); the right-to-left part is step
+  13.
 - **controls-menu-max-height-scroll** (1; not perf: no maximum height or scrolling). Round 17 (r17-1): unchanged.
   (layout-virtuallist-spacer-stale closed by dd3ad712: no parent's measure reads the spacer any more.)
+  Round 18 (r18-1): unchanged.
 - **aperture-poster-as-hero**, **aperture-tmdb-size-fallback**, **junction-narrow-gitlab-glyphs**,
   **meridian-pane-choice-not-persisted**, **meridian-min-width-wraps** (apps; not perf). Round 13 (r13-8):
   meridian-pane-choice-not-persisted reproduces (MeridianApp.cs:148, flipped at :340, never saved); the min-width wrap
   at 760×540 stands on Windows (46fccd88 keeps 448 / 1320); the others' code is unchanged.
+  Round 18 (r18-8): aperture-poster-as-hero now has a cost (a 2000×3000 poster as a hero is 22.9 MB decoded plus 22.9 MB
+  GPU) → step 6; aperture-tmdb-size-fallback's code unchanged, not exercised; junction-narrow-gitlab-glyphs unchanged;
+  both Meridian items still reproduce.
 - **syntax-shared-registry-rest** (5; parked) — Typst, Julia, PHP, Razor and HTML still use the shared registry (round
   11: `.typ` +42,419 KB kept); the user (question 42): no Typst files; parked.
+  Round 18 (r18-5): parked, unchanged.
 - **fedora-local-dotnet** (environment) — once Fedora ships the final `dotnet-sdk-11.0`, remove
   `/usr/local/share/dotnet` and both links, `/usr/local/bin/dotnet` and `/usr/local/sbin/dotnet` (`which` picks the sbin
   one). Round 13 (r13-4): Fedora 44's updates have only 11.0.100~rc.3; `wsl-test.sh` follows the dotnet on PATH.
   Round 14 (r14-4): `updates` and `updates-testing` still have only 11.0.100~rc.3; both links still in place.
   Round 17 (r17-4): on 2026-11-19 `updates-testing` has the final 11.0.100-1.fc44, `updates` still rc.3; the installed rpm is dotnet-sdk-10.0; both links still in place. The user could take it from updates-testing now.
+  Round 18 (r18-4): the same on 2026-11-22 (`updates` rc.3, `updates-testing` the final 11.0.100-1.fc44; the installed
+  rpm dotnet-sdk-10.0; both links in place).
 - **f16-held-drag-post-stall** (3; one survey stall, round 11 step 13's approved re-run clean) — cause unknown. Round 13
   (r13-3): the only F16 drag left is during HDR playback, where mpv posts every frame (the stall's precondition); a run
   needs an HDR clip playing on the 1440p at 200 Hz and a new approval from the user.
+  Round 18 (r18-3): not run; it is now the gate for two images on F16 (question 74 (c)).
 - **Suite scenarios** (8) — (a) an idle Vulkan window counting every thread's wakes: keep, low, only as a gated UiTests
   guard of round 12 step 5 (116 against 212 a second). (b) frames per key under a real loop and (c) an app-shaped shell
   resize: closed in round 13 (DiffFrameCountTests covers (b); (c) went with a11y-structural-walk-during-resize).
@@ -296,8 +306,13 @@ Re-ranked by the next survey.
   a11y off); (f) low.
   Round 16 (r16-8, r16-3, r16-4): (d) low; (e) medium, as step 3's guard; (f) low; new (g) a gated UiTests guard that a wrapped-row list resized from posted work draws 1 frame a step (with step 2), (h) an AsyncLoader per selection that allocates ~30 MB and is cancelled at 400 ms, all threads and gen counts on a real clock (with step 9), (i) a gated guard of DXGI local after the first `Dialog.Show` on a 2160×1350 GL window (with step 5).
   Round 17 (r17-8): (e), (g) and (i) closed (the closed note); (h) medium, as step 2's guard; (a), (d) and (f) low.
+  Round 18 (r18-8): (h) closed (`HighlightResumeTests`' idle-collection test is b1423e6e's guard); (a), (d) and (f) low
+  ((f): the sign-in page's DXGI local unchanged at 68.98 MB); new (j) an Aperture Home with 3 shelves of 30 cards,
+  walked Right past the first page, then Down (step 9's guard); (k) an Aperture item page with N pictures landing one a
+  frame, counting view builds a landing (step 8's guard).
 - **findbar-count-not-announced** (7, reader behaviour, not perf) — a find bar's new "n of m" reaches the bridge as a
   Name change on the count label; a reader speaks it only if it moves there (no `Announce`, no live regions).
+  Round 18 (r18-7): unchanged.
 - **text-cjk-row-start-suffix** (5, lead; r13-5) — after step 3 the largest HarfBuzz source: a row-start word read off
   the line's word (Japanese 300 of 1,051 calls at 1000 px, 216 of 453 a drag; Chinese 201 of 1,165, 77 of 403). Needs
   the slice's own script guess and safe cuts at both ends. Medium–large; up to ~20–30 % of a new width's calls.
@@ -305,17 +320,21 @@ Re-ranked by the next survey.
   short words (under 8 characters) cut at need are the largest share (461 of 951); giving 2–7 character words their cuts
   in the tables halves a new width's calls but costs opening +248 KB (zh) / +121 KB (ja): a trade.
   Round 16 (r16-5): lower; the wrap ranges answer 88–94 % of rows (Vesper zh drag 39 calls a step at 1,440, 75 at 960; a new width 825).
+  Round 18 (r18-5): low, unchanged (Vesper zh drag 39 / 75 HarfBuzz calls a step at 1,440 / 960).
 - **junction-summary-overtaken-at-start** (6, lead; r14-6 REVIEW) — AsyncLoader drops a superseded result, so a
   working-tree callback during the first full summary restarts it: with a log appended every 0.4–1 s the first summary
   lands at 0.8–1.3 s (1.3–2.1 s on 2 cores) after 2–4 dropped loads, its remote/for-each-ref/rev-parse/describe run 3–4
   times; on a slower machine it can be overtaken as long as callbacks keep coming (round 13's CI failure). Coalescing
   measured worse (Examined).
+  Round 18 (r18-6): unchanged (3490ba67 adds an index print to the shared status only).
 - **vesper-local-waiting-text** (6, wording, optional; round 14 step 6, 1b019826) — a slow local folder's waiting block
   reads "Connecting to C:" (the share/server text); it could read "Loading <folder>" for a local folder, which also
   changes what the Ctrl+Shift+N review state shows and the test that checks it. The user's call; not perf.
+  Round 18 (r18-6): unchanged.
 - **vk-instance-extensions-once** (3; fix when Vulkan Init is next touched) — `HasInstanceExtension`
   (SdlVulkanHost.cs:532) enumerates on every call (8 `vkEnumerateInstanceExtensionProperties` calls at Init): one shared
   list saves 7.1–7.4 ms of start-up, below the 10 ms bar.
+  Round 18 (r18-3): unchanged; may ride with step 12 as its own commit.
 - **a11y-item-renames-unfetched** (7; question 64, with question 50's live check; r15-7 Candidate 2) — with UIA, an
   item node that has no wrapper yet raises no Name change (today `RaisePropertyChanges` → `TryWrapper` →
   `TryMakeItemWrapper` makes a wrapper and a native object only to raise): a Vesper navigation between two 1,000-file
@@ -324,66 +343,111 @@ Re-ranked by the next survey.
   1,426.8 UI KB (the old apps-junction-ref-move-a11y). UIA only: AT-SPI publishes every item. The renaming walk stays.
   Round 16 (r16-7): low once step 3 lands (at most 200 renames an event on Windows: Vesper 150 ↔ 250 files 154 raises, 2,028 calls, 42–65 KB a navigation); Linux needs Orca (AT-SPI clients cache every item).
   Round 17 (r17-7): low; UIA renames are bounded at 200 (a 150-item replace makes 150 raises, ~1,950 calls with a client); AT-SPI eager lists up to 2,000 (1,000 name signals a replace) need Orca.
+  Round 18 (r18-7): low, unchanged.
 - **junction-colours-before-rows-route-a** (6; question 70's (a), not built) — after step 4 (b3bb93bd) a first file visit
   in Junction's Commit view still costs 2 builds and 2 frames, 492–570 KB against a revisit's 362–393 KB; holding the
   first frame until short colours land would make it a revisit (−25…−32 %, 1 frame) with the diff shown later by the
   tokenize's time. Re-ask only if a survey shows the difference matters to a user.
-- **elements-selectable-label-lazy-wiring** (1 or 4, lead; r17b4) — a selectable label costs 1,552 B against a plain
-  label's 672 B (six handlers and a menu delegate wired at creation); wiring them on first use would save ~11 % a diff
-  row (Junction's code labels, Vesper's viewer lines, Meridian's response). Framework; for the next survey.
-- **junction-diff-row-cells-one-label** (6, lead; r17b4) — a diff row is 8–10 elements; drawing its number and sign cells
-  as one label each would drop 3 elements, ~1.8 KB a made row. App; for the next survey.
-- **window-setroot-component-not-mounted** (6, lead; r17b6) — `Window.SetRoot(component.Mount())` never mounts the
-  component, so its `OnMount` never runs (step 6's probe hit it; a box around it works). A framework gap or a documented
-  rule; for the next survey.
-- **vesper-file-not-its-own-partner** (6; **(user)** question 72b; round 17 step 11 stopped) — with both panes on one
-  folder and the other cursor on ".." or a folder, F3 ("Compare files") pairs the cursor's file with itself ("Files are
-  identical"), rings it and moves the ring with every key, so each key builds the window (29.5 → 2.2 KB a key once
-  fixed). Built when the user picks a way in question 72b.
-- **text-wrap-ranges-per-width** (5; r17-5 Candidate; after step 1) — keep up to 4 wrap ranges a paragraph instead of 1,
-  so a label laid out at several widths a frame keeps one range per width: before step 1, Junction C# unified 72.0 →
-  46.0 KB a step (−36 %), split ledger 99.1 → 52.9 (−47 %), second drag 85.1 → 38.3; 0 of 4,857,450 drag layouts
-  differ; retained +2–3 %. Step 1 (b) removes the ancestor-width layouts that thrash the memo (element re-breaks 2,534 →
-  28 per 40 steps), so this may be unneeded: step 1 re-counts the misses.
-  Round 17 step 1 (dd3ad712) re-counted: C# 574f43a7 far misses 1,062 → 26, 42.2/39.0 KB a step (the memo alone reached
-  46.0); a359e426 split far misses 3,658 → 1,094, 49.1/34.9 KB (memo alone 52.9/38.3). Low: for the next survey, the
-  memo on top of step 1 on the split view only.
-- **vk-drag-steps-dropped** (3, information; r17-8) — in a real-window timer-step drag Aperture and Reel (Vulkan) took
-  only 11–19 of 31 queued steps in the drag window (present 54–88 % of those frames); the GL apps took all 31. For the
-  next survey: is a Vulkan resize step's present slower than the 16 ms pace, and does a user's own drag show it?
+  Round 18 (r18-6): no new number; not re-asked.
 - **junction-files-first-open** (6, lead; r17-8, r17-6) — Junction's Files view first open: 3,806 KB, 3 frames, 3 builds
   (its loading states), once a session.
+  Round 18 (r18-8): unchanged, once a session (3,841 KB, 5 frames).
 - **aperture-signin-user-message** (app bug, not perf; r17-8) — with an API key on a server with several users,
   `ApertureFailure.UserMessage` drops the "name the user to browse as" detail the sign-in returns (question 71).
+  Round 18 (r18-8): still reproduces (ApertureResult.cs:46: NotFound reads "That is no longer on <host>").
+- **aperture-item-page-first-build** (6, lead; r18-8) — after 0f9c8477 an item page's first build is 244 → 278–294 KB
+  (+14–20 %), a whole page open 1,444 → 1,535–1,706 KB (one base sample); likely the `Pressable` handlers and the
+  arrival focus. Low; re-measure after steps 7 and 8.
+- **painting-controls-paint-bounds** (2; r18-2, round 17 step 6's optional part) — Dropdown, Checkbox, RadioButton,
+  ToggleSwitch, ProgressBar, Spinner, the pickers, Calendar and Expander's part still report no paint bounds, so a faded
+  ancestor of one is window-sized; no app fades one (r18-2 checked every `Opacity` in `apps/*`; the NumericUpDown case
+  is step 11 (a)). A candidate only when an app does.
+- **meridian-runnerview-build-count-flake** (tests; r18b4; fix before round 18's full suite) — Meridian's RunnerView
+  tests fail "N builds of the results for 15 results" in full-suite runs only: 4 of 20 runs at 56215ccc; with archived
+  trees step 4's code 1 of 6 and the base 2 of 6; they pass alone. Results that land within one main-thread drain get
+  one build, so the count is a timing race in the test, not a change of this round. CI may hit it. A fix agent makes the
+  test deterministic (a gate or a count that does not depend on the drain) before the full suite.
+  Round 18 (pre-suite): fixed in 4cb092ad (`TestHttpServer.Gate` releases one request at a time, each result built
+  before the next lands; the reverse edit still fails; 40 of 40 inside a whole-solution run). The old test also passed
+  160 of 160 under four loads, so the flake was not seen first; the gate removes the race by construction. Close after
+  round 18's CI.
+- **skia-rest-purge-vulkan** (2 or 3, lead; r18b6) — Skia keeps the textures of every live picture up to its 256 MB
+  budget: at Aperture's Home after 20 item pages 65 MB of textures of live pictures, 60 MB of them off screen, and 12 MB
+  of upload staging; a rest-time `PurgeUnusedResources` on Vulkan would return about 70 MB of GPU memory and private.
+  Framework-wide; needs its own real-window holds (frames after a rest that re-upload, GL and Vulkan). For the next
+  survey.
+- **aperture-postercache-slot-stall** (8 or 4, lead; r18b8) — `PosterCache` has 8 download slots, so 8 slow downloads
+  stall every picture behind them (seen in step 8's real-window runs). Measure on the real server how often a slow fetch
+  holds the queue and what a timeout or a separate hero lane would change. For the next survey.
+- **reconcile-keyed-match-alloc** (6, framework lead; r18b8) — matching children by key allocates a Dictionary and a
+  List (~0.3 KB) per patched container (seen in step 8 when a data rebuild matches waiting picture boxes by key). A
+  pooled or small-count path could take it off every keyed patch. For the next survey.
+- **release-merge-main-shelf-arrows** (release, fix at round 18's merge; r18b9) — main is 9 commits ahead (framework
+  ContextMenu d9bf8e25, Button/Checkbox mnemonics, Dropdown/DatePicker, TableView sort, Application light/dark, a
+  long-range scrollbar; Aperture 133bcfe6, merged 936b5520: Up and Down move shelf to shelf with no page turn and the
+  cursor's card scrolls into view). Step 9 conflicts at the end of `MoveRingWithoutBuild`: resolve to `if (turned...)
+  ... else FocusCursorCard(laidOut: true);` (`AfterHomeShelfBuild` already calls `FocusCursorCard()`, which on main also
+  scrolls the card into view after the frame). Rewrite `HomeShelfTurnTests`' Down/Up steps and guard (j)'s Down for
+  main's arrows (the turn is then Right/Left past a page end and Next/Previous). Check step 4's context-menu-after-patch
+  against d9bf8e25. Run the full suite on the merged tree.
+  Round 18 (pre-suite): DONE in 87a0d35e (three conflicts: `MoveRingWithoutBuild` as above; `FocusCursorCard` keeps
+  question 77's handover and main's scroll-to-card; Home.cs keeps step 9's shelf parts with main's `AddCursorShelf`;
+  `HomeShelfTurnTests` rewritten for Right/Left and Next/Previous, Down/Up assert no build, all 4 still fail under their
+  reverse edits). Step 4 and d9bf8e25 both hold (c3f0eab0's keyboard-menu test). main then moved again (d335159e, GPU
+  pixel-frame upload): merged by the full-suite agent.
+- **part-place-stale-double-build** (6, framework lead; r18b9) — `Part.Place(stale: true)` on a part with no host builds
+  it twice (once in `Mount()`, again for the stale flag); Aperture's title bar and rail likely do this at start-up. For
+  the next survey.
+- **aperture-poster-card-cost** (6 or 8, lead; r18b9) — after step 9 a Home shelf turn is mostly the 7 poster cards it
+  makes, about 5.6 KB each (headless ~50.6 KB a turn). A lighter card or cards kept across pages could take most of it.
+  For the next survey.
+- **suite-bidi-rows-fresh-session** (5 and 8, suite; r18b13) — after step 13 "bidi wrap 150 paragraphs resize" (+23 %)
+  and "rtl wrap 150 Hebrew" (+9 %) allocate more: the rows time 5 steps after a fresh session, so the memo each
+  paragraph builds the first time its breaks move lands inside the timed steps (the base built all 150 in an untimed
+  step); over 200+ steps the same scenes are −71 % / −73 %. Warm or lengthen the rows so a deferred one-time cost does
+  not read as churn, and re-take their baselines. "create 2,000 unique emoji labels" +4 % is real (a range entry per
+  one-line BiDi label while a fresh 4,096-entry cache fills; keeping one-line ranges only for text laid out before was
+  examined and costs the real Arabic drag 27.5 → 79.3 KB a step). For the next survey.
+- **vk-fifo-probe-tests-200hz** (3, check before round 18's release; r18b12) — at 49fd9b1e on the 1440p (200 Hz, HDR on)
+  two `VulkanProbeTests` FIFO cases failed: the reused-image capture test's fifo case timed out at 60 s, and the
+  minimize/restore fifo case drew 8 frames in the second after restore (10 needed, 9 loop passes a second). FIFO keeps 3
+  images on unchanged code; run both at the base 549a4980 on the same monitor: if they fail there too, they are a
+  pre-existing 200 Hz/HDR lead for the next survey; if not, step 12 broke FIFO and must be fixed.
+  Round 18 (pre-suite): pre-existing, not step 12's: both cases fail at the base 549a4980 and at HEAD alike (4 runs, 2
+  holds, the 1440p at 200 Hz; FIFO gets 3 images both sides). Minimize/restore: 9–10 loop passes a second after the
+  restore, 8 frames (10 needed); capture case: ~240 ms a frame (60 frames in 14.2–14.9 s), its 60 s timeout masked by an
+  IOException deleting the validation log; nothing logged by the layer. Guess (untested): FIFO present waits for a
+  window shown without activation on this desk; `HULTUI_VULKAN_ACQUIRE_TRACE=1` would show it. For the next survey (3).
+- **f16-two-images-hdr-run** (3, owed; question 74 (c); r18b12) — the user approved one guarded HDR drag run (an HDR
+  clip playing on the 4K, a maximized-sized window, modal-loop timer steps, stopping on any stall over 1 s) to decide 2
+  images on F16; the 4K was absent all of step 12, so F16 keeps 3. Run it when the 4K is attached (with
+  f16-held-drag-post-stall's question); the survey's one pair: maximized-sized HDR −179.9 MB (−21.3 %).
+- **label-focus-no-clipboard** (correctness, found by the pre-suite agent; not perf) — a selectable label focused by
+`Element.Focus()` gets no clipboard: `Window.OnFocusChanged` skips labels, so its Copy and Ctrl+C copy nothing.
+Framework fix with a test; for the next round's build or the framework backlog.
 
-Closed from Waiting by the round 17 survey (→ Examined unless named): junction-colour-landing-remakes-rows (→ step 4),
-a11y-served-item-one-provider-per-tell (r17-7: with the gate a Vesper key is 1.4 KB with no reader asking; with one 2.1
-KB, and one provider a tell would save at most ~0.15 KB), vesper-start-focus-event (closed by 0d96e805: no reader, no
-tree, no event; a reader's first ask adopts the focus with no event), and Suite scenarios (e) (41ecec65's row), (g)
-(ec57c4ee's gated UiTests guard) and (i) (96d00ab3's `DialogFadeGpuMemoryTests`); (h) → step 2.
+Closed from Waiting by the round 18 survey (→ Examined unless named): text-wrap-ranges-per-width (r18-5: on top of round
+17's steps 1 and 8 the 4-range memo moves 33.0/23.7 → 33.1/23.0 KB a step), vk-drag-steps-dropped (r18-3: a timer step
+outside the modal loop rebuilds the swapchain every step, a user's drag 1–2 times a drag; timer steps also drop on GL
+while a video plays; r18-8's ~30–45 updates a second in a user's drag is inferred, not measured),
+window-setroot-component-not-mounted (r18-6: not perf; no root component overrides `OnMount`; a framework gap outside
+plan 17), a11y-client-frame-share (→ step 5), elements-selectable-label-lazy-wiring (→ step 4 (b), static wiring
+instead), junction-diff-row-cells-one-label (→ step 14), vk-swapchain-two-images (→ step 12),
+vesper-file-not-its-own-partner (→ step 1), and Suite scenarios (h) (b1423e6e's test is the guard).
 
 ## Landed
 
-Round 16 (the round round 17's survey reviews; it moves to the archive at round 18's survey). Rounds 1–15 are in
+Round 17 (the round round 18's survey reviews; it moves to the archive at round 19's survey). Rounds 1–16 are in
 [the archive](17-performance-team-ledger-archive.md#landed-rounds-14) ([round 5](17-performance-team-ledger-archive.md#landed-round-5),
 [round 6](17-performance-team-ledger-archive.md#landed-round-6), [round 7](17-performance-team-ledger-archive.md#landed-round-7),
 [round 8](17-performance-team-ledger-archive.md#landed-round-8), [round 9](17-performance-team-ledger-archive.md#landed-round-9),
 [round 10](17-performance-team-ledger-archive.md#landed-round-10), [round 11](17-performance-team-ledger-archive.md#landed-round-11),
 [round 12](17-performance-team-ledger-archive.md#landed-round-12), [round 13](17-performance-team-ledger-archive.md#landed-round-13),
-[round 14](17-performance-team-ledger-archive.md#landed-round-14), [round 15](17-performance-team-ledger-archive.md#landed-round-15)).
+[round 14](17-performance-team-ledger-archive.md#landed-round-14), [round 15](17-performance-team-ledger-archive.md#landed-round-15),
+[round 16](17-performance-team-ledger-archive.md#landed-round-16)).
 
 | Round | Commit | Candidate | Before → after |
 |---|---|---|---|
-| 16 | 40cadb57, 8c6d45de | text-wrap-range-one-line-tolerance (correctness; the review objection to 52852f6e against f388b11d) | `WrapRange` also keeps the text's own width T (NaN with a newline), and `KeptWrap` refuses any width where `T <= maxWidth + OneLineFitTolerance`, the one-line fast path's own expression; one float a range, no API. Probe `r16b1\tolcheck` (8 strings × 2 spacings × 4 ε, wrapped once at T − 2/256, then the shape cache cleared): 64/64 asks differ → 0/64; edge sweep (1,984 asks, 49 floats around T − 1/256 and 13 widths from T to T − 0.01, cache cold and warm, bit for bit) 514 → 0; the widths just past the edge still answered by the kept wrap (896). Round 15's real-document equivalence (5,038,170 layouts): 3 → 0 differ — three archive layouts in sans 13 at 667.99976 px with text 668.00195 px wide, 2 lines kept where a fresh layout gives 1: the bug was on real text at the base. Kept answers 1,430,056 → 1,430,053. Corpus hashes unchanged (48k 7A18AF8DE8E05271; 240k F09E9038726E4BD6; CJK wrap 1E6F1A93894D0B6A / 6C7FA51792E8EB84, 0 of 1,344,616). step-ab (031ae90f) `-Pairs 2`: AOT 0/0 both pairs, A/A 0; JIT pair 1 six untouched rows slower (grid auto-column, five a11y rows), pair 2 none, A/A none; wrap, resize and rich text rows −3.0…+1.1 %; the two "type in a rich text editor inside a VirtualList row" rows +0.9 KB on JIT only, both pairs (JIT object stack allocation: filtered both 2.4 / 2.0, with `DOTNET_JitObjectStackAllocation=0` both 3.8 / 3.5, 0 of 235 rows moved). `WrapRangeTests.AKeptWrap_LeavesTheWidthsAFloatErrorShort_ToTheOneLine` fails under a reverse edit; Windows Text 311, Skia 457, Headless 1,733 (goldens), Vesper 951 (+4 skipped); Fedora Text 311, Skia 457. No real window (no frame or memory claim). The verdicts are in the captures commit (step-ab copies after the change commit). |
-| 16 | ec57c4ee, 5766a137, 84106f2b | reactivity-live-frame-sets-aside-batch (the follow-up to c32c4b2e) + Aperture/Reel fullscreen order (correctness) | (a) `RenderLiveResizeFrame` sets aside the reactive batches open around it, flushes what they held and gives them back (internal `SetAsideBatches`/`RestoreBatches`, as `RunFrameCore`'s nested pass does): a resize made inside posted work or a handler builds in the size message's frame. Real window (NativeAOT Junction, jrepo's 8th commit in the Commit view, wrap on, the 4K at 150 %, 120 Hz, GL, 2 launches a side alternated in one 80 s hold, idle gate passed, 0 foreground takes): posted 6 px steps 1.90 → 0.95 frames a step (40 → 20), held writes 20/20 → 0/20, bytes inside `SetWindowPos` 9.3 → 162.7 KB, UI KB a step 163.5 → 162.7; posted 160 px steps 14 → 7 frames (~1,274 KB both); timer steps (a real drag's context) 0.95 / 0.88 frames and 156–162 KB a step on both sides — a user's own drag unchanged. A build that throws inside the size message: that frame is not drawn, the resize stays pending, the batches are given back; SDL's event watcher logs and swallows it (before, a posted resize's throwing build reached `RunFrame` and `Run`; now it is logged as any live-frame build is), and the next size event draws the new size. (b) Aperture's `SetFullscreen` and Reel's `ToggleFullscreen` write the player's flag and rebuild before `_window.SetFullscreen`, then read `Window.IsFullscreen` back (a refused toggle showed the wrong glyph in Aperture before): the frame drawn inside the toggle shows "Exit full screen" (and back), Aperture builds once a key instead of twice, a toggle stays 2 frames; headless only (never toggled in a real window), through `HeadlessOptions.WindowsFrame`'s `SetFullscreen` now drawing its first frame inside the call. step-ab (f8db7335) `-Pairs 2`: JIT and AOT 0 slower, 0 faster both pairs (A/A JIT keyed rows −11 %, two a11y allocKB rows); the posted-burst rows unchanged. Every new test fails under a reverse edit (the no-batch guard passes either way by design); the gated UiTests guard (expert 8's (g)) draws 21 frames for 21 posted steps (reverse edit 21 + 21). Windows Core 5,118, Headless 1,738, Junction 1,161, Aperture 369 (+21), Reel 53, Meridian 680 (+4), UiTests LiveResizeFrame/SdlLoopPass/FramePacing 16/16 (the fullscreen UiTests not run); Fedora the slnf 22/22, Junction 1,161, Aperture 369, Reel 53 (private D-Bus). REACTIVITY.md, THREADING.md, HEADLESS.md (write what the new frame shows before a call that resizes the window, then read `IsFullscreen`). |
-| 16 | 41ecec65, 9c21b2b6 | a11y-items-on-demand-sooner (question 64: (a), Windows only) | Each bridge reports its eager-items cutoff through an internal `IEagerItemsLimit` (UIA 200, AT-SPI 2,000, any other 2,000); the window reads it when a bridge is installed and builds, patches and refreshes by it; HeadlessUiaReader, UiaRig/AtSpiRig and 25 test wrappers pass on the wrapped bridge's number. Real window (NativeAOT, the desktop listener on, the 4K at 150 %; 5 holds, 24 launches, 0 foreground takes, 0 nvlddmkm; repeat launches identical), UI-thread KB: Junction start 2,212.3 → 1,835.7; Commit → History 600.0 → 270.2; a ref move with History 1,314.7 → 598.8 (−54.5 %; Name raises 1,002 → 3, provider calls 13,186 → 199; kept wrappers / natives 1,086 / 1,038 → 86 / 38); Vesper start 951.5 → 603.5, navigation between two 1,000-file folders 504.7 → 293.7 (the first 1,029.0 → 334.6; raises 1,003 → 3, calls 13,052 → 52), viewer open 1,664.1 → 1,041.4, close 794.7 → 718.3. Slower: a key move in a served list (fresh providers each tell) Vesper's 1,000 files 1.7 → 3.0 KB a key, Junction's History about the same (Waiting a11y-served-item-one-provider-per-tell). A rename of the focused served item is told as one Name change on that item (a real UIA client heard it once), also at a 200 crossing; Vesper 150 ↔ 250 crossings build the tree whole once, focus kept by id with no focus event, 382.7 / 371.2 / 358.2 / 326.6 KB against 438.2 / 412.6 / 335.2 / 362.5, raises 153–154 → 4, calls 2,028–9,695 → 78–106; an open inline editor keeps a 300-item list eager; a 201-entry menu is served. Also fixed: `GetItemLabel` on item rows sized a kept-label array to the whole list on the UI thread (24 KB at every return to History, 480 KB at 20,000 items): internal `IAccessibleItemSource.PeekItemLabel`. Guard (expert 8's (e)): suite row `a11y/insert above 1,000 item rows, UIA` 0 Name raises a step, 0.13 ms, 72 KB (with UIA at 2,000: 1,000 raises, 8.7 ms, 158 KB); the AT-SPI row at 1,999 items 1,999 name signals. Event streams 114/117 identical (the 3 are UIA lists over 200); every AT-SPI stream and list under 200 equal. step-ab (0e8bb81a) `-Pairs 2`: JIT 0 slower both pairs, `selection walk 1,000 rows, UIA` −12…−21 %, 252 → 90.3 KB, A/A 2 faster; AOT the walk −14/−17 %, 251.8 → 90.2 KB, pair 2 media scrubber hover +10 % (one pair), A/A 0/0. Negative controls fail as expected; Windows Core 5,119, Headless 1,746, Linux bridge 104, Fluent 38, Vesper 951, Meridian 680, Junction 1,161, UiTests ReaderFocus 3, VirtualListSample 6, AccessibilitySample 8; Fedora the slnf 22/22, Junction 1,161, Vesper 933 (private D-Bus). ACCESSIBILITY-PLAN.md, DECISIONS.md, ELEMENTS.md. Rule broken: a 5th desktop hold (6.6 s) to re-run a fixed UiTest whose first version compared against the desktop's real focused element; that log held a browser tab's title and was deleted. |
-| 16 | 0d96e805, b02b46d6, 32fffce7, 3211f964 | a11y-gate-on-client (question 50: build) + question 66 (a) | (a) A window builds its UIA tree and raises events only once a UIA client asks for its root (WM_GETOBJECT; built at once inside the ask, or by the next frame when asked inside a frame); each window its own gate, never closed. (b) `AccessibilityClients` ("a client listens": WebView2's own tree, a terminal's reader timers, text versions) also waits for that first ask on Windows; Linux unchanged; no public API. Real window (NativeAOT, the 4K at 150 %, idle-gated, alternated; 3 holds, 25 launches, 0 foreground takes, 0 nvlddmkm), db5dc041 → gate with no client asking (a11y bytes, raises, calls, kept wrappers and root asks all 0), UI KB: Junction start 1,835.9 → 1,823.7 (17 raises / 216 calls → 0), Commit → History 270.2 → 258.0 (417 calls → 0), a ref move 593.6 / 598.8 → 587.6 / 592.9, palette view switch ~1,268 → 1,202.3, 10 History Downs ~256 → ~250; Vesper start in 1,000 files 603.5 → 578.8, navigation 293.7 → 293.5, 10 Downs 29.7 → 17.1 (−42 %), 150 ↔ 250 switches −10…−18 %, viewer open 1,040.9 → ~1,016, close 717.8 → ~656.5; Meridian's preview open ~198.5 → 151.9 (13 raises / 144 calls → 0). After step 3 the gate's own share is small on Junction (−0.7 % start, −1 % a ref move) and large on key moves. An out-of-process client asking at ~5 s: the tree built once (203 nodes, 84.8 KB inside the ask), the next 5 Downs told; with Meridian's preview open the ask built the tree (45.1 KB) and the web page read the same (22 elements, heading found), no reload. A focus-only listener receives the same as before: UI Automation asks our root for it (3 asks when it registers with the window there, 4 when the window appears after), 11/11 and 6/6 focus events both sides; only a client that never makes UIA ask (this desk's own listener) gets nothing; Magnifier, the touch keyboard and Voice Access take the same path (reasoned, not run). 32fffce7: (b) first made the terminal subscribe to the static `ActiveChanged` event, and terminals left in disposed windows (still `IsHosted`) read their screen on every `Force` flip: 8 rich-text and text-area caret/typing rows +32 KB/op, +11…22 % in step-ab; the terminal now takes the announce place from its tree node, rows back. step-ab (db5dc041 → 32fffce7) `-Pairs 2`: JIT 0 slower (pair 2 the rich-text-in-list row 2.4 → 3.3 KB, as in step 3), A/A 0/0; AOT 0 slower, 1 faster (−12 %), A/A 0/0; the suite's UIA rows still measure the bridge (UiaRig answers IsActive). Windows Core 5,119, Headless 1,751, Linux bridge 104, Terminal 176, WebView 77, WebView.Engines 140, Fluent 38, Vesper 951, Meridian 680, Junction 1,161, UiTests 32 (+10 foreground-only skipped); Fedora the slnf 22/22. ReaderFocusTests' handlers drop other processes' elements before reading. ACCESSIBILITY-PLAN.md ("The gate on Windows"), DECISIONS.md. **The user's live Narrator check of Meridian's preview (question 66) is open:** `r16b4\live\` (start-meridian.cmd, CHECKLIST.md); the release waits for it. |
-| 16 | 96d00ab3, 05673aba | painting-dialog-fade-layer / gl-dialog-fade-window-layer (question 67: (b), approved after the images) | `Dialog.Show` fades the scrim's colour from alpha 0 and the panel's own opacity (to the app's own value, through `Element.Restyle`: set directly, a hover starting mid-fade left the panel stuck at 0.504), not the whole window's scrim by `Opacity`; same 0.12 s timing and easing; the palette, Confirm, Alert and WebView's script dialogs all go through it. Real window (NativeAOT, the change on and off in this tree, first Ctrl+P, 2 launches a side alternated; the 4K at 150 %, 120 Hz; 4 holds, 0 foreground takes, 0 nvlddmkm): Junction GL 2160×1350 DXGI local +18.0 → +8.0 MB, private +41.7 / 41.8 → +14.0 / 14.0 MB, scene end local 64.6 → 54.6 MB (−15 %), private 170.3 → 142.4 (−16 %); Meridian GL +18.0 → +4.0, +39.3 → +6.3, local 63.8 → 49.8 (−22 %), private −23 %; Junction Vulkan +19.0 → +5.0, +20.8 → +7.1, local 88.0 → 74.0 (−16 %); maximized 3800×2100 +32.0 → +8.0, +64.6 → +1.6, local 139.5 → 115.5, private 247.2 → 184.2 (−25 %); a second open +0 either side; working set equal. Pixels (headless, Junction's palette at 2160×1350): only the panel's area, frame 2 (α 0.5) max 35 of 255 (dark 105,056 px > 8, light the whole panel), frame 5 max 22–24, frame 8 max 8–9; the window before and the last frame byte-identical; goldens unchanged. Guard (expert 8's (i)): gated UiTests `DialogFadeGpuMemoryTests` (a `--dialog-fade` mode of `HultUI.UiTests.VulkanProbe`, own process): a 900×690 panel in a 2160×1350 GL window +18.0 MB fails under a reverse edit, +8.0 passes (limit: the panel's layer twice plus 1 MB); Skia's cache 33.4 → 19.4 MB. step-ab (b1f65222) `-Pairs 2`: JIT pair 1 RowHeights 20,000 rebuild +48 / +41 % (A/A +43 / +37 %: noise), pair 2 0; AOT 0 both pairs; A/A 0 both runtimes; `overlay/dialog open` 12.5 → 12.9 KB JIT, 12.3 → 12.7 AOT (the second tween's closures, once an open), time +2.7 % / +4.8 %. `DialogFadeTests` (4) fail under the old fade; Windows Core 5,119, Headless 1,755, Skia 457, Junction 1,161, Vesper 951 (+4), Meridian 680 (+4), Aperture 369 (+21), Fluent 38, the UiTests guard; Fedora the slnf 22/22. ELEMENTS.md (don't fade a window-sized element by its `Opacity`). Still through a window-sized layer: a panel holding a control with unknown paint bounds (checkbox, toggle, dropdown, slider): no current `Dialog.Show` panel has one. |
-| 16 | 89732bec, ca94d190 | painting-gradient-shader-by-size (question 68 on its one-level pixels) | A gradient's shader is kept by kind, angle, stops and snapped size, made over the box where that size was first drawn; a box drawn elsewhere draws with the canvas moved by the difference (Save, Translate, Restore), a box that has not moved draws with no move (the survey's always-move prototype rounded 4,254 pixels of Aperture's hero one level off at 1.5). Headless (JIT, 20 keys and five window sizes): Junction History key misses 10 → 0 at 1.0, 10 → 2 at 1.5, render bytes 0.17 → 0.00 / 0.02 KB a frame, shaders over the run 16 → 1 / 3; Meridian 10 → 2 / 4; Aperture 10 → 10 (every size new). Real window (NativeAOT, 1 hold, 4 launches alternated, the 4K at 150 %, 0 foreground takes): History 20 Downs misses 20/20 → 3/20, render-phase bytes 0.36 → 0.05 KB a frame; 17 of 20 key frames 0 B (the 3 left: snapped heights a different float at 1.5, each kept after its first draw). Pixels: Junction History 35/35 and Aperture 26/26 frames at 1.0 and 1.5, Meridian 12/12 at 1.5 byte-identical (fractional window sizes included); Meridian at 1.0 4 of 12 frames differ — at two window sizes a welcome rule kept its size and moved, 25 and 14 pixels of that 1 px rule 1 level off (max 1/255); goldens pass (none draws a gradient). step-ab (07e973d7) `-Pairs 2`: JIT pair 1 RowHeights 20,000 rebuild +26…37 % (A/A +28 / +37 %: noise), pair 2 clean; AOT 0/0 both pairs, A/A 0/0; no allocKB moved. PaintEffectCacheTests +3 tests (5 cases; a moving box one shader at 0 B a frame, the old code 208 B; a moved gradient within 1 level of an in-place shader; an unmoved one byte-identical, the always-move mutant fails); Windows Skia 462, Headless 1,755, Junction 1,161, Aperture 369 (+21), Meridian 680 (+4); Fedora Skia 462, Headless 1,534. |
-| 16 | 3d728568, 13a1b363, 6c08a046 | layout-wrapped-first-open-in-frame | A wrapped body measures at its width in its own `OnLayoutChanged` (7c0a3b79) once it has a box, not after the frame; Vesper's after-frame width check is gone (the body's hook sees every width change of these full-window bodies), Junction keeps one only for the pan (`FollowDiffWidth`: an unwrapped diff's scrollbar appearing needs a build). The survey's Vesper diagnosis was half wrong: the reader's body spans the window, so each line was already measured once at the right width (TODO.md 252, zh 389, archive 1,521); the 1206 came from the after-frame check firing on the Loading view and rebuilding the window. Headless AOT, 2–4 alternated idle-gated pairs, first open before → after: Vesper reader 14 → 11 builds, 3–4 → 3 frames, TODO.md 2,272.0 → 2,222.6 KB (−2 %; the expected −48 % does not exist); compare view 13 → 10 builds, 4,031.5 → 3,965.0 KB; an open after a resize line measures 502 → 251 (TODO.md), archive 3,040 → 1,520, compare 3,348 → 1,756 (KB within 15, cache hits); real window 14 → 11 builds, 2,269.5 → 2,220–2,232 KB. Junction Commit view first open 7 → 3 builds, 3 → 2 frames, line measures 401 → 201 (1,318 then 808 px → 808 only), frames at wrong heights 1 → 0, UI 2,206–2,215 → 1,812–1,828 KB (−18 %; real window 2,220.6 → 1,798.3); Changes first open 2,323.5 → 2,136.5 KB, 43.5–44.6 → 32.6–33.0 Mcycles; opens after a resize Commit 651 → 452 KB, 17 → 10 Mcycles, Changes 1,446 → 1,208 KB, 27 → 16 Mcycles (real window the same); later opens, resize steps and History keys equal. **Slower: the session's first Commit open in time**, headless 40.3–58.0 → 43.9–46.9 Mcycles (min +9 %), real window 38.5 / 39.4 → 41.4 / 44.1: the rows are now drawn before the markdown colours land, and the colours' frame makes them again (~21 Mcycles; colours held: 34.1–35.3 → 23.9–24.9, −30 %; opened after Changes 26.9–27.6 → 20.3) — kept as a once-a-session trade for −18 % bytes and no wrong-height frame (Waiting junction-colour-landing-remakes-rows). Pixels: frame hashes equal the base's in every series; every settled frame equals a full build's; where the base drew rows at wrong heights the first frame now equals the settled one; find reveals give the same offset and hit. step-ab (4eec21e9) `-Pairs 2`: JIT pair 1 virtual/rebuild beside a 20,000-row list +33…47 % (A/A the same rows: noise), pair 2 0/0; AOT 0/0 both pairs, A/A 0/0. New tests fail on the base; Windows Vesper 953 (+4), Junction 1,162, Headless 1,755; Fedora the slnf (Vesper 935 +20), Junction 1,162 (private D-Bus). Real window 2 holds, 0 foreground takes, resize steps from a Win32 timer callback. LAYOUT.md (measure at a width in `OnLayoutChanged`; a list replacing one elsewhere has no box yet). |
-| 16 | 49b0da84, fda77e01 | reactivity-junction-wrap-resize-in-place | A width step that crosses no breakpoint (a window resize, a drag step of the file list's splitter) measures Junction's wrapped diff rows at the width it leads to and fits them in place before layout, with no build (`FitWrappedDiffInPlace`, the same fit as step 7's hook; wrap and review cards, unified and split, Commit and Changes); step 7's `OnDiffListLaidOut` stays as the check; a breakpoint, a scale change and the splitter's press, release and keys still build. Headless AOT (2 alternated idle-gated pairs, each series on an empty gen 0), UI KB a step (Mcycles): Commit 6 px 104.8 → 47.4 (8.79 → 8.30) and 95.7 → 38.2, split 99.5 → 42.1 and 92.7 → 35.2, 160 px in a band 121.9 → 63.3, splitter 95.8 → 38.3 and 86.9 → 29.4 (5.93 → 5.55); Changes 6 px 163.5 → 125.6 (9.97 → 9.90) and 152.6 → 114.7, split 193.4 → 155.5, 160 px 228.2 → 188.3, split 160 px 387.3 → 347.4 (−10.3 %), splitter 154.7 → 116.8; view builds 1 → 0 a step, 1 frame either way; Commit time −3…−11 %, Changes ±1.3 %. Real window (NativeAOT, the 1440p only at 100 %, 200 Hz — the 4K was not attached; 2 holds, sides swapped, 0 foreground takes; steps from a Win32 timer callback): Commit 105.3 → 47.9 KB, Changes 164.0 → 126.2, builds 1 → 0, 9.82 → 9.23 and 10.91 → 10.46 Mcycles. The survey's −80…−90 % is not reached: the heights pass itself (200 or 400 rows through `TextMeasure.MeasureWrapped`) is what is left (a lead: keep each row's same-height width range). Pixels: every settled step byte-identical to the base's at 1.0 and 1.5, unified and split, across the breakpoint, every step equal to a full build's, 0 stale-height frames; review open (lines wrapped and unwrapped) 48 of 48 steps equal a forced full build. step-ab (d2ddfacd) `-Pairs 2`: JIT pair 1 virtual/rebuild beside 20,000 rows +28…36 % (A/A +29…41 %: noise), pair 2 0/0, the two rich-text allocKB rows 2.4 → 3.3 / 2 → 2.9 (flip both ways in earlier steps); AOT 0/0 both pairs, A/A 0/0. `DiffFrameCountTests` (resize, file-list drag) and `ReviewTests.AResizeMeasuresTheCardsAgain` fail on the base; Windows Junction 1,162, Headless 1,755; Fedora Junction 1,162 (private D-Bus). LAYOUT.md. |
-| 16 | f76cb440, 80e94eeb, 40ba50e2 | apps-junction-big-file-revisit | (a) Syntax: a cancelled `TokenizeDiff` resumes when called again with the same string instances, lines shown, clock and grammar (the progress in a ConditionalWeakTable keyed by the text; `SetTheme` clears it; no API). (b) Junction keeps the two texts of a file whose tokenize a key cancelled (LRU, bound 16 MB: five bigrepo pairs, or one pair at Syntax's 2,000,000-character limit); files that finish before the next key keep nothing. Headless JIT, bigrepo, 400 ms a key, all threads precise, 2 alternated idle-gated pairs: first visits 32.05 / 31.57 → 31.99 / 31.89 MB a key, GCs 27/9/5 and 26/7/5 → 24/4/2 and 22/3/1; revisits 32.39 / 31.95 → 31.13 / 31.20 (−3…−4 %), LOH 2.60 → 1.73 (4 of 12 revisits find their texts), GCs 27/16/6 and 27/6/6 → 21/1/0 and 22/2/1; 12 keys over a pair of unvisited big files 33.6 → 31.0 MB a key (−8 %), LOH 2.61 → 0.43, gen-2 4–6 → 0, colours land after the stop 2,361 / 2,479 → 1,095 / 1,093 ms (−55 %); a stop on a file left part-way once 2,687 / 2,710 → 2,411 / 2,425 ms (−10 %). **Retained heap after a full GC 9.7 → 21.0 MB** (10.9 MB kept texts, within the 16 MB bound) — kept as a bounded trade for the colours and the gen-2 collections. The survey's −29 MB a revisit is not reached: at a steady 400 ms the worker tokenizes until the next key either way; a revisit saves the two re-reads (LOH, git processes) and the gen-2s. Real window (NativeAOT, the 1440p only, 100 %, 200 Hz; 2 holds, sides swapped; a third 0.1 s hold opened no window): first visits 33.2 → 32.0 / 32.2 MB a key, GCs 25/6/3 → 22/3/1; revisits 33.1 → 30.6 (−8 %), GCs 27/7/4 → 21/1/0 and 22/0/0. step-ab (ff990dfb) `-Pairs 2`: JIT pair 1 one faster a11y row (A/A the same: noise) and the two rich-text allocKB rows, pair 2 0/0, A/A 0 slower; AOT 0/0 both pairs, A/A text/multi-font ellipsis +13 % (noise). Expert 8's suite row (h) not built (the suite runs no Junction or `TokenizeDiff`); HighlightResumeTests' counts guard it. TokenizeDiffResumeTests (16), HighlightResumeTests (3) fail under reverse edits; Windows Junction 1,165, Syntax 137, Headless 1,755; Fedora Junction 1,165 (private D-Bus), Syntax 137 in 3 of 4 runs (the known wall-clock `ACancelledTokenizeStopsAndTheNextOneRuns` once right after a build; 8/8 alone, base 3/3). |
-| 16 | 5da967d2 (docs only) | gl-tween-burst-nonlocal-growth (measured: NVIDIA's pool, levels off; no code change) | 50 scrollbar hover visits in a real window (NativeAOT at HEAD, hover driven in-process, frames a 5-visit block steady at 138–140; the 1440p only, 100 %, 200 Hz, HDR on; 4 holds, 0 foreground takes, 0 nvlddmkm), DXGI nonlocal MB at rest → after 5 / 10 / 20 / 50 visits / after a 30 s rest (working set): Vesper GL 11.6 → 23.6 at every mark (86.1 → 100.2 / 99.4 / 99.7 / 100.4 / 100.4; with `HULTUI_A11Y=0` the same); Junction GL (History) 15.1 → 23.1 at every mark (103.9 → 111.1…112.3); Vesper Vulkan 17.3 → 17.3 / 17.3 / 19.8 / 19.8 / 19.8; Junction Vulkan 18.3 → 18.3 / 20.3 / 20.8 / 20.8 / 20.8 (the rest's +4.5 MB working set is the first gen-0 GC's commit). Other bursts level too: Junction GL palette open/close 15.1 → 23.1 / 25.1 / 25.1…; a toolbar button hover reaches the same 23.1 later; 50 bar visits then 50 palette cycles end at 25.1 (one pool, not one per kind of burst). On GL all of it is resident write-combined private memory (Vesper 3.3 → 15.8 MB at visit 5); Skia's cache flat through all 50 (33 resources / 8.2 MB Vesper, 53 / 9.3 MB Junction); `glFinish` after every frame fills the same pool (+8–11 MB) and a one-frame fence +12, so it is not frames queued ahead of the GPU; the slow +1 MB from visit 10 to 50 is the managed heap's first allocation budget. DECISIONS.md entry with the table and the controls. Not tried: swap interval 1 during tweens. |
 | 17 | 8dbae799, dd3ad712, 4c890435 | perfsuite-columns-walk-focus (harness) + layout-virtuallist-measure-through-rows | (a) `ColumnsWalk` focuses its list: `virtual/columns cursor walk 100k item rows` renders 26.8 cells, 261.5 KB a step, 0 unrendered steps; a full suite run exits 0 again (`--quick`, all 248 scenarios, and step-ab's full JIT and AOT runs). (b) An internal `ScrollViewElement.MeasuredAsLeaf` (true for VirtualListElement), read by `MeasureSize` and the baseline probe: an ancestor measures a virtual list as a leaf, not through its realized rows, so no visible row is laid out at a width it is never drawn at. Headless (1440×900, 40 steps of 6 px, old and new in one process, alternated ×2), KB a step: resize Commit unwrapped 86.0/67.3 → 31.4/28.2 (asks 429 → 244), Changes unwrapped 77.7/71.1 → 29.5, Changes unwrapped split 145.6/142.3 → 66.5 (asks 835 → 358), Commit wrapped 103.7/95.5 → 63.3 (breaks 123.5 → 87.4), Changes wrapped split 270.7/265.1 → 195.4; splitter steps Commit unwrapped 33.5/28.5 → 13.9, Changes wrapped split 250.5/241.7 → 142.1; expert 5's a359e426 split 80.2/71.5 → 24.0 (re-breaks 3,919 → 1,396 per 40 steps, the rows' own 2,538 → 28); History, Vesper's panes, reader and compare view equal; 0 builds. Real window (NativeAOT, the 4K at 150 %, 2 holds, 0 foreground takes, 0 nvlddmkm; timer steps on the UI thread): Commit unwrapped resize 70.5–81.9 → 23.2–37.5 KB, 12.8–13.4 → 8.1–9.3 Mcycles, asks 497 → 317; Changes unwrapped split 143–145 → 60–73 KB, asks 880 → 417; Changes wrapped split splitter 233–236 → 126 KB (16 scenes in dd3ad712's body). Audit: 19 sites and the samples (CommandPalette, Vesper's Find and Rename set their height; TableView, InspectorView and the 16 app lists grow in columns whose siblings don't shrink): none needs the old content width; the layout audit over 9 suites, 4.75 M boxes, differs only in the new test and A11yUndrawnFrameTests (a 1 px counter no longer squeezed to 0.77 px by the list's rows: a fix). Pixels: boxes, scroll offsets and frame hashes equal the old rule's in 240 of 240 cases (1.0 and 1.5, wrap on and off, unified and split, 5 views, 3 widths, top and scrolled, caches emptied); goldens pass. step-ab (8dbae799) `-Pairs 2`: JIT 0 slower both pairs (pair 2 one faster, the partner walk −10 %), AOT 0/0 both pairs, A/A 0/0; the partner walk 36.2 → 33.6 KB allocKB on both runtimes. `VirtualListMeasuredAsLeafTests` (2) fail under a reverse edit; Windows `HultUI.slnx` 30 projects, 14,429 passed; Fedora the slnf plus Junction, Meridian, Aperture and Reel each in a private D-Bus session, 26 projects, 13,974 passed. LAYOUT.md, ELEMENTS.md (size a virtual list from outside: FlexGrow or a height, plus stretch or a width). After (b), expert 5's jcommit host: C# 574f43a7 re-breaks 1,129 → 185/142 (far misses 1,062 → 26), 71.8/79.7 → 42.2/39.0 KB (their 4-range memo reached 46.0); a359e426 split 4,394 → 1,579 (far 3,658 → 1,094), 99.0/85.2 → 49.1/34.9 KB (memo 52.9/38.3); 1,368 of the 1,396 re-breaks left are the heights pass's (step 8). |
 | 17 | 34606bab, b1423e6e, b185a60c | apps-junction-changes-recolour-same-texts + dotnet-junction-kept-texts-working-set (the review objection to 80e94eeb) | (a) A working-tree event whose new generation reads the same texts keeps the diff's colours (a 64-bit hash of each text with the Working/Staged highlights) and carries the kept texts: headless bigrepo, 2 alternated pairs, an untracked file or another file's save with a big modified file on screen 288.7 → 9.4 MB all threads, 13,639 → 0 lines walked, the diff uncoloured 475–2,921 ms → never; git processes (8/9) and file reads (1) unchanged; without the Changes view's own load the event's colour bytes 284.6 → 5.9 MB (−98 %); a small file 42 → 0 lines; a real text change still recolours, spans equal a fresh walk's. Real window (AOT) 266 → 9.4 MB an event, uncoloured 2.8 s → 0 frames. (b) Once a walk that kept texts comes to rest, one `GC.Collect(2, GCCollectionMode.Aggressive)` 2 s later on the UI thread gives the memory back (pauses 7.6–12.0 ms, no frame or key in that window). Options in the real window (NativeAOT, bigrepo, expert 8's jbig scene, 2 holds alternated), end-of-scene ws │ after a forced full GC ws/committed/private │ revisit pass MB, gen-2s: kept (80e94eeb) 202.6 │ 181.6/71.3/192.4 │ 368.5, 0; none (f76cb440) 155.7 │ 146.2/35.8/154.8 │ 375.1, 4; **kept + one aggressive GC at rest 134.1 │ 134.7/24.4/144.6 │ 368.1, 0 (kept)**; a compacting gen-2 at rest 180.7 │ 181.3/71.2/191.2 (frees the heap, keeps committed); `GCConserveMemory=5` 175.6 │ 157.3/46.8/167.8 │ 367.6, 2; a 6 MB bound 162.0 │ 149.7/39.3/159.8 │ 374.0, 3; dropping the texts at rest 187.8 │ 170.6/60.2/181.8; UTF-8 texts 183.9 │ 155.6/45.1/165.3 │ 397.0, 2 (1 run). The committed code, hold 3: 134.0 MB at scene end (kept 202.5, none 154.6); after a second 12-key pass and its collection 141.7 (186.6, 163.6), that pass 384.0 MB with 0 gen-2s (none 392.6, 4). Pixels: settled coloured frames after two events byte-identical to a fresh load's. step-ab (66f46f11) `-Pairs 2`, all runs idle-gated: JIT 0/0 both pairs (pair 2 the rich-text a11y rows' allocKB 3.3 → 2.4, the A/A the other way), AOT 0/0 both pairs, A/A 0/0. `HighlightGenerationTests` (3) and an idle-collection test in `HighlightResumeTests` fail under every reverse edit; Windows Junction 1,171, Syntax 137, Headless 1,794; Fedora Junction 1,171 (private D-Bus). Real window 3 holds, 24 launches, 0 foreground takes, 0 nvlddmkm, the 4K at 150 %, 120 Hz. Suite proposal (h) not built (the suite runs no Junction; the Junction test is the guard). DECISIONS.md (the options table), NATIVE-AOT.md (only an aggressive collection gives committed memory back). |
 | 17 | a787c194, 23dd0de4 | syntax-diff-skip-shared-stretches | `TokenizeDiff`'s old-version walk takes a line's end state and spans from the new version's walk when the line has the same text and starts from an equal state (TextMateSharp's `StateStack.Equals` ignores whether a rule's begin matched to the end of its line, which changes how `\G` matches next: the take also compares that, through an `UnsafeAccessor` to an internal member that a test pins); 9 B a line counted in Junction's kept-text `Bytes`. Equality: 0 lines differ, spans bit for bit against e77f210d and against each version's whole `TokenizeLines`, fresh and cancelled every 20 ms and resumed (1,326 cancels), at -U3 and -U12, on 379 pairs (the 9 survey pairs, 252 files of 1,000+ lines from the last 200 commits, 118 XML/YAML/PowerShell/shell); lines walked over the 200-commit corpus 916,266 → 621,679 (−32 %); bigrepo file00 13,626 → 7,453, 279.8 → 152.9 MB. Headless JIT (bigrepo, 2 idle-gated runs a side alternated): Commit open 297 → 171 MB all threads, GCs 18/2/1 → 10/2/1, colours at 3,042/3,045 → 1,812/1,799 ms; a stop on an unvisited file 300 → 172–174 MB, GCs 18/1/0 → 11/0/0, colours 2,783/2,833 → 1,635/1,587 ms; 12 keys at 400 ms unchanged (~31 MB a key); step 2's idle collection fires once on both sides. Real window (NativeAOT, 1 hold, base/new/base/new, 0 foreground takes, 0 nvlddmkm; **the 1440p only, 100 %, 200 Hz — the 4K was not attached**): Commit open 293.7 → 168.5 MB, GCs 20/4/2 → 11/2/1, colours 2,920/2,873 → 1,607/1,632 ms; a stop on an unvisited file 297.8 → 172.8 MB, colours 3,222 → 1,845/1,838 ms; the whole scene 1,358/1,370 → 1,138/1,134 MB (−17 %); end of scene after the idle collection ws 129.6 → 130.6 MB, heap 25.5 → 26.4 MB (the 9 B a line counted is 0.34 MB of it; ~13 B a line of distinct state objects the kept walks hold is not counted; five bigrepo pairs still fit the 16 MB bound at 13.92 MB counted). Pixels: 67 of 67 settled coloured frames byte-identical (bigrepo's first 3 files and a repo of 4 real pairs, every wheel position). step-ab (e77f210d) `-Pairs 2`, all 8 runs idle-gated: JIT and AOT 0 slower, 0 faster, no allocKB moved, A/A 0/0. 10 new tests fail under reverse edits (never taking 24, text alone 4, only the rules open 3, no end-of-line check 1, no records across a cancel 4; Junction's bytes test without the 9 B); some walked-line counts updated; Windows Syntax 147, Junction 1,172, Headless 1,794; Fedora Syntax 147, Junction 1,172 (private D-Bus). |
@@ -393,8 +457,57 @@ Round 16 (the round round 17's survey reviews; it moves to the archive at round 
 | 17 | 13fee514, b5ac3235 | a11y-atspi-adopt-focus-on-attach (correctness) | On a tree built from nothing (a Linux reader attached, or org.a11y.Status turned on late), `LinuxAccessibilityBridge.ApplyChanges` takes the node the tree marks focused as the holder and its target (the current item) as `_focusedPath`, so the item's object says focused and the list's does not, as after an early attach; a move the window tells in the same frame still goes out once (`_focusUntold`, which covers a field focused before the first tree); after a re-attach a served item that had the focus before the detach is marked unfocused. No signal at the attach itself, as UIA: Orca reads the focused state when it starts (`orca.py _activate_services` → `find_focused_object` → `AXUtilities.get_focused_object`), it does not wait for an event. Signals a move sends with the focus landed before / after the attach (AtSpiRig, headless): cursor walk eager (1,000) 0 / 2 → 2 / 2, selection Down eager 2 / 4 → 4 / 4, cursor walk served (10k, 1M) 0 / 2 → 2 / 2, selection Down served 0 / 2 → 2 / 2. `A11yAtSpiLateAttachTests` (19 cases: late or early status, walk and selection, eager and served, Tab out, a text field, a tree of element rows and an open context menu at the attach, detach and re-attach, a field focused before the first tree): 7 fail with the adopt undone, 2 more with the edge cases undone. step-ab (50bf6a18) `-Pairs 2 -Filter a11y/` (only the 21 AT-SPI rows reach the bridge): JIT 0/0 both pairs (one row's allocKB moved in pair 1 and the same way in the A/A), AOT 0/0, no allocKB moved, A/A clean. Windows Linux bridge 104, Core 5,212, Headless 1,820; Fedora the slnf (22 projects) green. ACCESSIBILITY-PLAN.md (a reader that attaches late hears the next move on both bridges). No real window (no desktop Orca). |
 | 17 | e790d321, 91721d06 | text-heights-pass-height-only (measured first, then built) | Where a height ask's bytes went (base 13a3e123, JIT headless, prose Commit, per 6 px step): the heights pass 42.0 of 63.6 KB, of it 31.0 KB the break (503 `TextLine`s and a `LineSource` for each of 89 rows broken again), layouts and line arrays 9.5, memo puts 0.1, Junction's float[] 0.8; Changes 112 of 138 KB (84.5 the break). `TextMeasure.MeasureWrapped` now asks an internal `IWrappedSizeContext` (`SkiaMeasureContext`), and `TextPipeline.WrappedSize` breaks with the same decisions and adds the lines' widths and heights to the bit without making a line, keeping a size-only width range; a paragraph seen for the first time, or one whose kept layout was drawn (`TextLine.RunsMade`), is laid out as before (without that rule visible rows broke twice: 574f43a7 142 → 229 re-breaks a drag); first opens equal bytes. No public API. Headless JIT, UI KB a step (heights pass): prose Commit 63.6 → 21.7 (42.0 → 2.5), split 72.4 → 21.3, Changes 138.0 → 25.8 (112.0 → 4.1), split 196.5 → 41.1; a359e426 18.4 → 10.4 (9.3 → 1.5), split 24.5 → 15.3; 574f43a7 7.7 → 7.4, split 12.7 → 10.4; cycles equal or lower everywhere. Headless NativeAOT (idle-gated): prose Commit 78.7 → 35.2 KB, heights pass 49,494 → 896 B, 10.15/9.96 → 9.60/9.89 Mcycles; a359e426 split 33.6 → 23.5 KB (13,696 → 1,144 B; second-sweep re-breaks 1,575 → 1,772, cause not found); 574f43a7 31.9 → 32.1, split 34.4 → 31.0. Real window (NativeAOT, the 4K at 150 %, 120 Hz, GL, HDR on; 2 holds, 3 launches, 0 foreground takes, 0 nvlddmkm; timer steps): prose Commit 70.3/71.1 → 31.8/31.9 KB (heights pass 40 → 2.9), split 77.3/78.1 → 31.2; Changes 131.3/133.4 → 34.0 (101 → 4.4), split 188.6/189.6 → 51.7/51.1; a359e426 21.1/19.6 → 18.0/17.7, split 30.1/31.0 → 22.5; 574f43a7 28.1/24.6 → 25.0/22.2; Mcycles flat. Equality: 2,011,835 size asks against the reference layout's size (reallatin, realbig, zh/ja/ko/th, ar/he/emoji; 5 styles × 47 widths) with 402,360 layouts between and 114,500 range-end probes: 0 differ; corpus hashes unchanged (48k 7A18AF8DE8E05271, 240k F09E9038726E4BD6, also with a size asked before each layout); Junction heights, boxes and pixels equal in all 8 scenes. step-ab (13a3e123) `-Pairs 2`: JIT 0 slower both pairs (one faster in pair 1, also in the A/A), two a11y rich-text-in-list rows' allocKB 2.9 → 2.0 / 3.3 → 2.4 on JIT only (stack-allocation placement); AOT 0/0, no allocKB moved, A/A clean. `WrappedSizeTests` (5) fail under reverse edits; Windows Text 311, Skia 467, Headless 1,820 (goldens), Junction 1,182, Vesper 954; Fedora the slnf (22 projects, 11,746 tests); Fedora Junction 1,181 of 1,182 — `JunctionAppHostTests.TheBranchesViewShowsABranchCreatedOnDisk` fails 3 of 3 at the base 13a3e123 too (r17fix). ELEMENTS.md. |
 | 17 | 9f9518e2 | junction-linux-ref-in-new-folder (correctness; found by step 8's Fedora run) | Fedora's `JunctionAppHostTests.TheBranchesViewShowsABranchCreatedOnDisk` failed 3 of 3 at 13a3e123 — and also at b5ab4704 (3 of 3 alone, 2 of 2 in its class, no D-Bus session), so no round 17 commit caused it; step 5's Fedora pass was a race won under load. `PumpUntilVisible` reads the a11y tree for 20 s; the Branches list held only "main": the summary was read in the first frame, and no reload followed because on Linux inotify watches a new folder only after it hears the folder made, by when git had written `refs/heads/feature/from-a-test` into it, and the refs watcher's filter had no `DirectoryName`, so the folder's own event was dropped too. A real Junction bug on Linux: a `feature/x` branch made in a terminal, a fetch's first slashed branch or a tag in a new folder left the views stale; Windows never affected (10 of 10 at 2-core affinity). Fix (`apps/Junction/Git/GitWatcher.cs`): the refs watcher also asks for folder events, so a folder made or removed under `.git/refs` counts as a ref moving; on Windows one more event inside the same debounce window. `GitWatcherTests.ARefMadeInANewFolder_IsToldAsARefMoving` (two branches and a tag in new folders, then a branch deleted) fails 3 of 3 under a reverse edit on Fedora (nothing heard); the host test and the new test 10 of 10 on Fedora (private D-Bus) and Windows (0x3); `JunctionAppHostTests` + `GitWatcherTests` 30 of 30 on both (twice on Fedora); Junction.Tests 1,183 of 1,183 on both. No step-ab (app watcher only; no suite row reaches it). |
+| 18 | ca72af3e, 6d5dff93 | vesper-file-not-its-own-partner (question 72b: (2)) | `DiffPartner` returns no partner when its fallback would be the cursor's own file; `OpenDiff` returns early there (F3 does nothing, as on a folder), and the ring (`DiffTargetPath`) and `PartnerStays` follow the same rule; the palette's "Compare files (diff)" goes through `OpenDiff`; no a11y text names the partner. Headless (JIT, 10 Downs, alternated ×2), one folder in both panes: the other cursor on ".." 29.2 → 1.2 KB a key, 1 → 0 builds; on a folder the same; F3 there "Files are identical" (2 builds) → nothing, no build. The agent's call, in the same rule: the other cursor on the cursor's own file is a self-pair too, so a walk over that file builds on the key onto it and the key off it (2.0 → 6.5 KB a key over 10 keys, 0.2 builds a key; one line in `DiffPartner` to undo). Unchanged: the other cursor on another file 2.0 KB, two folders 1.2 / 2.0 KB; F3 with a real partner compares, the Missing fallback still opens "Right file missing". Frames byte-identical to the base's in every layout but the self-pair ones (only the ring row, 1,234 px; the self-pair F3 frame shows the panes): `r18b1\frames\selfpair-*-{before,after}.png`. step-ab (49bd5d81) `-Pairs 2` (no suite row runs Vesper; whole suite): AOT 0/0 both pairs, A/A clean; JIT pair 1 0/0, pair 2 11 a11y rows slower (load: both sides run the same suite code; the A/A 3 slower). 9 tests fail with the old fallback restored; Windows VesperCommander 963 (+4), Headless 1,828; Fedora the slnf (Vesper 945, +20). |
+| 18 | e546143d, 3191b065, fc885fc2 | text-wrapped-size-cache-hit-keeps-range (the review objection to e790d321) | A size ask answered from the width-keyed `_cache` puts that layout's wrap range back, on the size path only (on Layout's hits the range ping-pongs between a drawn row's two widths); 3191b065 reads the range's bytes from the cache entry's weight, so a node grows 8 B, not 16 (e546143d alone read `text/wrap 150 paragraphs resize` 16.8 → 17.3 KB in both pairs; after it 17.0). Headless (JIT / AOT, idle-gated, alternated ×2), the sweep after the return to 1,440, UI KB a step: a359e426 split 23.7 / 23.6 → 18.6 / 18.5 (−22 %; size breaks 1,663 → 1,436, full layouts 109 → 7, characters itemized 239,123 → 193,973), unified 19.4 / 19.3 → 16.6 / 16.5 (−14 %; layouts 57 → 0), 574f43a7 split (a third sweep, past the base's one-time cache growth) 32.8 / 32.5 → 21.5 / 21.2 (−34 %), Vesper's zh drag 25.9 → 24.6 (−5 %; characters 434,070 → 364,749, round 17's count). The first sweep unchanged on JIT (33.0 / 52.1 / 37.8 KB; AOT +0.4 within its run-to-run spread); the first return to 1,440 costs 30.6 KB once (the drawn rows' second width is served by the opening layout, whose runs are made then), later returns equal. Real window (NativeAOT, the 4K at 150 %, 120 Hz, HDR on, GL; 2 holds, 8 launches, 0 foreground takes, 0 nvlddmkm): Junction split a359e426 after the return 23.6 → 18.6 KB a step (−21 %), the same counts as headless; first sweep 33.0 / 32.6 → 32.6. Equality: 3,980,865 sizes, 796,160 layouts and 114,500 range-end probes against the reference on the real documents with a second drag after the return, 0 differ; corpus hashes unchanged (7A18AF8DE8E05271, F09E9038726E4BD6), also with a size asked before each layout. step-ab (on 3191b065) `-Pairs 2`: JIT pair 1 3 slower (the RowHeights rebuild rows that flip either way, TableView sort +12 %), pair 2 clean; AOT pair 1 `wheel real-loop` +10 % (10 → 11 µs, no text code), pair 2 clean; A/A 0/0 both. 3 new `WrappedSizeTests` assertions fail under reverse edits; Windows Text 324, Skia 473, Headless 1,828, Junction 1,188, Vesper 963; Fedora the slnf (22 projects) and Junction 1,188 (private D-Bus). |
+| 18 | ab4069ca, 5b7a4494, 5f61fb12 | reactivity-aperture-back-lands-where-it-was (the review objection to 0f9c8477) + question 76 (a) | (a) A grid page keeps its scroll offset and cursor in the `Visit` when it is left, and Back, Forward, Escape, the mouse back button and a rail reopen restore them: the new list's held offset, or the cursor's row when there is none, with the cursor's card made, ringed and focused in the Back's own frame; a build reveals the grid cursor only when the cursor or its row moved (keys and resizes still reveal it), so a wheel is no longer pulled back by a page fetch or a poster landing (without that, mouse users stopped at 480 instead of 2400); a cursor left out of sight comes to the first card on screen on arrival. Headless (JIT, 300 films, 1440×900, alternated ×2): Back lands at 2674 on card-m070, focused (was 0, nothing focused); Back 340.8 → 338.3 KB (336 made either way); the two keys after 279.1 + 75.6 KB, 2 builds, 361 made → 0.4 + 0.4 KB, 0 builds; Escape, Forward and a rail reopen the same (each next key ~278 KB → 0.4); the mouse case (15 notches, a click, mouse back) lands at 2400 (was 0). Real window (NativeAOT, guarded; **the 1440p only, 100 %, 200 Hz — the 4K was not attached**; 2 holds, 6 launches, 0 foreground takes, 0 nvlddmkm): lands at 2360 on card-m063 (was 0), the key after 274.8 KB / 1 build / 289 made → 0.5 KB / 0 builds; the mouse case at 2400. (b) Back and Escape focus the page's cursor card, or its first card on screen: Escape to Home sends one focus event on a live card (was none, the reader left on a gone element); Play's and Resume's accessible names carry the title ("Play Film number 000", "Resume Film number 053, 20 m in"), visible labels unchanged. Frames: Keys 19 of 26 byte-identical to the base's, the rest the landings, Home's ring after Back and after a later rail click (Home keeps the cursor Back gave it) and one rail tooltip a step later (`r18b3\frames\{base,change}-{Keys,Mouse,Reader}\`). Not covered (question 77): a page with no cursor opened by a number key or the palette still leaves the focus on nothing, as at the base. step-ab (818cece5) `-Pairs 2` (no suite row runs Aperture; whole suite): JIT pair 1 3 slower (RowHeights 20,000 rebuild +39–42 %, 400 faded icons +15 %), pair 2 and A/A clean, no allocKB moved; AOT 0 slower both pairs, A/A clean. Every new test fails under its reverse edit; Windows Aperture 435, Headless 1,828; Fedora Aperture 435 (private D-Bus). |
+| 18 | 3442c3f5, 30a53f02, f97a6736, 89ecaeff | elements-context-menu-after-patch (correctness) + elements-selectable-label-static-wiring + layout-list-children-without-set | (a) An element's own context menu (TextInput, TextArea, RichTextEditor, selectable labels) is no longer stored in `ContextMenuItems`: the window asks the element through an internal virtual, and `PatchFrom` copies only a menu the app set (an app's null still turns the menu off; the public getter returns what it did). After one rebuild, before: Cut, Copy and Paste off and Select All on the build's copy; after: enabled and acting on the live element (headless clipboard). One delegate fewer a field or label (56 B JIT, 48 B AOT). (b) Selectable labels wire shared static handlers that read `e.CurrentTarget`, in one exact array of six: making a label selectable 880 → 248 B; a selectable label 1,496 → 920 B (JIT), 1,448 → 920 (AOT); −4.0…−6.3 % a wheel notch; a Junction file Down 223.1 → 211.9 KB (−5.0 %). (c) A VirtualList's window move tells kept children by a mark (a bool in padding: no element type grew) and reuses its children array while the row count holds (`VirtualListElement` 1,072 → 1,080 B); TreeDiffer's replace takes the same `ReplaceChildren`; two window moves 2,880 → 0 B; −4.2…−7.3 % a notch. Headless (b)+(c), JIT / AOT, alternated ×2, idle-gated: Vesper reader −12.4 / −12.0 %, compare −10.7 / −10.2 %, Junction Commit unified −9.7 / −9.4 %, split −10.2 / −9.8 %, History −5.0 / −5.1 %. Real window (NativeAOT, the 4K at 150 %, 120 Hz — attached again; 2 holds, 8 launches, 0 foreground takes, 0 nvlddmkm; 1 frame a notch both sides), KB a notch: Junction Commit unified 16.5 → 14.5 (−12.0 %), History −5.3 %, Vesper reader 15.2 → 12.7 (−16.2 %), compare −11.5 %. Pixels: 20 headless frames (wheel, wheel back, a selection drag, the menu open and closed; Junction Commit and History, Vesper's reader and compare) byte-identical, twice. step-ab (56215ccc) `-Pairs 2`: JIT and AOT 0 slower, 0 faster both pairs; 31 rows' allocKB down, none up (drag to reorder 8.8 → 4.0 KB, palette Down 3.9 → 3.3, list 100k wheel 27.9 → 26.8); A/A AOT clean, JIT 2 rows (the rich-text-in-list row, noise). Every new test fails under its reverse edit; Windows Core 5,227, Headless 1,832, Text 324, RichText.Markdown 62, Vesper 963, Junction 1,188; Meridian's RunnerView tests flake in full-suite runs at the base too (Waiting meridian-runnerview-build-count-flake); Fedora the slnf and Junction 1,188 (private D-Bus). |
+| 18 | 8b7471c8, fada66d3 | a11y-uia-disconnect-off-ui-thread (closes Waiting a11y-client-frame-share) | Each apply hands the providers it let go to one MTA thread for the process, which tells UI Automation they are gone (`UiaDisconnectProvider`) and then does the Detach/Release, in order; a provider made again for the same element first gets its old one told on the calling thread (TellFirst); `Dispose` tells whatever the thread has not taken and spins (no pump, 2 s cap) on any in flight, all before `UiaReturnRawElementProvider(hwnd, 0, 0, 0)`; `HeadlessUiaReader.Disconnected`/`Clear` flush, bare-bridge tests call `FlushDisconnects`. No API, no pixels, AT-SPI untouched. Real window (NativeAOT Junction, the 4K at 150 %, 120 Hz, GL; an out-of-process FlaUI client asking, focus-only and reader-like; measured around `RenderFrame` inside `Application`, alternated ×2, min of 4 frames), UI-thread cycles / wall: the palette close after 10 Downs focus-only 25.71 M / 8.16 ms → 2.62 M / 0.97 ms (−88 % wall), reader-like 28.20 M / 8.94 ms → 2.85 M / 1.01 ms (−89 %), the worker 0.19–0.40 M / 0.06–0.15 ms for 13–14 disconnects; the first palette Down's disconnect 3.1–5.5 ms on the UI thread → 0.11–0.35 ms on the worker; the first Commit open focus-only 9.02 → 7.84 ms (−13 %), reader-like 8.85 → 7.26 (−18 %), a second open 2.03 → 0.95 and 1.77 → 1.02 ms; History Downs unchanged. The client logs show the same events (HasKeyboardFocus 12, IsSelected 50, structure 2/10/8), no errors; 2 holds, 8 launches and the UiTests, 0 foreground takes, 0 nvlddmkm. Aperture not run in a real window. Headless event streams: Aperture history, served items and Fluent nav equal the base's; Vesper's EnterFolder reader tests show the same 3 timing variants on both sides over 7–10 runs. step-ab (43b87bfa) `-Pairs 2`: JIT pair 1 0 slower / 8 faster (the A/A 11 faster, AT-SPI rows among them: noise), pair 2 0/0; AOT pair 1 0/1, pair 2 0/0, A/A 1 slower (a UIA rename row +10 %); no allocKB moved (headless never shows the cost). 3 new tests fail under reverse edits (off the UI thread; all told before the root is released at `Dispose`; an old provider told before its re-made one); Windows Core 5,227, Headless 1,835, Junction 1,188, Vesper 963, Aperture 435, UiTests ReaderFocus/AccessibilitySample/VirtualListSample 18 (8 WinFormsHost need the foreground: skipped); Fedora the slnf (22 projects). ACCESSIBILITY-PLAN.md. |
+| 18 | 678a786c, b33b1ef6 | apps-aperture-artwork-retained | Where the bytes live (base, real Jellyfin as the named user, back at Home after 20 item pages): private 327 MB against 148 MB before the walk; decoded pictures 67 MB (210 pictures, 3 heroes 30.5 MB); Skia's GPU cache 84 MB (65 MB textures of live pictures, 60 MB of them off screen; 12 MB upload staging); GC committed 41–44 MB (24–27 after a full GC, heap 7–8); with every picture dropped and Skia purged private 163–170 MB. On NVIDIA Vulkan GPU memory counts in private bytes, ~1 s behind a purge. The survey's O(pages) was overstated: heroes were already capped at 4 (e18b6896); after 20 pages +179 MB, not ~+600. Built: heroes kept by their bytes (always the latest 2, up to 4 while they fit 24 MB, `HeroBytesKept`), and a hero let go is disposed at once on the UI thread (`PosterCache.Drop`; before, it stayed until another download landed). Real window (NativeAOT, Vulkan, the 4K at 150 %, 120 Hz, a 1440×900 window; 3 holds, base and change alternated ×2, 0 foreground takes, 0 nvlddmkm), cache decoded / private / working set / DXGI local MB: after 6 pages 43.1 → 35.2 / 268.4 → 248.0 (−7.6 %) / 228.3 → 216.7 (−5.1 %) / 118.1 → 111.1 (−5.9 %); after 20 pages 67.1 → 57.0 / 341.5 → 317.1 (−7.1 %) / 283.2 → 266.3 (−6.0 %) / 148.9 → 137.7 (−7.5 %); back at Home private 327.3 → 302.5 (−7.6 %; after a full GC 310.2 → 285.3, −8.0 %); nonlocal unchanged; Skia's cache 83.6 → 73.5. Blank frames: a page open 6.5–8.2 frames both sides (the hero blank until it lands, as before); Back to a kept hero 1 both sides, to a hero let go 2 and 4 against 1 (it loads again). Headless (50 pages, 150 %): decoded 72.3 → 52.0 MB, heroes held 4 → 2; 53 of 53 landed heroes byte-identical, the 2 loaded again included. Declined (DECISIONS.md): dropping the decoded copy after upload (−67 MB): no device-loss path, a texture is one window's, raster and capture need the pixels, a decode on demand is 10–35 ms on the UI thread. step-ab (71e62a28) `-Pairs 2` (no suite row runs Aperture): JIT 0 slower both pairs (11 and 8 faster a11y/virtual rows, the after side both times: run order, identical framework code), A/A 0/0; AOT 0/0 both pairs, A/A 0/0. 2 new tests fail under three reverse edits (a count-only bound, retire instead of drop, `Drop` without dispose); Windows Aperture 437 (+23), Headless 1,835; Fedora Aperture 437 (private D-Bus). |
+| 18 | 941cffdf, 0f5cda09, 421cc677, f26168b7 | reactivity-aperture-parts-build-on-change + question 77 (a) | (a) Each part keeps a value of what it shows and builds from it alone: every app build compares the value now with the one shown (`Place(stale:)`); the title bar's value is server, user and scale; the rail's the lit door, libraries, the request server's user, the three counts and scale, its loaders read untracked for the compare. The view-only flag is gone; the hidden forced `MarkDirty` still invalidates every part (the oracle). No path marks anything, so sign-out/in, a server or user change, libraries, request doors, badges and the light all reach the parts. REACTIVITY.md updated. (b) Each rail door is its own part, made once and kept (fixed doors by name, libraries by slot: nothing made or dropped on a library change or sign-out); the door going dark and the one lighting are built through their `own:` revisions. Headless (JIT, 300 films, 1440×900, alternated ×2, repeats within 0.2 KB), base → (a) → (b) KB: Enter 167.4 → 100.8 → 72.9 (−56 %; part builds 4 → 1 → 1 door); library first open 753.6 → 589.4 → 564.8 (−25 %; 8 → 1 → 2); Forward 78.7 → 61.1 → 32.9 (−58 %); Back/Escape 333.8 → 288.5; number key 336.1 → 293.0; rail reopen 365.4 → 322.8; 0 (Favourites) 59.9 → 14.0; / (Search) 57.8 → 15.2; a paging build while wheeling 237.6 → 139.9 (part builds 4 → 0); sign-out 209.7 → 111.9; sign-in 476.5 → 438.6 (21 door builds, once per sign-in). Lit door, doors and the title bar's user equal to the base at all 183 steps. Real window (NativeAOT, Vulkan Mailbox, HDR on, the 4K at 150 %, 120 Hz; 1 hold, 6 launches, 0 foreground takes, 2 refused activations, 0 nvlddmkm; ~42 KB of probe line included): Enter 180.4 → 118.8 → 86.4 KB (part builds 4 → 1 → 1); library first open part builds 8 → 1 → 2 (KB 1,616–1,678 → 1,253–1,403, noisy with poster landings); Forward 89.9 → 72.2 → 45.3. Question 77 (a): every way into a page (number keys, 0, /, the rail, the title bar's user, page links; Aperture has no command palette) gives the first card the cursor and the keyboard, ringed, and a reader hears it; a click or Tab that took the keyboard while a slow page loaded keeps it (checked after the build: a kept part is not in the window's tree mid-build). +0.0–0.7 KB an arrival; the next key 0.4 KB, 0 builds. Behaviour: the first arrow on a page moves on from card 0, as after Back (18 tests updated). Pixels: (a)+(b) 183 walk frames byte-identical; question 77 9 frames, 3 identical, the arrivals differ only inside the focused card's and the rail button's box (the ring). Reverse edits: Rerender invalidating again 3 fail; rail never stale 6 PartTests + 2 RequestServerHostTests; title bar never stale 3; forced build not invalidating, the oracle 15; whole rail on a light change / dark door not built / a door made per build, the (b) tests; question 77's UIA focus test 4 of 4, the guard 2. step-ab (4ed3b4dc) `-Pairs 2` (no suite row runs Aperture; app-only change): JIT pair 1 2 slower (RowHeights rebuild +38–40 %), pair 2 11 slower on the a11y rows the A/A moves 10–17 %; AOT pair 1 2 slower (a11y tab AT-SPI +16 %, 400 faded icons +25 %), pair 2 and A/A clean: noise, framework code identical. Windows Aperture 448 (+11), Headless 1,835; Fedora Aperture 448 (private D-Bus). |
+| 18 | d7eedc4b, 092201cc | reactivity-aperture-poster-lands-in-place (with r18-8's apps-aperture-artwork-landing-rebuilds-view) | Counted first (headless, base): view builds data/navigation + picture landings: library first open 4 + 8–9 (32 KB each); Home's start 2 + 5–7 (33–330 KB); a film page with cast 2 + 2–3 (84 KB); a series page 3 + 2 (47 KB); a season page 2 + 4 (121 KB); a 404 page 2 + 1 (30 KB). Built: a picture that lands goes into the element that waits for it (cards, heroes, cast faces), keyed by its URL so the reconcile never patches it from another item's; no view build for a landing or a failed fetch. The placeholder glyph is that image element, so nothing shows differently before a picture lands; a hero always has its image element (empty draws nothing). Data builds unchanged (the page's own loads). A landing re-lays only the image and its ancestors (a grid card 9 laid, 10 measured against 20 and 15 for the build it replaces; a hero 10/10, a face 12/16). Side fixes the landing builds had masked (`WindowFitTests`' full-build check): a grid row a taller window brings in asks for the page a build's estimate would load; a full build after a 404 makes the same tree. Headless (JIT, 1440×900, ×2 alternated), KB / builds / made: library first open 1,109–1,150 / 12–13 / 886–921 → 594–600 / 4 / 394–400 (−47 %); a Down bringing a row 145–205 / 1–2 / 120–161 → 59–82 / 0 / 43–45; Home's start 1,236 / 8 / 753 → 865 / 3 / 416; film page with cast 376–378 / 4 / 259 → 210–212 / 2 / 92; series page 154–157 / 4 → 110–112 / 3; season page 441.5 / 5 → 202 / 3; 404 page 70.8 / 3 → 41.6 / 2; one landing alone 31–84 KB / 1 build → 0.2–0.5 KB / 0. Real window (NativeAOT, the 1440p at 100 %, 200 Hz, the 4K not attached; 1 hold, 4 launches, 0 foreground takes, 0 nvlddmkm; ~42 KB probe line included): library first open 1,413–1,424 KB / 19 builds (15 picture) / 1,149–1,155 made / 16–17 frames → 604 / 4 / 388 / 16; ten Downs 1,895 / 16 / 1,219 → 947 / 1 / 339; film page 524–595 / 6–7 / 364–435 / 3–4 frames → 240 / 2 / 80 / 4; Home's start 13–15 builds / 857–898 made → 3 / 416; series page 166–259 → 172 KB (waiting picture boxes matched by key on a data rebuild, ~0.3 KB each). Pixels: 33 of 33 headless frames byte-identical (a distinct picture per item; 24 settled steps, 9 with a picture held back). Guard: the perf suite references no app, so suite proposal (k) is `ArtworkLandingTests` (7 tests, an item page whose pictures land one a frame with no build); GridRowKeepTests and PartTests expect no build; five reverse edits each fail (landing builds the view; no key on the waiting element; picture only by landing; a failure builds; a failed new hero size keeps the stand-in). REACTIVITY.md updated. step-ab (12fc7265) `-Pairs 2` (no suite row runs Aperture): JIT 0/0 both pairs, no allocKB moved, A/A clean; AOT the same. Windows Aperture 455 (+7), Headless 1,835; Fedora Aperture 455 (private D-Bus). |
+| 18 | f980fc8d, 06ca5c94 | apps-aperture-home-shelf-turn-builds-home | Measured first (headless, 3 shelves of 30): a shelf turn ran one full app build of 66.7 KB, of it the turned shelf 56.3 (7 cards 39.3, heading and row 15.3 with the menu and "See all" 5.6) and the rest of Home 10.4. Built: each library-card shelf on Home is its own `Part`, kept by its row key (one film can sit on two shelves, so not by slot); a page turn (Right/Left past a page end, Up/Down onto another page, the shelf's Next/Previous) writes that part's own signal, so only that shelf builds (0 app builds, 1 shelf build ~50.6 KB) and hands back the menu and "See all". Headless (JIT, 1440×900, ×2 alternated, repeats identical), KB / app builds / made: a Right that turns a page 98.0 / 1 / 61 → 80.2 / 0 / 52 (−18 %); a Down/Up turn with pictures cached 67.0–68.4 → 50.9 (−24…−26 %); with 7 new pictures 93.1–96.7 → 77.0–79.2 (−17…−18 %); after the cursor left another shelf (base remade 2 shelves) 121.4 → 81.1 (−33 %); a Right within a page 0.4 = 0.4; Home's start 680.1 → 686.9 (+1.0 %, 3 host elements); Back to Home from a film page 180.2 → 183.9 (+2.1 %); with 8 shelves a turn −30 %, start +2.8 %, Back −1.3 %. Real window (NativeAOT, Vulkan, the 1440p at 100 %, 200 Hz, the 4K not attached; 1 hold of 86 s, 4 launches, 0 foreground takes, 0 nvlddmkm; ~28.5 KB probe line included), KB / builds / made / frames: a Right that turns 122.9 / 1 / 61 / 3 → 107.4 / 0 / 52 / 3; a Down turn 119.8–122.7 → 104.4–107.2, 3 frames; a cached Down/Up 95.1 → 79.8, 1 frame; a Right within a page 28.7 → 29.0 (the probe line walking 3 more hosts). Pixels: 23 of 23 headless frames byte-identical both pairs. Guard (suite proposal (j); the suite hosts no app): `HomeShelfTurnTests` (4), each failing under its reverse edit (a turn builds only its shelf; the cursor card ringed and focused after a turn; a shelf whose items change shows them; the forced build builds every shelf and equals what the turns left). REACTIVITY.md: a part's own build reads untracked what its owner's build reads; hand focus over only from a build the part ran alone (`afterBuild` also fires for builds `Place` starts inside the owner's build); `Mount()` before `Place(stale:)` when the flag depends on the part's last build. step-ab (0e796cf5) `-Pairs 2` (no suite row runs Aperture): JIT pair 1 2 slower (RowHeights 20,000-row rebuild +30…+36 %, the noisy row of steps 3 and 7) and 8 faster, pair 2 0 slower, A/A clean; AOT 0 slower both pairs, A/A clean; no allocKB moved. Windows Aperture 459 (+4; 23 skipped), Headless 1,835; Fedora Aperture 459 (private D-Bus). Main's 133bcfe6 (merged 936b5520, not on this branch) moves Up/Down shelf to shelf with no page turn: after the release merge the real case is Right/Left across a page end and Next/Previous (−18 %); see Waiting release-merge-main-shelf-arrows. |
+| 18 | f7f2f6c5, 7f9b1e46 | dotnet-junction-collect-after-big-walk | `HighlightLanded` now also sets `_collectWhenIdle` when a landed walk was big: ≥ 2,000 lines walked or ≥ 32 MB allocated on the worker (`GC.GetAllocatedBytesForCurrentThread` around the walk). Why: real C# (HultUI's own sources) allocates 5.5 KB a line on AOT and JIT; one collection after a walk gave back 3.3 MB of working set at 500 lines, 8.1 at 1,000, 12.8 (−13 %) at 2,000, levelling at ~17.5 from 3,000; below 2,000 lines a walk allocates less than the gen-0 space the window keeps committed anyway (22–30 MB); 32 MB catches files of few long lines, past where the gain stops growing and 4× the 8.3 MB a language's first walk spends loading its grammar. Beyond the brief: the collection also waits until the window has had no input for 2 s (the existing public `Window.InputActivity`), so it never lands in a scroll after a walk. Real window (NativeAOT, guarded, the 1440p at 100 %, 200 Hz, primary, the 4K not attached; 2 holds of 166 and 156 s, 8 launches alternating, 0 foreground takes, 0 nvlddmkm), committed / working set / private MB at rest: after the Commit open (7,453 lines, 161 MB walked) 33.5 / 123.1 / ~120 → 8.4 / 98.0 / 94.2 (working set −20 %); after 3 first visits 40.9 / 133.0 / ~130 → 10.1 / 101.5 / 93.8 (−24 %); after a 4th visit and 7.5 s of wheel 42.1 / 145.2 → 11.3 / 113.7; real C# cut to 100–4,000 lines collected only after the 2,000-, 3,000- and 4,000-line walks (working set after 2,000 lines 131.2 → 108.4). Headless JIT heap / committed / working set at rest: Commit open 15.5 / 28.7 / 100.4 → 5.4 / 5.4 / 77.8; after 3 visits 19.4 / 41.7 / 114.9 → 7.1 / 7.1 / 79.7; the survey's scene ending in 6 revisits at 4 s 46.0 / 59.9 / 134.7 → 29.4 / 25.8 / 103.9 (one collection a rest; none after the cached revisits). jrepo: 0 collections (real window 873 lines, 14.8 MB walked; headless), memory equal. Frame cost: pauses 4.3–6.6 ms, one a rest (5 a launch), ~3.6 s after its key; no frame within 400 ms of any, so no late frame; none while keys or the wheel moved (the one after the wheel 2,029 ms after the last notch). Tests: `HighlightResumeTests` gains a finished 9,000-line walk (nothing collects while the wheel turns, one collection after it stops, none after a one-line file), failing under three reverse edits (no big-walk trigger, no input wait, every walk big); the kept-texts test expects one more collection when its resumed walk is big. NATIVE-AOT.md: start an at-rest collection's wait from the window's last input too; decide by what the work allocated, not what it kept. step-ab (6ef42e77) `-Pairs 2` (no suite row runs Junction's walk): JIT pair 1 0/0, pair 2 2 faster (RowHeights rebuild) and one rich-text a11y bytes move, the A/A moving the same rows the other way: noise; AOT 0/0 both pairs, no bytes moved, A/A clean. Windows Junction 1,189, Headless 1,835; Fedora Junction 1,189 (private D-Bus). |
+| 18 | 0ec5182c, 1ddec166, a83bcd2e | painting-numericupdown-paint-bounds + painting-drag-ghost-layer-bounds (question 73 (b)) | (a) `NumericUpDownElement.PaintBounds`: the border box, the value's ink (`TextPaintBounds` with the same rect, style and one line), the hairline, the step strip and both chevrons plus half their stroke, grown by 1; states checked: at rest, focused, mid-edit, held, shorter than its line, narrower than its strip (the window's focus ring draws after the tree; an edit wider than the field keeps what fits its line; no disabled look, no caret). (b) New internal `ElementRenderer.TreePaintBounds` (the subtree's bounds with the root's own transform and sticky shift) bounds the source ghost (0.7) and a custom DragVisual (0.8). Snapping the layer's origin cannot remove the drag-frame difference (Skia already puts it on a whole device pixel); pinning it at the window's corner made all 32 frames byte-identical but grows the layer toward the window (0.199 Mpx a frame), so it stays as the user accepted. Headless (JIT, ×2 alternated): layer area Vesper rename 1.198 → 0.041 Mpx a frame, 17 of 17 frames byte-identical both pairs; Junction drag 2.916 → 0.026 Mpx a frame, frames before and after the drag identical, 23 of 29 drag frames differ in 2–7 pixels by ≤ 6/255, both pairs alike. Real window (NativeAOT, the 1440p at 100 %, 200 Hz, the 4K not attached; Junction 1440×900, Vesper 1240×820; 2 holds, 16 launches, 0 foreground takes, 0 nvlddmkm), MB first time Skia / DXGI local / private, and DXGI local at the end: Vesper rename GL +4.12 → +0.24 / +8.1 → +0.2 / +11.5–12.1 → +1.4–1.9, end 30.2 → 22.3 (−26 %); Vulkan +4.24 → +0.37 / +5.0 → +1.0 / +5.9 → +1.9, end 43.4 → 39.4 (−9 %); Junction drag GL +6.06 → +0.12 / +14.1 → +2.2 / +24.7–25.2 → +9.8–10.0, end 40.3 → 28.4 (−30 %); Vulkan +6.06 → +0.12 / +6.0 → +0.0 / +6.3 → ≈0, end 44.9 → 38.9 (−13 %). Tests: `OpacityLayerTests.FadedNumberFieldsAreBoundedAndLoseNothing`, `RenameCounterFadeTests` (Vesper), `DragGhostLayerTests` (Headless: layer size, a custom visual, the whole ghost at every edge and corner at 1× and 1.5×, a rotated source), failing under reverse edits (bounds null/unbounded; bounds cut to the element's own box, NUD 53–154 pixels off; the root's transform left out). ELEMENTS.md and DRAG-AND-DROP.md updated. step-ab (5057eb1c) `-Pairs 2` (no suite row fades a number field; `input/drag to reorder 200 rows` draws no frame mid-drag, 0.217 → 0.215 ms): JIT 0/0 both pairs, A/A clean; AOT `input/wheel … real loop` and `text/ellipsis resize` ~+11 % in one pair each, a11y tab rows 10–13 % faster, no bytes moved, A/A clean: noise. Windows Core 5,227, Rendering.Skia 473, Headless 1,845 (goldens unchanged), Vesper 964, Junction 1,189; Fedora Skia 473, Headless 1,621 (+128 skipped), Vesper 946, Junction 1,189 (each app in a private D-Bus session). |
+| 18 | eec26ffd, 0f247da5 | text-bidi-wrap-ranges | `ComputeWrappedBidi` notes the three tests it makes against the width (a line's segments so far, a segment at a line's start, `BidiFitPrefix`'s prefixes), all in logical order; lines are shaped and reordered from where they start and end alone, so any width inside the range gives the same layout to the bit. Kept per text, style and direction (Rtl and Auto never share a range). Not answered: Ellipsis (no range), styled BiDi (spans that change metrics), an unbounded width; layout hits do not put a range back, a size ask answered from the width-keyed cache does (as step 2 on the plain path); no one-line path on BiDi, so a range runs as far as the breaks hold. Headless Vesper reader (both runs identical), KB a step JIT / AOT, BiDi layouts a step, range answers a step: ar 1,440 83.4 / 98.3 → 20.2 / 20.3 (−76 / −79 %), 477 → 2.1, 512; ar 960 120.7 / 135.6 → 48.2 / 48.4 (−60 / −64 %), 477 → 7.6, 502; he 1,440 36.4 / 41.9 → 12.0 / 12.1, 175 → 1.1, 211; he 960 50.2 / 55.6 → 22.7 / 22.8, 175 → 3.2, 205; zh unchanged (24.5 at 1,440, 38.1 at 960). The survey's ~9/~11 KB not reached: the layouts left are exactly the moved-break ones (85 and 304), ~5 KB each to shape new lines. Retained heap flat (ar 14.4 → 14.2 MB, he 7.7 → 7.6). Real window (NativeAOT, the 1440p at 100 %, 200 Hz, the 4K not attached; 1 hold, 4 launches, 0 foreground takes, 0 nvlddmkm): the Arabic reader drag 158.5 → 27.5 KB a step (−83 %), BiDi layouts 19,080 → 85 with 20,475 answered by a range. Equality: step 2's comparison plus Rtl and Auto styles and an up/down walk through the ranges on ar, he, emoji and th: 0 of 4.43 M sizes, 0.89 M layouts, 157 k size probes, 42.7 k BiDi range-end probes and 3.6 M walk layouts differ; corpus hashes unchanged (7A18AF8DE8E05271, F09E9038726E4BD6, also with a size asked first). Pixels: 164 headless reader frames (82 ar, 82 he) byte-identical. Tests: `BidiWrapRangeTests` (5), all failing with the change reversed and each of 5 mutations (direction out of the key, the size path put back, each of the three decision notes) failing at least one; two `CacheBoundTests` on the BiDi memo run with `KeepsWrapRanges = false` (a range now answers their second width). step-ab (d831b31f) `-Pairs 2`: JIT pair 1 "open a long document in a TextArea" +13 % (the A/A shows it too), pair 2 8 a11y rows slower (a filtered a11y re-run 0/0, A/A clean); AOT 0/0 both pairs, A/A clean. allocKB up on 3 rows on both runtimes: "bidi wrap 150 paragraphs resize" +23 % and "rtl wrap 150 Hebrew" +9 % (the suite times 5 steps after a fresh session: the base builds all 150 memos in an untimed step, the change builds each memo the first time its breaks move, inside the timed steps, 15.4 a step; 200+ steps of the same scene −71 % / −73 %); "create 2,000 unique emoji labels" +4 % (each one-line BiDi label keeps a range entry while a fresh session's 4,096-entry range cache fills). Examined, not kept: one-line ranges only for text laid out before removes the +4 % but the real window's Arabic drag goes to 79.3 KB a step instead of 27.5 and the return to 337 KB instead of 56. Kept on the real-app case (Real apps first); see Waiting suite-bidi-rows-fresh-session. Windows Text 324, Skia 478, Headless 1,845 (goldens), Junction 1,189, Vesper 964; Fedora the slnf's 22 projects and Junction 1,189 (private D-Bus). |
+| 18 | fd943d6f, 654a9368 | junction-diff-row-cells-one-label | Measured first: each line number and the sign were a label inside a placing box, and a missing number an empty label in a box (a number or the sign 1,656 B to make). Built: each is a label sized and aligned by itself (984 B); a missing number, and a wrapped context line's blank sign, become a margin on the other number (0 B). Elements a row unified 9 → 5–6 (wrapped 8 → 4), split 11 → 8–9 (wrapped 9 → 6–7); a unified row made and drawn 7.3–8.2 → 5.0–5.2 KB (wrapped 6.5–7.0 → 3.9–4.2), split 9.2–10.0 → 7.8–8.7; text measures unchanged. Headless (JIT, bigrepo unified, ×2 alternated, within 1 KB): first visit 827–864 → 733–770 KB (−11.1 %), revisit 631 → 537 (−14.9 %), ten wheel notches 280 → 231 (−17.4 %; 16.5 → 13.6 KB a row scrolled in), open −7.1 %; a colour landing 175.5 either way (it makes no row); jrepo unified revisit −18.1 %, ten notches −18.5 %; split −3…−13 %; builds, rows made, measures and frames equal everywhere. Real window (NativeAOT, guarded, the 1440p at 100 %, 200 Hz, the only monitor attached; 1 hold of 152.5 s, 6 launches, 0 foreground takes, 0 nvlddmkm; repeats within 0.1 KB): bigrepo unified first visit 810.3 → 712.6 KB (−12.1 %), ten notches 286.9 → 234.2 (−18.4 %), open −6.5 %; split −3.0…−3.8 %; frames and rows made equal. Selection, copy, hit-testing and readers unchanged (code labels, groups and indices untouched; a press on a number begins no selection; a click on a number or an empty number column reaches the row, staging in Changes; a reader hears the row's item label). Pixels: 144 headless frames byte-identical (80 of a generated change: Commit and Changes, unified and split, wrapped and not, 1,400 and 1,000 px, 1× and 1.5×, panned sideways; 64 of bigrepo and jrepo). The layout weighs each item's share of a shrink by its outer size, margins included (unlike CSS): a margin on the shrinking sign gave up 2.7 px instead of 0.8 and moved the code 1.9 px, caught by the pixel comparison; the margins sit on the numbers, which never shrink (LAYOUT.md). REACTIVITY.md: make a row of no more elements than it draws. Found: a wrapped row's numbers are left-aligned and sit on its last visual line (kept and pinned; question 78). New `DiffRowCellTests` fail under their reverse edits (boxes back; no `AlignSelf` or no margins; the sign in the copied text; a number that takes the click; the landing's old `InvalidateRows` path). step-ab (25fd3942) `-Pairs 2` (no suite row runs Junction): JIT pair 1 1 faster (a11y rename pane, unreachable), pair 2 0/0, A/A clean; AOT 0/0 both pairs, A/A clean; no allocKB moved. Windows Junction 1,203, Headless 1,845; Fedora Junction 1,203 (private D-Bus). |
+| 18 | 49fd9b1e, 8e9155be | vk-swapchain-two-images (question 74 (c); the HDR run not held: the 4K absent) | `VulkanSwapchainChoice.ImageCount`: on Windows the 8-bit swapchain under MAILBOX built at the window's size takes the surface's minimum, never below 2 (2 here; the surface offers 2..8); every other case keeps minimum + 1 (3 here), capped at the surface's maximum: the drag's over-allocated swapchain keeps 3 (over-allocation is MAILBOX-only; this removes the one-refresh drag waits the user had accepted, and the drag's end rebuilds the exact-size swapchain with 2; the third image costs one bucket only while the drag lasts); FIFO and IMMEDIATE keep 3 (under FIFO with 2 each frame after a present would wait for the refresh; neither measured at 2); F16 and off-Windows keep 3. docs/design/HDR.md Defaults row. Real window (NativeAOT, Vulkan, the 1440p 2560×1440 at 100 %, 200 Hz, HDR on, the only monitor; base and change alternated, DXGI local identical in both pairs): Aperture's sign-in page default 38.86 → 33.23 MB (−14.5 %), maximized-sized 79.17 → 65.48 (−17.3 %); Reel SDR playing default 248.33 → 244.58 (−1.5 %), maximized-sized 299.39 → 285.71 (−4.6 %; Reel alone below the 5 % bar on this monitor, the 4K's survey −7.8 %); frames equal; acquire waits over 1 ms 0 in playback, fades and browsing both sides; modal-loop drags while playing base 3/51, 0/46, 3/54, 1/56 (max 1.4 ms), change 2/50, 4/55, 1/56, 2/46 (max 1.6 ms); a capture of presented frame 600 at 2 images (each reused ~300 times) shows content (mean 158.8, 11 colours in 3,782 samples); 0 foreground takes, 0 nvlddmkm, no stall. The HDR (F16) drag run was not held: the desk showed only the 1440p at the start and before the last hold, and the approval names the 4K; F16 stays at 3 (Waiting f16-two-images-hdr-run). Validation: the layer proven loaded by a deliberate fault (the surface's maximum + 1: `VUID-VkSwapchainCreateInfoKHR-minImageCount-01272` ×2, then the probe crashed 0xC0000005, no TDR); the reused-image capture test passes for 8-bit at 2 (resizes, minimize/restore, a drag) and for IMMEDIATE with the layer's log empty and every image count checked; the 8-bit drag test passes (3 during the drag, 2 at its end); 14 other Vulkan probe tests pass. **Two FIFO probe tests failed** (the capture test's fifo case timed out at 60 s; the minimize/restore fifo case drew 8 frames in the second after restore, 10 needed, at 9 loop passes a second): FIFO keeps 3 on unchanged code, not re-run at the base within 3 holds (Waiting vk-fifo-probe-tests-200hz, before the release). Not run: F16 drag/resize tests (F16 unchanged), a monitor change, device loss. vk-instance-extensions-once not taken (no hold left for its proof). step-ab (549a4980) `-Pairs 2` (no suite row runs Vulkan): JIT pair 1 7 slower (a11y 1,000-row and virtual-rebuild rows; the A/A 11 slower on the same rows: noise), pair 2 0; AOT 0/0 both pairs, A/A 0. 3 new unit tests fail under reverse edits. Windows SDL3 83, Headless 1,845, Media 93, Media.Backends 18 (12 skipped), Reel 53, Aperture 459 (23 skipped); Fedora SDL3 74 (5 skipped; the off-Windows +1 pinned), Headless 1,621, Media 93, Media.Backends 18, Aperture 459 and Reel 53 (private D-Bus); HultUI.UiTests does not build on Linux (NETSDK1100), so no Vulkan test ran there. |
 
 ## Examined, not worth it
+
+From the round 18 surveys (details in `17-reports/r18-*`):
+
+- **Aperture keyboard browsing** (0f9c8477; r18-1, r18-2, r18-4, r18-8): no layout pass on ring or Tab-stop moves; 1
+  frame a key, 0.21–0.56 KB render a frame, only bounded layers (disabled page buttons 0.003 Mpx); Tab 0.5 KB; Back and
+  Forward fetch nothing and cost the destination page's build, as Escape did; the history is 100 `Visit`s of three
+  fields; the season watch builds once in 30 minutes.
+- **Aperture's history retention** (r18-4): open/back ×300 1.32 → 1.35 MB after a full GC; 150 different films 1.32 →
+  1.62 MB (text caches); `_arrivalFocus` frees 0.0 KB when cleared.
+- **Deferring each digit or mark proof** (781a857f; r18-5, `TEXT_PROOFAFTER=8`): Junction's first frame 1,585 → 787
+  HarfBuzz calls but 1,462 → 1,345 KB on AOT (−8.0 %, under the churn bar); the start-up bar unlikely (~800 calls of 1–3
+  characters). r18-8 bisected Junction start +7.7 % (once a session) and History Down +5 % to 45cbde7b; r18-5 measured
+  20 History Downs −8.8 KB with the digit table: low.
+- **The 1,172 width hits a split-view sweep** (r18-5): answered by `_cache` at 0 B.
+- **b1423e6e against frame pacing** (r18-3): at most one late frame a browse (gaps 23.5–23.7 ms against a 12–20 ms
+  cadence; a 6–8 ms pause); the next browse commits ~22 MB again (+5,400–5,800 page faults); working set after two
+  browses 150 against 187 MB.
+- **The over-allocated swapchain's present in a drag** (r18-3): over 1 ms in most drag frames; the known trade of
+  drag-only over-allocation (memory `swapchain-maintenance1`).
+- **GL Reel's window-sized cache** (r18-3): Skia 12.49 → 35.74 MB from the default to a maximized size (~4.2 B a pixel),
+  cause not proven; GL is not Reel's or Aperture's renderer.
+- **Opacity-0 layers after 0a7bb324** (r18-2): Skia draws nothing for an alpha-0 layer (a save plus an empty clip), so
+  they hold no GPU memory; Junction's dragged row at 0.4 is bounded (0.026 Mpx).
+- **UIA raises a key** (r18-7): HasKeyboardFocus off/on ~5 % of a key's frame cycles with a reader-like client (dropping
+  them changes what readers hear); the scroll-percent raise ~4 % of a History walk's frame cycles; Commit → History
+  0.6–0.96 M cycles with 0 disconnects; `IRawElementProviderAdviseEvents` never asked for (round 12).
+- **Reactivity in Aperture** (r18-6): a Down that brings a new grid row builds once, for its posters landing (→ step 8);
+  a Home page turn is 2 builds by design; a film page builds 3 times as it opens (navigation and two loads, network
+  timing).
+- **`MediaItem` +72 B** (ee044d36, 93f8a26d; r18-4): 0.7 MB for 10,000 items. `WebViewElement` 632 → 688 B (e66ead9f),
+  one a web view.
+- **BoxElement's share of a reader notch** (r18-1): 24.6 % (4.9 KB, ~4 boxes a row); element size was closed before. A
+  relayout boundary at a now-leaf VirtualList: not measured again (round 5: 1–2 %), a large engine change.
+- **Expert 2's Junction host at 747–790 MB private** (r18-2): its host builds the settings in-process and skips
+  `Program.cs`; the real app's scene ends at 171 MB working set (r18-8). A host artefact.
 
 From the round 17 surveys (details in `17-reports/r17-*`):
 
@@ -933,8 +1046,9 @@ From the round 1 surveys (details in `17-reports/`):
 
 ## Needs the user
 
-No question is open from rounds 1–16. Their answered questions are in the archive
-([round 16's 66, 67 and 68, with round 15's 64](17-performance-team-ledger-archive.md#needs-the-user-round-16),
+No question is open from rounds 1–17. Their answered questions are in the archive
+([round 17's 69–72 and 72b](17-performance-team-ledger-archive.md#needs-the-user-round-17),
+[round 16's 66, 67 and 68, with round 15's 64](17-performance-team-ledger-archive.md#needs-the-user-round-16),
 [round 15's 62, 63 and 65](17-performance-team-ledger-archive.md#needs-the-user-round-15), [round 14](17-performance-team-ledger-archive.md#needs-the-user-round-14),
 [round 13](17-performance-team-ledger-archive.md#needs-the-user-round-13), [round 12](17-performance-team-ledger-archive.md#needs-the-user-round-12),
 [round 11](17-performance-team-ledger-archive.md#needs-the-user-round-11),
@@ -943,45 +1057,59 @@ No question is open from rounds 1–16. Their answered questions are in the arch
 [round 7](17-performance-team-ledger-archive.md#needs-the-user-round-7), [round 6](17-performance-team-ledger-archive.md#needs-the-user-round-6)). Search it by candidate id
 before asking anything an earlier round asked. Recommendations in brackets. Question 50 (a11y-gate-on-client)
 was answered "not yet", then **build** (2026-11-16; built in round 16); 51 (after-layout-callback)
-"only if another app needs it" (closed by 7c0a3b79); 57 (text-open-measures-every-line, full) "not now" (Waiting).
+"only if another app needs it" (closed by 7c0a3b79); 57 (text-open-measures-every-line, full) "not now" (Waiting);
+72b (a file as its own F3 partner in Vesper) → (2), F3 does nothing there (Waiting vesper-file-not-its-own-partner).
 
-Round 17 questions (from the survey, 2026-11-19). Recommendations in brackets.
+Round 18 questions (from the survey, 2026-11-22). Recommendations in brackets. Where Back lands in Aperture (step 3)
+is not asked: 0f9c8477 and History.cs already promise "back where you were scrolled"; step 3 keeps the scroll offset.
 
-69. **The video player's bar fade** (r17-2, r17-3; step 6 (b)): the player's control bar fades through a window-sized
-    layer that Skia keeps for the window's life: in Reel +12 MB of GPU memory at its default size and +32 MB near
-    maximized (~48 MB in 4K fullscreen by arithmetic, ~96 MB on an HDR swapchain), private +13…+23 MB. Giving the slider
-    and the bar's glyphs their paint bounds shrinks the layer to the bar (−93 % of its area): GPU −12…−30 MB, private
-    −14…−16 % a playing window. During the 0.3 s fade-out and 0.15 s fade-in, 1–2 pixels of the full-screen icon are one
-    level off (1 of 255) in 50 of 111 frames; every other frame is byte-identical. (a) Keep today's fade. (b) Bounds,
-    with the one-level change. [(b): the same kind of change as question 68's.] → **(b)** (2026-11-19, the user). Before/after images of the fade frames
-    on request (headless, `PAINT_DUMPDIR`).
-70. **Colours before rows** (r17-6; step 4's route (a)): moving to a file in Junction's Commit view draws its diff plain
-    and the colours land a few frames later; today every row on screen is then made again (a first visit costs about
-    twice a revisit's bytes and 2 frames). (a) Hold the file's first frame until its colours land when the tokenize is
-    short: 1 frame, about −50 % bytes a first visit, the diff shows a little later. (b) Draw plain at once and recolour
-    the rows in place when the colours land: step 4, no decision needed, −36…−40 %. [(b) now; (a) only if step 4's
-    numbers leave a difference worth a later first frame.] → **the recommendation** (2026-11-19, the user). Step 4
-    (b3bb93bd) landed −29…−35 %; (a) would add −25…−32 % and 2 → 1 frames a first visit with the diff shown later by
-    the tokenize's time: not built (Waiting junction-colours-before-rows-route-a).
-71. **Jellyfin's user** (r17-8): jellyfin.home has 3 users, so an API-key sign-in needs a user name (the host logs
-    `signin=NotFound: … has 3 users — name the one to browse as`; this is why round 16's sign-ins returned
-    `library=none`). Name the user the surveys should browse as (`START_APERTURE_USER`), or leave Aperture's library
-    unmeasured. [A user with a small library, or a test user.] → the user named the account (2026-11-19); it is in
-    memory `aperture-jellyfin` and in each brief, not in committed docs (the repository is public).
+73. **The drag ghost's layer** (r18-2; step 11 (b)): Junction's repository drag (the sidebar reorder, the only in-window
+    drag in the apps) draws its ghost through a window-sized layer that the GPU keeps for the window's life: +18 MB of
+    GPU memory at the default size after the first drag (about 48 MB maximized on the 4K, by arithmetic). Bounding the
+    ghost's layer removes it (−27 % of the window's GPU memory), but during a drag 23 of 29 frames differ in 2–5 pixels
+    at the ghost's edges by up to 6 of 255 (the layer's origin moves; frames before and after the drag are identical).
+    (a) Keep today's ghost. (b) Bounds, with that change. [(b): the same kind of change as questions 68 and 69, during a
+    drag only.] Before/after images on request (headless, `PAINT_DUMPDIR`).
+74. **Two swapchain images on Vulkan** (r18-3; step 12): Reel and Aperture hold 3 swapchain images; 2 save GPU memory
+    all session (Reel maximized-sized −30 MB in SDR, about −180 MB in HDR playback; Aperture −17 %) with the same frames
+    in playback, but in a window drag while a video plays about 40 % of frames wait up to one refresh (8.5–9.1 ms at 120
+    Hz) against 2 of 57 with 3. The HDR (F16) drag with 2 images is unmeasured: it is the HDR held-drag run that needs
+    your approval. (a) Keep 3. (b) 2 for the 8-bit swapchain only (SDR video and browsing). (c) (b), and one guarded HDR
+    drag run in the build (an HDR clip on the 4K, a maximized-sized window, stopping on any stall over 1 s) to decide
+    F16. [(b) now; (c) if you approve the run.]
+75. **Keep the page Back returns to in Aperture** (r18-6): Back to Home or a library makes the whole page again (Home
+    323 elements, 322 KB; a grid 336, 338 KB). Keeping that one page hidden while away (~330 elements, ~0.3 MB) would
+    make Back about −80…−90 %, but goes against REACTIVITY.md's rule that a replaced view is let go (the Meridian leak).
+    (a) No. (b) Keep one page. [(a) for now: steps 7–9 shrink Back's builds first; ask again with their numbers if Back
+    still matters.]
+76. **Aperture with a screen reader** (r18-7; not perf): (1) Escape from a library opened from the rail goes Back to
+    Home, whose cursor was never set, so the keyboard focus goes nowhere and the reader stays on a gone element until
+    the next arrow; (2) Enter on a card opens its page and the reader hears only "Play, button", not the film. (a) Back
+    and Escape focus the page's cursor card, or its first card when there is none, and Play's name carries the title
+    ("Play <title>"). (b) Leave both. [(a); a small app change that can ride with step 3.]
+    → the user asked for images and the image diff first (2026-11-22): sent the three frames that differ most (f015,
+    f021, f029: 7, 4 and 5 pixels, max 6/255, at the ghost's left edge, the status dot and the right edge) at 3× with
+    the differing pixels marked, and a whole frame for context (`r18-painting\images\`, `ghost_images.py`). → **(b)**
+    (2026-11-22, the user, after the images: "It looks fine after the changes so lets go ahead with it.").
+    → **(c)** (2026-11-22, the user: "b and do the test"): 2 images for the 8-bit swapchain, and the one guarded HDR
+    drag run in step 12 (an HDR clip on the 4K, a maximized-sized window, modal-loop steps, stop on any stall over 1 s)
+    decides F16.
+    → **(a)** (2026-11-22, the user): no.
+    → **(a)** (2026-11-22; the user's second answer read "75: a", taken as 76: a — correct it if not): it rides with
+    step 3 as its own commit.
 
-72. **A file as its own F3 partner in Vesper** (step 5, 6751a51a): with both panes on the same folder and the other
-    pane's cursor on ".." or a folder, Vesper pairs the cursor's file with the same file in the other pane, rings it,
-    and moves that ring with every cursor key, so each key builds the window (29.5 KB a key against 2.2 KB; expert 8's
-    real window 32.9 KB). Comparing a file with itself shows no difference. (a) Keep it so. (b) Never pair a file with
-    itself: no ring there, and F3 does what it does with no partner. [(b), if F3 with no partner opens the file as
-    usual; the build agent checks that first and shows the before/after ring.] → **(b)** (2026-11-19, the user; step 11).
-72b. **The same, now that F3 is known** (step 11 stopped, 2026-11-20): F3 is "Compare files", and with no partner it
-    opens the diff as "Right file missing" with a "Copy left → right" button, so (b)'s condition does not hold; in the
-    self-pair layout F3 today shows "Files are identical". Which instead? (1) Drop only the ring there (F3 keeps showing
-    "Files are identical"; the ring then no longer always marks what F3 opens). (2) F3 does nothing there, as on a
-    folder, and nothing is ringed (the rule stays "a ring marks what F3 compares"). (3) F3 opens the viewer there (new
-    behaviour). (4) Keep it as it is. Each of (1)–(3) also removes the per-key build (29.5 → 2.2 KB a key).
-    [(2): comparing a file with itself is never useful, and it keeps the ring's meaning.]
+77. **Aperture: focus on a page opened by a number key or the palette** (step 3, r18b3; not perf): after step 3, Back
+    and Escape focus a card, but a page that has no cursor opened by a number key (Digit2) or the command palette from a
+    film page still leaves the keyboard focus on nothing, as before step 3 (no focus event; a reader stays on a gone
+    element until the next arrow). (a) Focus the page's cursor card, or its first card on screen, on every way into a
+    page, as Back and Escape now do. (b) Leave it. [(a): the same rule everywhere; a small app change, its own commit
+    with step 7.]
+    **Answered (a)** by the user 2026-11-23 ("Yes it should"): its own commit with step 7 (r18b7).
+78. **Junction: where a wrapped diff row's line numbers sit** (step 14, r18b14; not perf): today a wrapped row's line
+    numbers are left-aligned and sit on the row's last visual line (step 14 kept that and its tests pin it). Most diff
+    viewers put them on the first line, right-aligned. (a) Move them to the first visual line, right-aligned (pixels
+    change in wrapped rows only). (b) Leave them. [(a) reads like other diff viewers; a small app change, its own commit
+    before the release.]
 
 Reminder (expert 8): Aperture signed in to jellyfin.home as device "aperture-survey" in earlier rounds, as "aperture-r13" in round 13 (and twice in round 15), and once in
 round 12 as "aperture-r12" (again in round 15); the user should remove those devices and revoke the API key when the work is done.
@@ -1013,7 +1141,7 @@ destroy-first path, SdlVulkanHost.cs:845, or the depth/stencil request); surveys
 
 ## Log
 
-From 2026-11-18 (round 16's survey); earlier entries are in the archive ([to 2026-10-25](17-performance-team-ledger-archive.md#log-2026-10-07-to-2026-10-25),
+From 2026-11-19 (round 17's survey); earlier entries are in the archive ([to 2026-10-25](17-performance-team-ledger-archive.md#log-2026-10-07-to-2026-10-25),
 [2026-10-26 to 2026-10-27](17-performance-team-ledger-archive.md#log-2026-10-26-to-2026-10-27),
 [2026-10-27 to 2026-11-02](17-performance-team-ledger-archive.md#log-2026-10-27-to-2026-11-02),
 [2026-11-02 to 2026-11-03](17-performance-team-ledger-archive.md#log-2026-11-02-to-2026-11-03),
@@ -1024,131 +1152,9 @@ From 2026-11-18 (round 16's survey); earlier entries are in the archive ([to 202
 [2026-11-12, round 12](17-performance-team-ledger-archive.md#log-2026-11-12-round-12),
 [2026-11-12 to 2026-11-13, round 13](17-performance-team-ledger-archive.md#log-2026-11-12-to-2026-11-13-round-13),
 [2026-11-13 to 2026-11-14, round 14](17-performance-team-ledger-archive.md#log-2026-11-13-to-2026-11-14-round-14),
-[2026-11-14 to 2026-11-16, round 15 and the screen-reader fix](17-performance-team-ledger-archive.md#log-2026-11-14-to-2026-11-16-round-15-and-the-screen-reader-fix)).
+[2026-11-14 to 2026-11-16, round 15 and the screen-reader fix](17-performance-team-ledger-archive.md#log-2026-11-14-to-2026-11-16-round-15-and-the-screen-reader-fix),
+[2026-11-18 to 2026-11-19, round 16](17-performance-team-ledger-archive.md#log-2026-11-18-to-2026-11-19-round-16)).
 
-- 2026-11-18: round 16 survey started in a fresh context (session b6ef64d9; usage 39 % weekly, the 5-hour window 44 %).
-  Main had moved by 59 commits (41 outside plan 17 not yet reviewed: SkiaSharp 4.156 with HarfBuzzSharp 14.4 drawing
-  in BGRA, which plan 18 measured as headless paint rows 2–5× faster and cold Segoe UI words +14 %; SDL 3.5.0; the app
-  team's fixes; `Element.OnLayoutChanged`, which bears on Waiting's after-layout-callback); merged into the branch as
-  cd699003, no conflicts. Moved to the archive by a checked script (`archive_r16.py`; every moved line found there,
-  nothing lost): round 14's 10 Landed rows, round 15's build order with its closed-from-Waiting note, questions 62, 63
-  and 65, and round 14's 130 log lines (2026-11-13, its survey, to its release on 2026-11-14). Attached: both monitors
-  (the 4K at 150 % primary, the 1440p to its left; the primary reads 119 Hz). Steam is running (it holds 1 ms timer
-  resolution machine-wide). The eight experts survey round 15's build, 587f1767..75f2288a, and main's 41 commits, in
-  their own worktrees on the archive commit, in real windows too; spawned after the 5-hour window resets (a survey used
-  63 points of one in round 15).
-- 2026-11-18: round 16 survey done (reports fbb0240c..32c85e81, `17-reports/r16-*`; experts 8 and 7 from 23:52 UTC, the
-  other six after the 01:10 reset, all in by 02:00; 39 → 47 % weekly). Expert 4 satisfied, the rest not. Review
-  objections: 52852f6e against f388b11d (a kept wrap range brings back the "SAME DA" wrap once the shape cache turned
-  over; expert 5) → step 1; c32c4b2e (expert 8 bisected Junction's wrapped diff 0.95 → 1.90 frames a resize step; experts
-  1 and 6 found it only in resizes made inside posted work or a handler — the survey harnesses' posted `SetWindowPos` —
-  never in a user's drag) → step 2. Main's 41 commits: no real-app regression (SkiaSharp 4's GL frames equal; +16–24 B
-  an element from three new fields, below the bars). Expert 8's ~40 MB GL jump was NVIDIA's shader compiler on a
-  per-exe disk-cache miss after the Skia update (experts 2 and 3 independently; closed). Merged into a 10-step build
-  order: the two decided a11y items as steps 3–4, the dialog fade's kept layer (experts 2 and 3 together) as step 5,
-  question 66 (does "a client listens" follow the gate?) and 67 (how a dialog fades) asked, 8 Waiting items closed,
-  4 marked outside plan 17. Real windows: ~130 guarded launches in 21 holds of `Global\HultUI-r16-desktop`, 0
-  foreground takes, 0 driver events, 0 screen reads. Jellyfin sign-in failed (`library=none`): Aperture's library not
-  measured. For PERFORMANCE.md: a GL memory jump with one long flush is usually the driver compiling shaders (check
-  `GLCache` writes; run a scene twice per exe); resize harnesses must step on the window's own thread outside any batch;
-  every Element field is paid on every element (a bool is free only while the byte fields have room). Phase → build.
-- 2026-11-18: round 16 step 1 landed (40cadb57; captures 8c6d45de): a kept wrap range no longer answers a width where
-  one line holds the text whole (64/64 probe asks and 3 real archive layouts differed before, 0 after; corpora and step-ab
-  clean). For PERFORMANCE.md (testing): the 48k/240k/CJK corpora never evict between two widths, so they miss
-  cache-turnover bugs; round 15's full real-document comparison (`r16b1\eq`, ~65 s) caught this one — run it for any change
-  to the wrap or one-line path. Next: step 2.
-- 2026-11-18: round 16 step 2 landed (ec57c4ee, 5766a137; captures 84106f2b): a resize made inside posted work or a
-  handler builds in the size message's frame (posted steps 1.90 → 0.95 frames, a user's drag unchanged), and Aperture's
-  and Reel's fullscreen toggles draw the right controls in their first frame. A throwing build inside a posted resize is
-  now logged by SDL's event watcher instead of reaching `Run`, as any live-frame build already was. The UiTests that
-  toggle fullscreen on the desktop were not run (they belong to the full suite's opt-in set, if at all). For
-  PERFORMANCE.md: write what the new frame shows before any call that resizes the window; harnesses that post
-  `SetWindowPos` now count the frames a user gets. Next: step 3.
-- 2026-11-18: the user answered questions 66 and 67 with the recommendations: "a client listens" follows the gate
-  (66 (a), with a live Narrator check of Meridian's preview; step 4), and a dialog fades its scrim's colour and its panel
-  separately (67 (b); before/after images of the fade at frames 2, 5 and 8 to the user before the commit, (e) if they
-  show a visible difference; step 5).
-- 2026-11-18: round 16 step 3 landed (41ecec65; captures 9c21b2b6): UIA serves a list over 200 items on demand, AT-SPI
-  keeps 2,000 (a ref move with History −54.5 % UI bytes, Vesper's navigation −42 %, raises ~1,000 → 3); a key move in a
-  served list costs more (Vesper 1.7 → 3.0 KB a key: Waiting a11y-served-item-one-provider-per-tell). The agent took a
-  5th desktop hold (6.6 s) past the 4-hold cap, and a first UiTest draft read the desktop's real focused element (a
-  browser tab's title landed in a log, deleted; the orchestrator checked `r16b3\` for browser titles: none left). Briefs
-  from step 4 on say: a test never reads another process's UI. For PERFORMANCE.md: a bridge wrapper must pass on the
-  wrapped bridge's limit or tests silently run at the old one; a UI-thread `GetItemLabel` over item rows allocated an
-  array as long as the list. Next: step 4.
-- 2026-11-18: round 16 step 4 landed (0d96e805, b02b46d6, 32fffce7; captures 3211f964): a window builds its UIA tree
-  only once a client asks for its root, and "a client listens" waits for that ask too (question 66 (a)); with no reader
-  asking every app's a11y work is 0 (Vesper 10 Downs −42 % UI bytes, Meridian's preview open −23 %); a focus-only
-  listener still hears every focus event (UI Automation asks the root for it). step-ab caught a regression of (b) — a
-  terminal subscribed to a static event and every disposed window's terminal kept reading its screen — fixed in
-  32fffce7 before the captures. The user's live Narrator check of Meridian's preview is open (`r16b4\live\`,
-  CHECKLIST.md); the release waits for it. For PERFORMANCE.md: an element must never subscribe to a static event
-  (`Window.Dispose` does not unmount, so it lives on as hosted). Next: step 5 (images to the user before its commit).
-- 2026-11-18: round 16 step 5 at its stop point: option (b) built (Dialog.cs `FadeIn`: the scrim's colour from alpha 0,
-  the panel's own opacity through `Element.Restyle`), uncommitted; headless Junction palette at 2160×1350: only the panel
-  area changes, frame 2 max 35 of 255 (dark 105,056 px > 8, light the whole panel), frame 5 max 22–24, frame 8 max 8–9,
-  the last frame identical; images sent to the user (light frames 2 and 5, dark frame 2). Waiting for the user.
-- 2026-11-18: the user looked at the fade images and approved (b): "Commit it, I think it looks fine and it's only a
-  few ms." Step 5's agent resumed to finish its proof and commit.
-- 2026-11-18: round 16 step 5 landed (96d00ab3; captures 05673aba): a dialog fades its scrim's colour and its panel, not
-  a window-sized layer (first open GPU memory +18 → +8 MB on GL, +32 → +8 maximized on the 4K; private −16…−25 % at the
-  scene's end); a gated UiTests guard holds it. The user will do the Narrator check of Meridian's preview (question 66)
-  after step 10, so it doesn't disturb a performance run (2026-11-18, the user); the full suite and the release follow
-  it. For PERFORMANCE.md: never fade a window-sized element by its `Opacity` (a window-sized layer whose GPU texture Skia
-  keeps for the window's life). Next: step 6.
-- 2026-11-18: round 16 step 6 landed (89732bec; captures ca94d190): a gradient's shader is kept by its size, so
-  History's moving "Details →" gradient makes 3 shaders in 20 keys instead of 20 (17 of 20 key frames 0 B in the render
-  phase). One pixel change: Meridian's 1 px welcome rule, moved at two window sizes at scale 1.0, has 14–25 pixels one
-  level (1/255) off; asked as question 68 (keep, or revert 89732bec; recommendation keep). Next: step 7.
-- 2026-11-18: round 16 step 7 landed (3d728568, 13a1b363; captures 6c08a046): wrapped bodies measure at their width in
-  `OnLayoutChanged`, not after the frame. Junction's first wrapped Commit open 7 → 3 builds, −18 % UI bytes, no
-  wrong-height frame; opens after a resize −31…−41 % time. The survey's Vesper −48 % did not exist (only −2 %; the real
-  waste was an open after a resize, half the line measures). Kept with one trade, the orchestrator's call: the session's
-  first Commit open +9 % CPU time (its markdown colours now land after the rows were drawn and remake them, ~21 Mcycles)
-  → Waiting junction-colour-landing-remakes-rows. For PERFORMANCE.md: measure at a width in `OnLayoutChanged` once the
-  element has a box. Next: step 8.
-- 2026-11-18: round 16 step 8 landed (49b0da84; captures fda77e01): Junction's wrapped diff fits its rows to a width
-  step in place with no build (Commit −54…−66 % UI bytes a step, Changes −10…−25 %; the survey's −80…−90 % not reached:
-  the heights pass is what is left). Only the 1440p was attached for the real-window run. Next: step 9.
-- 2026-11-18: round 16 step 9 landed (f76cb440, 80e94eeb; captures 40ba50e2): a cancelled big-file tokenize resumes, and
-  Junction keeps the cancelled files' texts (≤ 16 MB). Colours land 55 % sooner on a stop over an unvisited big file,
-  gen-2 GCs while browsing big files 4–6 → 0, all-thread bytes only −3…−8 % (the survey's −29 MB a revisit did not hold:
-  the worker tokenizes until the next key either way); kept with a bounded retained cost (+11 MB after browsing big files),
-  the orchestrator's call. Lead for the next survey: skip the old version's walk through stretches both versions share once
-  the two states match (~half of each big-file pass). Next: step 10.
-- 2026-11-18: round 16 step 10 measured, no code change (5da967d2, DECISIONS.md): a GL window's tween bursts fill an
-  NVIDIA pool of write-combined memory that levels off after the first few bursts (Vesper nonlocal 11.6 → 23.6 MB, then
-  flat over 50 visits and a 30 s rest; Junction 15.1 → 23.1, its palette's ceiling 25.1); Skia's cache flat; Vulkan +2.5
-  MB then level. Round 16's build order is done. Next: the user's Narrator check of Meridian's preview (question 66;
-  `r16b4\live\CHECKLIST.md`), then the full suite (Windows, Fedora with the four app projects each in a private D-Bus
-  session, docfx), then release.
-- 2026-11-19: the user's live Narrator check of Meridian's preview (question 66, step 4's `r16b4\live\` build) passed:
-  "It works as expected in the checklist." Main had moved by 7 commits (VirtualList cursor apart from the selection,
-  lists in columns, the app id from the application, KeyChord Super, a million-row PerfSuite row, Roslyn's version, a
-  TODO); merged into the branch as 666e6486, one conflict (VirtualListAccessibilityTests.cs: both sides added tests,
-  both kept), the merged tree built.
-- 2026-11-19: round 16's full suite at 666e6486, 00:20–00:37: Windows `HultUI.slnx` 30 projects, 0 failures (Junction
-  1,166 in 9 m 9 s); docfx 0 warnings; Fedora the slnf 22 projects and Junction 1,166, Meridian 680, Aperture 369, Reel 53
-  each in a private D-Bus session, but **VesperCommander 1 failure**: step 7's `WrapResizeFrameTests` (3 of 3 reruns of
-  the class failed one or both tests). Cause (expert 1): a timing race in the test — on Fedora the 22 KB read lands
-  before the first frame drains the UI queue, so that frame draws the text and "Loading…" is never drawn (1 frame, not
-  2); the one-frame open is correct (each line measured once at the laid-out width, nothing built after the frame); it
-  failed 1 of 2 at 3d728568 too (step 7's Fedora pass ran the whole slnf at once, which slowed the read). Fixed in
-  89506c22: an internal `ViewerLoadGate` (null in shipped code, modelled on `DiffCompareGate`) and `HoldViewerLoad()`;
-  the tests hold the read until the waiting view is drawn and also assert that the first frame shows it; the class 10/10
-  on Windows, 5/5 on 2 cores, 10/10 on Fedora, VesperCommander.Tests whole 953 (+4) / 935 (+20); both tests still fail
-  under a reverse edit of step 7; the shipped path's `Task.Run` of an async lambda +80 B an open. Main moved again by
-  one Junction change (791d1a44: a staging move is settled only by its own command); merged as 5e180d17 (clean);
-  Junction.Tests re-run on Windows and Fedora on the merge: Windows 1,167 and Fedora 1,167 (private D-Bus), 0 failures. Phase → release.
-- 2026-11-19: round 16 RELEASED. Merged into main b131ae85 and pushed (origin/main 227e9462 in the branch, tree identical
-  to the tested branch; the primary checkout fast-forwarded behind the guard). CI run 44426151547 green on the first
-  attempt (test, test-linux, docs, meridian-keyring on Ubuntu and macOS); "Push on main" green. The user asked for app
-  releases: junction-v1.29.0, vesper-v1.29.0, meridian-v1.12.0, aperture-v1.27.0, reel-v1.13.0 on b131ae85 (99 commits
-  since the 1.28.0 set: SkiaSharp 4, SDL 3.5.0, Jellyfin.Sdk 2026.10.12, round 16), pushed 3 + 2, all five installer runs
-  started. Round → 17, Phase survey, in a fresh context.
-- 2026-11-19: all five app releases published: Vesper, Meridian, Aperture and Reel green on the first attempt; Junction
-  green on attempt 2 (attempt 1 red on Vesper's `KeptRowTests.AFolderMeasuredWithSpace_ShowsItsTotal`, the known flake
-  plan 18 saw: a 10 s wait for a background folder size under load; it passed in Vesper's own run).
 - 2026-11-19: round 17 survey started in a fresh context (session 35903ed7; usage 65 % weekly, the week resets
   2026-11-22 03:00 UTC; the 5-hour window 6 %). Main unmoved since the release (b131ae85). Moved to the archive by a
   checked script (`archive_r17.py`; every moved line found there, nothing lost): round 15's 12 Landed rows, round 16's
@@ -1253,3 +1259,179 @@ From 2026-11-18 (round 16's survey); earlier entries are in the archive ([to 202
   (Junction 1,188 in 10 m 5 s, Core 5,212, Headless 1,822, Text 324, Skia 471); Fedora the slnf (22 projects) and
   Junction 1,188, Meridian 680, Aperture 370, Reel 53 each in a private D-Bus session, 0 failures; docfx 0 warnings, 0
   errors. Phase → release.
+- 2026-11-20: round 17 RELEASED. Merged into main e799c23b and pushed (origin/main 3c6d6a5b in the branch, tree identical
+  to the tested branch but the ledger; the primary checkout fast-forwarded behind the guard). CI run 44653899561 green on
+  the first attempt (test, test-linux, docs, meridian-keyring on Ubuntu and macOS); "Push on main" green. Round 17 in
+  sum: 8 build steps landed, a Junction Linux watcher bug fixed on the way, steps 9–10 queued and step 11 waiting for
+  question 72b. Real-app results: a wrapped Junction resize step about a quarter of round 16's (steps 1 and 8), a save
+  that leaves a diff's texts as they were keeps its colours (288.7 → 9.4 MB an event), Junction's big-file working set
+  202.6 → 134.1 MB, big multi-hunk diffs coloured with 32–45 % fewer lines walked, first file visits −29…−35 %, view
+  switches −27…−47 %, the player bar's first fade 12–32 → 0–2 MB of GPU memory. Usage 65 → 85 % of the week. Round → 18,
+  Phase survey, in a fresh context after the weekly reset.
+- 2026-11-20: the user answered question 72b: (2), "b" — with both panes on one folder, F3 does nothing on a file whose
+  only partner is itself (as on a folder) and nothing is ringed. Step 11 goes at the head of round 18's build order as a
+  decided item (Waiting vesper-file-not-its-own-partner).
+- 2026-11-22: round 18 survey started in a fresh context (session 00f54f03, after the weekly reset; usage 1 % weekly,
+  the 5-hour window 7 %). Main had moved by 5 commits (fe8f4ecf: a control outside the framework can arm text input;
+  Aperture's browser-style page history, whole-app keyboard use and New seasons row, 0f9c8477, ee044d36, f67b25ec,
+  93f8a26d); merged into the branch as b28e9128, no conflicts. Moved to the archive by a checked script
+  (`archive_r18.py`; every moved line found there, nothing lost): round 16's 10 Landed rows, round 17's build order with
+  its closed-from-Waiting note (its untaken steps 9 and 10 copied into Waiting first, with their evidence), questions
+  69–72b, and round 16's 123 log lines (2026-11-18, its survey, to the app releases on 2026-11-19). Attached: both
+  monitors (the 4K at 150 % primary, 120 Hz; the 1440p at 100 %, 120 Hz, to its left). Steam is running. The eight
+  experts survey round 17's build and main's 18 commits outside plan 17 since round 17's survey, in their own worktrees
+  on the archive commit aa3a3696, in real windows too (desktop lock `Global\HultUI-r18-desktop`); all eight spawned at
+  ~09:45 UTC.
+- 2026-11-22: round 18 survey done (reports 4a15613a..f5124ce0, `17-reports/r18-*`; all eight spawned at ~09:45 UTC, all
+  in by ~10:35; 1 → 8 % weekly, the 5-hour window 7 → 54 %). No expert satisfied. Review objections: e790d321 (a size
+  ask answered from the width cache leaves a stale wrap range after a return to the opening width; expert 5) → step 2;
+  0f9c8477 (Aperture's Back to a scrolled library lands at the top, against the commit's own promise; expert 6) → step
+  3. Round 17 helped the real apps (expert 8: Junction first file visits −22 %, view switches −4…−40 %, bigrepo working
+  set at rest 202.4 → 134.9 MB, the player bar's first fade +12 → +2 MB); main's plan 19 merge costs Junction's start
+  +7.7 % once a session (low). Expert 7 found round 17's 82.8 % "other" share to be a frame-log trap and the real cost
+  of a UIA client: 0.56–0.73 ms a `UiaDisconnectProvider` on the UI thread (step 5). Experts 1 and 4 measured the
+  selectable-label wiring apart (−4 % alone headless, −11…−16 % with the children set in the real window): one step,
+  separate commits, owner 1. Five Aperture candidates from main's new features (steps 3, 6–9). Merged into a 14-step
+  build order headed by the decided step 1; questions 73 (the drag ghost's pixels), 74 (two swapchain images), 75 (keep
+  Back's page) and 76 (Aperture with a reader) asked; 8 Waiting items closed, 2 added. Real windows: ~80 guarded
+  launches in 17 holds of `Global\HultUI-r18-desktop`, 0 foreground takes, 0 driver events, 0 screen reads; both
+  monitors attached throughout. Expert 8 signed in to Jellyfin as the named user. Older scratchpads' publishes have lost
+  their DLLs (a cleanup); re-publish. For PERFORMANCE.md: a `SetWindowPos` resize without `WM_ENTERSIZEMOVE` rebuilds a
+  Vulkan swapchain every step (stand-ins for a user's drag send the pair); read `Performance` after `EndFrame`, not in
+  `FrameRendered`; a picture cache bounded by entries, not bytes, grows with every big picture shown; a component's own
+  context-menu provider must survive a patch. Phase → build.
+- 2026-11-22: the user answered question 74 → (c) ("b and do the test": 2 images for the 8-bit swapchain, and the
+  guarded HDR drag run in step 12), 75 → (a), and 76 → (a) (the message said "75: a" twice; the second taken as 76).
+  Question 73: the user asked for the images and the image diff first; the three frames that differ most and a whole
+  frame were sent (`r18-painting\images\`). Step 1 is building (agent on `brief-r18b1.md`).
+- 2026-11-22: the user answered question 73 → (b) after the images ("It looks fine after the changes so lets go ahead
+  with it."): step 11 (b) bounds the drag ghost's layer, with the edge pixels it changes.
+- 2026-11-22: round 18 step 1 landed (ca72af3e; captures 6d5dff93): in Vesper a file is never its own F3 partner, so
+  with both panes on one folder and the other cursor on ".." or a folder a cursor key builds nothing (29.2 → 1.2 KB a
+  key) and F3 does nothing there, as on a folder (question 72b (2)). The agent also treats the other cursor resting on
+  the same file as a self-pair (a walk over it builds twice, 2.0 → 6.5 KB a key over 10 keys). Next: step 2.
+- 2026-11-22: the user on step 1's extra call: "keep the self-pair walk as it is" (the other cursor resting on the same
+  file stays a self-pair: no ring, F3 does nothing; a walk over it builds on the key onto it and the key off it).
+- 2026-11-22: round 18 step 2 landed (e546143d, 3191b065; captures fc885fc2): the objection to e790d321 is answered —
+  a size ask answered from the width cache puts the layout's wrap range back, so a resize drag after the window returns
+  to the width a view opened at no longer breaks every row again (Junction split −21…−22 % a step, real window and
+  headless; 574f43a7 −34 %; Vesper's zh drag back to round 17's itemizing). The second commit fixed the first's own
+  +0.5 KB on a suite row by reading the range's bytes from the cache entry's weight (8 B a node instead of 16). For
+  PERFORMANCE.md: a field added to a long-lived cache entry is paid on every node, so read what the entry already holds
+  first; NativeAOT's per-phase UI bytes vary between identical runs, so take exact bytes from JIT and counts from AOT.
+  Next: step 3.
+- 2026-11-22: round 18 step 3 landed (ab4069ca, 5b7a4494; captures 5f61fb12): the objection to 0f9c8477 is answered —
+  Aperture's Back, Forward, Escape, mouse back and rail reopen land where the grid was scrolled, the cursor's card focused
+  (the keys after a Back 279.1 + 75.6 KB → 0.4 + 0.4 KB, 0 builds); a wheel is no longer pulled back to the cursor by
+  a build; with question 76 (a) Escape to Home focuses a card and Play and Resume name the film for a reader. The desk
+  changed: only the 1440p (100 %, 200 Hz) was attached for the real window. Question 77 asked (a page with no cursor
+  opened by a number key or the palette). For PERFORMANCE.md: a view that lets go of its elements keeps what its next
+  build needs (scroll offset, cursor) in the model; reveal a cursor when it moves, not on every build, or the wheel
+  fights it. Next: step 4.
+- 2026-11-22: round 18 step 4 landed (3442c3f5, 30a53f02, f97a6736; captures 89ecaeff): a text field's or selectable
+  label's right-click menu acts on the live element after a rebuild (it acted on a detached copy); selectable labels
+  wire shared handlers (880 → 248 B to make one); a VirtualList's window move builds no set and no new array. Wheel
+  notches in the real window: Junction Commit −12.0 %, History −5.3 %, Vesper's reader −16.2 %, compare −11.5 %;
+  step-ab 0 slower on both runtimes, 31 suite rows' bytes down. Found: Meridian's RunnerView tests fail "N builds of the
+  results" in 4 of 20 full-suite runs, at the base too (a timing race in the test; CI may hit it) → Waiting
+  meridian-runnerview-build-count-flake, to fix before round 18's full suite. For PERFORMANCE.md: an element's own
+  wiring uses static handlers that read `e.CurrentTarget` in one exact array; an element's own delegate never goes in a
+  public property a patch copies. Next: step 5.
+- 2026-11-22: round 18 step 5 landed (8b7471c8; captures fada66d3): with a screen reader or any UIA client asking, the
+  providers a frame lets go are told to UI Automation on a thread of their own: Junction's palette close 8.2–8.9 → ~1.0
+  ms wall (−88…−89 %), the first Commit open −13…−18 %, the first palette Down's 3–5.5 ms disconnect off the UI thread;
+  the same events reach the client. For PERFORMANCE.md: `UiaDisconnectProvider` costs ~0.6 ms on the UI thread with a
+  real client (headless never shows it); a test that reads `ProviderDisconnected` flushes first; compare timing-dependent
+  reader event streams across several runs as sets of variants. Next: step 6.
+- 2026-11-22: round 18 step 6 landed (678a786c; captures b33b1ef6; the declined part in DECISIONS.md): Aperture keeps
+  its heroes by their bytes and frees one let go at once: after 20 item pages on the real server private −7.1 %, working
+  set −6.0 %, DXGI local −7.5 %; back at Home −7.6 %. The survey's ~+600 MB over 20 pages did not exist (heroes were
+  already capped at 4: +179 MB). Dropping the decoded copy after upload (−67 MB) declined: no device-loss path. Lead →
+  Waiting skia-rest-purge-vulkan (a rest-time `PurgeUnusedResources`, ~−70 MB at Aperture's Home). For PERFORMANCE.md: on
+  NVIDIA Vulkan GPU textures and staging buffers count in private bytes, ~1 s behind a purge; a probe's own output must
+  never contain the driver's stop marker (`MEM `). **Paused by the user after step 6 (2026-11-22, "Pause after step 6 and
+  resume at midnight"):** a one-time timer re-runs the loop at 2026-11-23 00:00 local. Next: step 7.
+- 2026-11-23: round 18 step 7 landed (941cffdf, 0f5cda09, question 77 (a) 421cc677; captures f26168b7): Aperture's title
+  bar and rail build only when what they show moved, by a value compared on every app build (no call site marks a part;
+  the forced-build oracle green), and each rail door is its own kept part. Headless Enter 167.4 → 72.9 KB (−56 %), Forward
+  78.7 → 32.9 (−58 %), library first open 753.6 → 564.8 (−25 %), a paging build 237.6 → 139.9; real window Enter 180.4 →
+  86.4 KB, part builds 4 → 1. Question 77 (a): every way into a page hands its first card the keyboard (Aperture has no
+  command palette; a click or Tab during a slow load keeps the keyboard). For REACTIVITY.md / the guidelines: compare a
+  part's value on every build rather than list call sites that mark it; read loaders untracked in the owner's compare; a
+  kept part is outside the window's tree during the owner's build (`IsInTree`/`IsHosted` false), so check focus after
+  it; make per-item parts once and keep them by slot. Known quirk, unchanged: after a sign-in to another server the rail
+  shows the old server's libraries until the new list lands. Next: step 8.
+- 2026-11-23: round 18 step 8 landed (d7eedc4b; captures 092201cc): an Aperture picture that lands goes into the element
+  that waits for it, keyed by its URL, with no view build (cards, heroes, cast faces). Headless library first open
+  1,109–1,150 → 594–600 KB (−47 %, builds 12–13 → 4), a film page 376 → 211 KB, a season page 441.5 → 202; real window
+  library first open 1,413–1,424 → 604 KB, ten Downs 1,895 → 947 KB; 33 of 33 frames byte-identical; step-ab clean both
+  runtimes. Suite proposal (k) closed as `ArtworkLandingTests` (the suite references no app). Two side fixes the landing
+  builds had masked (a taller window's new grid row asks for its page; a full build after a 404 makes the same tree).
+  For the guidelines: builds triggered by landings can hide a missing reader of the window size. Leads → Waiting
+  aperture-postercache-slot-stall and reconcile-keyed-match-alloc. Next: step 9.
+- 2026-11-23: round 18 step 9 landed (f980fc8d; captures 06ca5c94): each Aperture Home shelf is its own part kept by its
+  row key, and a page turn builds only that shelf. Headless a Right that turns a page 98.0 → 80.2 KB (−18 %), a cached
+  Down/Up turn 67–68 → 50.9 (−24…−26 %), after leaving another shelf 121.4 → 81.1 (−33 %); Home's start +1.0 %, Back to
+  Home +2.1 % (3 host elements); real window a Right that turns 122.9 → 107.4 KB; 23 of 23 frames byte-identical;
+  step-ab clean both runtimes (JIT pair 1's RowHeights rebuild rows the known noisy row). Suite proposal (j) closed as
+  `HomeShelfTurnTests`. Main has moved on by 9 commits (framework ContextMenu, Button, Dropdown, TableView, Application,
+  and 133bcfe6 Aperture Up/Down shelf to shelf): Waiting release-merge-main-shelf-arrows records the conflict and the
+  tests to rewrite at the release merge. Leads → Waiting part-place-stale-double-build and aperture-poster-card-cost.
+  Next: step 10.
+- 2026-11-23: round 18 step 10 landed (f7f2f6c5; captures 7f9b1e46): Junction's one collection at rest also runs after
+  a big colour walk that finished (≥ 2,000 lines or ≥ 32 MB allocated on the worker) and waits for 2 s without input.
+  Real window working set at rest after the Commit open 123.1 → 98.0 MB (−20 %), after 3 first visits 133.0 → 101.5
+  (−24 %), committed 40.9 → 10.1; jrepo 0 collections; pauses 4.3–6.6 ms, one a rest, no late frame; step-ab clean.
+  For PERFORMANCE.md / probes: `GC.GetGCMemoryInfo().TotalCommittedBytes` is as of the last collection, so it reads
+  stale or 0 at rest; read working set or private bytes there. Next: step 11.
+- 2026-11-23: round 18 step 11 landed (0ec5182c, 1ddec166 (question 73 (b)); captures a83bcd2e): a number field reports
+  where it paints, so Vesper's faded counter row fades in its own layer (layer 1.198 → 0.041 Mpx a frame; real window GL
+  DXGI local at the end 30.2 → 22.3 MB, −26 %; Vulkan −9 %; pixels byte-identical); the drag ghost fades in a layer of
+  its own size (2.916 → 0.026 Mpx a frame; Junction's drag GL 40.3 → 28.4 MB, −30 %; Vulkan −13 %; drag frames differ
+  by ≤ 6/255 as the user accepted). step-ab clean. For PAINTING/DRAG-AND-DROP: the drag ghost is a faded group like any
+  other, so one element with unknown bounds in a drag source (a Canvas) makes every drag frame window-sized, and Skia
+  keeps that texture on GL and Vulkan alike. Next: step 12.
+- 2026-11-23: round 18 step 13 landed (eec26ffd; captures 0f247da5): a right-to-left paragraph keeps a wrap range for
+  the widths its breaks hold for. Vesper's Arabic reader drag headless 83.4 → 20.2 KB a step at 1,440 (−76 %), 120.7 →
+  48.2 at 960 (−60 %); real window 158.5 → 27.5 KB a step (−83 %), BiDi layouts 19,080 → 85; 0 of millions of sizes and
+  layouts differ; 164 frames byte-identical; step-ab time clean. Three suite rows allocate more (+23 % / +9 % on the BiDi
+  resize rows, an artefact of 5 timed steps after a fresh session, −71…−73 % over 200 steps; +4 % on 2,000 unique emoji
+  labels, a range entry each): kept on the real-app case, Waiting suite-bidi-rows-fresh-session. For PERFORMANCE.md: a
+  suite row timing a few steps after a fresh session turns a deferred one-time cost into an allocation increase — check
+  a longer run before calling it a regression; headless scenes that resize before the drag can hide first-drag costs
+  the real open-then-drag shows. Next: step 14, then step 12.
+- 2026-11-23: round 18 step 14 landed (fd943d6f; captures 654a9368): a Junction diff row's line numbers and sign are
+  labels of the row, not labels in boxes, and a missing number is a margin. Unified rows 9 → 5–6 elements, 7.3–8.2 →
+  5.0–5.2 KB; real window bigrepo first visit 810.3 → 712.6 KB (−12.1 %), ten notches 286.9 → 234.2 (−18.4 %); split
+  −3…−4 %; 144 frames byte-identical; step-ab clean. For LAYOUT.md (written): the layout weighs a shrink share by the
+  outer size, margins included, unlike CSS. Question 78 asked (a wrapped row's numbers sit on its last visual line,
+  left-aligned; not perf). Next: step 12 (the 4K still absent at 08:34).
+- 2026-11-23: round 18 step 12 landed (49fd9b1e; captures 8e9155be), the round's last build step: on Windows the 8-bit
+  MAILBOX swapchain at the window's size takes 2 images; the drag's over-allocated one, FIFO, IMMEDIATE, F16 and off
+  Windows keep 3. On the 1440p (the only monitor) Aperture's sign-in page −14.5 % / −17.3 % DXGI local, Reel SDR −1.5 % /
+  −4.6 %; frames equal; drag waits as before (the drag keeps 3). The approved HDR run was not held (the 4K absent all
+  step): F16 stays at 3, Waiting f16-two-images-hdr-run. Two FIFO probe tests failed on the 200 Hz HDR display on
+  unchanged FIFO code, unproven at the base: Waiting vk-fifo-probe-tests-200hz, to check at the base before the release.
+  For the guidelines: `scripts/wsl-test.sh` already passes `-c Release` (passing it again makes `dotnet test` print its
+  help, and a grep-filtered log then looks clean while nothing ran); docs/PERFORMANCE.md does not exist — the "For
+  PERFORMANCE.md" notes in this log need a home (the plan's guidelines file). Build steps done; next: the pre-suite fixes
+  (meridian-runnerview-build-count-flake, vk-fifo-probe-tests-200hz at the base, question 78 if answered), then the
+  full suite.
+- 2026-11-23: round 18 pre-suite work (one agent): main merged into the branch (87a0d35e: keyboard context menus,
+  mnemonics, Dropdown/DatePicker, TableView sort, light/dark, the long-range scrollbar, Aperture's shelf-to-shelf
+  arrows; three conflicts resolved, `HomeShelfTurnTests` rewritten); c3f0eab0 proves step 4's own-menu change with
+  d9bf8e25's keyboard menus; the Meridian RunnerView flake gated (4cb092ad); main's own red Windows test
+  (`ScrollbarRegressionTests.ATextArea_DrawsItsBarAsBefore`, CI run 45062007836, the system font's line height) pinned
+  to fonts with a baseline from 549a4980 (387b277e; Linux unverified). The FIFO probe failures are pre-existing (base
+  and HEAD alike). A whole-solution run on the merged tree: 15,134 tests, only the scrollbar test failing (now fixed).
+  Found: label-focus-no-clipboard (Waiting). main moved again meanwhile (d335159e, another contributor: a pixel frame
+  uploaded once per version on the GPU renderers): the full-suite agent merges it first. Next: the full suite.
+- 2026-11-23: round 18 full suite (one agent) at 2eba86c9 (main's d335159e merged with no conflicts: a pixel frame
+  uploaded once per version on the GPU renderers, beside step 11's `TreePaintBounds` and step 12's image counts),
+  11:08–11:26 on an idle machine: Windows `HultUI.slnx -c Release` 30 projects, 0 failures (Junction 1,203 in 9 m 49 s,
+  Core 5,305, Headless 1,913, Text 324, Skia 484, Vesper 964, Meridian 680 with the gated RunnerView tests, Aperture 462,
+  Reel 53; UiTests 25 passed and 125 skipped without `HULTUI_UITESTS`); Fedora the slnf's 22 projects and Junction 1,203,
+  Meridian 680, Aperture 462, Reel 53 each in a private D-Bus session, 0 failures; the pinned scrollbar baseline
+  (387b277e) passes on Linux; docfx 0 warnings, 0 errors. One new compiler warning: CS0419 (an ambiguous cref) at
+  `src/HultUI.Text/MeasurementCache.cs:393` from 3191b065's new `TryGet` overload (internal; fix in the next round).
+  Phase → release.

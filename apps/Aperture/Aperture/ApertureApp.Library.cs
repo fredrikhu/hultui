@@ -62,6 +62,10 @@ public sealed partial class ApertureApp
         int visibleRows = Math.Max(1, (int)Math.Ceiling(viewportHeight / rowStride));
         _fitGridStride = rowStride;
         var cursorKey = $"library:{libraryId}:{GridSort}:{GridDescending}:{GridPlayedFilter}:{GridGenre?.Id}:{GridFavouritesOnly}";
+        // Where the page was left is a place in the list it showed then (the key the page arrived
+        // with, until SetCursorList below takes this one): another sort or filter since is another
+        // list, which opens at the top, as the cursor starts over in it.
+        if (_cursorKey != cursorKey) _gridArrivalScrollY = -1;
 
         // What to have loaded: a page beyond the furthest the grid has been taken — the last
         // row made as it came into view (see GridRowFor), or the cursor — so the next page is
@@ -71,6 +75,9 @@ public sealed partial class ApertureApp
         // library loaded 100, and End, the arrows and the wheel stopped at the 100th.
         int needed = Math.Max((visibleRows * 2 + 1) * perRow, _gridReached + GridPageSize);
         if (CursorIndexIn(cursorKey) is >= 0 and var cursor) needed = Math.Max(needed, cursor + 1 + GridPageSize);
+        // The rows down to where the page was left, as for the cursor.
+        if (_gridArrivalScrollY >= 0)
+            needed = Math.Max(needed, ((int)((_gridArrivalScrollY + viewportHeight) / rowStride) + 1) * perRow + GridPageSize);
         if (CursorGoingToEndIn(cursorKey)) needed = int.MaxValue;
         EnsureGridPage(libraryId, needed);
         // A page that lands rebuilds the view: this read is tracked. Nothing else here read the
@@ -78,8 +85,22 @@ public sealed partial class ApertureApp
         _ = _gridPage.Value;
 
         var items = GridItems;
-        // What the arrows walk in this view, and how many fit across.
-        SetCursorList(cursorKey, items, perRow, GridTotal);
+        // A grid opening where its visit left it shows the rows there; its first card on screen is the
+        // first of the first whole one.
+        float openAt = _gridList.Current is not { IsHosted: true } ? _gridArrivalScrollY : -1f;
+        int firstOnScreen = openAt > 0 ? (int)MathF.Ceiling(openAt / rowStride - 0.01f) * perRow : 0;
+        // What the arrows walk in this view, and how many fit across; Back or Forward with no cursor
+        // starts it on that card.
+        SetCursorList(cursorKey, items, perRow, GridTotal, firstOnScreen);
+        // A cursor its visit left out of sight (the wheel took the grid away from it before a card was
+        // clicked) comes to that card too: Back hands the keyboard to a card the page shows, and a key
+        // walks on from where the grid is, not from where it was.
+        if (openAt >= 0 && items.Count > 0 && CursorIndex >= 0
+            && (CursorIndex / perRow * rowStride >= openAt + viewportHeight || (CursorIndex / perRow + 1) * rowStride <= openAt))
+        {
+            _cursorIndex = Math.Min(firstOnScreen, items.Count - 1);
+            _pendingCursorFocus = true;
+        }
 
         if (items.Count == 0)
         {
@@ -110,6 +131,7 @@ public sealed partial class ApertureApp
         _gridCardShape = cardShape;
 
         var list = VirtualListElement<GridRowItem>.New();
+        OpenGridWhereItWasLeft(list, perRow, rowStride, rowCount, viewportHeight);
         // Each item here is a row of posters, and every poster is its own button — so the
         // realized rows answer for themselves rather than the list publishing one node per
         // row (see VirtualListElement.RowsAreComposite).
@@ -126,10 +148,18 @@ public sealed partial class ApertureApp
         return column;
     }
 
-    /// <summary>Keeps the cursor on screen as the arrows walk past the realized window.</summary>
-    private void RevealGridCursor(int perRow, float rowStride)
+    /// <summary>
+    /// Keeps the cursor on screen as the arrows walk past the realized window. A build reveals it only
+    /// when it moved, or its row did (another number of columns), since the grid last showed it
+    /// (<paramref name="always"/>: a window that changed under it): the wheel takes the grid away from
+    /// the cursor, and the builds that come while it does (a page asked for, a picture landing) used to
+    /// pull it back. A cursor Back put on the first card on screen is one a mouse user never moved.
+    /// </summary>
+    private void RevealGridCursor(int perRow, float rowStride, bool always = false)
     {
-        if (_gridList.Current is not { } mounted || CursorIndex < 0) return;
+        if (_gridList.Current is not { IsHosted: true } mounted || CursorIndex < 0) return;
+        if (!always && _gridCursorShown == (CursorIndex, perRow, rowStride)) return;
+        _gridCursorShown = (CursorIndex, perRow, rowStride);
         int cursorRow = CursorIndex / perRow;
         mounted.ScrollRangeIntoView(cursorRow * rowStride, rowStride);
         // A page that landed took the cursor past the rows the list has laid out (End on its
@@ -137,6 +167,52 @@ public sealed partial class ApertureApp
         // the list has the new rows.
         if ((cursorRow + 1) * rowStride > mounted.ContentHeight)
             _window.RequestPostFrameCallback(() => _gridList.Current?.ScrollRangeIntoView(cursorRow * rowStride, rowStride));
+    }
+
+    /// <summary>The cursor, and the columns and row height it was revealed in, as the grid last showed it
+    /// (<see cref="RevealGridCursor"/>, <see cref="OpenGridWhereItWasLeft"/>).</summary>
+    private (int Cursor, int PerRow, float Stride) _gridCursorShown = (-1, 0, 0f);
+
+    /// <summary>How far the grid of the page arrived at was scrolled when that visit was left
+    /// (<see cref="Visit.GridScrollY"/>), until a list made for it opens there; -1 for none.</summary>
+    private float _gridArrivalScrollY = -1;
+
+    /// <summary>
+    /// A library arrived at by Back, Forward or the rail opens its grid where its visit left it, as a
+    /// browser puts you back where you were scrolled: at the offset it was left at, the wheel's as the
+    /// keys', or with none kept at the cursor's row. It used to open at the top: another view had let
+    /// go of the grid (<see cref="LetGoOfGrid"/>), so <see cref="RevealGridCursor"/> had no list to
+    /// scroll, the cursor's card was not made and the keyboard went nowhere, and the first key after
+    /// made the grid again (279 KB and 289 elements at 300 films; the second key 76 KB more).
+    /// <para>The list is new (another view showed in between, or the empty state while a page
+    /// loaded), so the offset is its own, held for its first layout: the rows there are the ones made,
+    /// the cursor's card among them, ringed, and it takes the keyboard once the frame is drawn
+    /// (<see cref="FocusCursorCard"/>), all in the arrival's own frame. An offset past the rows loaded
+    /// so far (the library was loaded again since) is put again on the list on screen once a page
+    /// that reaches it has been laid out, as the cursor's reveal is.</para>
+    /// </summary>
+    private void OpenGridWhereItWasLeft(VirtualListElement<GridRowItem> list, int perRow, float rowStride, int rowCount,
+        float viewportHeight)
+    {
+        float at = _gridArrivalScrollY;
+        if (_gridList.Current is { IsHosted: true })
+        {
+            // A build of the grid on screen: only an offset still waiting for its rows to load.
+            if (at >= 0)
+                _window.RequestPostFrameCallback(() =>
+                {
+                    if (_gridList.Current is { IsHosted: true } shown) shown.ScrollOffsetY = at;
+                });
+        }
+        else
+        {
+            if (at >= 0) list.ScrollOffsetY = at;
+            else if (CursorIndex >= 0) list.ScrollRangeIntoView(CursorIndex / perRow * rowStride, rowStride);
+            // The cursor is on screen as the list opens, or nowhere: the builds after leave the grid
+            // where it is until a key moves it.
+            _gridCursorShown = (CursorIndex, perRow, rowStride);
+        }
+        if (!GridHasMore || rowCount * rowStride >= at + viewportHeight) _gridArrivalScrollY = -1;
     }
 
     private Element BuildLibraryBar(string title, string libraryId)
@@ -345,13 +421,13 @@ public sealed partial class ApertureApp
     /// <summary>
     /// What a grid row shows besides its place and its cursor column: how much of the list has
     /// loaded (a page fills the last row), the cards a watched or favourite toggle changed in
-    /// place, how many cards fit across, the pictures that have landed (a card made before its
-    /// picture shows a placeholder), and the display scale (glyphs and artwork are cut for it,
-    /// and a change retires the old rasters). Another library, sort or filter empties the list
-    /// first, which takes the grid off screen; the layout and the titles setting are another
-    /// row height: both make every row again by themselves.
+    /// place, how many cards fit across, a picture that landed and could not go into its card in
+    /// place (<see cref="_artworkRemade"/>; one that could needs no row), and the display scale
+    /// (glyphs and artwork are cut for it, and a change retires the old rasters). Another library,
+    /// sort or filter empties the list first, which takes the grid off screen; the layout and the
+    /// titles setting are another row height: both make every row again by themselves.
     /// </summary>
-    private readonly record struct GridRowShape(int Loaded, int Patched, int PerRow, int ArtworkLanded, float Scale);
+    private readonly record struct GridRowShape(int Loaded, int Patched, int PerRow, int ArtworkRemade, float Scale);
 
     private GridRowShape _gridRowShape;
 
@@ -362,7 +438,7 @@ public sealed partial class ApertureApp
     /// build asked; takes the new state either way.</summary>
     private bool GridRowShapeChanged(int perRow)
     {
-        var shape = new GridRowShape(_gridItems.Count, _gridPatches, perRow, _artworkLanded, Ui.DisplayScale);
+        var shape = new GridRowShape(_gridItems.Count, _gridPatches, perRow, _artworkRemade, Ui.DisplayScale);
         bool changed = shape != _gridRowShape;
         _gridRowShape = shape;
         return changed;
@@ -385,7 +461,13 @@ public sealed partial class ApertureApp
         // drawn.
         int loaded = items.Count;
         _gridReached = Math.Max(_gridReached, r.Row < 0 ? loaded : Math.Min(loaded, (r.Row + 1) * perRow));
-        if (GridHasMore && _gridAheadAsked != loaded && _gridReached + GridPageSize > loaded)
+        // So does one a taller window brings in when the build's estimate, two screenfuls and a row
+        // at the list's height now, reaches past the loaded end: a build would load that far, and a
+        // resize builds nothing. A picture landing used to build, and loaded it by the way.
+        float viewport = _gridList.Current?.Layout.AbsoluteContentBox.Height ?? 0f;
+        int screens = viewport > 0f && _fitGridStride > 0f
+            ? ((int)Math.Ceiling(viewport / _fitGridStride) * 2 + 1) * perRow : 0;
+        if (GridHasMore && _gridAheadAsked != loaded && Math.Max(_gridReached + GridPageSize, screens) > loaded)
         {
             _gridAheadAsked = loaded;
             HultUI.Application.InvokeOnMainThread(Rerender);
@@ -396,10 +478,10 @@ public sealed partial class ApertureApp
     }
 
     /// <summary>
-    /// A row of posters. A row made again — a picture landed, a page filled it, the cursor moved
-    /// onto it with a build, the columns changed — hands back each card whose item, cursor and
-    /// picture are what it was made with (REACTIVITY.md, "Hand back the elements a key does not
-    /// change"): the row is keyed by its first item's place, so the list patches the row it replaces
+    /// A row of posters. A row made again — a page filled it, the cursor moved onto it with a
+    /// build, the columns changed — hands back each card whose item, cursor and picture are what it
+    /// was made with, a picture that landed since having gone into its card in place (REACTIVITY.md,
+    /// "Hand back the elements a key does not change"): the row is keyed by its first item's place, so the list patches the row it replaces
     /// from it, and the cards by their items, so the patch puts the live ones back untouched, with the
     /// pictures they show. A change of columns moves places to other rows, and the cards go with them
     /// (<see cref="CanTakeCard"/>). A cursor key mostly makes no row at all (MoveRingWithoutBuild).
@@ -417,7 +499,7 @@ public sealed partial class ApertureApp
             if (i >= items.Count) break;
             var item = items[i];
             // Asked for a card handed back as well: a make of the row is what keeps a picture on
-            // screen recent in the cache, and what shows the one that landed.
+            // screen recent in the cache, and how a card whose picture the cache let go of is found.
             var picture = ShownPicture(item, ImageKind.Primary, Halide.PosterWidth, Halide.PosterHeight);
             var state = new GridCardState(item, i, MarkOf(i), picture);
             if (_gridCards.TryKeep(item.Id, state, out var kept) && CanTakeCard(kept, key))
@@ -471,9 +553,8 @@ public sealed partial class ApertureApp
 
     /// <summary>What a card shows besides what every card shows: its item (a watched or favourite
     /// toggle changes the copy), its place, the cursor on it or the Tab stop (<see cref="MarkOf"/>),
-    /// and the picture it draws, null for the placeholder.</summary>
-    private readonly record struct GridCardState(MediaItem Item, int Index, CardMark Mark,
-        HultUI.Core.Rendering.IImageSource? Picture);
+    /// and the picture it shows (<see cref="CardArt"/>: the placeholder until its picture lands in place).</summary>
+    private readonly record struct GridCardState(MediaItem Item, int Index, CardMark Mark, CardArt Picture);
 
     /// <summary>What every card shows: whether it has a caption, and the scale its glyphs are cut
     /// at, which retires them. (Artwork's scale goes with that one; the pictures are compared.)</summary>

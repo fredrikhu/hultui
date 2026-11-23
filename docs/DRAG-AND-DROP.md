@@ -223,6 +223,8 @@ box.On<DragStartEvent>(e =>
 
 The custom visual is laid out once and rendered at the cursor position during the drag.
 
+The ghost (the source at 70 %, a custom visual at 80 %) fades through a layer the size of what it paints, the `PaintBounds` of its elements unioned as for any faded element (see "Opacity and what an element paints" in ELEMENTS.md). An element in it that cannot bound its paint, such as a `Canvas`, makes that layer the window's size on every frame of the drag, and on GL and Vulkan Skia keeps its texture for the window's life (Junction's repository drag on GL: 14 MB of video memory at 1440×900, 18 MB at 2160×1350; plan 17 round 18).
+
 ---
 
 ## Keys and Dynamic Lists

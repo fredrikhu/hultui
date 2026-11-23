@@ -34,9 +34,10 @@ public sealed partial class ApertureApp
 
     /// <summary>Whether reporting is on offer at all: a request server this user may file
     /// problems with.</summary>
-    internal bool CanReportProblems =>
-        _requestServer?.User is { } user
-        && (user.Has(RequestPermission.CreateIssues) || user.Has(RequestPermission.ManageIssues));
+    internal bool CanReportProblems => _requestServer?.User is { } user && CanReport(user);
+
+    private static bool CanReport(RequestUser user) =>
+        user.Has(RequestPermission.CreateIssues) || user.Has(RequestPermission.ManageIssues);
 
     internal void ToggleReport()
     {
