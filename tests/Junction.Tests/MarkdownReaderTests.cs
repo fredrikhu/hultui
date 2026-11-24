@@ -273,5 +273,67 @@ public class MarkdownReaderTests
         else Assert.Equal((project, secret, file!), upload);
     }
 
+    /// <summary>A picture whose body stops after its headers (a connection gone quiet, with no
+    /// keepalive to notice). The client's timeout covers the request up to its headers only, and
+    /// until plan 17 round 19 the body was read with no token: the pool thread the picture loads on
+    /// was held for good. The picture's deadline covers the body too.</summary>
+    [Fact]
+    public void APictureWhoseBodyStalls_EndsAtItsDeadline()
+    {
+        using var http = new HttpClient(new StalledBody());
+        using var deadline = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+        Exception? ended = null;
+        // A thread of its own, joined with a timeout: a pool thread's wait can run the read inline.
+        var reader = new Thread(() =>
+        {
+            try { JunctionApp.ReadPlain(http, new Uri("https://pictures.test/shot.png"), deadline.Token); }
+            catch (Exception ex) { ended = ex; }
+        }) { IsBackground = true, Name = "Test: picture read" };
+        reader.Start();
+        Assert.True(reader.Join(TimeSpan.FromSeconds(5)), "the read outlived its deadline");
+        Assert.IsAssignableFrom<OperationCanceledException>(ended);
+    }
+
+    /// <summary>Headers that promise 100,000 bytes, then a body that sends nothing until the
+    /// client is disposed.</summary>
+    private sealed class StalledBody : HttpMessageHandler
+    {
+        private readonly TaskCompletionSource _disposed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            var response = new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StreamContent(new Stalled(_disposed.Task)) };
+            response.Content.Headers.ContentLength = 100_000;
+            return Task.FromResult(response);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            _disposed.TrySetResult();
+            base.Dispose(disposing);
+        }
+
+        private sealed class Stalled(Task end) : Stream
+        {
+            public override bool CanRead => true;
+            public override bool CanSeek => false;
+            public override bool CanWrite => false;
+            public override long Length => throw new NotSupportedException();
+            public override long Position { get => 0; set => throw new NotSupportedException(); }
+            public override void Flush() { }
+            public override int Read(byte[] buffer, int offset, int count) { end.Wait(); return 0; }
+            public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+            {
+                await end.WaitAsync(ct).ConfigureAwait(false);
+                return 0;
+            }
+            public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct) =>
+                ReadAsync(buffer.AsMemory(offset, count), ct).AsTask();
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+            public override void SetLength(long value) => throw new NotSupportedException();
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        }
+    }
+
     private static MdText Para(MdDocument doc, int i) => Assert.IsType<MdParagraph>(doc.Blocks[i]).Text;
 }

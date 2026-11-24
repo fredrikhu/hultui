@@ -539,12 +539,20 @@ public partial class JunctionApp
         return loader.Value;
     }
 
+    /// <summary>How long a picture may take to arrive, its body included. The clients' 20 s
+    /// timeouts cover a request up to its headers only, and the fetch blocks a pool thread on the
+    /// read (<see cref="Sync{T}"/>): a body that went quiet after its headers held that thread for
+    /// good. A minute: a 2 MB screenshot still arrives over 300 kbit/s, the largest upload kept
+    /// (16 MB) over about 2.2 Mbit/s.</summary>
+    private static readonly TimeSpan MdPictureDeadline = TimeSpan.FromMinutes(1);
+
     // Runs off the UI thread.
     private MdPicture LoadPicture(Uri uri, GitLabRemote? remote)
     {
         try
         {
-            var bytes = FetchUpload(uri, remote) ?? FetchPlain(uri);
+            using var deadline = new CancellationTokenSource(MdPictureDeadline);
+            var bytes = FetchUpload(uri, remote, deadline.Token) ?? FetchPlain(uri, deadline.Token);
             if (bytes is not { Length: > 0 } || SkiaSharp.SKBitmap.Decode(bytes) is not { } decoded) return MdPicture.Broken;
             int longest = Math.Max(decoded.Width, decoded.Height);
             if (longest <= MdPictureMaxPixels) return new MdPicture(new SkiaImageSource(decoded), false);
@@ -565,13 +573,13 @@ public partial class JunctionApp
     /// <summary>A file pasted into this project, through the API with the account's token —
     /// the only way into a private project's uploads without a browser session. Null for any
     /// other URL, or when the instance predates the endpoint (17.4).</summary>
-    private byte[]? FetchUpload(Uri uri, GitLabRemote? remote)
+    private byte[]? FetchUpload(Uri uri, GitLabRemote? remote, CancellationToken ct)
     {
         if (remote is null || UploadOf(uri, remote) is not { } upload || _gitlab.ClientFor(remote.Host) is not { } client)
             return null;
         var project = upload.ProjectId ?? ResolveProjectId(client, remote);
         if (project is null) return null;
-        var bytes = Sync(client.GetUploadAsync(project.Value, upload.Secret, upload.File));
+        var bytes = Sync(client.GetUploadAsync(project.Value, upload.Secret, upload.File, ct));
         return bytes.Ok ? bytes.Value : null;
     }
 
@@ -580,7 +588,7 @@ public partial class JunctionApp
     /// not serve (a public project's still loads from its web URL). Through the handler the
     /// accounts use for the host, so it travels — and is tested — the same way.
     /// </summary>
-    private byte[]? FetchPlain(Uri uri)
+    private byte[]? FetchPlain(Uri uri, CancellationToken ct)
     {
         var http = _mdPlainClients.GetOrAdd(uri.Host, host =>
         {
@@ -590,9 +598,16 @@ public partial class JunctionApp
             client.DefaultRequestHeaders.UserAgent.ParseAdd("Junction/1.0 (+https://github.com/fredrikhu/hultui)");
             return client;
         });
-        using var response = Sync(http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead));
+        return ReadPlain(http, uri, ct);
+    }
+
+    /// <summary>A plain GET's body, at most <see cref="GitLabClient.MaxUploadBytes"/>, with
+    /// <paramref name="ct"/> over the body as well as the request.</summary>
+    internal static byte[]? ReadPlain(HttpClient http, Uri uri, CancellationToken ct)
+    {
+        using var response = Sync(http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, ct));
         if (!response.IsSuccessStatusCode || response.Content.Headers.ContentLength > GitLabClient.MaxUploadBytes) return null;
-        return Sync(GitLabClient.ReadCappedAsync(response.Content, GitLabClient.MaxUploadBytes, CancellationToken.None));
+        return Sync(GitLabClient.ReadCappedAsync(response.Content, GitLabClient.MaxUploadBytes, ct));
     }
 
     /// <summary>The upload a URL names in <paramref name="remote"/>'s project — the
