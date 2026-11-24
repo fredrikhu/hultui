@@ -5,8 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 19
-- **Phase:** build — round 19 (the survey merged 2026-11-24; 13 steps, steps 10, 12 and 13 wait for questions 80, 79 and
-  81). Step 1 landed (0704eb26). Next: step 2. Survey done 2026-11-24 in session e91920b9 (reports `17-reports/r19-*`; usage 33 → 40 % of the
+- **Phase:** build — round 19 (the survey merged 2026-11-24; 13 steps, questions 79–81 answered (b), (b), (a)
+  on 2026-11-24). Steps 1–2 landed. Next: step 3. Survey done 2026-11-24 in session e91920b9 (reports `17-reports/r19-*`; usage 33 → 40 % of the
   week, the 5-hour window 1 → 53 %).
   Round 18 RELEASED 2026-11-23: main 6366d201, CI run 45156444317 green on the first attempt. Round 19's files (the
   survey brief `brief-r19-survey.md`, `merge_r19.py`, build briefs `brief-r19b<N>.md`, `archive_r19.py`, agent ids
@@ -108,7 +108,7 @@ decision in Needs the user; the rest of their step goes ahead.
 Ranked by expected effect in the real apps over cost (the brief's "Real apps first"); the two review objections first.
 Each step names the report lines its brief quotes (`r19-k` = `17-reports/r19-k-<area>.md`) and measures its real-app
 case in a guarded real window (the lock `Global\HultUI-r19-desktop`, the harnesses in session e91920b9's scratchpad
-`r19-<area>\`) as well as by step-ab. Steps 10, 12 and 13 wait for questions 80, 79 and 81; the rest go ahead. Every
+`r19-<area>\`) as well as by step-ab. Questions 79–81 were answered with the recommendations on 2026-11-24, so steps 10, 12 and 13 go ahead too. Every
 Junction fixture is a copy reset with `git reset --hard HEAD` first (shared scratch fixtures have been thinned: Waiting
 scratch-fixtures-thinned).
 
@@ -204,7 +204,7 @@ scratch-fixtures-thinned).
    (−22 %). Cancel the walk when the view closes or moves on, and run Junction's f7f2f6c5 rule (≥ 2,000 lines or ≥ 32 MB
    allocated, then 2 s with no input) for one aggressive collection, inside Vesper (a shared framework helper would be
    public API: ask). Probe `r19-dotnet\vwalk\`. Small; app; no API.
-10. **a11y-item-renames-unfetched** ((user), question 80; 7; r19-7 Candidate 2) — real window, Vesper 151 ↔ 191 entries
+10. **a11y-item-renames-unfetched** (question 80: (b), decided; 7; r19-7 Candidate 2) — real window, Vesper 151 ↔ 191 entries
     with a reader-like client: 153–154 Name raises, 5.0–5.2 ms of a 6.6–6.7 ms frame (12,300 provider calls plus 13,800
     QIs); focus-only 1.6–2.0 of 4.1–4.4 ms; bridge off 1.35–1.41 ms. Raise no Name change for an item node that has no
     native object yet: the frame to ~1.7 ms (−75 %). After the first navigation 160 native objects persist (the first
@@ -220,10 +220,10 @@ scratch-fixtures-thinned).
     `SetMnemonicCues` marks the root paint-dirty on every Alt down and up in every app (1 frame an Alt press headless, 2
     in a real window) though no app uses `UseMnemonic` or `MenuBar`: repaint only when the window shows a mnemonic
     (question 63's rule: a bare modifier draws nothing). Medium; (a) app, (b) framework; no API.
-12. **reactivity-aperture-keep-back-page** ((user), question 79; 6; r19-6 NEEDS THE USER) — only if (b): keep one page
+12. **reactivity-aperture-keep-back-page** (question 79: (b), decided; 6; r19-6 NEEDS THE USER) — only if (b): keep one page
     (Home or a grid) hidden while away, dropped on sign-out and on a scale or theme change: Back about −85 % (~286 KB,
     285–297 elements made). Medium; app; an exception to REACTIVITY.md's let-go rule, written there.
-13. **junction-keyboard-row-menus** ((user), question 81; 1; r19-7 REVIEW of d9bf8e25) — only if (a):
+13. **junction-keyboard-row-menus** (question 81: (a), decided; 1; r19-7 REVIEW of d9bf8e25) — only if (a):
     `FindContextMenuOwner` asks a focused list's current or selected row first, so Shift+F10 and the Menu key open a
     row's menu (Junction's 18). Small; framework; behaviour change with a test.
 
@@ -461,6 +461,7 @@ Round 18 (the round round 19's survey reviews; it moves to the archive at round 
 | 18 | fd943d6f, 654a9368 | junction-diff-row-cells-one-label | Measured first: each line number and the sign were a label inside a placing box, and a missing number an empty label in a box (a number or the sign 1,656 B to make). Built: each is a label sized and aligned by itself (984 B); a missing number, and a wrapped context line's blank sign, become a margin on the other number (0 B). Elements a row unified 9 → 5–6 (wrapped 8 → 4), split 11 → 8–9 (wrapped 9 → 6–7); a unified row made and drawn 7.3–8.2 → 5.0–5.2 KB (wrapped 6.5–7.0 → 3.9–4.2), split 9.2–10.0 → 7.8–8.7; text measures unchanged. Headless (JIT, bigrepo unified, ×2 alternated, within 1 KB): first visit 827–864 → 733–770 KB (−11.1 %), revisit 631 → 537 (−14.9 %), ten wheel notches 280 → 231 (−17.4 %; 16.5 → 13.6 KB a row scrolled in), open −7.1 %; a colour landing 175.5 either way (it makes no row); jrepo unified revisit −18.1 %, ten notches −18.5 %; split −3…−13 %; builds, rows made, measures and frames equal everywhere. Real window (NativeAOT, guarded, the 1440p at 100 %, 200 Hz, the only monitor attached; 1 hold of 152.5 s, 6 launches, 0 foreground takes, 0 nvlddmkm; repeats within 0.1 KB): bigrepo unified first visit 810.3 → 712.6 KB (−12.1 %), ten notches 286.9 → 234.2 (−18.4 %), open −6.5 %; split −3.0…−3.8 %; frames and rows made equal. Selection, copy, hit-testing and readers unchanged (code labels, groups and indices untouched; a press on a number begins no selection; a click on a number or an empty number column reaches the row, staging in Changes; a reader hears the row's item label). Pixels: 144 headless frames byte-identical (80 of a generated change: Commit and Changes, unified and split, wrapped and not, 1,400 and 1,000 px, 1× and 1.5×, panned sideways; 64 of bigrepo and jrepo). The layout weighs each item's share of a shrink by its outer size, margins included (unlike CSS): a margin on the shrinking sign gave up 2.7 px instead of 0.8 and moved the code 1.9 px, caught by the pixel comparison; the margins sit on the numbers, which never shrink (LAYOUT.md). REACTIVITY.md: make a row of no more elements than it draws. Found: a wrapped row's numbers are left-aligned and sit on its last visual line (kept and pinned; question 78). New `DiffRowCellTests` fail under their reverse edits (boxes back; no `AlignSelf` or no margins; the sign in the copied text; a number that takes the click; the landing's old `InvalidateRows` path). step-ab (25fd3942) `-Pairs 2` (no suite row runs Junction): JIT pair 1 1 faster (a11y rename pane, unreachable), pair 2 0/0, A/A clean; AOT 0/0 both pairs, A/A clean; no allocKB moved. Windows Junction 1,203, Headless 1,845; Fedora Junction 1,203 (private D-Bus). |
 | 18 | 49fd9b1e, 8e9155be | vk-swapchain-two-images (question 74 (c); the HDR run not held: the 4K absent) | `VulkanSwapchainChoice.ImageCount`: on Windows the 8-bit swapchain under MAILBOX built at the window's size takes the surface's minimum, never below 2 (2 here; the surface offers 2..8); every other case keeps minimum + 1 (3 here), capped at the surface's maximum: the drag's over-allocated swapchain keeps 3 (over-allocation is MAILBOX-only; this removes the one-refresh drag waits the user had accepted, and the drag's end rebuilds the exact-size swapchain with 2; the third image costs one bucket only while the drag lasts); FIFO and IMMEDIATE keep 3 (under FIFO with 2 each frame after a present would wait for the refresh; neither measured at 2); F16 and off-Windows keep 3. docs/design/HDR.md Defaults row. Real window (NativeAOT, Vulkan, the 1440p 2560×1440 at 100 %, 200 Hz, HDR on, the only monitor; base and change alternated, DXGI local identical in both pairs): Aperture's sign-in page default 38.86 → 33.23 MB (−14.5 %), maximized-sized 79.17 → 65.48 (−17.3 %); Reel SDR playing default 248.33 → 244.58 (−1.5 %), maximized-sized 299.39 → 285.71 (−4.6 %; Reel alone below the 5 % bar on this monitor, the 4K's survey −7.8 %); frames equal; acquire waits over 1 ms 0 in playback, fades and browsing both sides; modal-loop drags while playing base 3/51, 0/46, 3/54, 1/56 (max 1.4 ms), change 2/50, 4/55, 1/56, 2/46 (max 1.6 ms); a capture of presented frame 600 at 2 images (each reused ~300 times) shows content (mean 158.8, 11 colours in 3,782 samples); 0 foreground takes, 0 nvlddmkm, no stall. The HDR (F16) drag run was not held: the desk showed only the 1440p at the start and before the last hold, and the approval names the 4K; F16 stays at 3 (Waiting f16-two-images-hdr-run). Validation: the layer proven loaded by a deliberate fault (the surface's maximum + 1: `VUID-VkSwapchainCreateInfoKHR-minImageCount-01272` ×2, then the probe crashed 0xC0000005, no TDR); the reused-image capture test passes for 8-bit at 2 (resizes, minimize/restore, a drag) and for IMMEDIATE with the layer's log empty and every image count checked; the 8-bit drag test passes (3 during the drag, 2 at its end); 14 other Vulkan probe tests pass. **Two FIFO probe tests failed** (the capture test's fifo case timed out at 60 s; the minimize/restore fifo case drew 8 frames in the second after restore, 10 needed, at 9 loop passes a second): FIFO keeps 3 on unchanged code, not re-run at the base within 3 holds (Waiting vk-fifo-probe-tests-200hz, before the release). Not run: F16 drag/resize tests (F16 unchanged), a monitor change, device loss. vk-instance-extensions-once not taken (no hold left for its proof). step-ab (549a4980) `-Pairs 2` (no suite row runs Vulkan): JIT pair 1 7 slower (a11y 1,000-row and virtual-rebuild rows; the A/A 11 slower on the same rows: noise), pair 2 0; AOT 0/0 both pairs, A/A 0. 3 new unit tests fail under reverse edits. Windows SDL3 83, Headless 1,845, Media 93, Media.Backends 18 (12 skipped), Reel 53, Aperture 459 (23 skipped); Fedora SDL3 74 (5 skipped; the off-Windows +1 pinned), Headless 1,621, Media 93, Media.Backends 18, Aperture 459 and Reel 53 (private D-Bus); HultUI.UiTests does not build on Linux (NETSDK1100), so no Vulkan test ran there. |
 | 19 | 0704eb26, 49f87476 | a11y-served-item-tell-first (the review objection to 8b7471c8) | A raise on an item served on demand waits while the eager item node's provider with its runtime id is not yet told gone: it goes to the disconnect thread behind the tells and every later raise queues behind it until the queue drains (the order before 8b7471c8); raises with nothing to wait for still go out at once; a served item handed to a client is told first on the client's thread; `Dispose` runs what is left, held raises included (`WindowsAccessibilityBridge.cs` only; `UiaDetachedElementTests`, 4 tests that fail under a reverse edit). Real window (the 1440p, 100 %, 200 Hz, NativeAOT, FlaUI client asking), Vesper 3 → 1,001 entries, 12 crossings a side: unreadable focus events 4/12 → 0/12 (`--mode reader`), 7/12 → 0/12 (`--mode ask`); UI-thread tells 0 → 0 (the survey's prototype told 1 in 3 at 4.5 ms); the reader-like client hears all 24 HasKeyboardFocus changes a launch (18–20 before); held crossings' UI-thread a11y 1.55 → 1.13 M cycles median (reader), 0.84 → 0.54 (ask), the held raises 0.24–0.57 M on the disconnect thread. Junction's palette close after 10 Downs: 13–14 disconnects on the worker, 0 on the UI thread, frame cycles unchanged within noise, client logs equal. 12 `HeadlessUiaReader` streams equal; step-ab 0 slower JIT and AOT (A/A moved the same rows). |
+| 19 | e3c163af, 7a2fd623, 47644d76 | dotnet-aperture-picture-body-deadline (the review objection to d7eedc4b) | One deadline per picture download, 30 s from taking its slot, covering the send and the body (a `CancellationTokenSource` a download; the slowest real download was 563 ms, a 370 KB hero beside seven posters on a 200 kbit/s link ~26 s; a failed picture stays Failed for the session, so a short deadline would cost slow links their pictures); waits whose element left the window, and the older of two waits on one element, are dropped by a post-frame callback asked for from `Waiting()` and `OnAfterBuild`, never inside a build. Junction's markdown pictures get 1 minute (uploads up to 16 MB). Stall probe (8 stalled bodies, then 4 healthy): 12 in flight and 0/4 loaded at 60 s → 0 in flight, 8/8 Failed, 4/4 loaded by 40 s. Headless leak probe heap 1.72 → 41.06 MB (4,887 waits, 4,876 off the tree) → 2.38 → 2.83 MB, 0 waits after the deadline (prune alone 1.36 → 1.86 MB; the ~1 MB more is the probe's 8 stalled reads rooted until the deadline). Healthy runs unchanged (heap 1.35–1.81 vs 1.36–1.79 MB, +0.15 KB a download); real window (the 1440p, NativeAOT, fake library) a library first open 559.8 → 562.5 KB, 10 item pages 3,519 → 3,530 KB, same builds and pictures. step-ab: AOT 0/0; JIT rows that moved flip between pairs with src/ and samples/ unchanged and no app in the suite (noise). 4 tests fail under their reverse edits; Aperture and Junction pass on Windows and Fedora. |
 
 ## Examined, not worth it
 
@@ -1122,18 +1123,21 @@ Round 19 questions (from the survey, 2026-11-24). Recommendations in brackets.
     but goes against REACTIVITY.md's rule that a replaced view is let go (the Meridian leak). (a) No. (b) Keep one page,
     dropped on sign-out and on a scale or theme change. [(b): one page is bounded, where the rule's leak was not; step
     12.]
+    → **(b)** (2026-11-24, the user: "I go with your recommendations for 79-81"): step 12 goes ahead.
 80. **Name changes for list items no reader was given** (r19-7; question 64's (b), now measured): with a UIA reader, a
     Vesper navigation between two folders of ≤200 entries raises ~153 Name changes for rows no client ever fetched:
     5.0–5.2 ms of a 6.6 ms frame with a reader-like client, 1.6–2.0 of 4.1–4.4 ms focus-only (1.4 ms with the bridge
     off). (a) Leave it. (b) Raise no Name change for an item that has no native object yet: the frame to ~1.7 ms (−75
     %); a client listening for Name changes on the whole subtree no longer hears renames of rows it never got (NVDA
     ignores them). UIA only. [(b); step 10.]
+    → **(b)** (2026-11-24, the user: "I go with your recommendations for 79-81"): step 10 goes ahead.
 81. **Keyboard context menus in Junction's lists** (r19-7; d9bf8e25; not perf): Shift+F10 and the Menu key open nothing
     in Junction: all 18 of its menus are on rows of a focused VirtualList, and `FindContextMenuOwner` walks up from the
     list, never into its current row (Junction moves `SelectedIndex`; `CurrentIndex` stays −1). A keyboard or reader
     user cannot reach any row menu. (a) The framework asks a focused list's current or selected row first. (b) Junction
     gives each list a menu for its selection. (c) Leave it. [(a): every app with row menus gets it; Vesper, Aperture and
     Meridian handle the keys themselves; step 13.]
+    → **(a)** (2026-11-24, the user: "I go with your recommendations for 79-81"): step 13 goes ahead.
 
 Reminder (expert 8): Aperture signed in to jellyfin.home as device "aperture-survey" in earlier rounds, as "aperture-r13" in round 13 (and twice in round 15), and once in
 round 12 as "aperture-r12" (again in round 15); the user should remove those devices and revoke the API key when the work is done.
@@ -1396,3 +1400,13 @@ From 2026-11-22 (round 18's survey); earlier entries are in the archive ([to 202
   tell before raises and hand-outs that share its id; raising from the MTA disconnect thread reaches out-of-process
   clients. Testing: PowerShell variable names ignore case; compare timing-dependent reader streams as sets of variants.
   Next: step 2.
+- 2026-11-24: the user answered questions 79–81 with the recommendations ("I go with your recommendations for 79-81"):
+  79 → (b), keep one Aperture page for Back (step 12); 80 → (b), no Name change for a UIA item no client was given (step
+  10); 81 → (a), the framework asks a focused list's current or selected row for its menu (step 13). Round 19 step 2
+  landed (e3c163af, 7a2fd623; captures 47644d76): the objection to d7eedc4b is answered — a picture download's 30 s
+  deadline covers its body, so a stalled transfer frees its slot (8 stalls: 0/4 healthy pictures at 60 s → 4/4 by 40 s),
+  and waits whose element left the window go after a frame (the stalled-body leak 41.06 → 2.83 MB heap); healthy runs
+  and the real window unchanged; Junction's markdown pictures get a 1-minute deadline. For REACTIVITY.md (written): a
+  list of refs kept for a later event drops off-window refs only after a frame, never inside a build, and keeps the
+  newest ref per element. For probes: an in-memory stuck stream with no token is collectable, so it under-reports what a
+  stalled socket keeps. Next: step 3.
