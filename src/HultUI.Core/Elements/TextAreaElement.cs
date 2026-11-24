@@ -1595,18 +1595,22 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         // stops at the next space after fitEnd (nHigh), 64 chars on at most, its n + 1 characters
         // printable ASCII; between characters, n alone. At a width on the rounding of a multiple
         // m of the advance between them the row is searched, and finds m - 1 or m, as the count
-        // would: the same break.
-        int nLow = n, nHigh = n;
-        if (breakAt > start)
+        // would: the same break. Only in a pass that keeps ranges: reading on to the next space
+        // for each row an open breaks by count cost a 1 MB minified script ~10 % of its open.
+        if (lower < upper)
         {
-            nLow = breakAt - start;
-            int space = fitEnd, reach = Math.Min(hardEnd, fitEnd + 64);
-            while (space < reach && !char.IsWhiteSpace(_text[space])) space++;
-            if (space < reach && IsPrintableAscii(_text.AsSpan(fitEnd, space + 1 - fitEnd)))
-                nHigh = space - start;
+            int nLow = n, nHigh = n;
+            if (breakAt > start)
+            {
+                nLow = breakAt - start;
+                int space = fitEnd, reach = Math.Min(hardEnd, fitEnd + 64);
+                while (space < reach && !char.IsWhiteSpace(_text[space])) space++;
+                if (space < reach && IsPrintableAscii(_text.AsSpan(fitEnd, space + 1 - fitEnd)))
+                    nHigh = space - start;
+            }
+            lower = Math.Max(lower, nLow * advance + 2 * ((nLow + 1) * advance * (1f / 4096) + 1e-3f));
+            upper = Math.Min(upper, (nHigh + 1) * advance - 2 * ((nHigh + 1) * advance * (1f / 4096) + 1e-3f));
         }
-        lower = Math.Max(lower, nLow * advance + 2 * ((nLow + 1) * advance * (1f / 4096) + 1e-3f));
-        upper = Math.Min(upper, (nHigh + 1) * advance - 2 * ((nHigh + 1) * advance * (1f / 4096) + 1e-3f));
         return breakAt > start ? breakAt : fitEnd;
     }
 
