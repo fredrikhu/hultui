@@ -1176,6 +1176,16 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
     /// <summary>Lets go of the rows gathered in <see cref="_dropping"/>, and has the next frame
     /// realize the window again — the kept rows as they are, the others from the template.</summary>
+    /// <remarks>Paint, not layout, and a reader's refresh. Nothing around the list depends on its
+    /// rows (a parent measures it as a leaf, <see cref="MeasuredAsLeaf"/>), and the frame's drawing
+    /// realizes the window again (<see cref="UpdateContentSize"/>, with the window unset here): it
+    /// works out the extent, makes the rows let go of, lays them out at their places and places
+    /// every row. A place's height comes from <see cref="ItemHeight"/> or
+    /// <see cref="ItemHeightFor"/>, which a drop does not run again: heights that move go through
+    /// <see cref="InvalidateHeights"/>, a patch's height check (KeepUnchangedRows) or new items,
+    /// which mark layout themselves. Marked for layout, a row whose state changed measured every
+    /// box around the list again: a Junction Files tree key onto a folder laid out 65 boxes and
+    /// measured 227 containers and 176 leaves, for 8, 0 and 14 (plan 17 round 19).</remarks>
     private void DropGathered()
     {
         if (_dropping.Count == 0) return;
@@ -1187,8 +1197,10 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         _dropping.Clear();
         _visibleStart = -1;
         _visibleEnd = -1;
-        MarkLayoutDirty();
         MarkPaintDirty();
+        // A reader hears of the rows made again on the schedule a layout change has (the tree walked
+        // in place, coalesced), as a scroll does: what the layout mark used to ask of the window for it.
+        NotifyAccessibilityPropertyChanged(AccessibilityProperties.BoundingRect);
     }
 
     // ── Row geometry. With no height function these all reduce to the uniform arithmetic. ──
@@ -2047,10 +2059,11 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         return true;
     }
 
-    // Of what it copies below, the rows and their heights reach layout, and every path that
-    // changes them marks it: InvalidateItems, DropGathered, and the height check in
-    // KeepUnchangedRows. An item-rows list patched by a rebuild that changed none of them keeps
-    // its layout, and so do the boxes around it.
+    // Of what it copies below, the rows' heights reach layout, and every path that changes them
+    // marks it: InvalidateItems and the height check in KeepUnchangedRows. The rows themselves are
+    // made, laid out and placed as the list is drawn (DropGathered marks paint). An item-rows list
+    // patched by a rebuild that changed none of its heights keeps its layout, and so do the boxes
+    // around it.
     private protected override bool PatchMarksOwnLayout => true;
 
     internal override void PatchFrom(Element source)
