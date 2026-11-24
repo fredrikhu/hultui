@@ -6,7 +6,7 @@ file after every step and commits it with the step's work. Full survey reports a
 
 - **Round:** 19
 - **Phase:** build — round 19 (the survey merged 2026-11-24; 13 steps, questions 79–81 answered (b), (b), (a)
-  on 2026-11-24). Steps 1–3 landed. Next: step 4. Survey done 2026-11-24 in session e91920b9 (reports `17-reports/r19-*`; usage 33 → 40 % of the
+  on 2026-11-24). Steps 1–4 landed. Next: step 5. Survey done 2026-11-24 in session e91920b9 (reports `17-reports/r19-*`; usage 33 → 40 % of the
   week, the 5-hour window 1 → 53 %).
   Round 18 RELEASED 2026-11-23: main 6366d201, CI run 45156444317 green on the first attempt. Round 19's files (the
   survey brief `brief-r19-survey.md`, `merge_r19.py`, build briefs `brief-r19b<N>.md`, `archive_r19.py`, agent ids
@@ -426,6 +426,33 @@ Re-ranked by the next survey.
   disappear: round 14's `r14-gl-vulkan\jrepo` has 3,049 of 3,355 tracked files deleted and round 18's
   `r18-apps\fx\jrepo` 694 (older publishes lost their DLLs, r18-8); likely a Windows temporary-files cleanup. Agents
   reset a fixture copy with `git reset --hard HEAD` and re-publish rather than reuse.
+- **grid-tableview-keeps-rows** (6, with 1; outside lead, the grid comparison 2026-11-24, branch claude/grid-comparison,
+  uncommitted: `samples/HultUI.Samples.GridComparison/results/2026-11-24-plan17-leads.md`) — `TableView.Body` builds its
+  rows with the one-argument `.RenderWith(Row)` (TableView.Render.cs:77), the plain `ItemTemplate`, so every rebuild of
+  its owner makes every visible row again (VirtualListElement.cs:2133–2144); the two-argument row template keeps
+  unchanged rows and moves rows with their items (`KeepsRows`, `_moving`). Record-only, 10,000 / 100,000 rows × 12
+  columns: insert/remove burst `TableView` 518 / 573 µs against FerroUI with cell text 315 / 363 (1.6×); move burst 461
+  / 517 against 190 / 257 (2.0–2.4×); the bare `VirtualList` 208 / 233 and 177 / 216. Likely fix: `TableView` uses the
+  row template and tells its list itself (`InvalidateRows`) when its columns change (width, order, hidden). Settle
+  first: the harness's edits call `_grid.Changed()` (`TableView`) and `List.InvalidateRows()` (bare list), so the bare
+  list's figure may be the port's own "drop every row"; measure an `Items` patch too. Real app: no app uses `TableView`,
+  but Junction's Blame (`l => BlameRow(l, content, runStart…)`, JunctionApp.Blame.cs) and Vesper's Rename preview
+  (`RenderWith(RenameRow)`, CommanderApp.Rename.cs:290) use the plain template the same way — unmeasured (Rename's rows
+  may change every keystroke anyway). Optional second half: the recycle pool discards the row it takes
+  (VirtualListElement.cs:1885); patching onto it with `TreeDiffer.TryPatch`, as keyed rows are (:1917), could save
+  mount, style and text layout — unmeasured. Not a candidate: the first row-scroll and forced-layout "losses" were a
+  port error; with `MarkLayoutDirty` (`GRID_INVALIDATE=measure`) `TableView` takes 96 µs against FerroUI's 196 on row
+  scrolls and 57 against 85 on forced layouts.
+- **grid-tableview-column-virtualization** (1, with 7 for readers and 8 for apps; outside lead, the grid comparison
+  2026-11-24, same file) — `TableView.Row` and `Header()` build a cell for every column (TableView.Render.cs:86, :35).
+  Record-only: 1-px sideways scroll, 200 columns, `TableView` 100 µs against 30 for the comparison's bare list with
+  hand-made column virtualization (FerroUI with text 102); far-column jump, 1,000 columns, 269 against 92 (FerroUI 402);
+  detach/reattach, 50 columns, 737 against 84 (FerroUI 1,638). The gap is to HultUI's own list, not to FerroUI. Method
+  in the comparison's `VirtualListTarget` (Targets.cs): column edges kept, binary-search the first and last column in
+  view, build only those cells at their offset, rebuild rows only when that range changes. Hard parts: Auto-width
+  columns (leave out or measure once), the header in step, focus in a cell that scrolls out, a reader's table navigation
+  still reaching every cell (7). Real app: none (no app uses `TableView`): a scaling argument only. No public API
+  without asking.
 
 Closed from Waiting by the round 19 survey (→ Examined unless named): skia-rest-purge-vulkan (→ step 4),
 a11y-item-renames-unfetched (→ step 10, question 80), label-focus-no-clipboard (→ step 5 (b)),
@@ -463,6 +490,7 @@ Round 18 (the round round 19's survey reviews; it moves to the archive at round 
 | 19 | 0704eb26, 49f87476 | a11y-served-item-tell-first (the review objection to 8b7471c8) | A raise on an item served on demand waits while the eager item node's provider with its runtime id is not yet told gone: it goes to the disconnect thread behind the tells and every later raise queues behind it until the queue drains (the order before 8b7471c8); raises with nothing to wait for still go out at once; a served item handed to a client is told first on the client's thread; `Dispose` runs what is left, held raises included (`WindowsAccessibilityBridge.cs` only; `UiaDetachedElementTests`, 4 tests that fail under a reverse edit). Real window (the 1440p, 100 %, 200 Hz, NativeAOT, FlaUI client asking), Vesper 3 → 1,001 entries, 12 crossings a side: unreadable focus events 4/12 → 0/12 (`--mode reader`), 7/12 → 0/12 (`--mode ask`); UI-thread tells 0 → 0 (the survey's prototype told 1 in 3 at 4.5 ms); the reader-like client hears all 24 HasKeyboardFocus changes a launch (18–20 before); held crossings' UI-thread a11y 1.55 → 1.13 M cycles median (reader), 0.84 → 0.54 (ask), the held raises 0.24–0.57 M on the disconnect thread. Junction's palette close after 10 Downs: 13–14 disconnects on the worker, 0 on the UI thread, frame cycles unchanged within noise, client logs equal. 12 `HeadlessUiaReader` streams equal; step-ab 0 slower JIT and AOT (A/A moved the same rows). |
 | 19 | e3c163af, 7a2fd623, 47644d76 | dotnet-aperture-picture-body-deadline (the review objection to d7eedc4b) | One deadline per picture download, 30 s from taking its slot, covering the send and the body (a `CancellationTokenSource` a download; the slowest real download was 563 ms, a 370 KB hero beside seven posters on a 200 kbit/s link ~26 s; a failed picture stays Failed for the session, so a short deadline would cost slow links their pictures); waits whose element left the window, and the older of two waits on one element, are dropped by a post-frame callback asked for from `Waiting()` and `OnAfterBuild`, never inside a build. Junction's markdown pictures get 1 minute (uploads up to 16 MB). Stall probe (8 stalled bodies, then 4 healthy): 12 in flight and 0/4 loaded at 60 s → 0 in flight, 8/8 Failed, 4/4 loaded by 40 s. Headless leak probe heap 1.72 → 41.06 MB (4,887 waits, 4,876 off the tree) → 2.38 → 2.83 MB, 0 waits after the deadline (prune alone 1.36 → 1.86 MB; the ~1 MB more is the probe's 8 stalled reads rooted until the deadline). Healthy runs unchanged (heap 1.35–1.81 vs 1.36–1.79 MB, +0.15 KB a download); real window (the 1440p, NativeAOT, fake library) a library first open 559.8 → 562.5 KB, 10 item pages 3,519 → 3,530 KB, same builds and pictures. step-ab: AOT 0/0; JIT rows that moved flip between pairs with src/ and samples/ unchanged and no app in the suite (noise). 4 tests fail under their reverse edits; Aperture and Junction pass on Windows and Fedora. |
 | 19 | 131918aa, 8a8cb4f3 | reactivity-vesper-tab-builds-both-trails | On Tab or a click into the other pane, `LightTrail` recolours each trail's one active-pane element in place (the drive label by a `Ref`, `TextColor` and `MarkStyleDirty`; the result pill by `Restyle`, for its hover tint); when that element is not on screen the trail builds as before (REACTIVITY.md's Vesper paragraph updated). Headless JIT (base/change alternated, repeats identical): Tab 88.8–96.5 → 16.0–16.3 KB (−82…−83 %), trail builds 2 → 0, made 73 → 9; a click into the other pane 124.5–126.1 → 45.9–51.7 KB (−59…−64 %), made 87–92 → 23–28; Tab beside a result set 86.4–86.8 → 28.0 KB (−68 %). Real window (the 1440p, 100 %, 200 Hz, NativeAOT, GL 1240×820) Tab ×20 82.5 → 16.4 KB a Tab (−80 %), made 61 → 9, 1 frame a Tab both sides. Frames byte-identical (SHA-256 after every action; the new test checks each against a full build after Tab, a click, Tab with the pointer on the pill, a pane swap, another folder, a theme change and a narrow window; it fails under three reverse edits). step-ab: AOT 0/0, A/A 0; JIT rows flipped between pairs with no framework file changed (noise). VesperCommander.Tests 965 passed. |
+| 19 | 82f3b3ff, e1c67008 | gl-vulkan-rest-purge (closes Waiting skia-rest-purge-vulkan) | Once a Vulkan window has drawn no frame for 30 s, one loop deadline purges what the last frame did not draw with (`PurgeUnusedResources` cut off at the start of the last presented frame) and then Skia's scratch (upload staging); GL excluded. Rest 30 s: a purged picture comes back in the frame that shows it (+0.9 ms render for a grid's posters, 6.8 MB; +1.4 ms for an item page, 23.6 MB; no blank frame), and a user reads a page for 60–90 s. Real window (the 1440p, 100 %, 200 Hz, NativeAOT, Aperture fake library), base → change at rest: after a walk Skia 59.91 → 11.78 MB, DXGI local 91.3 → 51.3–55.3 (−39…−44 %), private −16 %; after 6 item pages Skia 45.37 → 19.16, local 66.7 → 55.0 (−17.5 %), non-local 25.4 → 13.4 (−47 %), private −13 %; after a second rest local −53 % / −35 %, private −23 % / −21 %. Back and Forward after the rest: 1 frame each, UI KB as base, the re-upload in that frame (render 0.54 → 1.44 ms grid, 0.15 → 1.53 item). App-thread idle wakes unchanged (0.27–0.85 a second; the purge is one wake a rest). Reel: no purge while playing; paused past the rest frees 0.56 MB of Skia, DXGI unchanged. Frames byte-identical (in-process `Window.SaveFrame`, SHA-256). step-ab: AOT 0/0; JIT pair 2's nine rows not in pair 1 (the suite builds no Vulkan surface: noise). `VulkanProbeTests.AfterARest_TheWindowPurgesOnce_AndDrawsTheSameFrame` (8-bit and F16) and 4 `RestPurgeTests` fail under reverse edits; Fedora slnf 0 failed. |
 
 ## Examined, not worth it
 
@@ -1418,3 +1446,14 @@ From 2026-11-22 (round 18's survey); earlier entries are in the archive ([to 202
   recolour the live element through a `Ref` rather than build the part, and use `Restyle` where the element has a hover
   style; a test of the hover case hovers before the full-build oracle runs, because the forced rebuild repairs the
   resting look and hides the bug. Next: step 4.
+- 2026-11-24: round 19 step 4 landed (82f3b3ff; captures e1c67008): a Vulkan window that has drawn no frame for 30 s
+  purges the GPU textures and upload staging its last frame did not use: Aperture at rest after a walk DXGI local
+  −39…−44 % and private −16 %, after 6 item pages local −17.5 %, non-local −47 %, private −13 % (after a second rest
+  −35…−53 % and −21…−23 %); Back and Forward re-upload in their one frame (+1–1.4 ms render, no blank frame), frames
+  byte-identical, idle wakes unchanged, GL excluded. The agent used 3 app holds plus 7 short holds for the Vulkan
+  UiTests and probe tests, past the brief's 3 (0 foreground takes, 0 driver events). Lead for expert 2: the first purge
+  keeps what only the frame before the last drew (the page a Back left: 3.1 MB of grid posters, 11.5 MB for an item
+  page); it goes at the next rest. For PERFORMANCE.md: a rest measured from Aperture's start crosses its 30 s
+  `FirstSeasonLook` frame; after a purge private bytes keep falling in steps for up to ~9 s. Also added to Waiting (from
+  the grid comparison session, at the user's request there): grid-tableview-keeps-rows and
+  grid-tableview-column-virtualization, for round 20's survey. Next: step 5.
