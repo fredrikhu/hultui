@@ -944,17 +944,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             : _focusManager.MoveFocusPrevious(scope, wrap);
         if (!moved) return false;
 
+        // The element that took the focus has the clipboard: the move went through
+        // OnFocusChanged, which hands it to text elements as they gain focus.
         _focusFromKeyboard = true;
-
-        // Text elements reach the clipboard through the window, so hand it over as they
-        // gain focus rather than making every one of them find it.
-        switch (_focusManager.FocusedElement)
-        {
-            case TextInputElement input: input.Clipboard = Clipboard; break;
-            case TextAreaElement area: area.Clipboard = Clipboard; break;
-            case ITextServicesClient client: client.Clipboard = Clipboard; break;
-            case TextElement { Selectable: true } label: label.Clipboard = Clipboard; break;
-        }
         return true;
     }
 
@@ -1007,6 +999,12 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
     private void OnFocusChanged(Element? element)
     {
+        // A selectable label copies through the window's clipboard too, however it took the focus:
+        // Tab and a press handed it over, but Element.Focus() and a reader's focus request did not,
+        // and Ctrl+C and the menu's Copy copied nothing. It takes no text input (the chain below).
+        if (element is TextElement { Selectable: true } label)
+            label.Clipboard = Clipboard;
+
         if (element is TextInputElement textInput)
         {
             textInput.Clipboard = Clipboard;
