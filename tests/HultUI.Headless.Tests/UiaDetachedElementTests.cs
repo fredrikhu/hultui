@@ -429,4 +429,252 @@ public class UiaDetachedElementTests(ITestOutputHelper output)
             foreach (var p in held) Marshal.Release(p);
         }
     }
+
+    // ── Items served on demand (plan 17 round 19): an item node and the item served in its place share one
+    //    runtime id (VirtualItemId), and UI Automation knows an element by it, so an item node's provider told
+    //    gone after a raise on the served item took the served one with it: a reader could not read the element
+    //    of the focus event it was given.
+
+    private const int FocusChanged = UiaInterop.UIA_AutomationFocusChangedEventId;
+
+    private static List<string> FileNames(int count) => Enumerable.Range(0, count).Select(i => $"file {i}").ToList();
+
+    private static VirtualListElement<string> Files(int count, int selected)
+    {
+        var list = VirtualListElement<string>.New().ItemHeight(20)
+            .RenderWith(t => Flex.Row().Children(TextB.New(t).FontSize(12f)))
+            .Items(FileNames(count))
+            .SelectedIndex(selected);
+        list.IsFocusable = true;
+        return list;
+    }
+
+    /// <summary>An element as the logs name it: "item N" of <paramref name="list"/>, "list", "root", or its id.</summary>
+    private static string Of(Element list, ElementId? id) =>
+        id is not { } e ? "root"
+        : VirtualItemId.TryDecode(e, out var owner, out int index) && owner == list.Id ? $"item {index}"
+        : e == list.Id ? "list" : $"{e.Value}";
+
+    private static string Line(List<(string What, int Thread)> log, int ui) =>
+        string.Join(", ", log.Select(t => t.What + (t.Thread == ui ? " (UI)" : "")));
+
+    /// <summary>
+    /// A list that crosses from 3 items to 1,001 (UI Automation serves a list over 200 on demand) and moves the
+    /// reader's focus onto an item served in place of an item node, while the disconnect thread has yet to tell
+    /// the item nodes' providers (held by a client) gone: nothing is raised on the served item until the item
+    /// node's provider with its runtime id is told gone, so the reader can read the focus event's element.
+    /// Every raise the frame made goes out, in the order it made them, and no tell runs on the UI thread.
+    /// </summary>
+    [WindowsFact]
+    public void AListCrossing200Items_RaisesOnAServedItem_OnlyAfterItsItemNodesProviderIsToldGone()
+    {
+        using var hwnd = TestHwnd.Create();
+        using var session = HeadlessSession.Create(600, 400);
+        using var bridge = NewBridge(hwnd, session);
+        var list = Files(3, 1);
+        session.Window.SetRoot(Flex.Column().FlexGrow(1).Children(list.FlexGrow(1)));
+        for (int i = 0; i < 3; i++) session.PumpFrame(TimeSpan.FromMilliseconds(150));
+        list.Focus();
+        for (int i = 0; i < 3; i++) session.PumpFrame(TimeSpan.FromMilliseconds(150));
+        Assert.True(bridge.HasReaderFocus(VirtualItemId.For(list.Id, 1)));
+        // A client holds each item node's provider, as a reader that walked the list does.
+        var held = Enumerable.Range(0, 3).Select(i => bridge.NativeFragmentSimple(VirtualItemId.For(list.Id, i))).ToArray();
+        Assert.DoesNotContain(IntPtr.Zero, held);
+        int ui = Environment.CurrentManagedThreadId;
+        var log = new Told();
+        var made = new List<string>();
+        using var entered = new ManualResetEventSlim();
+        using var gate = new ManualResetEventSlim();
+        // The disconnect thread stops in the first provider it tells until the gate opens: the rest wait.
+        bridge.ProviderDisconnected = id =>
+        {
+            log.Add($"told {Of(list, id)}");
+            if (Environment.CurrentManagedThreadId != ui && !entered.IsSet) { entered.Set(); gate.Wait(TimeSpan.FromSeconds(10)); }
+        };
+        bridge.Raised = r => made.Add($"raised {r.Kind} {r.Id} {Of(list, r.Element)}");
+        bridge.RaisedToUia = r => log.Add($"raised {r.Kind} {r.Id} {Of(list, r.Element)}");
+        string focusOnItem2 = $"raised {UiaRaisedKind.Event} {FocusChanged} item 2";
+        try
+        {
+            list.Items = FileNames(1_001);
+            list.SelectedIndex = 2;
+            for (int i = 0; i < 3; i++) session.PumpFrame(TimeSpan.FromMilliseconds(150));
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
+            var before = log.Log;
+            output.WriteLine($"made: {string.Join(", ", made)}");
+            output.WriteLine($"before the gate opens: {Line(before, ui)}");
+            Assert.Contains(focusOnItem2, made);
+            Assert.DoesNotContain(before, t => t.What == focusOnItem2);   // held: item 2's item node is not told gone yet
+        }
+        finally { gate.Set(); }
+        Assert.True(bridge.FlushDisconnects(TimeSpan.FromSeconds(10)));
+
+        var after = log.Log;
+        output.WriteLine($"after: {Line(after, ui)}");
+        Assert.Equal(["told item 0", "told item 1", "told item 2"], after.Select(t => t.What).Where(w => w.StartsWith("told item", StringComparison.Ordinal)).Order());
+        Assert.All(after.Where(t => t.What.StartsWith("told", StringComparison.Ordinal)), t => Assert.NotEqual(ui, t.Thread));
+        int told2 = after.FindIndex(t => t.What == "told item 2");
+        int focus2 = after.FindIndex(t => t.What == focusOnItem2);
+        Assert.True(told2 >= 0 && told2 < focus2, "the focus event on item 2 went to UI Automation before its item node's provider was told gone");
+        // Every raise the frames made, in the order they made them: none lost, none overtaken.
+        Assert.Equal(made, after.Select(t => t.What).Where(w => w.StartsWith("raised", StringComparison.Ordinal)));
+        // The reader reads the item the focus event named.
+        Assert.True(bridge.HasReaderFocus(VirtualItemId.For(list.Id, 2)));
+        IntPtr focus = bridge.NativeVirtualItemSimple(list.Id, 2);
+        try { Assert.Equal((0, "file 2"), Name(focus)); }
+        finally { Marshal.Release(focus); }
+        foreach (var p in held)
+        {
+            Assert.Equal(NotAvailable, Name(p).Hr);
+            Marshal.Release(p);
+        }
+    }
+
+    /// <summary>A list crossed 200 items while the disconnect thread has yet to tell its item nodes' providers
+    /// gone, and a client asks for an item served in place of one of them (a navigation after the structure
+    /// event): the item node's provider with its runtime id is told gone first, on the client's thread, before
+    /// the client gets the served one.</summary>
+    [WindowsFact]
+    public void AnItemServedToAClient_HasTheItemNodesProviderWithItsRuntimeIdToldGoneFirst()
+    {
+        using var hwnd = TestHwnd.Create();
+        using var session = HeadlessSession.Create(600, 400);
+        using var bridge = NewBridge(hwnd, session);
+        var list = Files(3, 0);
+        session.Window.SetRoot(Flex.Column().FlexGrow(1).Children(list.FlexGrow(1)));
+        for (int i = 0; i < 3; i++) session.PumpFrame(TimeSpan.FromMilliseconds(150));
+        var held = Enumerable.Range(0, 3).Select(i => bridge.NativeFragmentSimple(VirtualItemId.For(list.Id, i))).ToArray();
+        int ui = Environment.CurrentManagedThreadId;
+        var log = new Told();
+        using var entered = new ManualResetEventSlim();
+        using var gate = new ManualResetEventSlim();
+        bridge.ProviderDisconnected = id =>
+        {
+            log.Add($"told {Of(list, id)}");
+            if (Environment.CurrentManagedThreadId != ui && !entered.IsSet) { entered.Set(); gate.Wait(TimeSpan.FromSeconds(10)); }
+        };
+        IntPtr served = IntPtr.Zero;
+        try
+        {
+            list.Items = FileNames(1_001);
+            for (int i = 0; i < 3; i++) session.PumpFrame(TimeSpan.FromMilliseconds(150));
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
+            using var opens = new Timer(_ => gate.Set(), null, 1_000, Timeout.Infinite);   // should item 2 be the one it stopped in
+            var client = new Thread(() =>
+            {
+                served = bridge.NativeVirtualItemSimple(list.Id, 2);
+                log.Add("the client has item 2");
+            });
+            client.Start();
+            Assert.True(client.Join(TimeSpan.FromSeconds(10)));
+        }
+        finally { gate.Set(); }
+        Assert.True(bridge.FlushDisconnects(TimeSpan.FromSeconds(10)));
+
+        var after = log.Log;
+        output.WriteLine(Line(after, ui));
+        int told = after.FindIndex(t => t.What == "told item 2"), got = after.FindIndex(t => t.What == "the client has item 2");
+        Assert.True(told >= 0 && told < got, "the client got the served item before the item node's provider with its runtime id was told gone");
+        try { Assert.Equal((0, "file 2"), Name(served)); }
+        finally { Marshal.Release(served); }
+        foreach (var p in held) Marshal.Release(p);
+    }
+
+    /// <summary>A window closed while raises are held behind providers the disconnect thread has yet to tell
+    /// gone: every provider is told and every held raise raised, in order, before UI Automation is told the
+    /// window's providers are gone; none is lost.</summary>
+    [WindowsFact]
+    public void AWindowClosedWithRaisesHeld_RaisesEveryOne_AfterItsTell_BeforeTheWindowsProvidersGo()
+    {
+        using var hwnd = TestHwnd.Create();
+        using var session = HeadlessSession.Create(600, 400);
+        var bridge = NewBridge(hwnd, session);
+        var list = Files(3, 1);
+        session.Window.SetRoot(Flex.Column().FlexGrow(1).Children(list.FlexGrow(1)));
+        for (int i = 0; i < 3; i++) session.PumpFrame(TimeSpan.FromMilliseconds(150));
+        list.Focus();
+        for (int i = 0; i < 3; i++) session.PumpFrame(TimeSpan.FromMilliseconds(150));
+        var held = Enumerable.Range(0, 3).Select(i => bridge.NativeFragmentSimple(VirtualItemId.For(list.Id, i))).ToArray();
+        int ui = Environment.CurrentManagedThreadId;
+        var log = new Told();
+        var made = new List<string>();
+        using var entered = new ManualResetEventSlim();
+        using var gate = new ManualResetEventSlim();
+        bridge.ProviderDisconnected = id =>
+        {
+            log.Add($"told {Of(list, id)}");
+            if (Environment.CurrentManagedThreadId != ui && !entered.IsSet) { entered.Set(); gate.Wait(TimeSpan.FromSeconds(10)); }
+        };
+        bridge.Raised = r => made.Add($"raised {r.Kind} {r.Id} {Of(list, r.Element)}");
+        bridge.RaisedToUia = r => log.Add($"raised {r.Kind} {r.Id} {Of(list, r.Element)}");
+        bridge.ProvidersReleased = _ => log.Add("released");
+
+        list.Items = FileNames(1_001);
+        list.SelectedIndex = 2;
+        for (int i = 0; i < 3; i++) session.PumpFrame(TimeSpan.FromMilliseconds(150));
+        Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
+        string focusOnItem2 = $"raised {UiaRaisedKind.Event} {FocusChanged} item 2";
+        Assert.DoesNotContain(log.Log, t => t.What == focusOnItem2);   // held
+        using var opens = new Timer(_ => gate.Set(), null, 300, Timeout.Infinite);
+        bridge.Dispose();
+        session.Window.InstallAccessibilityBridge();   // the window lets go of it, as a closed window would
+        gate.Set();
+        Assert.True(bridge.FlushDisconnects(TimeSpan.FromSeconds(10)));
+
+        var after = log.Log;
+        output.WriteLine(Line(after, ui));
+        Assert.Equal("released", after[^1].What);   // every one before the window's providers go
+        Assert.Equal(["told item 0", "told item 1", "told item 2"], after.Select(t => t.What).Where(w => w.StartsWith("told", StringComparison.Ordinal)).Order());
+        Assert.Equal(made, after.Select(t => t.What).Where(w => w.StartsWith("raised", StringComparison.Ordinal)));   // none lost
+        Assert.True(after.FindIndex(t => t.What == "told item 2") < after.FindIndex(t => t.What == focusOnItem2));
+        foreach (var p in held) Marshal.Release(p);
+    }
+
+    /// <summary>Round 18's case: a frame lets go of an overlay's item nodes (Junction's palette closing) and
+    /// moves the focus to an item another list serves on demand. No raise waits for those tells, as none shares
+    /// a runtime id with them: the focus event goes out on the UI thread at once, and every provider is told
+    /// gone on the disconnect thread, none on the UI thread.</summary>
+    [WindowsFact]
+    public void AFrameThatLetsGoOfAnOverlaysItems_RaisesOnAnotherListsServedItem_AtOnce_AndTellsNothingOnTheUiThread()
+    {
+        using var hwnd = TestHwnd.Create();
+        using var session = HeadlessSession.Create(600, 400);
+        using var bridge = NewBridge(hwnd, session);
+        var history = Files(1_001, 5);
+        var palette = Files(14, 0);
+        var column = Flex.Column().FlexGrow(1).Children(history.FlexGrow(1), palette.FlexGrow(1));
+        session.Window.SetRoot(column);
+        for (int i = 0; i < 3; i++) session.PumpFrame(TimeSpan.FromMilliseconds(150));
+        palette.Focus();
+        for (int i = 0; i < 3; i++) session.PumpFrame(TimeSpan.FromMilliseconds(150));
+        var held = Enumerable.Range(0, 14).Select(i => bridge.NativeFragmentSimple(VirtualItemId.For(palette.Id, i))).ToArray();
+        Assert.DoesNotContain(IntPtr.Zero, held);
+        int ui = Environment.CurrentManagedThreadId;
+        var log = new Told();
+        using var entered = new ManualResetEventSlim();
+        using var gate = new ManualResetEventSlim();
+        bridge.ProviderDisconnected = id =>
+        {
+            log.Add("told");
+            if (Environment.CurrentManagedThreadId != ui && !entered.IsSet) { entered.Set(); gate.Wait(TimeSpan.FromSeconds(10)); }
+        };
+        bridge.RaisedToUia = r => log.Add($"raised {r.Kind} {r.Id} {Of(history, r.Element)}");
+        string focusOnItem5 = $"raised {UiaRaisedKind.Event} {FocusChanged} item 5";
+        try
+        {
+            column.RemoveChild(palette);
+            history.Focus();
+            for (int i = 0; i < 3; i++) session.PumpFrame(TimeSpan.FromMilliseconds(150));
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
+            var before = log.Log;
+            output.WriteLine($"before the gate opens: {Line(before, ui)}");
+            Assert.Contains(before, t => t.What == focusOnItem5 && t.Thread == ui);
+        }
+        finally { gate.Set(); }
+        Assert.True(bridge.FlushDisconnects(TimeSpan.FromSeconds(10)));
+        var told = log.Log.Where(t => t.What == "told").ToList();
+        Assert.True(told.Count >= 14, $"told {told.Count}");
+        Assert.All(told, t => Assert.NotEqual(ui, t.Thread));
+        foreach (var p in held) Marshal.Release(p);
+    }
 }

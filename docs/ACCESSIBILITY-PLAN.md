@@ -1236,9 +1236,31 @@ its own; headless runs never show it. Junction's palette closed with 13–14 in 
   more behind) has the old one told first, on the thread that makes it (`TellFirst`). A window's
   `Dispose` tells what the thread has not taken, and waits for the one it is telling, before
   `UiaReturnRawElementProvider(hwnd, 0, 0, 0)`.
+- **Items served on demand (plan 17 round 19).** An item node and the item served in its place share one
+  runtime id (`VirtualItemId`), and UI Automation knows an element by it: an item node's provider told
+  gone after something was raised on the served item took the served one with it. A list that crosses
+  from 200 items or fewer to more lets its item nodes go and, in the same frame, raises its items'
+  changes and the focus event on items served in their place; a client could not read the element of
+  the focus event it was given (COMException UIA_E_ELEMENTNOTAVAILABLE). Vesper, a 3-entry folder into
+  one of 1,001 with a reader-like client: the focus event lost in 4 of 12 crossings. Now:
+  - a raise on a served item whose item node's provider is not told yet is **held**: handed to the
+    thread behind the tells, which raises it once everything handed before it is done; while one is
+    held, every raise after it is held too, so the client hears the same events in the order the UI
+    thread made them, after the tells, as when the tells ran on the UI thread. A raise that waits for
+    nothing goes out on the UI thread at once (Junction's palette close: 13–14 tells, no raise held);
+  - a served item handed to a client (a navigation, its focus, a hit test) has that item node's
+    provider told first, on the client's thread, or waits for the thread to tell it;
+  - `Dispose` runs what is left in order, held raises too, before the window's providers go.
+
+  Real window (NativeAOT Vesper, the same crossing, 12 a side): the focus event a client could not
+  read 4 of 12 → 0 with a reader-like client, 7 of 12 → 0 with a focus-only one; 0 tells on the UI
+  thread; with raises held (8 of 12) the crossing frame's accessibility work on the UI thread went
+  from 1.55 to 1.13 M cycles (median, reader-like), the held raises 0.24–0.57 M cycles on the thread.
 - **Tests.** `HeadlessUiaReader.Disconnected` and `Clear` wait for the thread. A test that sets a bare
   bridge's `ProviderDisconnected` (called on the thread that told) calls `FlushDisconnects` before it
-  reads, and before it reads what a held provider answers.
+  reads, and before it reads what a held provider answers; `FlushDisconnects` waits for held raises
+  too. `Raised` is told of each raise on the UI thread as it is made, in order; `RaisedToUia` as UI
+  Automation is told it, on the thread that tells it.
 
 ## Out of scope (follow-ups)
 
