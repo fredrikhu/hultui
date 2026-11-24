@@ -66,6 +66,8 @@ public partial class CommanderApp
 
     private IReadOnlyList<TextSpan>[]? _viewerHl;
     private string? _viewerHlKey;
+    // The running colour walk's cancel (StopViewerHighlight).
+    private CancellationTokenSource? _viewerHlCancel;
 
     // Pretty print. The file as read stays in _viewerRaw; `f` swaps the re-indented form in
     // and out of _viewerLines, so everything downstream — rows, search, selection — sees a
@@ -117,8 +119,10 @@ public partial class CommanderApp
         _viewerItems = [];
         _viewerTops = [];
         // Orphans a read or a tokenize still running, so a slow one cannot land on a view the
-        // user has already left.
+        // user has already left; and stops the tokenize, which would otherwise walk on to the
+        // end of the file for colours nobody will see.
         _viewerGen++;
+        StopViewerHighlight();
         _viewerHlKey = null;
         _viewerHl = null;
         // The panes don't exist yet — this build still shows the viewer. Ask for the focus
@@ -140,6 +144,7 @@ public partial class CommanderApp
         _viewerLines = [];
         _viewerItems = [];
         _viewerTops = [];
+        StopViewerHighlight();   // the file being replaced
         _viewerHl = null;
         _viewerHlKey = null;
         _viewerPan.Reset();
@@ -306,6 +311,7 @@ public partial class CommanderApp
     /// mis-colour anything inside a block comment or a multi-line string.</summary>
     private void StartViewerHighlight(string[] lines)
     {
+        StopViewerHighlight();   // a walk of the text this one replaces (re-indented, or as stored)
         _viewerHl = null;
         _viewerHlKey = null;
         if (!SyntaxHighlighter.CanHighlight(_viewerPath)) return;   // no grammar for this extension
@@ -314,16 +320,34 @@ public partial class CommanderApp
         // Keyed by which text is up, not only which file: a tokenize of the raw lines that
         // lands after a pretty-print toggle would colour the wrong lines.
         var key = _viewerHlKey = $"{ViewerTextKey} {_viewerGen}";
+        var cancel = _viewerHlCancel = new CancellationTokenSource();
+        var token = cancel.Token;
+        WalkStarted();
         Task.Run(() =>
         {
-            var spans = Tokenize(path, lines);
+            var cost = new WalkCost();
+            IReadOnlyList<TextSpan>[]? spans;
+            try { spans = Tokenize(path, lines, token, ref cost); }
+            catch (OperationCanceledException) { spans = null; cost.Cancelled = true; }
             HultUI.Application.InvokeOnMainThread(() =>
             {
+                if (ReferenceEquals(_viewerHlCancel, cancel)) _viewerHlCancel = null;
+                WalkEnded(cancel, cost);
                 if (_viewerHlKey != key) return;   // superseded
                 _viewerHl = spans;
                 MarkDirty();
             });
         });
+    }
+
+    /// <summary>Stops the viewer's colour walk, if one is running: the view closed, or moved on
+    /// to another file or to the same file re-indented. The walk stops within a line instead of
+    /// going on to the end of the file: an 8,000-line C# file closed 150 ms after it opened
+    /// walked on for 31-36 MB and half a second of a core (plan 17 round 19).</summary>
+    private void StopViewerHighlight()
+    {
+        _viewerHlCancel?.Cancel();
+        _viewerHlCancel = null;   // the walk's landing disposes it
     }
 
     /// <summary>Syntax spans for a 0-based line, or null while the tokenize is still running

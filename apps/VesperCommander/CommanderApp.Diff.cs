@@ -303,8 +303,9 @@ public partial class CommanderApp
         _diffOpen = false;
         _diffResult = null;
         // Bumping the generation orphans any comparison still running, so a slow one cannot
-        // land on a view the user has already left.
+        // land on a view the user has already left; and the colour walk stops.
         _diffGen++;
+        StopDiffHighlight();
         // The panes don't exist yet — this build still shows the diff. Ask for the focus
         // once they're back; PaneRef still holds the element from before the view opened.
         _pendingPaneFocus = _diffSide;
@@ -327,6 +328,7 @@ public partial class CommanderApp
     /// </summary>
     private void ComputeDiff()
     {
+        StopDiffHighlight();   // the comparison being replaced
         _diffResult = null;
         _diffRows = new();
         _diffChangeRows = new();
