@@ -24,10 +24,11 @@ public partial class CommanderApp
     //  - what a view-only build (MarkViewDirty: a cursor move, a mark, type-to-find, Tab, a grid
     //    scrolled, a listing, a thumbnail or a preview landing, a worker's progress tick) can
     //    change that a part shows, which MarkViewDirty compares with what the part was built
-    //    from: which pane is active (the trails), the mark count, the filter, the files cut and
-    //    the thumbnails still decoding (the footers), and the filter, a notice, the open prompt
-    //    and a backgrounded transfer's progress (the command line). A folder-size walk's tick
-    //    builds the footers outright (ProgressDirty);
+    //    from: which pane is active (the trails, which take it in place with no build: the drive
+    //    crumb's label or the result pill recoloured, see LightTrail), the mark count, the
+    //    filter, the files cut and the thumbnails still decoding (the footers), and the filter, a
+    //    notice, the open prompt and a backgrounded transfer's progress (the command line). A
+    //    folder-size walk's tick builds the footers outright (ProgressDirty);
     //  - a signal or a loader its build reads: the footer reads its pane's listing, so a listing
     //    that lands builds it again.
     //
@@ -52,8 +53,13 @@ public partial class CommanderApp
         public Part? Strip, Trail, ResultsTrail, Columns, Foot;
         public readonly Signal<int> StripRevision = new(0), TrailRevision = new(0),
             ColumnsRevision = new(0), FootRevision = new(0);
-        /// <summary>Whether the trail was built for the active pane.</summary>
+        /// <summary>Whether the trail shows its pane as the active one: what it was built for, or
+        /// what a change of the active pane recoloured it to (<see cref="LightTrail"/>).</summary>
         public bool TrailActive;
+        /// <summary>The one element of each trail that shows it: the drive crumb's label in the
+        /// path trail, the pill in a result set's.</summary>
+        public readonly Ref<TextElement> DriveLabel = new();
+        public readonly Ref<BoxElement> ResultsPill = new();
         public FootKey FootKey;
     }
 
@@ -113,7 +119,7 @@ public partial class CommanderApp
         {
             char side = si == 0 ? 'L' : 'R';
             var p = _paneParts[si];
-            if (p.TrailActive != (_active == side)) p.TrailRevision.Value++;
+            if (p.TrailActive != (_active == side) && !LightTrail(side)) p.TrailRevision.Value++;
             if (p.FootKey != FootKeyNow(side)) p.FootRevision.Value++;
         }
         if (_cmdKey != CmdKeyNow()) _cmdRevision.Value++;
@@ -169,5 +175,31 @@ public partial class CommanderApp
         return ResultsOf(side) is { } results
             ? BuildResultsBreadcrumb(side, active, results)
             : BuildBreadcrumb(side, active);
+    }
+
+    /// <summary>A change of the active pane, on the trail as it stands: the one thing in a trail
+    /// that shows which pane is active, the drive crumb's label or a result set's pill, recoloured
+    /// on the live element with no build. Tab and a click into the other pane built both trails
+    /// for it, about 80 KB a change. False when the trail on screen has no such element, as when
+    /// its shape changed (a result set fed in or left) and the build that makes it is still to
+    /// come; the trail then builds.</summary>
+    private bool LightTrail(char side)
+    {
+        var p = PaneOf(side);
+        bool active = _active == side;
+        if (ResultsOf(side) is null)
+        {
+            if (p.DriveLabel.Current is not { IsHosted: true } label) return false;
+            label.TextColor(DriveLabelColor(active)).MarkStyleDirty();
+        }
+        else
+        {
+            if (p.ResultsPill.Current is not { IsHosted: true } pill) return false;
+            // Restyle, as the pill has a hover tint: set directly, the colour lasted only until
+            // the pointer next crossed it.
+            pill.Restyle(active ? LitPill : DimPill);
+        }
+        p.TrailActive = active;
+        return true;
     }
 }

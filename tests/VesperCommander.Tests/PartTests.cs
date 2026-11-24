@@ -4,8 +4,10 @@ using System.Text;
 using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
+using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
 using SkiaSharp;
+using VesperCommander.Theme;
 using Xunit;
 
 namespace VesperCommander.Tests;
@@ -90,9 +92,10 @@ public class PartTests
 
     /// <summary>Every path that rebuilds the view and keeps the parts, and the parts each one may
     /// build because it changes what they show: a sweep or a mark the footer's count, the filter
-    /// the footer's counts and the command line, Tab and a click in the other pane the trails (the
-    /// active pane's root crumb is lit). Each rebuilds the window, builds exactly those parts, and
-    /// leaves every part as a full build would make it.</summary>
+    /// the footer's counts and the command line. Tab and a click in the other pane build none: the
+    /// trails take the change in place (the active pane's root crumb is lit; see
+    /// <see cref="AChangeOfTheActivePane_RecoloursTheTrails_AndBuildsNone"/>). Each rebuilds the
+    /// window, builds exactly those parts, and leaves every part as a full build would make it.</summary>
     [Fact]
     public void ViewOnlyPaths_BuildOnlyThePartsThatShowWhatChanged_AsAFullBuildWould()
     {
@@ -115,19 +118,19 @@ public class PartTests
         ViewOnly("Ctrl+A", () => t.Press(KeyCode.A, KeyModifiers.Ctrl), "left footer");
         ViewOnly("Ctrl+A again", () => t.Press(KeyCode.A, KeyModifiers.Ctrl), "left footer");
         ViewOnly("a row clicked", () => ClickRow(t, 'L', Name(9)));
-        ViewOnly("Tab", () => t.Press(KeyCode.Tab), "left trail", "right trail");
+        ViewOnly("Tab", () => t.Press(KeyCode.Tab));
         // From ".." onto a file: F3 pairs it with the left pane's cursor, which takes the partner's
         // ring; the next file pairs with it too.
         ViewOnly("Down in the right pane", () => t.Press(KeyCode.Down));
         NoBuild("Down again in the right pane", () => t.Press(KeyCode.Down));
-        ViewOnly("a row clicked in the other pane", () => ClickRow(t, 'L', Name(2)), "left trail", "right trail");
+        ViewOnly("a row clicked in the other pane", () => ClickRow(t, 'L', Name(2)));
         ViewOnly("a filter typed", () => t.Press(KeyCode.Digit1), "left footer", "command line");
         ViewOnly("the filter extended", () => t.Press(KeyCode.Digit2), "left footer", "command line");
         NoBuild("Down in the filter", () => t.Press(KeyCode.Down));
         ViewOnly("Backspace in the filter", () => t.Press(KeyCode.Backspace), "left footer", "command line");
         ViewOnly("Escape clears the filter", () => t.Press(KeyCode.Escape), "left footer", "command line");
         ViewOnly("Tab with a filter", () => { t.Press(KeyCode.Digit3); t.Press(KeyCode.Tab); },
-            "left trail", "right trail", "left footer", "command line");
+            "left footer", "command line");
 
         // The grids: a key, and Brief scrolled sideways. Its columns are made for the scroll, and a
         // scroll builds only when it brings a column not made into view (round 10 step 15,
@@ -146,6 +149,145 @@ public class PartTests
         s.PumpFrames(2);
         NoBuild("Thumbnails Down", () => t.Press(KeyCode.Down));
         ViewOnly("Thumbnails Insert", () => t.Press(KeyCode.Insert), "left footer");
+    }
+
+    /// <summary>Of the parts, only the trails show which pane is active: the drive crumb's label is
+    /// lit in the active pane, a result set's pill is brighter. Tab and a click into the other pane
+    /// recolour that one element on screen and build no trail (they built both trails, about 80 KB
+    /// a change). After each, and after the paths that build the trails again (a pane swap,
+    /// another folder, a theme, a narrow window), the trails are what a full build makes, the lit
+    /// one is the active pane's, and the frame is the one a full build draws, byte for byte.</summary>
+    [Fact]
+    public void AChangeOfTheActivePane_RecoloursTheTrails_AndBuildsNone()
+    {
+        using var t = Open();
+        var s = t.Session;
+        var settings = t.Field<Settings>("_settings");
+        var (theme, accent, preview) = (settings.Theme, settings.Accent, settings.PreviewPane);
+        // The preview reads the active pane's file off the UI thread: one landing between the two
+        // frames compared would tell them apart for a reason of its own.
+        settings.PreviewPane = false;
+        FullRebuild(t);
+        s.PumpFrames(2);
+        var teal = Color.FromHex("#6bc0d9");   // ResultsTeal
+        char Active() => t.Field<char>("_active");
+        char Other() => Active() == 'L' ? 'R' : 'L';
+        void Off() { s.Window.MoveMouse(5, 400); s.PumpFrames(1); }
+        // What a pane's ref names: its trail's drive label or results pill.
+        T? Live<T>(char side, string field) where T : Element
+        {
+            var p = t.Field<Array>("_paneParts").GetValue(side == 'L' ? 0 : 1)!;
+            return ((Ref<T>)p.GetType().GetField(field)!.GetValue(p)!).Current;
+        }
+
+        // The lit element of each trail on screen, and only the active pane's lit.
+        void Lit(string when)
+        {
+            foreach (char side in "LR")
+            {
+                bool on = side == Active();
+                var trail = Descendants(Part(t, (side == 'L' ? "left" : "right") + " trail")).ToList();
+                if (t.Invoke("ResultsOf", side) is null)
+                {
+                    var label = Live<TextElement>(side, "DriveLabel");
+                    Assert.True(label is not null && trail.Contains(label), $"the {side} drive label is not in its trail ({when})");
+                    Assert.True(label!.ResolvedInherited.TextColor == (on ? Nocturne.Accent300 : Nocturne.On(0.55)),
+                        $"the {side} drive label is {(on ? "not lit" : "lit")} ({when})");
+                }
+                else
+                {
+                    var pill = Live<BoxElement>(side, "ResultsPill");
+                    Assert.True(pill is not null && trail.Contains(pill), $"the {side} results pill is not in its trail ({when})");
+                    Assert.True(pill!.BackgroundColor == Nocturne.Alpha(teal, on ? 0.16 : 0.10),
+                        $"the {side} results pill is {(on ? "not lit" : "lit")} ({when})");
+                }
+            }
+        }
+        // A change of the active pane: the window builds, no part does (but the ones named).
+        void Change(string name, Action act, params string[] built)
+        {
+            char was = Active();
+            Step(t, name, act, window: true, frames: true, built);
+            Assert.NotEqual(was, Active());
+            Lit(name);
+        }
+        // A path that builds the trails again.
+        void Built(string name, Action act)
+        {
+            act();
+            s.PumpFrames(3);
+            AssertPartsAreAFullBuild(t, name, frames: true);
+            Lit(name);
+        }
+        void ClickOther()
+        {
+            char side = Other();
+            ClickRow(t, side, t.Rows(side).Where(e => !e.IsParent).ElementAt(3).Name);
+            Off();
+        }
+
+        try
+        {
+            Lit("open");
+            Change("Tab", () => t.Press(KeyCode.Tab));
+            Change("Tab back", () => t.Press(KeyCode.Tab));
+            Change("a row clicked in the other pane", ClickOther);
+            Change("and back in the first", ClickOther);
+
+            // The pill of a result set, and the pointer across it after the change: a hover gives
+            // back the look the pill rests in, which the change must have moved too.
+            Assert.Equal('L', Active());
+            Built("a result set fed in", () =>
+            {
+                t.Press(KeyCode.F7, KeyModifiers.Alt);
+                t.SetField("_findRecursive", true);
+                t.SetField("_findPattern", ".md");
+                t.Invoke("RunFind");
+                s.PumpUntil(() => !t.Field<bool>("_findSearching"), TimeSpan.FromSeconds(30));
+                s.PumpFrames(2);
+                t.Press(KeyCode.L, KeyModifiers.Ctrl);
+            });
+            Assert.NotNull(t.Invoke("ResultsOf", 'L'));
+            void TabAndHover()
+            {
+                t.Press(KeyCode.Tab);
+                Hover(t, Live<BoxElement>('L', "ResultsPill")!);
+                Off();
+            }
+            // The key takes off the notice the set was fed in with.
+            Change("Tab beside the result set, the pill hovered", TabAndHover, "command line");
+            Change("Tab back to the result set, the pill hovered", TabAndHover);
+            Built("the results left", () =>
+            {
+                t.Press(KeyCode.Backspace);
+                s.PumpUntil(() => t.Rows('L').Count > Files);
+            });
+
+            Built("the panes swapped", () => t.Press(KeyCode.U, KeyModifiers.Ctrl));
+            Change("Tab after the swap", () => t.Press(KeyCode.Tab));
+            Built("the other pane in another folder", () =>
+            {
+                char side = Other();
+                t.Invoke("NavigateTo", side, Path.Combine(t.Left, "docs"));
+                s.PumpUntil(() => t.Rows(side).Count == 6);
+            });
+            Change("Tab after it", () => t.Press(KeyCode.Tab));
+            Built("another theme", () =>
+            {
+                Nocturne.Use("gruvbox-light", 0);
+                s.Application.Theme = Nocturne.ToHultTheme();
+                FullRebuild(t);
+            });
+            Change("Tab in it", () => t.Press(KeyCode.Tab));
+            Built("a narrow window", () => s.Window.SetClientSize(760, 700));
+            Change("Tab in it", () => t.Press(KeyCode.Tab));
+        }
+        finally
+        {
+            Nocturne.Use(theme, accent);
+            s.Application.Theme = Nocturne.ToHultTheme();
+            settings.PreviewPane = preview;
+        }
     }
 
     /// <summary>The pointer over a sort column lights it in its pane's column header alone: no
@@ -462,7 +604,13 @@ public class PartTests
     /// <summary>Runs <paramref name="act"/> and checks it built the window (or not) and exactly the
     /// named parts on screen (at least once each), and that every part is what a full build makes,
     /// before and after.</summary>
-    private static void Step(DiffViewTests.Fixture t, string name, Action act, bool window, params string[] built)
+    private static void Step(DiffViewTests.Fixture t, string name, Action act, bool window, params string[] built) =>
+        Step(t, name, act, window, frames: false, built);
+
+    /// <param name="frames">Whether the frame after it is checked too: the bytes a full build
+    /// draws.</param>
+    private static void Step(DiffViewTests.Fixture t, string name, Action act, bool window, bool frames,
+        params string[] built)
     {
         AssertPartsAreAFullBuild(t, "before " + name);
         int builds = Builds(t);
@@ -480,12 +628,15 @@ public class PartTests
             else Assert.True(n == was, $"{name} built the {part} ({n - was} builds)");
         }
         foreach (var part in built) Assert.True(after.ContainsKey(part), $"the {part} is not on screen");
-        AssertPartsAreAFullBuild(t, "after " + name);
+        AssertPartsAreAFullBuild(t, "after " + name, frames);
     }
 
-    private static void AssertPartsAreAFullBuild(DiffViewTests.Fixture t, string? when = null)
+    /// <param name="frames">Whether the frame drawn now must also be the bytes the full build
+    /// draws.</param>
+    private static void AssertPartsAreAFullBuild(DiffViewTests.Fixture t, string? when = null, bool frames = false)
     {
         var kept = PartSigs(t);
+        byte[]? keptFrame = frames ? Pixels(t) : null;
         int parts = t.App.PartBuilds;
         FullRebuild(t);
         t.Session.PumpFrames(2);
@@ -503,6 +654,16 @@ public class PartTests
                         $"the kept {part} is not what a full build makes{(when is null ? "" : " (" + when + ")")}, line {l}:\n"
                         + $"  kept: {(l < xl.Length ? xl[l] : "<none>")}\n  full: {(l < yl.Length ? yl[l] : "<none>")}");
         }
+        if (keptFrame is not null && !keptFrame.AsSpan().SequenceEqual(Pixels(t)))
+            throw new Xunit.Sdk.XunitException($"the frame is not what a full build draws ({when})");
+    }
+
+    /// <summary>The window's last frame, as drawn.</summary>
+    private static byte[] Pixels(DiffViewTests.Fixture t)
+    {
+        using var image = t.Session.Window.CapturePixels();
+        using var bitmap = SKBitmap.FromImage(image);
+        return bitmap.Bytes;
     }
 
     /// <summary>The parts on screen by name, each with what it shows.</summary>

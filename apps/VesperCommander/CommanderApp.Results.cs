@@ -204,6 +204,12 @@ public partial class CommanderApp
     private string ResultsRootLabel(ResultListing v) =>
         CollapsePath(v.Root, Math.Max(60f, BreadcrumbBudget() - 130f - EstTextWidth(v.Query, mono: true)));
 
+    /// <summary>The results pill's ground, brighter in the active pane: as built, and as a change
+    /// of the active pane recolours it (<see cref="LightTrail"/>).</summary>
+    private static Color ResultsPillBg(bool active) => Nocturne.Alpha(ResultsTeal, active ? 0.16 : 0.10);
+    private static readonly Action<Element> LitPill = static e => ((BoxElement)e).BackgroundColor = ResultsPillBg(true);
+    private static readonly Action<Element> DimPill = static e => ((BoxElement)e).BackgroundColor = ResultsPillBg(false);
+
     /// <summary>The breadcrumb a fed-in pane shows in place of the path trail: a pinned teal
     /// results pill, then the folder the search ran under — clicking either leaves.</summary>
     private Element BuildResultsBreadcrumb(char side, bool active, ResultListing v)
@@ -217,9 +223,10 @@ public partial class CommanderApp
         int shown = v.Entries.Count;
         var pill = Box.New().FlexShrink(0)
             .Padding(new Thickness(1, 6, 1, 6)).CornerRadius(Nocturne.RadiusSm)
-            .Background(Nocturne.Alpha(ResultsTeal, active ? 0.16 : 0.10))
+            .Background(ResultsPillBg(active))
             .Cursor(CursorType.Pointer)
             .Tooltip($"Search results for {v.Query} — Backspace returns to {v.Root}");
+        pill.WithRef(PaneOf(side).ResultsPill);
         var inner = Flex.Row(gap: 5).AlignItems(AlignItems.Center);
         inner.AddChild(Ui.Icon(Glyphs.Search, 11f, ResultsTeal));
         inner.AddChild(Ui.Mono($"{shown} result{(shown == 1 ? "" : "s")}", 11.5f, ResultsTeal)

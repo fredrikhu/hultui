@@ -708,7 +708,12 @@ header and footer, this way (round 5, step 12), and adds four lessons:
 - **Split a part by what changes together.** One header part per pane made Tab build both tab
   strips and column headers as well (159 KB a key), because the trail shows which pane is active:
   as three parts, Tab builds the two trails (106 KB), and the pointer over a sort column builds one
-  column header and no window (378 → 26 KB a move).
+  column header and no window (378 → 26 KB a move). Since plan 17 round 19 Tab builds no trail
+  either: a trail shows the active pane in one colour, which the change sets on the live element
+  instead (the drive crumb's label through a `Ref`, `TextColor` and `MarkStyleDirty`; a result
+  set's pill with `Restyle`, as it has a hover tint), and the trail builds only when that element
+  is not on screen. Headless, JIT: Tab 89–97 → 16 KB, a click into the other pane 125 → 46–52 KB;
+  NativeAOT in a real window 83 → 16–17 KB a Tab.
 - **Set what a build shows before asking for it.** Duplicating a tab set the copy's view and sort
   after the build that showed the tab; the next rebuild of anything used to cover that, and a kept
   part does not. With parts, a full rebuild no longer happens by accident.
