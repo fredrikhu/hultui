@@ -136,6 +136,31 @@ public class ChangesPatchTests
         Assert.Empty(none);
     }
 
+    /// <summary>Neither read writes the index (nor so takes <c>index.lock</c>), with a file whose times moved and
+    /// whose text did not: git stopped inside a read would leave the lock behind, and a file read on its own runs
+    /// beside the user's staging clicks, whose <c>git apply --cached</c> failed on that lock.</summary>
+    [Fact]
+    public void TheReads_LeaveTheIndexAlone()
+    {
+        using var repo = Fixture();
+        repo.Git("status");
+        string index = Path.Combine(repo.Path, ".git", "index");
+        File.SetLastWriteTimeUtc(Path.Combine(repo.Path, ".gitattributes"), DateTime.UtcNow.AddMinutes(5));
+        var before = File.ReadAllBytes(index);
+
+        var (_, whole) = repo.Repo.GetWorkingDiff(staged: false, ignoreWhitespace: false, maxChars: 1 << 20);
+        Assert.True(whole);
+        repo.Repo.GetWorkingDiff(staged: false, ignoreWhitespace: false, maxChars: 64);
+        repo.Repo.GetWorkingFileDiff(false, ".gitattributes", null);
+        repo.Repo.GetWorkingFileDiff(false, "a.txt", null);
+        Assert.Equal(before, File.ReadAllBytes(index));
+        Assert.False(File.Exists(index + ".lock"));
+
+        // What a plain git diff does with the same tree: the refresh the reads leave out.
+        repo.Git("diff");
+        Assert.NotEqual(before, File.ReadAllBytes(index));
+    }
+
     // ── The start's preload and the Changes view ─────────────────────────
 
     /// <summary>A working tree below the limit loads as before: every listed file's diff with the load (an empty
