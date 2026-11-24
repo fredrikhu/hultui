@@ -31,7 +31,7 @@ public class ChromePartTests
     /// cursors of History, Branches, Tags, Files and the Commit file list, the search boxes and
     /// the find bar. Each rebuilds the window, builds no chrome, and leaves the chrome exactly as
     /// a full build would make it. A character in the composer's fields builds no window at
-    /// all.</summary>
+    /// all, nor does a key in the Files tree or the Commit file list that moves nothing.</summary>
     [Fact]
     public void ViewOnlyMoves_RebuildTheView_AndKeepTheChromeAFullBuildWouldMake()
     {
@@ -46,6 +46,17 @@ public class ChromePartTests
                 s.PumpFrames(3);
                 Assert.True(fx.App.Builds > builds, $"{name} did not rebuild the window");
                 Assert.True(fx.App.ChromeBuilds == chrome, $"{name} built the chrome ({fx.App.ChromeBuilds - chrome} part builds)");
+                AssertChromeIsAFullBuild(fx, "after " + name);
+            }
+            // A tree key that moves nothing builds nothing, and leaves the chrome as it was.
+            void NoBuild(string name, Action act)
+            {
+                Settle(fx);   // what the key before opened has landed
+                int builds = fx.App.Builds, chrome = fx.App.ChromeBuilds;
+                act();
+                s.PumpFrames(3);
+                Assert.True(fx.App.Builds == builds, $"{name} built the window");
+                Assert.True(fx.App.ChromeBuilds == chrome, $"{name} built the chrome");
                 AssertChromeIsAFullBuild(fx, "after " + name);
             }
             void Key(KeyCode k, KeyModifiers m = KeyModifiers.None) => s.Window.PressKey(k, m);
@@ -73,18 +84,22 @@ public class ChromePartTests
             ViewOnly("Tags Down again", () => Key(KeyCode.Down));
             ViewOnly("Tags Up", () => Key(KeyCode.Up));
 
-            // Files: the cursor opens each file it lands on.
+            // Files: the cursor opens each file it lands on (the browsed commit's tree is files
+            // only). A key past the top moves nothing and builds nothing.
             Switch(fx, KeyCode.Digit7);
-            ViewOnly("Files Down", () => Key(KeyCode.Down));
-            ViewOnly("Files Down again", () => Key(KeyCode.Down));
-            ViewOnly("Files End", () => Key(KeyCode.End));
+            Key(KeyCode.End); s.PumpFrames(3);
+            ViewOnly("Files Up", () => Key(KeyCode.Up));
+            ViewOnly("Files Up again", () => Key(KeyCode.Up));
+            ViewOnly("Files Home", () => Key(KeyCode.Home));
+            NoBuild("Files Up past the top", () => Key(KeyCode.Up));
 
-            // Commit: the file list's cursor, the next commit, and the find bar.
+            // Commit: the file list's cursor (the commit's one file: Down moves nothing), the next
+            // commit, and the find bar.
             Switch(fx, KeyCode.Digit2);
             Key(KeyCode.Home); s.PumpFrames(3);
             Switch(fx, KeyCode.Digit3);
-            ViewOnly("Commit file Down", () => Key(KeyCode.Down));
-            ViewOnly("Commit file Down again", () => Key(KeyCode.Down));
+            NoBuild("Commit file Down", () => Key(KeyCode.Down));
+            NoBuild("Commit file Down again", () => Key(KeyCode.Down));
             ViewOnly("Commit next commit", () => Key(KeyCode.Down, KeyModifiers.Ctrl));
             ViewOnly("Commit previous commit", () => Key(KeyCode.Up, KeyModifiers.Ctrl));
             ViewOnly("Commit find bar opens", () => Key(KeyCode.F, KeyModifiers.Ctrl));

@@ -742,8 +742,9 @@ public partial class JunctionApp
     // the cursor through it — built all of them again: 1.9 MB a key on a commit of 300 files in
     // 81 folders, every one of them in the accessibility tree. It is the Files tab's shape now: a
     // virtual list of item rows, the header its first, so only the rows on screen are elements
-    // and a key makes the rows whose item changed — the two the cursor left and reached. The
-    // rows keep the heights they had (CommitRowHeights), so it looks and scrolls as it did.
+    // and a key makes the two rows the cursor left and reached: the cursor is the list's current
+    // item, and a key that only moves it builds nothing (MoveCommitCursor). The rows keep the
+    // heights they had (CommitRowHeights), so it looks and scrolls as it did.
 
     private Element BuildFileTree(IReadOnlyList<GitFileChange> files, bool fill = false)
     {
@@ -768,7 +769,7 @@ public partial class JunctionApp
 
         var list = VirtualListElement<CommitTreeRowItem>.New()
             .Items(new CommitTreeRowItems(this, _commitFileRows, files.Count))
-            .RenderWith((item, _) => CommitTreeRow(item))
+            .RenderWithState((item, s) => CommitTreeRow(item, cursor: s.IsCurrent))
             .RowHeights(_commitRowHeight ??= (item, _) => CommitRowHeight(item));
         list.Padding(new Thickness(8, 6, 8, 6))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 1, 0, 0));
@@ -777,6 +778,8 @@ public partial class JunctionApp
         // element, so a reader no longer finds it there (the Files tab's trade).
         list.RowsAreComposite = true;
         list.Role = AccessibilityRole.ScrollView;
+        // A build hands the list the cursor's row, wherever the cursor path was set.
+        list.CurrentIndex = CommitListIndex(_commitCursorPath);
         list.WithRef(_fileScrollRef);
         // When the diff pane is hidden the list fills the view; otherwise it's a fixed-width
         // sidebar next to the diff.
@@ -793,12 +796,13 @@ public partial class JunctionApp
     /// <summary>
     /// One row of the Commit view's file list as its list sees it: the header (no node), which
     /// carries the count; or a node, and what its look takes from the rest of the view — whether
-    /// it is the open file, under the cursor, an open folder, and a reviewed file's threads. A
-    /// key that moves the cursor changes two items; opening a folder moves the rows below it,
-    /// which are other nodes at those places now.
+    /// it is the open file, an open folder, and a reviewed file's threads. The cursor is the
+    /// list's current item, not the item's: a key that moves it changes no item, and the list
+    /// makes the row it left and the row it reached again. Opening a folder moves the rows below
+    /// it, which are other nodes at those places now.
     /// </summary>
     internal readonly record struct CommitTreeRowItem(TreeNode<GitFileChange>? Node, int Files, bool Open,
-        bool Cursor, bool Expanded, (int Threads, int Unresolved) Threads);
+        bool Expanded, (int Threads, int Unresolved) Threads);
 
     /// <summary>The header and the visible rows as the list's items, each made when the list
     /// asks for it — a key compares the rows on screen, not every row.</summary>
@@ -811,12 +815,11 @@ public partial class JunctionApp
         {
             get
             {
-                if (index == 0) return new CommitTreeRowItem(null, files, false, false, false, default);
+                if (index == 0) return new CommitTreeRowItem(null, files, false, false, default);
                 var node = rows[index - 1];
-                bool cursor = node.Path == app._commitCursorPath;
                 return node.IsFolder
-                    ? new CommitTreeRowItem(node, 0, false, cursor, app._commitFilesTree.IsExpanded(node), default)
-                    : new CommitTreeRowItem(node, 0, node.Path == app._selectedFilePath, cursor, false,
+                    ? new CommitTreeRowItem(node, 0, false, app._commitFilesTree.IsExpanded(node), default)
+                    : new CommitTreeRowItem(node, 0, node.Path == app._selectedFilePath, false,
                         app.ReviewThreadCounts(node.Path));
             }
         }
@@ -832,15 +835,15 @@ public partial class JunctionApp
     /// <summary>Rows the Commit view's file list has made, for tests.</summary>
     internal int CommitTreeRowsMade { get; private set; }
 
-    private Element CommitTreeRow(CommitTreeRowItem item)
+    private Element CommitTreeRow(CommitTreeRowItem item, bool cursor)
     {
         CommitTreeRowsMade++;
         if (item.Node is not { } node)
             return Text.New($"{item.Files} FILES CHANGED").FontSize(10f)
                 .TextColor(Nocturne.On(0.40)).Padding(new Thickness(6, 8, 6, 8));
         return node.IsFolder
-            ? CommitFolderRow(node, item.Cursor, item.Expanded)
-            : FileTreeRow(node, item.Open, item.Cursor, item.Threads);
+            ? CommitFolderRow(node, cursor, item.Expanded)
+            : FileTreeRow(node, item.Open, cursor, item.Threads);
     }
 
     // The heights the rows had in the scroll view, which a virtual list has to be told: each is
@@ -894,6 +897,9 @@ public partial class JunctionApp
         }
         return _commitRowIndex.TryGetValue(path, out var index) ? index : -1;
     }
+
+    /// <summary>The list's index of a path's row (the header is the list's first), or -1.</summary>
+    private int CommitListIndex(string? path) => CommitRowIndex(path) is var i and >= 0 ? i + 1 : -1;
 
     /// <summary>Brings the cursor's row on screen. The list may not have realized it, so its band
     /// comes from the row heights, summed in the order the list sums them (the header first).</summary>
@@ -949,15 +955,34 @@ public partial class JunctionApp
     /// <summary>Moves the cursor to a visible row. A file row opens too, so arrowing
     /// through the list still previews each diff; a folder row only moves the highlight
     /// and leaves the open file on screen — the same as the Files tab, and better than
-    /// blanking the pane every time the cursor crosses a folder.</summary>
+    /// blanking the pane every time the cursor crosses a folder. A move onto a folder, or back
+    /// onto the open file, is the live list's current item, with no build: the list makes the row
+    /// the cursor left and the one it reached, and a key past the end does nothing. A build for
+    /// it made the whole view, 64 elements and 73 KB a folder key (plan 17 round 19).</summary>
     private bool MoveCommitCursor(int index)
     {
         if (_commitFileRows.Count == 0) return true;
         index = Math.Clamp(index, 0, _commitFileRows.Count - 1);
         var node = _commitFileRows[index];
         _commitCursorPath = node.Path;
+        if (node.IsFolder || node.Path == _selectedFilePath)
+        {
+            if (_fileScrollRef.Current is VirtualListElement<CommitTreeRowItem> live && _window.IsInTree(live))
+            {
+                // What the build's after-hook did for a move (OnAfterBuild), now, before the
+                // frame's layout: the least scroll that shows the row.
+                _pendingScrollToSelected = false;
+                live.CurrentIndex = index + 1;   // the header is the list's first row
+                ScrollCommitCursorIntoView();
+            }
+            else
+            {
+                _pendingScrollToSelected = true;
+                MarkViewDirty();
+            }
+            return true;
+        }
         _pendingScrollToSelected = true;
-        if (node.IsFolder || node.Path == _selectedFilePath) { MarkViewDirty(); return true; }
         _selectedFilePath = node.Path;
         // Tracked: selecting an image file activates a new per-file image-diff loader.
         RerenderView();

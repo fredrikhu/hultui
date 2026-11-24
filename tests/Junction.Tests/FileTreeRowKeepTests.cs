@@ -11,8 +11,8 @@ namespace Junction.Tests;
 
 /// <summary>
 /// The Files tree is a virtual list: only the rows on screen are elements, and the list keeps a
-/// row until its item changes — the node, and whether it is the open file, under the cursor, or
-/// an open folder. A key makes the rows it changes; the visible rows are kept between builds
+/// row until its item changes — the node, and whether it is the open file or an open folder — or
+/// the cursor (the list's current item) reaches or leaves it. A key makes the rows it changes; the visible rows are kept between builds
 /// while the tree and its open folders are unchanged. One test per input, each failing with
 /// that input left out; and the tree's rows still answer to a reader as tree items.
 /// </summary>

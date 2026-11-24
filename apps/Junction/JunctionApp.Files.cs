@@ -238,8 +238,9 @@ public partial class JunctionApp
     /// elements built, resolved and diffed on every key (28 MB), 3,500 rows walked by every
     /// pointer move's hit test and every frame's paint, and a 3,500-child extent scan a frame.
     /// <para>The list keeps a row while its item is equal (<see cref="FileTreeRowItem"/>: the
-    /// node, and whether it is the open file, under the cursor, or an open folder), so a key
-    /// makes only the rows it changes. The rows are tree items with their own role and open
+    /// node, and whether it is the open file or an open folder) and in the state it was made in
+    /// (whether the cursor is on it: the list's <see cref="VirtualListElement{T}.CurrentIndex"/>),
+    /// so a key makes only the rows it changes. The rows are tree items with their own role and open
     /// state (<see cref="VirtualListElement{T}.RowsAreComposite"/>), in a container that says it
     /// is a scroll view, as it did. What a virtual list cannot give a reader is the rows off
     /// screen: they are not elements.</para>
@@ -257,10 +258,14 @@ public partial class JunctionApp
         var list = VirtualListElement<FileTreeRowItem>.New()
             .ItemHeight(FileTreeRowHeight)
             .Items(new FileTreeRowItems(this, _filesFlat))
-            .RenderWith((r, _) => TreeRow(r))
+            .RenderWithState((r, s) => TreeRow(r, cursor: s.IsCurrent))
             .FlexGrow(1).Padding(new Thickness(6, 6, 6, 6));
         list.RowsAreComposite = true;
         list.Role = AccessibilityRole.ScrollView;
+        // The cursor is the list's current item, not part of an item: a key that only moves it
+        // moves it on the live list and builds nothing (MoveFilesCursor). A build hands it the
+        // cursor's row, wherever the cursor path was set.
+        list.CurrentIndex = FilesRowIndex(_filesCursorPath);
         list.WithRef(_filesTreeScrollRef);
         return list;
     }
@@ -271,12 +276,13 @@ public partial class JunctionApp
 
     /// <summary>
     /// One row of the Files tree as its list sees it: the node, and what its look takes from the
-    /// rest of the view — whether it is the open file, whether the cursor is on it, and for a
-    /// folder whether it is open. A key that moves the cursor changes two items; one that opens
-    /// a file or a folder changes the items it touches (and an opened folder moves the rows below
-    /// it, which are other nodes at those places now).
+    /// rest of the view — whether it is the open file, and for a folder whether it is open. The
+    /// cursor is the list's current item, not the item's: a key that moves it changes no item, and
+    /// the list makes the row it left and the row it reached again. One that opens a file or a
+    /// folder changes the items it touches (and an opened folder moves the rows below it, which
+    /// are other nodes at those places now).
     /// </summary>
-    internal readonly record struct FileTreeRowItem(TreeNode<string> Node, bool Open, bool Cursor, bool Expanded);
+    internal readonly record struct FileTreeRowItem(TreeNode<string> Node, bool Open, bool Expanded);
 
     /// <summary>The visible rows as the list's items, each made when the list asks for it — a
     /// key compares the forty on screen, not the thousands in a search.</summary>
@@ -291,7 +297,6 @@ public partial class JunctionApp
                 var node = rows[index];
                 return new FileTreeRowItem(node,
                     Open: !node.IsFolder && node.Path == app._filesSelPath,
-                    Cursor: node.Path == app._filesCursorPath,
                     Expanded: node.IsFolder && app._filesTree.IsExpanded(node));
             }
         }
@@ -467,13 +472,12 @@ public partial class JunctionApp
     /// <summary>Rows the Files tree's template has made, for tests.</summary>
     internal int FileTreeRowsMade { get; private set; }
 
-    private Element TreeRow(FileTreeRowItem item)
+    private Element TreeRow(FileTreeRowItem item, bool cursor)
     {
         FileTreeRowsMade++;
         var node = item.Node;
         bool selected = item.Open;
         bool expanded = item.Expanded;
-        bool cursor = item.Cursor;
         int depth = node.Depth;
 
         var row = Flex.Row(gap: 6).AlignItems(AlignItems.Center)
@@ -580,17 +584,34 @@ public partial class JunctionApp
     }
 
     /// <summary>Moves the cursor to a visible row (clamped). A file row opens too, so the
-    /// content pane follows the cursor; a folder row just moves the highlight.</summary>
+    /// content pane follows the cursor; a folder row, or the open file's, just moves the
+    /// highlight. That is the live list's current item, with no build: the list makes the row the
+    /// cursor left and the one it reached, and a key past the end, which moves nothing, does
+    /// nothing. A build for it made the whole view, 44 elements and 53 KB a folder key, and a
+    /// held Down at the end 45 KB a repeat (plan 17 round 19).</summary>
     private void MoveFilesCursor(int newIdx)
     {
         newIdx = Math.Clamp(newIdx, 0, _filesFlat.Count - 1);
         var node = _filesFlat[newIdx];
         _filesCursorPath = node.Path;
-        _pendingFilesTreeScroll = true;
         if (!node.IsFolder && node.Path != _filesSelPath)
+        {
+            _pendingFilesTreeScroll = true;
             SelectTreeFile(node.Path);   // opens the file (tracked, see SelectTreeFile)
+        }
+        else if (_filesTreeScrollRef.Current is VirtualListElement<FileTreeRowItem> live && _window.IsInTree(live))
+        {
+            // What the build's after-hook did for a move (OnAfterBuild), now: the least scroll
+            // that shows the row, before the frame's layout. Rows are one height.
+            _pendingFilesTreeScroll = false;
+            live.CurrentIndex = newIdx;
+            live.ScrollRangeIntoView(newIdx * FileTreeRowHeight, FileTreeRowHeight);
+        }
         else
+        {
+            _pendingFilesTreeScroll = true;
             MarkViewDirty();
+        }
     }
 
     /// <summary>←/→ via the model's tree step: expand/collapse happens in the model
