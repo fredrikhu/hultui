@@ -83,6 +83,20 @@ public sealed class PosterCache : IDisposable
     /// a connection.</summary>
     private readonly SemaphoreSlim _slots = new(8);
 
+    /// <summary>
+    /// How long one download may take, from its request to the last byte of its body. The client's
+    /// timeout covers the request only, up to the headers: a body that went quiet after them (a Wi-Fi
+    /// roam, a VPN reconnect, a NAS dropping off, with no keepalive to notice) was read for the rest of
+    /// the session, holding its slot, and eight of them stopped every picture. A download past this
+    /// lands <see cref="Status.Failed"/>, so its tile keeps the placeholder.
+    ///
+    /// <para>Thirty seconds: the slowest of 186 downloads from a real server took 563 ms (a cold hero
+    /// the server resized; posters' bodies 0–2 ms after their headers), and a 370 KB hero that shares
+    /// a 200 kbit/s link with seven 40 KB posters lands in about 26 s. A server slow to answer still
+    /// fails at the client's 20 s. Read when a download takes its slot; settable for tests.</para>
+    /// </summary>
+    internal TimeSpan Deadline { get; set; } = TimeSpan.FromSeconds(30);
+
     public PosterCache(Action onLoaded, int capacity = 400, HttpClient? http = null)
     {
         _onLoaded = onLoaded;
@@ -363,23 +377,27 @@ public sealed class PosterCache : IDisposable
     {
         try
         {
+            // From the slot, not from the ask: a download queued behind others is not late.
+            using var deadline = new CancellationTokenSource(Deadline);
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             if (IsAuthorizedFor(url))
                 request.Headers.TryAddWithoutValidation("Authorization", Authorization);
-            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead)
+            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token)
                 .ConfigureAwait(false);
             // A 404 here is ordinary: the server reported a tag for an image it no longer
             // has. The tile shows its placeholder, and nothing is logged at the user.
             if (!response.IsSuccessStatusCode) return (null, Status.Failed);
             if (response.Content.Headers.ContentLength is > MaxBytes) return (null, Status.Failed);
 
-            var bytes = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+            var bytes = await response.Content.ReadAsByteArrayAsync(deadline.Token).ConfigureAwait(false);
             if (bytes.Length == 0 || bytes.Length > MaxBytes) return (null, Status.Failed);
 
             var bitmap = Decode(bytes);
             return bitmap is null ? (null, Status.Failed) : (new SkiaImageSource(bitmap), Status.Ready);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException)
+        // A missed deadline is an OperationCanceledException from the body read (a TaskCanceledException
+        // from the send).
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or IOException)
         {
             return (null, Status.Failed);
         }

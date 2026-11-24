@@ -440,8 +440,9 @@ public sealed partial class ApertureApp
     }
 
     /// <summary>The picture elements waiting for their pictures, by URL: each the latest of a chain
-    /// (<see cref="ArtWait.Next"/>). A wait is taken out when its picture lands, so this holds only
-    /// what is on the way.</summary>
+    /// (<see cref="ArtWait.Next"/>). A wait is taken out when its picture lands, and after a frame when
+    /// its element has left the window (<see cref="PruneArtWaits"/>), so this holds only what is on the
+    /// way to the window.</summary>
     private readonly Dictionary<string, ArtWait> _artWaits = new(StringComparer.Ordinal);
 
     /// <summary>The cache asked for a picture another element puts into itself when it lands
@@ -463,7 +464,91 @@ public sealed partial class ApertureApp
         element.WithRef(wait);
         wait.Next = _artWaits.GetValueOrDefault(wait.Key);
         _artWaits[wait.Key] = wait;
+        AskToPruneArtWaits();
         return element;
+    }
+
+    private bool _artWaitsPruneAsked;
+    private Action? _pruneArtWaits;
+
+    /// <summary>Drops the waits that will never take their picture once the next frame is drawn
+    /// (<see cref="PruneArtWaits"/>). From a build that made a waiting element, and from each app
+    /// build while any wait is left, as a page that left the window may have been the last to ask.</summary>
+    private void AskToPruneArtWaits()
+    {
+        if (_artWaitsPruneAsked || _artWaits.Count == 0) return;
+        _artWaitsPruneAsked = true;
+        _window.RequestPostFrameCallback(_pruneArtWaits ??= PruneArtWaits);
+    }
+
+    private readonly List<(string Key, ArtWait? Head)> _artWaitsMoved = [];
+    private HashSet<ImageElement>? _artWaitsSeen;
+
+    /// <summary>
+    /// Lets go of the waits whose element left the window, and of the older of two waits whose
+    /// element is the same (a card made again while its picture was on the way: its ref was pointed
+    /// at the live element by the patch). Each wait holds its element, and through it the page it was
+    /// on: a picture whose body stalled never lands, and every page visited after it was kept (plan 17
+    /// round 19: 0.33 MB a page, 41 MB after 250). A wait that stays is the newest for its element,
+    /// the one the card's kept state holds (<see cref="CardArt"/>).
+    /// </summary>
+    /// <remarks>Only after a frame, never in a build: in the app's build a kept Home shelf and the
+    /// cards it hands back are out of the tree, and a card just made is out of it until its build is
+    /// patched in, so a prune there took live cards' waits and they kept the glyph. After a frame an
+    /// element out of the tree never comes back: a kept element is handed back only from the window
+    /// (<c>KeptElements.TryKeep</c>), and a part whose host left is made again by its next mount.</remarks>
+    private void PruneArtWaits()
+    {
+        _artWaitsPruneAsked = false;
+        var seen = _artWaitsSeen ??= new HashSet<ImageElement>(ReferenceEqualityComparer.Instance);
+        foreach (var (key, chain) in _artWaits)
+        {
+            ArtWait? head = null, tail = null;
+            bool moved = false;
+            for (var wait = chain; wait is not null;)
+            {
+                var next = wait.Next;
+                wait.Next = null;
+                if (wait.Current is { IsHosted: true } element && element.Key == key && seen.Add(element))
+                {
+                    if (tail is null) head = wait;
+                    else tail.Next = wait;
+                    tail = wait;
+                }
+                else
+                {
+                    // Its element is gone, or another wait's: nothing will take it.
+                    wait.Current = null;
+                    moved = true;
+                }
+                wait = next;
+            }
+            seen.Clear();
+            if (moved) _artWaitsMoved.Add((key, head));
+        }
+        foreach (var (key, head) in _artWaitsMoved)
+        {
+            if (head is null) _artWaits.Remove(key);
+            else _artWaits[key] = head;
+        }
+        _artWaitsMoved.Clear();
+    }
+
+    /// <summary>For the tests: the waits held, and the elements in the window they wait in.</summary>
+    internal (int Waits, int Elements) ArtWaitCounts
+    {
+        get
+        {
+            var elements = new HashSet<ImageElement>(ReferenceEqualityComparer.Instance);
+            int waits = 0;
+            foreach (var (key, chain) in _artWaits)
+                for (var wait = chain; wait is not null; wait = wait.Next)
+                {
+                    waits++;
+                    if (wait.Current is { IsHosted: true } element && element.Key == key) elements.Add(element);
+                }
+            return (waits, elements.Count);
+        }
     }
 
     /// <summary>

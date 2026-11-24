@@ -244,6 +244,117 @@ public class ArtworkLandingTests
         }, art);
     }
 
+    /// <summary>Pages left while their pictures stall (a body gone quiet lands nothing until the
+    /// download's deadline). Each wait holds its element, and through it the page it is on: until plan
+    /// 17 round 19 every page visited after a stall was kept whole, about 0.33 MB a page. After a frame
+    /// the waits whose element left the window go, and so does the older of two for one element (a
+    /// card made again around the cursor while it waited): one wait is left for each element on screen
+    /// that waits, and the pictures still go into them when they land.</summary>
+    [Fact]
+    public void PagesLeftWhilePicturesStall_KeepOneWaitForEachElementOnScreen()
+    {
+        var art = new Artwork();
+        HoldEveryFilm(art);
+        Host((session, app) =>
+        {
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            PumpUntil(session, () => session.Window.FindByAutomationId("card-m003") is not null, "the grid");
+            Rest(session);
+            AssertOneWaitForEachElement(app);
+
+            for (int i = 0; i < 6; i++)
+            {
+                Key(session, KeyCode.Right);
+                AssertOneWaitForEachElement(app);
+                Key(session, KeyCode.Enter);
+                PumpUntil(session, () => session.Window.FindByAutomationId("detail-play") is not null, "an item's page");
+                Rest(session);
+                AssertOneWaitForEachElement(app);
+                // A build of the page while its pictures wait (its data again): the hero, the poster
+                // and the faces are made again and patched into the live ones, refs and all.
+                FullBuild(app);
+                Rest(session);
+                AssertOneWaitForEachElement(app);
+                session.Window.PressKey(KeyCode.Left, KeyModifiers.Alt);
+                PumpUntil(session, () => Card(session, "m003") is not null, "the grid again");
+                Rest(session);
+                AssertOneWaitForEachElement(app);
+            }
+
+            // What is left still takes its pictures (the first eight asked for hold the slots: let all go).
+            Assert.False(HasPicture(Card(session, "m003")!));
+            ReleaseEveryFilm(art);
+            PumpUntil(session, () => app.Posters.PendingCount == 0, "the pictures held back");
+            Rest(session);
+            Assert.True(HasPicture(Card(session, "m003")!), "a card on screen did not take its picture");
+            Assert.Equal((0, 0), app.ArtWaitCounts);
+        }, art);
+    }
+
+    /// <summary>Home's shelves are parts the app's build hands back, and while it builds they and the
+    /// cards they hand back are out of the tree; a card just made is out of it until its build is
+    /// patched in. Waits are dropped only after a frame, so a full build of Home, and a Back to Home
+    /// from an item's page, still leave each waiting card its wait: the picture goes into it when it
+    /// lands. Dropped in the build, the cards kept the glyph.</summary>
+    [Fact]
+    public void HomesCards_TakeTheirPictures_AfterAFullBuild_AndAfterABack()
+    {
+        var art = new Artwork();
+        HoldEveryFilm(art);
+        Host((session, app) =>
+        {
+            var cards = HomeCards(session);
+            Assert.True(cards.Count >= 3, $"Home shows {cards.Count} cards");
+            Assert.DoesNotContain(cards, id => HasPicture(Card(session, id)!));
+
+            FullBuild(app);
+            Rest(session);
+            AssertOneWaitForEachElement(app);
+            art.Release($"/{cards[0]}/");
+            PumpUntil(session, () => HasPicture(Card(session, cards[0])!), $"{cards[0]}'s picture after a full build");
+
+            Open(session, app, "m150");
+            session.Window.PressKey(KeyCode.Left, KeyModifiers.Alt);
+            PumpUntil(session, () => Card(session, cards[1]) is not null, "Home again");
+            Rest(session);
+            AssertOneWaitForEachElement(app);
+            Assert.False(HasPicture(Card(session, cards[1])!));
+            art.Release($"/{cards[1]}/");
+            PumpUntil(session, () => HasPicture(Card(session, cards[1])!), $"{cards[1]}'s picture after a Back");
+            Assert.True(HasPicture(Card(session, cards[0])!));
+            Assert.False(HasPicture(Card(session, cards[2])!));
+            ReleaseEveryFilm(art);
+        }, art);
+    }
+
+    private static void FullBuild(ApertureApp app) =>
+        typeof(Component).GetMethod("MarkDirty", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(app, null);
+
+    private static void HoldEveryFilm(Artwork art)
+    {
+        for (int i = 0; i < 200; i++) art.Hold($"/m{i:000}/");
+    }
+
+    private static void ReleaseEveryFilm(Artwork art)
+    {
+        for (int i = 0; i < 200; i++) art.Release($"/m{i:000}/");
+    }
+
+    /// <summary>Every wait held is for an element in the window, and no two for one element.</summary>
+    private static void AssertOneWaitForEachElement(ApertureApp app)
+    {
+        var (waits, elements) = app.ArtWaitCounts;
+        Assert.True(elements > 0, "nothing on screen waits for a picture");
+        Assert.Equal(elements, waits);
+    }
+
+    /// <summary>The items of Home's cards on screen, in the window's order.</summary>
+    private static List<string> HomeCards(HeadlessSession session) =>
+        Descendants(Root(session)).OfType<BoxElement>()
+            .Select(e => e.AutomationId).OfType<string>()
+            .Where(id => id.StartsWith("card-", StringComparison.Ordinal))
+            .Select(id => id["card-".Length..]).Distinct().ToList();
+
     // ── Reading the screen ───────────────────────────────────────────────
 
     /// <summary>Pictures drawn: image elements covering their box with a picture that is in.</summary>

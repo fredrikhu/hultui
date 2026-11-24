@@ -187,6 +187,7 @@ public sealed partial class ApertureApp : Component, IDisposable
         FocusPendingSearchField();
         FocusArrival();
         LetGoOfLeftCursorCard();
+        AskToPruneArtWaits();
     }
 
     /// <summary>How many times <see cref="Build"/> has run, for the tests.</summary>

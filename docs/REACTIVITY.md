@@ -1286,6 +1286,21 @@ that brings a row 145–205 → 59–82 KB and no build; Home's start 1,236 → 
 page with its cast 376–378 → 210–212 KB; one landing 31–84 → 0.2–0.5 KB. Frames are byte-identical to
 the builds', before a picture lands and after.
 
+**Let go of a wait whose element left the window, after a frame.** Each wait is a ref, and a ref holds
+its element and the view around it ("A ref into a view keeps the whole view"). A picture that never
+lands (a body that went quiet after its headers) kept every page visited after it, 0.33 MB a page:
+headless, 160 films, eight stalled bodies, 100 open and Back cycles and 150 pages, the heap went from
+1.72 to 41.06 MB with 4,885 waits for 443 pictures. Aperture now drops, in a post-frame callback asked
+for by a build that made a waiting element or left any wait behind, the waits whose element is out of
+the window and the older of two whose element is the same (a twin's ref is pointed at the live element
+by the patch): one wait is left for each element on screen that waits, and the run above, with the
+stalls never ending, stays at 1.36–1.86 MB (the healthy run's 1.35–1.81). **Not in a build:** while the owner builds, a kept part and the
+elements it hands back are out of the tree (`IsHosted` false), and an element just made is out of it
+until the build is patched in; a prune there took the waits of live cards, which kept their glyph.
+After a frame an element out of the window never comes back: `KeptElements` hands back only what the
+window holds, and a part whose host left is made again by its next `Mount()`. A download also has a
+deadline that covers its body (`PosterCache.Deadline`), so a stall ends as a failure.
+
 ---
 
 ## Component Model
