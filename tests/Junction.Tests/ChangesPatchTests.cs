@@ -380,6 +380,9 @@ public class ChangesPatchTests
     private static void Hosted(int? wholeChangesChars, Action<HeadlessSession, JunctionApp, TempRepo> body)
     {
         using var repo = Fixture();
+        // A copy's first status rewrites its index (every file's times are new): done here, not by the app
+        // under its watcher, whose event could land mid-test as a reload.
+        repo.Git("status");
         using var session = HeadlessSession.Create(1440, 900);
         JunctionApp? app = null;
         try
@@ -394,6 +397,12 @@ public class ChangesPatchTests
             if (wholeChangesChars is { } chars) app.WholeChangesChars = chars;
             session.Application.SetRoot(app.Mount());
             session.PumpFrame();
+            // No reload the test does not make itself: a walk or a visit counts every file read, and a reload
+            // reads the shown file again and starts the reading ahead over. Under a full run's load a watcher
+            // event of the start (2026-11-24) landed mid-walk.
+            session.PumpUntil(() => Loaded(app), TimeSpan.FromSeconds(30));
+            foreach (var w in ((IDictionary)Field(app, "_watchers")!).Values) ((IDisposable)w!).Dispose();
+            session.PumpFrames(3);
             body(session, app, repo);
         }
         finally { app?.Dispose(); }
