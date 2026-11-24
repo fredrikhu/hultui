@@ -182,6 +182,10 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     /// <summary>Every wrapper the bridge keeps, for tests of its upkeep.</summary>
     internal IEnumerable<UiaFragment> Wrappers => _wrappers.Values;
 
+    /// <summary>How many elements have a native object the bridge keeps (one a client was given, or an
+    /// event raised on), for tests of its upkeep.</summary>
+    internal int NativeObjects => _nativeByElement.Count;
+
     internal ElementId? FocusedNodeId
     {
         get
@@ -835,9 +839,14 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
         long leaving = told != 0 && ResolveFocusTarget() != told ? told : 0;
         foreach (var change in changes)
         {
-            if (leaving != 0 && change.PropertyName == AccessibilityProperties.Name
-                && unchecked((long)change.Node.ElementId.Value) == leaving)
-                continue;
+            if (change.PropertyName == AccessibilityProperties.Name)
+            {
+                long raw = unchecked((long)change.Node.ElementId.Value);
+                if (leaving != 0 && raw == leaving) continue;
+                // The reader's focus is told whatever it holds: it may have been given the item served on
+                // demand with the same runtime id, before the list had item nodes.
+                if (raw != told && NeverGiven(change.Node.ElementId)) continue;
+            }
             // An item node's wrapper is made here when it has none yet, from its node in the tree.
             if (!TryWrapper(change.Node.ElementId, out var wrapper)) continue;
             if (change.PropertyName == AccessibilityProperties.ScrollPosition)
@@ -852,6 +861,22 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
                 RaisePropertyChanged(wrapper, change.PropertyName);
         }
     }
+
+    /// <summary>
+    /// Whether <paramref name="id"/> is a list's item node that no client was given: it has no native
+    /// object yet (a client's navigation, a hit test, its focus or an event raised on it makes one, and
+    /// it is kept while the item is). Its rename is not told, and no wrapper or native object is made for
+    /// it: a client that never had the item has nothing to bring up to date, and reads the name when it
+    /// first gets it. Told, the rename made the item's provider only for the event, and UI Automation's
+    /// work for it filled the frame: Vesper's move between folders of 151 and 191 entries raised 153–154
+    /// Name changes, and with a reader-like client asking the move's frame took 5.9–6.5 ms, 1.6–1.8 ms
+    /// without them (12,384 → 834 provider calls on the UI thread; 160 → 10 native objects kept after the
+    /// first move; plan 17 round 19 step 10, a real window on NativeAOT). A client listening for Name
+    /// changes on the window's subtree no longer hears renames of rows it never got, as it never heard them
+    /// of a list's items served on demand. Any thread may make the native object meanwhile; one made after
+    /// this read is made from the renamed node, which the apply put in place before it.
+    /// </summary>
+    private bool NeverGiven(ElementId id) => VirtualItemId.IsItem(id) && !_nativeByElement.ContainsKey(id);
 
     /// <summary>
     /// A list served on demand has another number of items: what a list of item nodes raises for

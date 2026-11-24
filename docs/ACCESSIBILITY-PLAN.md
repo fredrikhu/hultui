@@ -181,7 +181,7 @@ for a dispose.
 
 A list's item node gets its UIA wrapper when something first asks for it (plan 17 round 12 step 3):
 a client's navigation, a hit test, a lookup by its id, an event it raises (a selection move, a new
-label). The wrapper is made from the item's node in the list's node (an item's id is its list and its
+label of an item a client was given). The wrapper is made from the item's node in the list's node (an item's id is its list and its
 place), under a lock the apply holds while it changes the map and moves the wrappers to the new tree,
 so a client's thread makes it from the tree before an apply or after it; from then on it is moved with
 the tree and let go with its item as any other. Elements' nodes keep theirs from the diff that adds
@@ -192,6 +192,25 @@ rows a file): 633 wrappers made and let go a key → 3, the bridge 116.1 → 0.6
 980.0 → 864.4 KB a key at a 33 ms key pace; the same raises (4 structure events and a Name a key, 65
 provider calls and 65 QueryInterface calls, 18–20 µs a raise). What a key still costs with a reader is
 the walk, 287 KB: the next file's rows as nodes, their labels and the app's row records.
+
+An item node no client was given tells no rename on UIA (plan 17 round 19 step 10; the user's choice,
+question 80). A list keyed by place whose contents change in place (Vesper's list as a folder is
+entered, Junction's History as a commit lands) renames its item nodes, and each Name change made the
+item's wrapper and native object only to raise it; a reader-like client's listeners then made about
+80 provider calls and 90 QueryInterface calls on the UI thread for it. So an item node with no native
+object yet (none was handed to a client: no navigation, hit test, focus or other event reached it) is
+told nothing and gets nothing made; one a client has, and the reader's focus whatever provider it
+holds (it may have the item served on demand from before the list had item nodes), are told as
+before. A client that asks for such an item later reads its new name. A client listening for Name
+changes on the window's subtree no longer hears renames of rows it never got, as it never heard them
+of a list served on demand. Real window, the 4K at 150 % (120 Hz), NativeAOT Vesper with our FlaUI
+client asking, a move between folders of 151 and 191 entries, 20 a launch, two launches a side:
+reader-like client, the move's frame min 5.91–5.95 → 1.61–1.63 ms (median 6.3–6.5 → 1.8 ms; the a11y
+block 5.4 → 0.7 ms; 12,384 → 834 provider calls and 13,824 → 924 QueryInterface calls on the UI
+thread); focus-only 2.81–2.91 → 1.31–1.35 ms (a11y 2.0 → 0.4 ms; 3,713 → 263 calls); the Name raises
+153–154 → 3–4 a move, and the objects kept after them 262 wrappers and 160 native objects → 112 and
+10. The client heard the same 21 focus events, and the same HasKeyboardFocus, IsSelected, bounds and
+structure events. AT-SPI is unchanged: its clients keep a copy of each item they read.
 
 A focus move rebuilds no tree. The window marks it on the applied tree in place
 (`IsFocused` on the node that had the focus and on the one that has it) and hands
@@ -909,7 +928,8 @@ What a reader hears of a list served on demand that a list of item nodes told ot
   or none, and no diff tells the rename. A move tells no rename of the item it leaves: the focus event
   carries the new item's name. Checked by a real client: `ReaderFocusTests` (a property handler hears it
   once; the focus handler hears no move).
-- **A rename of any other item** is not told; a client reads its name when it asks, as before.
+- **A rename of any other item** is not told; a client reads its name when it asks, as before. A
+  list of item nodes tells it only of an item a client was given (round 19 step 10, above).
 - **A list crossing 200 items** builds its tree whole once (item nodes on one side, none on the other);
   the reader's focus stays on its current item by the same id, with no focus event.
 - **A row that holds the focus** (an inline editor) gives a list over 200 item nodes while it is open:

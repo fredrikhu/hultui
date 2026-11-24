@@ -427,10 +427,10 @@ public class A11yCurrentItemFocusTests
         list.Items = ["new 0", .. Enumerable.Range(0, count).Select(i => $"file {i}")];
         Settle(rig.Session);
         Assert.Equal(0, list.SelectedIndex);
-        // Served: the focused item's alone. Item nodes: each one's, as an item's id is its place.
+        // The focused item's alone. Item nodes are each renamed, as an item's id is its place, but one no
+        // client was given tells none (plan 17 round 19 step 10; before, each item node told its own).
         var renamed = NameChanges(rig);
-        Assert.Equal(served ? 1 : count, renamed.Count);
-        Assert.Equal(Item(list, 0), renamed[0]);
+        Assert.Equal([Item(list, 0)], renamed);
         Assert.Empty(rig.FocusEvents());
         Assert.Equal(Item(list, 0), rig.GetFocus());
         Assert.True(rig.HasFocus(Item(list, 0)));
@@ -440,14 +440,12 @@ public class A11yCurrentItemFocusTests
         rig.Raised.Clear();
         list.Items = list.Items.Select(s => "other " + s).ToList();
         Settle(rig.Session);
-        renamed = NameChanges(rig);
-        Assert.Equal(served ? 1 : count + 1, renamed.Count);
-        Assert.Equal(Item(list, 0), renamed[0]);
+        Assert.Equal([Item(list, 0)], NameChanges(rig));
         Assert.Empty(rig.FocusEvents());
         Assert.Equal("other new 0", NameOf(rig, Item(list, 0)));
 
-        if (!served) return;
-        // A served list tells nothing of an item away from the focus: a client reads its name when it asks.
+        // Nothing of an item away from the focus that no client was given, served or an item node (since
+        // plan 17 round 19 step 10): a client reads its name when it asks.
         rig.Raised.Clear();
         list.Items = list.Items.Select((s, i) => i == 50 ? "changed" : s).ToList();
         Settle(rig.Session);
@@ -1352,6 +1350,73 @@ public class A11yCurrentItemFocusTests
         for (int i = 0; i < 3; i++) rig.Session.PumpFrame(TimeSpan.FromMilliseconds(150));
         Assert.Contains(rig.Raised, e => e.Element == Item(list, 0) && e.Id == UiaInterop.UIA_NamePropertyId);
         Assert.Empty(rig.FocusEvents());
+    }
+
+    /// <summary>
+    /// Vesper's folder move with a reader on its list (plan 17 round 19 step 10): a new listing relabels
+    /// the list's items in place, and an item no client was given tells no rename (153 a move between
+    /// folders of 151 and 191 entries, 5 ms of a 6.6 ms frame with a reader-like client). The move tells
+    /// what it told: the selected states, the rows that came, the focus states and the focus event on the
+    /// new cursor; and an item a client holds tells its rename.
+    /// </summary>
+    [WindowsFact]
+    public void ANewListing_TellsNoRenameOfItemsNoClientWasGiven_AndTheMoveAsBefore()
+    {
+        using var rig = new UiaRig();
+        var (_, list, _, root) = FocusableList(20, selected: 5);
+        rig.Session.Window.SetRoot(root);
+        Settle(rig.Session);
+        list.Focus();
+        rig.Session.PumpFrame();
+        Assert.Equal(Item(list, 5), rig.GetFocus());
+        Assert.False(rig.HasFocus(Item(list, 12)));   // a client reads item 12: it holds it
+        rig.Raised.Clear();
+
+        list.Items = Enumerable.Range(0, 30).Select(i => i == 0 ? ".." : $"inner {i}").ToList();
+        list.SelectedIndex = 0;
+        for (int i = 0; i < 3; i++) rig.Session.PumpFrame(TimeSpan.FromMilliseconds(150));
+        // Before: a Name change on each of items 0–19 but 5 (the item the focus left), 19 in all.
+        Assert.Equal(
+        [
+            new UiaRaised(UiaRaisedKind.Structure, UiaInterop.StructureChangeType_ChildrenBulkAdded, list.Id),
+            Prop(IsSelected, Item(list, 0)),
+            Prop(IsSelected, Item(list, 5)),
+            Prop(UiaInterop.UIA_NamePropertyId, Item(list, 12)),
+            Prop(HasKeyboardFocus, Item(list, 5)),
+            Prop(HasKeyboardFocus, Item(list, 0)),
+            Focus(Item(list, 0)),
+        ], rig.Raised);
+        Assert.Equal(Item(list, 0), rig.GetFocus());
+        Assert.Equal("inner 7", NameOf(rig, Item(list, 7)));
+    }
+
+    /// <summary>
+    /// The reader's focus on an item of a list served on demand stays on its item as the list comes down to
+    /// 200 items or fewer and gets item nodes: the client holds the item as the provider served on demand,
+    /// and its item node has no native object of its own. A rename of it after is told all the same.
+    /// </summary>
+    [WindowsFact]
+    public void TheReadersFocus_HeldFromAServedList_IsToldItsRename_AfterTheListGotItemNodes()
+    {
+        using var rig = new UiaRig();
+        var (_, list, _, root) = FocusableList(300, selected: 0);
+        rig.Session.Window.SetRoot(root);
+        Settle(rig.Session);
+        list.Focus();
+        rig.Session.PumpFrame();
+        Assert.True(rig.Node(list.Id)!.IsVirtualItemContainer);
+        Assert.Equal(Item(list, 0), rig.GetFocus());
+
+        list.Items = Enumerable.Range(0, 150).Select(i => $"file {i}").ToList();
+        for (int i = 0; i < 3; i++) rig.Session.PumpFrame(TimeSpan.FromMilliseconds(150));
+        Assert.False(rig.Node(list.Id)!.IsVirtualItemContainer);
+        rig.Raised.Clear();
+
+        list.Items = Enumerable.Range(0, 150).Select(i => i == 0 ? "renamed" : $"file {i}").ToList();
+        for (int i = 0; i < 3; i++) rig.Session.PumpFrame(TimeSpan.FromMilliseconds(150));
+        Assert.Equal([Item(list, 0)], NameChanges(rig));
+        Assert.Empty(rig.FocusEvents());
+        Assert.Equal("renamed", NameOf(rig, Item(list, 0)));
     }
 
     /// <summary>What a provider answers for PositionInSet and SizeOfSet, (0, 0) for nothing.</summary>

@@ -30,13 +30,15 @@ public class UiaLazyItemWrapperTests
     private sealed class Pane(int count) : Component
     {
         public string Prefix = "file a";
+        // The items' labels, when not the prefix's: the same list relabelled in place.
+        public string? Names;
         public int Count = count;
         public int Selected = -1;
         public readonly Ref<VirtualListElement<string>> List = new();
 
         public override Element Build()
         {
-            var items = Enumerable.Range(0, Count).Select(i => $"{Prefix} line {i}").ToList();
+            var items = Enumerable.Range(0, Count).Select(i => $"{Names ?? Prefix} line {i}").ToList();
             var list = VirtualListElement<string>.New()
                 .ItemHeight(20f)
                 .Items(items)
@@ -52,6 +54,7 @@ public class UiaLazyItemWrapperTests
         private static readonly Func<string, string?> Label = s => s;
 
         public void Show(string prefix) { Prefix = prefix; MarkDirty(); }
+        public void Rename(string names) { Names = names; MarkDirty(); }
         public void Select(int index) { Selected = index; MarkDirty(); }
     }
 
@@ -203,6 +206,52 @@ public class UiaLazyItemWrapperTests
         Assert.Equal([list.Children[3].ElementId, list.Children[4].ElementId], told);
         Assert.Equal(false, rig.Uia.Wrappers.Single(w => w.ElementId == list.Children[3].ElementId).Selected);
         Assert.Equal(true, rig.Uia.Wrappers.Single(w => w.ElementId == list.Children[4].ElementId).Selected);
+    }
+
+    private static List<ElementId?> NameChanges(Rig rig) =>
+        rig.Raised.Where(r => r is { Kind: UiaRaisedKind.Property, Id: UiaInterop.UIA_NamePropertyId }).Select(r => r.Element).ToList();
+
+    /// <summary>
+    /// The same list relabelled in place, as Vesper's is when a folder is entered (an item's id is its
+    /// list and its place): an item no client was given tells no rename, and gets no wrapper or native
+    /// object for one (plan 17 round 19 step 10: 153 such raises a move between folders of 151 and 191
+    /// entries, 5 ms of a 6.6 ms frame with a reader-like client). A client that gets an item later reads
+    /// its new name.
+    /// </summary>
+    [WindowsFact]
+    public void ARenameInPlace_TellsNoRenameOfItemsNoClientWasGiven_AndMakesNoWrapperOrNativeObject()
+    {
+        using var rig = new Rig();
+        int natives = rig.Uia.NativeObjects;
+        rig.Raised.Clear();
+
+        rig.Pane.Rename("file b");
+        rig.Session.PumpFrame(TimeSpan.FromMilliseconds(16));
+
+        var list = rig.ListNode();
+        Assert.Equal("file b line 0", list.Children[0].Name);
+        Assert.Empty(NameChanges(rig));
+        Assert.Equal(0, rig.ItemWrappers);
+        Assert.Equal(natives, rig.Uia.NativeObjects);
+        Assert.Equal("file b line 150", rig.Ask(list.Children[150].ElementId).Name);
+    }
+
+    /// <summary>An item a client was given (a navigation to it) still tells its rename, once, on its own
+    /// provider; the others tell none.</summary>
+    [WindowsFact]
+    public void ARenameInPlace_OfAnItemAClientWasGiven_IsToldAsBefore()
+    {
+        using var rig = new Rig();
+        var item = rig.ListNode().Children[150].ElementId;
+        rig.Ask(item);
+        rig.Raised.Clear();
+
+        rig.Pane.Rename("file b");
+        rig.Session.PumpFrame(TimeSpan.FromMilliseconds(16));
+
+        Assert.Equal([item], NameChanges(rig));
+        Assert.Equal(1, rig.ItemWrappers);
+        Assert.Equal("file b line 150", rig.Ask(item).Name);
     }
 
     /// <summary>A wrapper made late is moved with the tree, and let go with its item: a client that
