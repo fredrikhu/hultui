@@ -80,6 +80,25 @@ window.IsOpen       // true if window is open and not disposed
 window.IsMaximized  // true if maximized (useful for custom chrome)
 ```
 
+### Owned windows
+
+A window can belong to another: a tool window, an inspector, a detail view that follows the main window's selection. Give it an `Owner`:
+
+```csharp
+var details = app.CreateWindow("Details", 500, 600);
+details.Owner = app.PrimaryWindow;
+details.ShowWithoutActivation = true;   // opens beside the main window without taking its keys
+details.SetRoot(new DetailsView(selection).Mount());
+```
+
+- **It stays above its owner** and is hidden while its owner is minimized, coming back with it. On Windows the owner is the system's own (`GW_OWNER`), set through SDL's window parent.
+- **It closes when its owner closes, first.** Each owned window raises its own `Closed` while its owner is still open, so an app can save its state — whether it was open, where it was — from either window's handler. Closing an owned window leaves its owner as it was.
+- **Set it before or after the window shows**, and `null` makes it a window of its own again. A window cannot own itself, through any number of windows, nor belong to another application's window: both throw. `OwnedWindows` lists what a window owns.
+
+`ShowWithoutActivation` makes the window's first show leave the keyboard where it is. It is read when the window first shows, after its first frame, so set it before then. The window can be activated afterwards like any other: a click does. On Windows the activation the show asks for is refused on the calling thread, whatever `SDL_WINDOW_ACTIVATE_WHEN_SHOWN` says; elsewhere SDL's hint is set for that one show.
+
+Under a `HeadlessSession` the owner list and the closing order are the framework's and behave the same; the owner, `ShowWithoutActivation` and `FrameBorderColor` (see [CUSTOM-CHROME.md](CUSTOM-CHROME.md)) reach the headless platform window, which records them.
+
 ### Title
 
 The title passed at creation is not fixed — assigning `Window.Title` re-titles the window the OS is already showing, so it can track whatever the window currently has open:

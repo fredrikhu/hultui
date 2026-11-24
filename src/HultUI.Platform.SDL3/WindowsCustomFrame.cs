@@ -265,8 +265,23 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
         int corner = fullscreen ? DWMWCP_DONOTROUND : DWMWCP_DEFAULT;
         DwmSetWindowAttribute(_hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
 
-        int border = fullscreen ? DWMWA_COLOR_NONE : DWMWA_COLOR_DEFAULT;
+        int border = fullscreen ? DWMWA_COLOR_NONE : _borderColor;
         DwmSetWindowAttribute(_hwnd, DWMWA_BORDER_COLOR, ref border, sizeof(int));
+    }
+
+    private int _borderColor = DWMWA_COLOR_DEFAULT;
+
+    /// <summary>The border DWM draws while the window is not full screen: a COLORREF, or
+    /// <c>DWMWA_COLOR_DEFAULT</c> for the system's (<c>Window.FrameBorderColor</c>).</summary>
+    public int BorderColor
+    {
+        get => _borderColor;
+        set
+        {
+            _borderColor = value;
+            if (IsFullscreen) return;
+            DwmSetWindowAttribute(_hwnd, DWMWA_BORDER_COLOR, ref value, sizeof(int));
+        }
     }
 
     private void ExtendFrame()

@@ -464,6 +464,75 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     public void Raise() => PlatformWindow.Raise();
     public void ToggleMaximize() { if (IsMaximized) Restore(); else Maximize(); }
 
+    // ──── Owned windows ────
+
+    private Window? _owner;
+    private readonly List<Window> _owned = [];
+
+    /// <summary>
+    /// The window this one belongs to — a tool or detail window beside a main one — or null
+    /// for none, the default. An owned window stays above its owner, is hidden while its owner
+    /// is minimized, and closes when its owner closes, before it, raising its own
+    /// <see cref="Closed"/>. Set before or after the window first shows; null makes it a window
+    /// of its own again. See docs/MULTI-WINDOW.md.
+    /// </summary>
+    /// <exception cref="ArgumentException">The window would own itself, through any number of
+    /// windows, or belongs to another application.</exception>
+    public Window? Owner
+    {
+        get => _owner;
+        set
+        {
+            if (ReferenceEquals(value, _owner)) return;
+            if (value is not null)
+            {
+                if (!ReferenceEquals(value.Application, Application))
+                    throw new ArgumentException("An owner must belong to the same application.", nameof(value));
+                for (var w = value; w is not null; w = w._owner)
+                    if (ReferenceEquals(w, this))
+                        throw new ArgumentException("A window cannot own itself, or a window that owns it.", nameof(value));
+            }
+            _owner?._owned.Remove(this);
+            _owner = value;
+            value?._owned.Add(this);
+            if (!_disposed) PlatformWindow.SetOwner(value?.PlatformWindow);
+        }
+    }
+
+    /// <summary>The windows this one owns (<see cref="Owner"/>), in the order they were given it.</summary>
+    public IReadOnlyList<Window> OwnedWindows => _owned;
+
+    /// <summary>
+    /// Whether the window's first show leaves the keyboard with the window that has it: a
+    /// window that follows another's selection opens beside it without taking the keys away
+    /// from it. Read when the window first shows, which is after its first frame; set it
+    /// before then. It can be activated as any other window afterwards — a click does.
+    /// </summary>
+    public bool ShowWithoutActivation
+    {
+        get => PlatformWindow.ShowWithoutActivation;
+        set => PlatformWindow.ShowWithoutActivation = value;
+    }
+
+    private Color? _frameBorderColor;
+
+    /// <summary>
+    /// The thin border the system draws around the window, for chrome that should match an
+    /// app's own title bar; null, the default, for the system's colour. Windows 11 draws it
+    /// (<c>DWMWA_BORDER_COLOR</c>); elsewhere it is ignored. Full screen takes it away and
+    /// gives this back.
+    /// </summary>
+    public Color? FrameBorderColor
+    {
+        get => _frameBorderColor;
+        set
+        {
+            if (_frameBorderColor == value) return;
+            _frameBorderColor = value;
+            PlatformWindow.SetFrameBorderColor(value);
+        }
+    }
+
     /// <summary>
     /// True while the window covers its whole display with no chrome — the borderless
     /// kind games call windowed fullscreen. Not the same as <see cref="IsMaximized"/>,
@@ -4447,8 +4516,16 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// that calls this has decided. <see cref="Closed"/> is raised.</summary>
     public void Close()
     {
+        // The windows it owns first, each with its own Closed while this one is still open:
+        // the platform takes an owner's windows down with it, which would leave them closed
+        // without a word.
+        foreach (var owned in _owned.ToArray())
+            if (owned.IsOpen) owned.Close();
         PlatformWindow.Close();
         Closed?.Invoke();
+        // Out of its owner's list; the native window is gone, so nothing to tell it.
+        _owner?._owned.Remove(this);
+        _owner = null;
     }
 
     /// <summary>
@@ -5657,6 +5734,11 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     {
         if (_disposed) return;
         _disposed = true;
+        // Out of its owner's list, and its own owned windows on their own.
+        _owner?._owned.Remove(this);
+        _owner = null;
+        foreach (var owned in _owned) owned._owner = null;
+        _owned.Clear();
         FailFrameSaves();
         if (_tracer.IsRecording && !string.IsNullOrEmpty(_envTracePath))
             _tracer.StopRecording(_envTracePath);

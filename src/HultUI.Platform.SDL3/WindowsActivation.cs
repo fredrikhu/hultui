@@ -44,6 +44,12 @@ internal static unsafe class WindowsActivation
     internal static Scope RefuseIfUnwanted() =>
         OperatingSystem.IsWindows() && Unwanted ? Begin() : default;
 
+    /// <summary>
+    /// Refuses every activation on this thread until the scope is disposed, on Windows, whatever
+    /// the hint says: a window shown with <c>Window.ShowWithoutActivation</c>.
+    /// </summary>
+    internal static Scope Refuse() => OperatingSystem.IsWindows() ? Begin() : default;
+
     /// <summary>Whether SDL was told not to activate a window when it shows it.</summary>
     internal static bool Unwanted
     {
