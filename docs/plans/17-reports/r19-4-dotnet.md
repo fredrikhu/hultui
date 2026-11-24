@@ -186,3 +186,60 @@ FILES (in `C:\Users\fredr\AppData\Local\Temp\claude\eb4e2037ca05cb48\e91920b9-37
   - harness: `common.ps1`, `batch-r1.ps1`, `batch-r2.ps1`, `frames.py`, `Driver*.cs`;
   - logs: `batch-r1.txt`, `batch-r2.txt`, `runs\r1-*`, `runs\r2-*` (out, frames.csv, uia.txt).
 - Also: `locks.log`, `gate.log`, `fedora-check.sh`, `fedora-check.txt`; fixtures `fx\jrepo`, `fx\viewer`.
+
+## Addendum (after the orchestrator's note on the shared jrepo)
+
+**My Junction fixture was clean.** My jrepo is a copy of r18-dotnet\fx\jrepo, not the dirty r14 original. Before any
+Junction measurement, `git status --porcelain` showed 0 entries (3,355 tracked files, HEAD e432c224). So hold 1's
+Junction numbers (heap 6.3–6.6 MB) were taken on a clean tree. I never touched the shared original.
+
+**Expert 3's lead holds: Junction keeps every changed line of the working tree, parsed.** Added candidate (expert 6 owns
+the Changes load's reactivity; the retained memory is mine):
+
+- id: dotnet-junction-changes-diff-kept-whole
+  what: Junction's start-up full preload reads the Changes data, which parses and keeps every staged and unstaged file's
+  whole diff; keep only the file lists and parse a file's diff when it is shown, or keep its raw patch and parse it on
+  first show.
+  evidence:
+  - **Code:** `ReadChanges` (JunctionApp.Changes.cs:170–173) calls `GetWorkingDiff(staged: true)` and
+    `GetWorkingDiff(staged: false)` and keeps every `GitFileDiff` in `ChangesData` (StagedDiffs/UnstagedDiffs). It runs
+    at start through `RequestPreload(..., full: true)` (JunctionApp.cs:470), even when the user never opens Changes.
+  - **Cost per line:** each kept line is a `GitDiffLine` record plus its own `Content` string: 180–244 B a line.
+  - **Parser alone (headless JIT, copies of my clean jrepo with folders deleted):**
+
+    | Fixture | Files | Lines | Characters | Allocated | Retained |
+    |---|---|---|---|---|---|
+    | docs\ deleted | 182 | 45,633 | 3.7 M | 34.3 MB | 10.6 MB |
+    | src, tests, docs, apps deleted | 1,996 | 458,215 | 22.1 M (git diff 23.0 M) | 233.8 MB | 78.8 MB |
+
+  - **Junction hosted headlessly, 10 s after start on History, then a full GC:**
+
+    | Fixture | Allocated | GCs | Heap after full GC | Working set | Private |
+    |---|---|---|---|---|---|
+    | clean jrepo | 12.7 MB | 0/0/0 | 3.4 MB | 79.0 MB | 37.7 MB |
+    | docs\ deleted | 47.9 MB | — | 14.6 MB | 106.4 MB | 64.9 MB |
+    | big deletion | 256.1 MB | 16/15/4 | 86.7 MB | 243.1 MB | 212.6 MB |
+
+    In the big case, the parsed diff (78.8 MB) is most of the retained heap.
+  - **Expert 3's real window** (an 82.2 MB unstaged patch): a 640 MB heap and 907 MB working set at rest. That is the
+    same O(changed lines), ~7.8 B of heap per patch byte against 3.8 in mine.
+  - **Not O(saves):** with the big deletion standing, saving README.md twice allocated 1.2 and 1.1 MB per save (0.2 MB on
+    the clean tree). The watcher did not re-parse the diff while History was showing.
+  real app: Junction opened, or switched to, on a repository with a big uncommitted change: a deleted or moved folder, a
+  line-ending or formatting change across a tree, regenerated files, a vendor update. That is occasional, but it is paid
+  at every start and repository switch while the change stands, and kept for the window's life.
+  expected: retained bar, a scaling case (O(changed lines) → O(the shown file)).
+  - Big deletion: heap at rest 86.7 → ~8 MB, working set 243 → ~165 MB (−32 %).
+  - Start-up allocation 256 → ~22 MB.
+  - The 82 MB case: roughly −600 MB.
+  - Keeping raw patch text instead would be about 1 B a character (22 MB), against 180–244 B a parsed line.
+  cost: medium, Junction only, no API, no pixels.
+  - These need only the shown file's parsed diff: line and hunk staging, the "No textual changes" rows (entries made
+    from the lists) and the untracked synthesis.
+  - Check whether anything reads every file's hunks (counts, search, the review composer) before making them lazy.
+  - Linux: the load's timing moves, so run Junction's tests on Fedora.
+
+FILES (in `...e91920b9...\scratchpad\r19-dotnet\`): `jdirty\` (src\Program.cs, proj\JDirty.csproj): `run1.txt` (parser
+and app at rest), `run2.txt` (with the saves). Fixtures: `fx\jdel-docs`, `fx\jdel-big` (copies of the clean jrepo with
+folders deleted). `fx\jrepo` is clean again: the probe's two appended README.md lines were restored with git, and status
+shows 0 entries. Nothing is left running.
