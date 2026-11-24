@@ -1394,7 +1394,7 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
                     if (ranging && probe > 1)
                         lower = prefixes is null
                             ? float.PositiveInfinity
-                            : Math.Max(lower, Math.Max(WidestBefore(probe, width, charWidth), FittedBelow(probe)));
+                            : Math.Max(lower, Math.Max(WidestBefore(probe, width, charWidth), FittedBelow(probes!, probe, wrapWidth)));
                     return hardEnd;
                 }
                 lo = probe;
@@ -1452,7 +1452,7 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
             float wLow = loWidth, wHigh = hiWidth;
             if (!floor && breakAt > start)
             {
-                int k = ClustersTo(breakAt);
+                int k = ClustersTo(breakAt, lo);
                 if (k > 0 && k < lo)
                     (kLow, wLow) = (k, Measure(breakAt - start));
                 int space = fitEnd, reach = Math.Min(hardEnd, fitEnd + 64);
@@ -1467,8 +1467,8 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
             }
             float from = floor || kLow == 1
                 ? float.NegativeInfinity
-                : Math.Max(WidestBefore(kLow, wLow, charWidth), FittedBelow(kLow));
-            float to = Math.Min(NarrowestAfter(kHigh, wHigh, charWidth), FailedAbove(kHigh));
+                : Math.Max(WidestBefore(kLow, wLow, charWidth), FittedBelow(probes!, kLow, wrapWidth));
+            float to = Math.Min(NarrowestAfter(kHigh, wHigh, charWidth), FailedAbove(probes!, kHigh, wrapWidth));
             if (from < to)
             {
                 lower = Math.Max(lower, from);
@@ -1482,7 +1482,7 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
 
         // The count of clusters that ends at `pos`, at most lo, or 0 if none does (a space a mark
         // joins to).
-        int ClustersTo(int pos)
+        int ClustersTo(int pos, int lo)
         {
             if (clusters is null) return pos - start;
             int a = 1, b = lo;
@@ -1497,18 +1497,18 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
 
         // The widest prefix the search measured that fitted, of fewer than k clusters; and the
         // narrowest that did not fit, of more than k.
-        float FittedBelow(int k)
+        static float FittedBelow(List<(int Clusters, float Width)> probes, int k, float wrapWidth)
         {
             float widest = float.NegativeInfinity;
-            foreach (var (n, w) in probes!)
+            foreach (var (n, w) in probes)
                 if (n < k && w <= wrapWidth) widest = Math.Max(widest, w);
             return widest;
         }
 
-        float FailedAbove(int k)
+        static float FailedAbove(List<(int Clusters, float Width)> probes, int k, float wrapWidth)
         {
             float narrowest = float.PositiveInfinity;
-            foreach (var (n, w) in probes!)
+            foreach (var (n, w) in probes)
                 if (n > k && w > wrapWidth) narrowest = Math.Min(narrowest, w);
             return narrowest;
         }
