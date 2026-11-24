@@ -1850,6 +1850,9 @@ public abstract class Element
         else _inherited?.CopyFrom(InheritedStyle.Default);
         IsFocusable = source.IsFocusable;
         TabIndex = source.TabIndex;
+        // Like focusability: an element built out of the pointer's reach once (a field shown off
+        // until its checkbox is ticked) kept that for good, every later build asking for it back.
+        IsHitTestVisible = source.IsHitTestVisible;
         // With the two above: an element patched from a build that asks for the ring kept the
         // one it was made with. Aperture's first library button, patched from the rail's spacer
         // once the libraries loaded, took Tab with no ring (2026-11-21).
