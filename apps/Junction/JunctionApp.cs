@@ -364,7 +364,10 @@ public partial class JunctionApp : Component, IDisposable
         // than on the UI thread because that is the one place in this view already off it,
         // and it answers both of the amend checkbox's questions: whether there is anything to
         // amend, and what to put in the fields when you say so.
-        string? HeadMessage = null)
+        string? HeadMessage = null,
+        // Non-null: the working tree's diffs were too long to read whole, and the two dictionaries
+        // hold only the files read so far; the others are read when they are shown (ChangesDiffFor).
+        ChangePatches? Patches = null)
     {
         public static readonly ChangesData Empty = new([], [], new(), new(), [], null, []);
 
@@ -947,8 +950,7 @@ public partial class JunctionApp : Component, IDisposable
         if (!PathEquals(path, _activeRepoPath) || View != JunctionView.Changes) return;
         var data = ChangesView;
         if ((_hideDiff && !data.InSequencer) || _changeSelPath == null || _changeSelConflicted) return;
-        var diffs = _changeSelStaged ? data.StagedDiffs : data.UnstagedDiffs;
-        if (diffs.TryGetValue(_changeSelPath, out var diff) && diff.Hunks.Count > 0)
+        if (ChangesDiffFor(data, _changeSelStaged, _changeSelPath, ask: false) is { Hunks.Count: > 0 } diff)
             _ = HighlightFor(diff, _changeSelStaged ? ExternalDiffMode.Staged : ExternalDiffMode.Unstaged, null,
                 margin: SaveAskMargin);
     }

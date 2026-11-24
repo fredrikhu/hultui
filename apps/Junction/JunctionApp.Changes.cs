@@ -5,6 +5,7 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Core.Styling;
 using Junction.Git;
 using Junction.Theme;
@@ -47,8 +48,8 @@ public partial class JunctionApp
         GitFileDiff? diff = null;
         if (_changeSelPath != null && !_changeSelConflicted)
         {
-            var dict = _changeSelStaged ? data.StagedDiffs : data.UnstagedDiffs;
-            dict.TryGetValue(_changeSelPath, out diff);
+            diff = ChangesDiffFor(data, _changeSelStaged, _changeSelPath);
+            if (diff != null) ReadAheadChanges(data);
         }
         // Untracked files have a synthesized all-additions diff with no real index
         // header, so line-level patch application can't target them — stage the whole
@@ -74,8 +75,12 @@ public partial class JunctionApp
         // HEAD's message moves only with HEAD, which moves the refs generation: while that stands,
         // a reload (an editor's save) keeps the one read last rather than run git log for it.
         (int RefsGen, string? Message)? head = _changesHeadRead.TryGetValue(path, out var read) && read.RefsGen == refsGen ? read : null;
+        // The file the view shows, read with a working tree too long to read whole (ReadChanges): a reload
+        // behind a save or a staging click lands with the diff on screen.
+        (string Path, bool Staged)? opening = PathEquals(path, _activeRepoPath) && _changeSelPath is { } shown && !_changeSelConflicted
+            ? (shown, _changeSelStaged) : null;
         _changesLoaders.For(path).Load($"{path}|{gen}|w{ws}",
-            () => LoadOrRetry(path, () => LoadChanges(path, ws, status, head)),
+            () => LoadOrRetry(path, () => LoadChanges(path, ws, status, head, opening)),
             onLoaded: data =>
             {
                 _changesHeadRead[path] = (refsGen, data.HeadMessage);
@@ -94,7 +99,7 @@ public partial class JunctionApp
     /// <summary>
     /// Runs off the UI thread. <paramref name="shared"/>: the status the summary of this generation
     /// reads too. <paramref name="head"/>: HEAD's message, when one read at this refs generation is
-    /// known.
+    /// known. <paramref name="opening"/>: the file the view shows, or null for the one it opens on.
     ///
     /// <para>The lists are several git commands read one after another, and a <c>git add</c> that
     /// lands between them tears them apart: the staged list read before it and the working tree
@@ -109,13 +114,13 @@ public partial class JunctionApp
     /// A change undone within one read (staged and unstaged again) goes unseen.</para>
     /// </summary>
     private ChangesData LoadChanges(string path, bool ignoreWhitespace, SharedStatus? shared = null,
-        (int RefsGen, string? Message)? head = null)
+        (int RefsGen, string? Message)? head = null, (string Path, bool Staged)? opening = null)
     {
         var repo = RepoFor(path);
         for (int read = 1; ; read++)
         {
             var before = repo.IndexPrint();
-            var data = ReadChanges(repo, path, ignoreWhitespace, shared, before, head);
+            var data = ReadChanges(repo, path, ignoreWhitespace, shared, before, head, opening);
             if (repo.IndexPrint() == before) return data;
             if (read == MaxChangesReads)
                 throw new InvalidOperationException($"The index of {path} moved under {read} reads in a row.");
@@ -126,7 +131,7 @@ public partial class JunctionApp
     /// <summary>One read of the working tree for <see cref="LoadChanges"/>, begun when the index
     /// held <paramref name="before"/>.</summary>
     private ChangesData ReadChanges(GitRepository repo, string path, bool ignoreWhitespace,
-        SharedStatus? shared, ulong? before, (int RefsGen, string? Message)? head)
+        SharedStatus? shared, ulong? before, (int RefsGen, string? Message)? head, (string Path, bool Staged)? opening)
     {
         var staged = repo.GetStagedChanges();
         // One status for the files only it lists and, mid-operation, the conflicts: read after
@@ -167,31 +172,237 @@ public partial class JunctionApp
                 state.TheirsRef != null ? repo.GetCommit(state.TheirsRef) : null);
         }
 
-        var stagedDiffs = repo.GetWorkingDiff(staged: true, ignoreWhitespace: ignoreWhitespace)
-            .GroupBy(d => d.Path).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
-        var unstagedDiffs = repo.GetWorkingDiff(staged: false, ignoreWhitespace: ignoreWhitespace)
-            .GroupBy(d => d.Path).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        // Each side is read whole below WholeChangesChars, as it always was; past that, git is stopped
+        // and the files whose patch ended before it are kept (GetWorkingDiff).
+        int max = WholeChangesChars;
+        var (stagedRead, stagedWhole) = repo.GetWorkingDiff(staged: true, ignoreWhitespace, max);
+        var stagedDiffs = stagedRead.GroupBy(d => d.Path).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        var (unstagedRead, unstagedWhole) = repo.GetWorkingDiff(staged: false, ignoreWhitespace, max);
+        var unstagedDiffs = unstagedRead.GroupBy(d => d.Path).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
 
-        // Untracked files aren't in `git diff`; synthesize an all-additions diff.
-        foreach (var f in unstaged.Where(f => f.Kind == FileChangeKind.Untracked))
+        // Untracked files aren't in `git diff`; synthesize an all-additions diff, for as many
+        // as fit in what a side is read whole up to (each file's text, read whole). The rest
+        // are made when they are shown, as a side read in part reads its files.
+        long untrackedChars = 0;
+        bool untrackedWhole = true;
+        foreach (var f in unstaged)
         {
-            if (unstagedDiffs.ContainsKey(f.Path)) continue;
+            if (f.Kind != FileChangeKind.Untracked || unstagedDiffs.ContainsKey(f.Path)) continue;
+            untrackedChars += repo.GetWorkingFileSize(f.Path) ?? 0;
+            if (untrackedChars > max) { untrackedWhole = false; break; }
             var ud = repo.GetUntrackedFileDiff(f.Path).FirstOrDefault();
             if (ud != null) unstagedDiffs[f.Path] = ud;
         }
+        unstagedWhole &= untrackedWhole;
 
-        // Every listed file gets an entry, even an empty one. A file git status calls
-        // modified while git diff has nothing to show for it (see AddStatusOnlyChanges) is
-        // a row like any other, and the pane beside it has to read "No textual changes" —
-        // a missing entry renders as "Select a file", next to the file just selected.
-        foreach (var f in staged)
-            if (!stagedDiffs.ContainsKey(f.Path)) stagedDiffs[f.Path] = new GitFileDiff(f.Path, null, []);
-        foreach (var f in unstaged)
-            if (!unstagedDiffs.ContainsKey(f.Path)) unstagedDiffs[f.Path] = new GitFileDiff(f.Path, null, []);
+        // Every listed file of a side read whole gets an entry, even an empty one. A file git
+        // status calls modified while git diff has nothing to show for it (see
+        // AddStatusOnlyChanges) is a row like any other, and the pane beside it has to read
+        // "No textual changes" — a missing entry renders as "Select a file", next to the file
+        // just selected. A side read in part gets its other files' entries as they are read.
+        if (stagedWhole)
+            foreach (var f in staged)
+                if (!stagedDiffs.ContainsKey(f.Path)) stagedDiffs[f.Path] = new GitFileDiff(f.Path, null, []);
+        if (unstagedWhole)
+            foreach (var f in unstaged)
+                if (!unstagedDiffs.ContainsKey(f.Path)) unstagedDiffs[f.Path] = new GitFileDiff(f.Path, null, []);
+
+        ChangePatches? patches = null;
+        if (!stagedWhole || !unstagedWhole)
+        {
+            patches = new ChangePatches(path, ignoreWhitespace, staged, unstaged, stagedDiffs, unstagedDiffs);
+            // The file the view shows, or the one PickInitialChange opens on, is read now when it was
+            // not: the view opens, or a reload lands, with its diff.
+            var open = opening ?? (conflicted.Count > 0 ? null
+                : staged.Count > 0 ? (staged[0].Path, true)
+                : unstaged.Count > 0 ? (unstaged[0].Path, false)
+                : null);
+            if (open is { } o && IndexOfPath(o.Staged ? staged : unstaged, o.Path) is var i and >= 0)
+            {
+                var diffs = patches.Diffs(o.Staged);
+                if (!diffs.ContainsKey(o.Path))
+                    diffs[o.Path] = ReadChangePatch(repo, (o.Staged ? staged : unstaged)[i], o.Staged, ignoreWhitespace);
+            }
+        }
 
         var assumeUnchanged = repo.GetAssumeUnchangedFiles();
         return new ChangesData(staged, unstaged, stagedDiffs, unstagedDiffs, conflicted, sequencer,
-            assumeUnchanged, head is { } known ? known.Message : repo.GetLastCommitMessage());
+            assumeUnchanged, head is { } known ? known.Message : repo.GetLastCommitMessage(), patches);
+    }
+
+    /// <summary>
+    /// The longest staged or unstaged diff the Changes view's load reads whole, in characters (and the most
+    /// text of untracked files it makes diffs of). A longer one is read a file at a time: the file the view
+    /// shows with the load, each other file when it is first shown, and the files beside the one shown
+    /// ahead of the keys (<see cref="ReadAheadChanges"/>).
+    ///
+    /// <para>Only the shown file's diff is ever drawn, and every changed line of the working tree was read
+    /// and parsed into objects for it anyway, at every start and repository switch, Changes shown or not, and
+    /// kept: 180–244 bytes a line. A deleted folder of 458,215 lines was 256 MB allocated at start and 86.7
+    /// MB of heap at rest. 262,144 characters is the Commit tab's limit (<see cref="WholePatchChars"/>).</para>
+    /// </summary>
+    internal int WholeChangesChars { get; set; } = 262_144;
+
+    /// <summary>Files the Changes view read on their own, for tests (the file a load opens on is
+    /// counted too).</summary>
+    internal int ChangePatchLoads => _changePatchLoads;
+
+    private int _changePatchLoads;
+
+    /// <summary>Files read ahead of the keys, for tests (ChangePatchLoads counts them too).</summary>
+    internal int ChangeReadAheads => _changeReadAheads;
+
+    private int _changeReadAheads;
+
+    /// <summary>
+    /// Where the rest of a working tree read in part (<see cref="WholeChangesChars"/>) comes from: the
+    /// repository and whitespace setting its load was read with, and the load's own lists and diffs (the ones
+    /// <see cref="ChangesView"/> copies to apply the stagings in flight): what git listed on each side, and
+    /// where a file read later goes. One per load, compared by reference, so a file read for one load is never
+    /// taken for another's.
+    /// </summary>
+    private sealed class ChangePatches(string repoPath, bool ignoreWhitespace,
+        IReadOnlyList<GitFileChange> stagedFiles, IReadOnlyList<GitFileChange> unstagedFiles,
+        Dictionary<string, GitFileDiff> stagedDiffs, Dictionary<string, GitFileDiff> unstagedDiffs)
+    {
+        public string RepoPath { get; } = repoPath;
+        public bool IgnoreWhitespace { get; } = ignoreWhitespace;
+        public IReadOnlyList<GitFileChange> Files(bool staged) => staged ? stagedFiles : unstagedFiles;
+        public Dictionary<string, GitFileDiff> Diffs(bool staged) => staged ? stagedDiffs : unstagedDiffs;
+    }
+
+    // Runs off the UI thread.
+    /// <summary>One listed file's diff on one side, read on its own: as the load read whole would have it,
+    /// an empty one ("No textual changes") when git has nothing to show for it.</summary>
+    private GitFileDiff ReadChangePatch(GitRepository repo, GitFileChange file, bool staged, bool ignoreWhitespace)
+    {
+        Interlocked.Increment(ref _changePatchLoads);
+        var diffs = !staged && file.Kind == FileChangeKind.Untracked
+            ? repo.GetUntrackedFileDiff(file.Path)
+            : repo.GetWorkingFileDiff(staged, file.Path, file.OldPath, ignoreWhitespace);
+        return diffs.Find(d => d.Path == file.Path) ?? new GitFileDiff(file.Path, null, []);
+    }
+
+    /// <summary>
+    /// One file's diff on one side of <paramref name="data"/>, or null. With a working tree read in part
+    /// (<see cref="ChangePatches"/>), a listed file not read yet is asked for now (unless
+    /// <paramref name="ask"/> is false) and is null until it lands (<see cref="ChangePatchLoading"/>); it then
+    /// joins the load's diffs, so a second visit reads nothing. A file whose staging is in flight is not
+    /// asked for: git is moving it, and the reload behind the move reads it.
+    /// </summary>
+    private GitFileDiff? ChangesDiffFor(ChangesData data, bool staged, string? path, bool ask = true)
+    {
+        if (path is null) return null;
+        if ((staged ? data.StagedDiffs : data.UnstagedDiffs).TryGetValue(path, out var diff)) return diff;
+        if (data.Patches is not { } source || StagingInFlight(source.RepoPath, path)) return null;
+        // Read after ChangesView copied the load's diffs to apply a staging in flight.
+        if (source.Diffs(staged).TryGetValue(path, out diff)) return diff;
+        if (ask) AskChangePatch(source, staged, path, ahead: false);
+        return null;
+    }
+
+    private bool StagingInFlight(string repoPath, string path)
+    {
+        foreach (var key in _pendingStage.Keys)
+            if (key.Path == path && PathComparer.Equals(key.Repo, repoPath)) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// One file's diff of a working tree read in part, read for the Changes view: the shown file's when it is
+    /// shown, and the files beside it ahead of the keys. One read at a time; a newer ask drops the one before
+    /// it. No build reads this loader's state, so a diff read ahead lands without drawing a frame; the shown
+    /// file's asks for one when it lands.
+    /// </summary>
+    private readonly HultUI.AsyncLoader<GitFileDiff?> _changePatch = new(null);
+    private (ChangePatches? Source, bool Staged, string? Path) _changePatchAsked;
+    private Func<bool>? _changePatchBusy;
+
+    /// <summary>Whether <paramref name="path"/>'s diff on that side is on its way from <paramref name="source"/>.
+    /// Read untracked: a landing that matters asks for its frame.</summary>
+    private bool ChangePatchPending(ChangePatches? source, bool staged, string path) =>
+        source is not null && ReferenceEquals(_changePatchAsked.Source, source)
+        && _changePatchAsked.Staged == staged && _changePatchAsked.Path == path
+        && ReactiveScope.Untracked(_changePatchBusy ??= () => _changePatch.IsLoading);
+
+    /// <summary>True while the Changes view waits for the shown file's diff: a file of a working tree read in
+    /// part, listed and not read yet (on its way, or moving between the lists while git stages it).</summary>
+    private bool ChangePatchLoading(string path)
+    {
+        if (View != JunctionView.Changes || _changeSelConflicted || path != _changeSelPath) return false;
+        var data = ChangesView;
+        return data.Patches is not null && IndexOfPath(_changeSelStaged ? data.Staged : data.Unstaged, path) >= 0;
+    }
+
+    /// <summary>Asks for <paramref name="path"/>'s diff on that side unless it is read, is not a listed file
+    /// of that side, or is the one on its way (the loader takes the same key as a no-op).</summary>
+    private void AskChangePatch(ChangePatches source, bool staged, string path, bool ahead)
+    {
+        var diffs = source.Diffs(staged);
+        var files = source.Files(staged);
+        int index = IndexOfPath(files, path);
+        if (index < 0 || diffs.ContainsKey(path)) return;
+        var file = files[index];
+        _changePatchAsked = (source, staged, path);
+        _changePatch.Load((source, staged, path), () => LoadOrRetry(source.RepoPath, () =>
+            {
+                if (ahead) Interlocked.Increment(ref _changeReadAheads);
+                return ReadChangePatch(RepoFor(source.RepoPath), file, staged, source.IgnoreWhitespace);
+            }),
+            onLoaded: diff =>
+            {
+                if (diff is not null) diffs.TryAdd(path, diff);
+                // A Ctrl+D that waited for this file's diff.
+                bool editor = ReferenceEquals(_editorDiffOnLanding.Source, source) && _editorDiffOnLanding.Path == path;
+                if (editor) _editorDiffOnLanding = default;
+                if (!ReferenceEquals(_changes.Value.Patches, source)) return;   // a newer load, or another repository
+                // The pane was waiting for this one: draw it. A file read ahead draws nothing; the next one
+                // ahead is asked for instead.
+                if (path == _changeSelPath && staged == _changeSelStaged && !_changeSelConflicted)
+                {
+                    if (_diffFull) Rerender(); else RerenderView();
+                    if (editor && View == JunctionView.Changes) OpenSelectedDiffExternally();
+                }
+                else if (View == JunctionView.Changes) ReadAheadChanges(ChangesView);
+            });
+    }
+
+    /// <summary>
+    /// Reads the file rows beside the shown one in the list ahead, the next first, then the previous, one at a
+    /// time, once the shown file's own diff is here: a walk through the files with the arrow keys then finds
+    /// each one read and draws it on the key's own frame. A read for a file that is no longer beside the shown
+    /// one is dropped by the next ask.
+    /// </summary>
+    private void ReadAheadChanges(ChangesData data)
+    {
+        if (data.Patches is not { } source || _changeSelPath is not { } shown || _changeSelConflicted) return;
+        if (ChangesDiffFor(data, _changeSelStaged, shown, ask: false) is null) return;
+        SyncChangeListRows(data);
+        int i = ChangeListIndex(new ChangeRef(shown, _changeSelStaged ? ChangeSection.Staged : ChangeSection.Unstaged));
+        if (i < 0) return;
+        var next = NeighbourChange(i, 1);
+        var previous = NeighbourChange(i, -1);
+        // The one on its way is one of them: let it land.
+        foreach (var row in (ReadOnlySpan<ChangeRef?>)[next, previous])
+            if (row is { } r && ChangePatchPending(source, r.Section == ChangeSection.Staged, r.Path))
+                return;
+        foreach (var row in (ReadOnlySpan<ChangeRef?>)[next, previous])
+            if (row is { } r && ChangesDiffFor(data, r.Section == ChangeSection.Staged, r.Path, ask: false) is null
+                && !StagingInFlight(source.RepoPath, r.Path))
+            {
+                AskChangePatch(source, r.Section == ChangeSection.Staged, r.Path, ahead: true);
+                return;
+            }
+    }
+
+    /// <summary>The first file row after (or before) row <paramref name="i"/> of the Changes list, past
+    /// headers, folders and conflicts: where the next arrow key that shows a diff lands.</summary>
+    private ChangeRef? NeighbourChange(int i, int step)
+    {
+        for (int j = i + step; j >= 0 && j < _changeListRows.Count; j += step)
+            if (_changeListRows[j] is { Kind: ChangeListKind.File, Node: { } node } row)
+                return new ChangeRef(node.Path, row.Section);
+        return null;
     }
 
     private void PickInitialChange(ChangesData data)
@@ -1648,6 +1859,9 @@ public partial class JunctionApp
                 to.Sort((a, b) => string.CompareOrdinal(a.Path, b.Path));
             }
             if (fromDiffs.Remove(key.Path, out var diff)) toDiffs[key.Path] = diff;
+            // A file of a working tree read in part that was not read yet: the diff it had on the side it
+            // is going to is not the one to show, and the reload behind the move reads this one.
+            else if (data.Patches is not null) toDiffs.Remove(key.Path);
         }
         return data with
         {

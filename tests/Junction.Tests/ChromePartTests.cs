@@ -845,7 +845,7 @@ public class ChromePartTests
                 // What a load that shares nothing and reads everything makes of the same disk.
                 var shown = Get<object>(fx.App, "ChangesView");
                 var fresh = typeof(JunctionApp).GetMethod("LoadChanges", BindingFlags.NonPublic | BindingFlags.Instance)!
-                    .Invoke(fx.App, [a, false, null, null])!;
+                    .Invoke(fx.App, [a, false, null, null, null])!;
                 foreach (var list in new[] { "Staged", "Unstaged", "Conflicted", "AssumeUnchanged" })
                     Assert.Equal(((System.Collections.IEnumerable)Get<object>(fresh, list)).Cast<object>(),
                         ((System.Collections.IEnumerable)Get<object>(shown, list)).Cast<object>());
