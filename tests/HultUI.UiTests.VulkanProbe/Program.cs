@@ -61,6 +61,15 @@ using HultUI.WebView.WebView2;
 // --save-frame=<path> it saves the frame before the rest to <path>.before.png and the one after to
 // <path>.after.png.
 //
+// --rest-purge draws a page of six pictures, then a page of two others (the six stay alive off screen),
+// then runs the real loop: a repaint every 16 ms for twice the rest (shortened to 1.5 s), then nothing for
+// twice the rest, then the six again. It prints the frames drawn while frames kept coming, and Skia's image
+// textures (from the window's own GPU context) after the second page, at the end of the frames, after the
+// rest and back on the first page. With HULTUI_STARTUP set, the trace's "probe frames done" mark is just
+// before the last frame before the rest. With --save-frame=<path> it saves the first page to <path>.a.png,
+// the second before the rest to <path>.before.png and after it to <path>.after.png, and the first page
+// again, its pictures uploaded again, to <path>.back.png.
+//
 // --frame-counter draws each frame's own number, as sixteen black or white cells, over a red,
 // green or blue background by the number mod 3. HULTUI_VULKAN_CAPTURE's file is looked for after
 // every frame, decoded and deleted: it must show the frame just drawn. Each swapchain captures
@@ -132,6 +141,7 @@ internal static class Program
         var renderer = args.Contains("--renderer=default") ? RendererKind.Default : RendererKind.Vulkan;
         if (args.Contains("--disposed-images")) return DisposedImages(renderer);
         if (args.Contains("--size-rest")) return SizeRest(renderer, args.FirstOrDefault(a => a.StartsWith("--save-frame="))?["--save-frame=".Length..]);
+        if (args.Contains("--rest-purge")) return RestPurge(renderer, args.FirstOrDefault(a => a.StartsWith("--save-frame="))?["--save-frame=".Length..]);
         if (args.Contains("--frame-counter")) return FrameCounter(renderer);
         if (args.Contains("--frame-bytes")) return FrameBytes(renderer);
         if (args.Contains("--pixel-uploads")) return PixelUploads(renderer);
@@ -661,6 +671,103 @@ internal static class Program
                     .ContinueWith(_ => Application.InvokeOnMainThread(app.PrimaryWindow.Close));
             });
         }) { IsBackground = true }.Start();
+        app.Run();
+        foreach (var source in sources) source.Dispose();
+        Console.WriteLine("probe: done");
+        return 0;
+    }
+
+    /// <summary>The rest <see cref="RestPurge"/> shortens the surface's to.</summary>
+    private const int RestMs = 1500;
+
+    /// <summary>
+    /// What a Vulkan window keeps of the pictures it no longer draws. Skia keeps the texture of a
+    /// picture alive off screen, and staged uploads until a scratch purge: Aperture at Home after a
+    /// walk down its grid kept 59.85 MB. Once the window has drawn nothing for a rest, the surface
+    /// purges what its last frame did not draw with, from the loop's own deadline: the probe asks
+    /// for display-colour events, so nothing else wakes its loop while it rests.
+    /// </summary>
+    private static int RestPurge(RendererKind renderer, string? savePath)
+    {
+        // Read once, by each surface as it is made.
+        typeof(HultUI.Rendering.Skia.SkiaVulkanRenderSurface)
+            .GetProperty("RestPurgeDelay", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+            .SetValue(null, TimeSpan.FromMilliseconds(RestMs));
+        using var app = Foreground.NoActivate(new Application("vulkan-probe", 640, 400, renderer: renderer,
+            displayColorEvents: true));
+        var sources = new List<HultUI.Rendering.Skia.SkiaImageSource>();
+        HultUI.Rendering.Skia.SkiaImageSource[] Pictures(params string[] colours) => colours.Select(colour =>
+        {
+            var bitmap = new SkiaSharp.SKBitmap(128, 128, SkiaSharp.SKColorType.Rgba8888, SkiaSharp.SKAlphaType.Premul);
+            bitmap.Erase(SkiaSharp.SKColor.Parse(colour));
+            var source = new HultUI.Rendering.Skia.SkiaImageSource(bitmap);
+            sources.Add(source);
+            return source;
+        }).ToArray();
+        int frames = 0;
+        HultUI.Core.Elements.Element Page(HultUI.Rendering.Skia.SkiaImageSource[] pictures) =>
+            Flex.Row().FlexGrow(1).FlexWrap(HultUI.Core.Layout.FlexWrap.Wrap).Gap(8f).Padding(8f)
+                .Background(Color.FromHex("#101010"))
+                .Children(pictures.Select(p => (HultUI.Core.Elements.Element)Image.New(p).Width(128f).Height(128f))
+                    .Append(Canvas.New(_ => frames++).Width(1f).Height(1f)).ToArray());
+        var first = Pictures("#E04040", "#40C060", "#4060E0", "#E0C040", "#C040C0", "#40C0C0");
+        var second = Pictures("#F08020", "#8020F0");
+
+        app.SetRoot(Page(first));
+        for (int i = 0; i < 6; i++)
+            app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+        if (savePath is not null) SaveFrame(app, savePath + ".a.png");
+        var root = Page(second);
+        app.SetRoot(root);
+        for (int i = 0; i < 6; i++)
+            app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+        PrintSkia(app, "second");
+        if (savePath is not null) SaveFrame(app, savePath + ".before.png");
+
+        // The real loop: frames keep coming for twice the rest, then nothing for twice the rest.
+        int framesBefore = frames;
+        new Thread(() =>
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            while (clock.ElapsedMilliseconds < 2 * RestMs)
+            {
+                Application.InvokeOnMainThread(root.MarkPaintDirty);
+                Thread.Sleep(16);
+            }
+            Application.InvokeOnMainThread(() =>
+            {
+                HultUI.Core.DevTools.StartupTrace.Mark("probe frames done");
+                root.MarkPaintDirty();
+            });
+            Thread.Sleep(100);
+            Application.InvokeOnMainThread(() =>
+            {
+                Console.WriteLine($"probe: frames {frames - framesBefore} in {2 * RestMs} ms");
+                PrintSkia(app, "frames");
+            });
+            Thread.Sleep(2 * RestMs);
+            Application.InvokeOnMainThread(() =>
+            {
+                PrintSkia(app, "rested");
+                if (savePath is null)
+                {
+                    app.SetRoot(Page(first));
+                    app.PrimaryWindow.RequestPostFrameCallback(() => Application.InvokeOnMainThread(Back));
+                    return;
+                }
+                _ = app.PrimaryWindow.SaveFrame(savePath + ".after.png").ContinueWith(_ => Application.InvokeOnMainThread(() =>
+                {
+                    app.SetRoot(Page(first));
+                    _ = app.PrimaryWindow.SaveFrame(savePath + ".back.png").ContinueWith(_ => Application.InvokeOnMainThread(Back));
+                }));
+            });
+        }) { IsBackground = true }.Start();
+
+        void Back()
+        {
+            PrintSkia(app, "back");
+            app.PrimaryWindow.Close();
+        }
         app.Run();
         foreach (var source in sources) source.Dispose();
         Console.WriteLine("probe: done");

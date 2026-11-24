@@ -988,7 +988,9 @@ public sealed class Application : IDisposable
         if (_platform is SdlWindowingPlatform && SDL3Window.NextDisplayColorPoll is { } poll)
             Earliest(ref at, ref deadline, poll, IdleDeadline.DisplayColor);
         // A Vulkan window frees what Skia kept for its old sizes once a size change has rested
-        // (SkiaVulkanRenderSurface.PurgeAfterSizeRest), at the end of the pump this deadline wakes.
+        // (SkiaVulkanRenderSurface.PurgeAfterSizeRest), and what its last frame did not draw with
+        // once it has drawn nothing for a while (PurgeAfterRest), at the end of the pump this
+        // deadline wakes.
         if (_platform is SdlWindowingPlatform && SDL3Window.NextSurfacePurge is { } purge)
             Earliest(ref at, ref deadline, purge, IdleDeadline.SurfacePurge);
         // The GL driver's thread walk, set off once the window has settled. Only while that is to

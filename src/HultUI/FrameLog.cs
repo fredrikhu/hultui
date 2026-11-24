@@ -41,7 +41,8 @@ internal enum IdleDeadline
     Posted,
     /// <summary>The window has settled, and the GL driver's one-time thread walk may be set off.</summary>
     DriverThreadWalk,
-    /// <summary>A Vulkan window's purge once a size change has rested.</summary>
+    /// <summary>A Vulkan window's purge once a size change has rested, or once it has drawn nothing
+    /// for a while.</summary>
     SurfacePurge,
     Count,
 }
