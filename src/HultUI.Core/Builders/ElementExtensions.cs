@@ -282,6 +282,31 @@ public static class ElementExtensions
     public static T OnClick<T>(this T el, Action<ClickEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnPointerDown<T>(this T el, Action<PointerDownEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnPointerUp<T>(this T el, Action<PointerUpEvent> handler) where T : Element { el.On(handler); return el; }
+    /// <summary>The press ended without a release (the system took the touch, or a gesture
+    /// claimed it): undo what the press started. No PointerUp or Click follows.</summary>
+    public static T OnPointerCancel<T>(this T el, Action<PointerCancelEvent> handler) where T : Element { el.On(handler); return el; }
+
+    /// <summary>A finger held still on this element, or inside it, for the long-press time. No
+    /// click follows, and the window opens no context menu and shows no tooltip for it: the
+    /// handler is the long press's meaning (docs/design/GESTURES.md §4).</summary>
+    public static T OnLongPress<T>(this T el, Action<LongPressEvent> handler) where T : Element { el.On(handler); return el; }
+
+    /// <summary>
+    /// Lets a finger that lands on this element, or inside it, drag it along <paramref name="axis"/>:
+    /// once the finger moves past the touch slop mostly along that axis, and no element inside this
+    /// one took it first, the press is cancelled and the finger's moves come here as
+    /// <paramref name="update"/>s until it lifts (<paramref name="end"/>, with the velocity). For
+    /// swipe-to-dismiss, a carousel, pull-to-refresh. The mouse is unaffected.
+    /// </summary>
+    public static T OnPan<T>(this T el, PanAxis axis,
+        Action<PanStartEvent>? start, Action<PanUpdateEvent> update, Action<PanEndEvent>? end) where T : Element
+    {
+        el.On<PanAxisQuery>(q => q.Axis ??= axis);
+        if (start is not null) el.On(start);
+        el.On(update);
+        if (end is not null) el.On(end);
+        return el;
+    }
     public static T OnPointerEnter<T>(this T el, Action<PointerEnterEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnPointerLeave<T>(this T el, Action<PointerLeaveEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnScroll<T>(this T el, Action<ScrollEvent> handler) where T : Element { el.On(handler); return el; }

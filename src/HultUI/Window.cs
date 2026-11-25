@@ -2091,6 +2091,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // An autoscroll moves the view with no input arriving at all, so it has to ask for
         // the frames itself — otherwise holding the pointer still would stop the scroll.
         || _autoScrollTarget is not null
+        // So does a finger's fling (Window.Gestures.cs).
+        || _fling is not null
         // So does a selection held past the edge of its view.
         || SelectionEdgeScrolling
         // An accessibility action (invoke/toggle/set-value/focus) queued from an
@@ -2351,6 +2353,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // rather than a frame behind it.
         TickAutoScroll();
         TickSelectionEdgeScroll();
+        TickFling();
 
         // The same for a splitter, a pan or a slider following the pointer: the moves since the
         // last frame recorded where it is, and this applies the latest, once (PointerFollow).
@@ -3021,7 +3024,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     var (overlayHover, overlayHoverOffset) = HitTestOverlays(pos);
                     var nowUnder = overlayHover ?? HitTester.HitTest(_root, pos);
                     var (capUp, capClick, capDbl) = _pointerState.HandlePointerUp(captured, capturedPos, button.Button, button.Modifiers);
-                    EventDispatcher.Dispatch(capUp, captured);
+                    DispatchRelease(capUp, captured);
                     // A click needs the release over the element (or inside it), as it
                     // would without capture; letting go elsewhere is how a press is abandoned.
                     bool releasedOver = false;
@@ -3090,6 +3093,12 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 // Check overlays first, then main tree
                 var (overlayTarget, overlayOffset) = HitTestOverlays(pos);
                 var target = overlayTarget ?? HitTester.HitTest(_root, pos);
+                // A cancelled press goes to the element that took it, wherever the finger is now,
+                // and so does the release of a finger that stayed within the touch slop
+                // (_releaseOnPressed): its tap is the pressed element's.
+                if (!button.IsDown && (PointerContext.Cancelling || _releaseOnPressed)
+                    && _pointerState.PressedElement is { } pressed && IsShownInWindow(pressed))
+                    target = pressed;
                 if (target is null) break;
 
                 bool isOverlayHit = overlayTarget is not null;
@@ -3122,7 +3131,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     }
 
                     // Check if click is on a scrollbar — walk up from target to find a ScrollViewElement
-                    if (!isOverlayHit && button.Button == 0 && TryStartScrollbarDrag(target, pos))
+                    // Not for a finger: a finger anywhere in the view scrolls it, and the thin desktop
+                    // bar is no target for one (touch scrollbars are later, GESTURES.md §7).
+                    if (!isOverlayHit && button.Button == 0 && !PointerContext.IsTouch && TryStartScrollbarDrag(target, pos))
                         break;
 
                     // Middle button in anything that can scroll: anchor an autoscroll here.
@@ -3185,12 +3196,15 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                         _activeTextGroup = null;
                     }
 
-                    // Start pointer capture for text input drag selection
-                    if (!isOverlayHit && button.Button == 0 && target is TextInputElement dragInput && dragInput.IsDragging)
+                    // Start pointer capture for text input drag selection. Not for a finger, which
+                    // would then never scroll the page it landed on: touch selection starts from a
+                    // long press (phase 4, GESTURES.md §2).
+                    bool selects = !isOverlayHit && button.Button == 0 && !PointerContext.IsTouch;
+                    if (selects && target is TextInputElement dragInput && dragInput.IsDragging)
                         _textInputDragTarget = dragInput;
-                    else if (!isOverlayHit && button.Button == 0 && target is TextAreaElement dragArea && dragArea.IsDragging)
+                    else if (selects && target is TextAreaElement dragArea && dragArea.IsDragging)
                         _textAreaDragTarget = dragArea;
-                    else if (!isOverlayHit && button.Button == 0 && target is TextElement dragLabel && dragLabel.IsDragging)
+                    else if (selects && target is TextElement dragLabel && dragLabel.IsDragging)
                     {
                         if (dragLabel.SelectionGroup is { } grp && dragLabel.SelectionIndex >= 0)
                         {
@@ -3230,7 +3244,10 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
                     // Record potential drag source if the element (or ancestor) is draggable
                     // In an overlay too (a dialog's own drag and drop: its rows, chips, tiles).
-                    if (button.Button == 0 && _textInputDragTarget is null && _textAreaDragTarget is null && _textElementDragTarget is null && _groupDragToken is null)
+                    // Not for a finger: a finger that moves scrolls, and drags only from a long press
+                    // (docs/design/GESTURES.md §4).
+                    if (button.Button == 0 && !PointerContext.IsTouch
+                        && _textInputDragTarget is null && _textAreaDragTarget is null && _textElementDragTarget is null && _groupDragToken is null)
                     {
                         var draggable = FindDraggableAncestor(target);
                         if (draggable is not null)
@@ -3249,7 +3266,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 else
                 {
                     var (upEvt, clickEvt, dblClickEvt) = _pointerState.HandlePointerUp(target, effectiveBtnPos, button.Button, button.Modifiers);
-                    EventDispatcher.Dispatch(upEvt, target);
+                    DispatchRelease(upEvt, target);
                     if (clickEvt is not null)
                         EventDispatcher.Dispatch(clickEvt, target);
                     if (dblClickEvt is not null)
@@ -3257,6 +3274,10 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 }
                 break;
             }
+
+            case InputEvent.TouchInput touch:
+                HandleTouch(touch);
+                break;
 
             case InputEvent.PointerLeftWindowInput:
             {
@@ -3274,6 +3295,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
             case InputEvent.MouseWheelInput wheel:
             {
+                _fling = null;   // the wheel takes over from a finger's throw
                 var pos = new Point(wheel.MouseX, wheel.MouseY);
                 // Overlays first, as a press does: a wheel over a dialog or a popup list is
                 // that overlay's, not the page's underneath it.
@@ -3939,11 +3961,19 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 break;
             }
         }
+        // A finger changes no cursor and widens no scrollbar: neither shows under a finger
+        // (docs/design/POINTER-IDENTITY.md §3).
+        if (PointerContext.IsTouch) return FinishHover(target, at);
         SetCursor(cursor, cursorImage);
         _hoverCursor = cursor;
         _hoverCursorImage = cursorImage;
         _cursorFollowsHover = overScrollbar is null;
         SetScrollbarHover(overScrollbar, pos);
+        return FinishHover(target, at);
+    }
+
+    private (Element? Target, Point At) FinishHover(Element? target, Point at)
+    {
 
         // Tooltip tracking
         UpdateTooltipHover(target);
@@ -5204,6 +5234,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
     private void UpdateTooltipHover(Element? hitTarget)
     {
+        // A finger hovers nothing: no tooltip opens for touch (a long press will show one,
+        // docs/design/GESTURES.md §4), and one showing goes.
+        if (PointerContext.IsTouch) hitTarget = null;
         var (owner, text) = FindTooltipOwner(hitTarget);
 
         // Same owner — nothing to do

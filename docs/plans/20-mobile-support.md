@@ -502,6 +502,14 @@ touch driver. Pinch waits until an element needs it.
 - The headless tests cover slop, latching, handoff, velocity and cancellation on virtual time.
 - The perf suite is flat.
 
+**Status (2026-11-26): built and tested headless; not yet run on a device.** Pointer identity
+(`docs/design/POINTER-IDENTITY.md` §8) and the gestures (`docs/design/GESTURES.md` §9), with
+`TouchPointerTests` (19) and `TouchGestureTests` (22). Left for this phase:
+- the emulator and the phone: taps, swipes, flings and long presses through `adb shell input`,
+  and frame time while flinging Aperture's grid
+- the Fluent sample and Aperture by touch (the first exit criterion)
+- the perf suite
+
 ### Phase 4: Soft keyboard and touch text editing (M, public API)
 
 New `TextInputKind` members and return-key hints. The focused field scrolls into view above the

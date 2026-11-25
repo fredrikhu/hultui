@@ -27,11 +27,45 @@ public sealed unsafe class EventTranslator
     /// decides what a key's <see cref="KeyDownEvent.Text"/> can say.</summary>
     internal SDL_Window* Window { get; set; }
 
+    /// <summary>A finger, as a <see cref="InputEvent.TouchInput"/>. SDL gives its position as 0 to 1
+    /// across the window; the window's size in layout units makes it a point. A finger SDL made
+    /// from the mouse or a pen is not one: those arrive as the mouse.</summary>
+    private void Finger(SDL_Event* evt, TouchPhase phase)
+    {
+        ref var f = ref evt->tfinger;
+        if (f.touchID == SDL_MOUSE_TOUCHID || f.touchID == SDL_PEN_TOUCHID) return;
+        int w = 0, h = 0;
+        if (Window is not null) SDL_GetWindowSize(Window, &w, &h);
+        float s = InputScale;
+        OnInputEvent?.Invoke(new InputEvent.TouchInput(
+            (long)(ulong)f.fingerID, phase, f.x * w * s, f.y * h * s, TranslateKeyMod(SDL_GetModState())));
+    }
+
     internal void ProcessEvent(SDL_Event* evt)
     {
         float s = InputScale;
         switch (evt->type)
         {
+            // A mouse SDL made from a finger, should one come though SDL_HINT_TOUCH_MOUSE_EVENTS
+            // is off: the finger itself arrives as a touch (docs/design/POINTER-IDENTITY.md §5).
+            case (uint)SDL_EventType.SDL_EVENT_MOUSE_BUTTON_DOWN or (uint)SDL_EventType.SDL_EVENT_MOUSE_BUTTON_UP
+                when evt->button.which == SDL_TOUCH_MOUSEID:
+            case (uint)SDL_EventType.SDL_EVENT_MOUSE_MOTION when evt->motion.which == SDL_TOUCH_MOUSEID:
+                break;
+
+            case (uint)SDL_EventType.SDL_EVENT_FINGER_DOWN:
+                Finger(evt, TouchPhase.Down);
+                break;
+            case (uint)SDL_EventType.SDL_EVENT_FINGER_MOTION:
+                Finger(evt, TouchPhase.Move);
+                break;
+            case (uint)SDL_EventType.SDL_EVENT_FINGER_UP:
+                Finger(evt, TouchPhase.Up);
+                break;
+            case (uint)SDL_EventType.SDL_EVENT_FINGER_CANCELED:
+                Finger(evt, TouchPhase.Cancel);
+                break;
+
             case (uint)SDL_EventType.SDL_EVENT_MOUSE_BUTTON_DOWN:
                 OnInputEvent?.Invoke(new InputEvent.MouseButtonInput(
                     evt->button.x * s, evt->button.y * s,

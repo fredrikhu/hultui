@@ -43,7 +43,43 @@ public abstract class PointerEvent : ElementEvent
 
     /// <summary>Modifier keys held during the event.</summary>
     public KeyModifiers Modifiers { get; init; }
+
+    /// <summary>The ID of the mouse's pointer, which never changes.</summary>
+    public const int MousePointerId = 1;
+
+    /// <summary>
+    /// Which pointer this is. The mouse is always <see cref="MousePointerId"/>. Each finger gets
+    /// an ID for as long as it touches, and the ID is not reused while any finger is down
+    /// (docs/design/POINTER-IDENTITY.md).
+    /// </summary>
+    public int PointerId { get; init; } = PointerContext.Id;
+
+    /// <summary>What the pointer is: a mouse, a finger, or a pen (pens arrive as the mouse for now).</summary>
+    public PointerType PointerType { get; init; } = PointerContext.Type;
+
+    /// <summary>
+    /// The mouse, or the first finger down. Only the primary pointer hit-tests, hovers, clicks and
+    /// takes focus; other fingers reach the element holding the primary pointer's capture, and
+    /// nothing else.
+    /// </summary>
+    public bool IsPrimary { get; init; } = PointerContext.IsPrimary;
 }
+
+/// <summary>What a <see cref="PointerEvent"/> comes from.</summary>
+public enum PointerType
+{
+    Mouse,
+    Touch,
+    Pen,
+}
+
+/// <summary>
+/// The press ended without a release: the operating system took the touch (a system gesture, a
+/// call), or a gesture claimed the pointer (a scroll that took the finger from the button it
+/// landed on). No <see cref="PointerUpEvent"/> and no <see cref="ClickEvent"/> follow; the
+/// capture, if any, has ended. Undo what the press started.
+/// </summary>
+public sealed class PointerCancelEvent : PointerEvent;
 
 public sealed class PointerDownEvent : PointerEvent
 {

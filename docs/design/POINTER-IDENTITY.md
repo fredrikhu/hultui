@@ -1,11 +1,12 @@
 # Pointer identity — design note
 
-**Status (2026-11-25): design approved, nothing built.** The user approved §4's API as
-proposed and took every recommendation in §6:
+**Status (2026-11-26): built, as §8 records.** The user approved §4's API as proposed on
+2026-11-25 and took every recommendation in §6:
 - other fingers go to the capture holder only
 - desktop touchscreens become touch pointers too
-- pens stay as mice for now Plan 20, phase 3, first part ([plan](../plans/20-mobile-support.md)
-§2.3). It makes touch a pointer of its own, so the next note can build gestures (tap, long
+- pens stay as mice for now
+
+Plan 20, phase 3, first part ([plan](../plans/20-mobile-support.md) §2.3). It makes touch a pointer of its own, so the next note can build gestures (tap, long
 press, pan with inertia, pinch) on it. Gestures are not designed here, but §5 checks this
 design leaves them room.
 
@@ -224,3 +225,43 @@ need the emulator's own multi-touch (Ctrl+drag in its window) or a device.
 
 The gestures note builds on this, and its work (pan, inertia, nested handoff, long press,
 pinch) is the larger part of phase 3.
+
+## 8. As built (2026-11-26)
+
+The API is §4's, unchanged. Where the build differs from the note, or settles what it left open:
+
+- **Stamping is ambient.** `PointerContext` (internal, thread-static) holds the pointer whose
+  input the window is handling, and every `PointerEvent` takes its `PointerId`, `PointerType`
+  and `IsPrimary` from it as it is made. The seventeen places the mouse paths make events did
+  not change. Outside a touch it is the mouse.
+- **A primary finger is the mouse's paths** (`Window.Touch.cs`): its down is a hover at the
+  finger and a left press, its moves are moves, its up is a release followed by "the pointer
+  left the window", which ends the hover. A touch down sends no `PointerMove` first, as the web's
+  touch sends none.
+- **A finger inside the slop releases on the element it pressed.** The note's rule (within 8 DIP
+  *and* on the pressed element) lost taps: a finger landing on a button's label and lifting 6 DIP
+  away on the button's padding released on a different element, and the click synthesis matches
+  elements exactly. So within the slop the release, and its click, go to the pressed element
+  wherever the wobble went, as Android's views do. The mouse keeps the exact-element rule.
+- **A cancel goes to the pressed element too**, wherever the finger is, when that element is
+  still shown; to the capture holder when one holds the pointer.
+- **Touch makes no drag source**, opens no tooltip, changes no cursor and widens no scrollbar.
+  Drags from a finger come from a long press (`GESTURES.md` §4).
+- **SDL:** `SDL_HINT_TOUCH_MOUSE_EVENTS`, `SDL_HINT_MOUSE_TOUCH_EVENTS` and
+  `SDL_HINT_PEN_TOUCH_EVENTS` are all `0`, on every platform. The last keeps a pen from pressing
+  twice (once as SDL's mouse, once as a finger). Mouse events from `SDL_TOUCH_MOUSEID` and
+  fingers from `SDL_MOUSE_TOUCHID` or `SDL_PEN_TOUCHID` are dropped.
+- **The control audit.** Six controls capture the pointer and so receive other fingers: the
+  slider, the scrollbar, the table's column grip, the rich text editor, the terminal and the web
+  view. Each ignores pointers that are not primary. Those, the number field and the three text
+  controls get a `PointerCancel` path: the drag or selection stops where it got to, a value
+  reached stays, a link does not open, the terminal's program and the web page hear the button
+  come up (neither can be told "cancelled"). The other controls act on the click, which a cancel
+  never makes, and their pressed look is the window's, which a cancel clears. The apps' own
+  handlers are audited when each app comes to touch.
+- **Tests:** `TouchPointerTests` (19), each touch rule with a mouse control beside it. Negative
+  controls, each rule broken in turn: the slop, the double tap's reach, the release on the
+  pressed element, the cancel event, the tooltip guard, the slider's primary guard and its
+  cancel each fail their test.
+- **Not verified on a device yet.** The emulator takes `adb shell input tap` and `swipe`; two
+  fingers need its own multi-touch or the phone.

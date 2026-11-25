@@ -9,7 +9,7 @@ using HultUI.Core.Styling;
 
 namespace HultUI.Core.Elements;
 
-public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
+public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable, IPanScrollable
 {
     private string _text = "";
     private int _cursorPos;
@@ -2029,6 +2029,24 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         float before = _scrollOffsetY;
         ScrollOffsetY = before + dy;
         return _scrollOffsetY != before;
+    }
+
+    // ---- Pan (IPanScrollable): a finger's scroll, vertical only, as the wheel's ----
+
+    bool IPanScrollable.CanPan(PanAxis axis, int direction) =>
+        axis != PanAxis.Horizontal && (direction > 0 ? _scrollOffsetY < MaxScrollY() - 0.01f : _scrollOffsetY > 0.01f);
+
+    Point IPanScrollable.PanBy(float dx, float dy)
+    {
+        float before = _scrollOffsetY;
+        ScrollOffsetY = before + dy;
+        return new Point(0, _scrollOffsetY - before);
+    }
+
+    Point IPanScrollable.PanOffset
+    {
+        get => new(0, _scrollOffsetY);
+        set => ScrollOffsetY = value.Y;
     }
 
     /// <summary>Largest valid vertical scroll offset (content height minus viewport).</summary>

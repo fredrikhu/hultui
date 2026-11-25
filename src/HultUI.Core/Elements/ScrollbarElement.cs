@@ -212,14 +212,25 @@ public class ScrollbarElement : Element, IRangeValueElement
         OnOwn<PointerDownEvent>(OnPointerDown);
         OnOwn<PointerMoveEvent>(e =>
         {
-            if (!_dragging) return;
+            // A second finger reaches the capture holder too (docs/design/POINTER-IDENTITY.md §2):
+            // the thumb follows the first.
+            if (!_dragging || !e.IsPrimary) return;
             // Recorded, and applied once per frame that may be drawn: OnChanged rebuilds the
             // viewer it scrolls, and a 1,000 Hz mouse rebuilt it about sixteen times a frame.
             _pointerAlong = Along(e.LocalPosition);
             (_follow ??= new PointerFollow(FollowPointer)).Request(this);
         });
+        // A press the system took ends as a release does: the thumb stays where it was dragged.
+        OnOwn<PointerCancelEvent>(e =>
+        {
+            if (!e.IsPrimary) return;
+            _follow?.Flush();
+            _dragging = false;
+            _bar.SetHover(false, this);
+        });
         OnOwn<PointerUpEvent>(e =>
         {
+            if (!e.IsPrimary) return;
             // The drag ends exactly where the pointer did, whether or not a frame came between.
             _follow?.Flush();
             _dragging = false;
@@ -292,7 +303,7 @@ public class ScrollbarElement : Element, IRangeValueElement
 
     private void OnPointerDown(PointerDownEvent e)
     {
-        if (e.Button != PointerEvent.LeftButton || MaxValue == 0) return;
+        if (e.Button != PointerEvent.LeftButton || !e.IsPrimary || MaxValue == 0) return;
         // What the moves before the press were to show comes first.
         _follow?.Flush();
 

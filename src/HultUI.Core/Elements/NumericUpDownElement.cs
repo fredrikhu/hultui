@@ -47,6 +47,7 @@ public class NumericUpDownElement : Element, IRangeValueElement
         Inherited.Cursor = CursorType.Pointer;
         OnOwn<PointerDownEvent>(OnPointerDown);
         OnOwn<PointerUpEvent>(_ => Release());
+        OnOwn<PointerCancelEvent>(_ => Release());
         OnOwn<PointerLeaveEvent>(_ => Release());
         OnOwn<FocusEvent>(_ => { _focused = true; MarkPaintDirty(); });
         OnOwn<BlurEvent>(_ => { _focused = false; Commit(); Release(); MarkPaintDirty(); });

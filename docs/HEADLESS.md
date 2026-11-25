@@ -142,6 +142,32 @@ window.PressKey(KeyCode.Y, KeyModifiers.Ctrl, layoutKey: 'z', modifierKeys: Modi
 `PressKey` without those leaves them unknown (0, `None`, null), which is what the WinForms
 host gives; code that reads them must fall back, and a test of that code should cover both.
 
+Fingers have a driver of their own (`docs/design/POINTER-IDENTITY.md`). A finger is a number
+the test picks, from `TouchDown` to `TouchUp` or `TouchCancel`:
+
+```csharp
+window.Tap(element);                      // down and up at the element's centre, as Click aims
+window.Tap(x, y);
+window.TouchDown(0, x, y);                // the first finger down is the primary pointer
+window.TouchMove(0, x + 12, y);           // past the 8 DIP slop: the release clicks nothing
+window.TouchDown(1, x2, y2);              // a second finger: to the capture holder, or nowhere
+window.TouchUp(1);
+window.TouchCancel(0);                    // the system took it: PointerCancel, no PointerUp, no click
+```
+
+Gestures run on virtual time (`docs/design/GESTURES.md`):
+
+```csharp
+window.Swipe(from, to, TimeSpan.FromMilliseconds(50));   // 10 moves, a frame pumped before each
+session.PumpFrames(180);                                 // let the fling run out
+window.LongPress(element);                               // held 600 ms, then lifted
+```
+
+A finger follows the touch rules, not the mouse's: its release clicks only within 8 DIP of its
+press (and then the element it pressed, even if the wobble crossed onto a child or off one), a
+double tap is two taps within 300 ms and 32 DIP, hover ends at the release, and no tooltip
+opens. Time the double tap with `PumpFrame(TimeSpan)` between the taps, as for a double click.
+
 Events enter through the same single funnel as real SDL input, so hit-testing, capture, hover enter/leave, focus-on-click, drag thresholds, and click synthesis all exercise production code paths. `window.Clipboard` and `window.TextInputHost` are in-memory recorders — Ctrl+C lands in `Clipboard.Text`, and `TextInputHost.IsTextInputActive` asserts the IME was armed on focus.
 
 ## Queries

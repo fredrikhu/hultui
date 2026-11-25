@@ -258,6 +258,9 @@ public partial class RichTextEditorElement
 
     private void OnPointerDown(PointerDownEvent evt)
     {
+        // A second finger reaches the capture holder too (docs/design/POINTER-IDENTITY.md §2):
+        // the selection follows the first. The same in the move, release and cancel.
+        if (!evt.IsPrimary) return;
         if (evt.Button == PointerEvent.RightButton && EnsureFreshLayout())
         {
             // The context menu that opens next is about what is under the pointer — a table's
@@ -297,13 +300,15 @@ public partial class RichTextEditorElement
         _upstream = upstream;
         _preferredX = -1;
         _dragging = true;
-        evt.CapturePointer();
+        // A finger is not held: a press that captured it could never scroll the page or the
+        // editor (docs/design/GESTURES.md §2).
+        if (evt.PointerType != PointerType.Touch) evt.CapturePointer();
         MarkPaintDirty();
     }
 
     private void OnPointerMove(PointerMoveEvent evt)
     {
-        if (!_dragging || !EnsureFreshLayout()) return;
+        if (!_dragging || !evt.IsPrimary || !EnsureFreshLayout()) return;
         if (_pressedLink is not null && Distance(evt.Position, _pressPoint) > 4f) _pressedLink = null;
         var at = ToDocument(evt.Position);
         var (pos, upstream) = PositionAt(at.X, at.Y);
@@ -320,10 +325,18 @@ public partial class RichTextEditorElement
 
     private void OnPointerUp(PointerUpEvent evt)
     {
-        if (!_dragging) return;
+        if (!_dragging || !evt.IsPrimary) return;
         _dragging = false;
         if (_pressedLink is { } link && _state.Selection.IsCollapsed)
             LinkActivated?.Invoke(link);
+        _pressedLink = null;
+    }
+
+    /// <summary>The system took the press: the selection it made stays, and no link opens.</summary>
+    private void OnPointerCancel(PointerCancelEvent evt)
+    {
+        if (!evt.IsPrimary) return;
+        _dragging = false;
         _pressedLink = null;
     }
 

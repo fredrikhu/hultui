@@ -1,3 +1,4 @@
+using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
@@ -392,6 +393,24 @@ public partial class RichTextEditorElement
         float before = _scrollY;
         ScrollOffsetY = before + dy;
         return _scrollY != before;
+    }
+
+    // A finger's scroll (IPanScrollable), vertical only, as the wheel's.
+
+    bool IPanScrollable.CanPan(PanAxis axis, int direction) =>
+        axis != PanAxis.Horizontal && (direction > 0 ? _scrollY < MaxScrollY() - 0.01f : _scrollY > 0.01f);
+
+    Point IPanScrollable.PanBy(float dx, float dy)
+    {
+        float before = _scrollY;
+        ScrollOffsetY = before + dy;
+        return new Point(0, _scrollY - before);
+    }
+
+    Point IPanScrollable.PanOffset
+    {
+        get => new(0, _scrollY);
+        set => ScrollOffsetY = value.Y;
     }
 
     private bool _draggingScrollbar;

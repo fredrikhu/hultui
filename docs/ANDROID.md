@@ -73,6 +73,34 @@ Android's Back (the button, or the edge gesture) arrives as `KeyCode.Back`:
 On the desktop a keyboard's browser-back key is `KeyCode.Back` too; unhandled, it does what
 Escape would, and nothing more.
 
+## Touch
+
+Fingers are touch pointers, here and on desktop touchscreens:
+- **A tap is a click** when the finger lifts within 8 DIP of where it landed.
+- **A double tap** is two taps within 300 ms and 32 DIP: `ClickCount` 2, as a double click.
+- **Hover ends when the finger lifts.** A `:hover` look shows the press, then goes.
+- **No tooltips, no cursor.**
+- **A second finger presses nothing.** It goes only to the element holding the first finger's
+  capture (`PointerDownEvent.CapturePointer`), with `IsPrimary` false.
+- **The system can take a finger** (a system gesture, a call). The element it pressed gets
+  `PointerCancel` (`OnPointerCancel`) and no click; undo what the press started there.
+
+Pointer events say which pointer they come from: `PointerId` (the mouse is always
+`PointerEvent.MousePointerId`), `PointerType` and `IsPrimary`.
+
+Gestures (`docs/design/GESTURES.md`):
+- **A finger that moves 8 DIP scrolls** the innermost list or scroll view that can move that way,
+  and the element it landed on gets `PointerCancel`, not a click. A sideways swipe on a shelf
+  moves the shelf; an up or down one moves the page. A list already at its end lets the one
+  around it take the swipe.
+- **A flick throws the content**, and it slows to a stop. A touch on it stops it.
+- **A long press** (500 ms) runs an `OnLongPress` handler, or opens the context menu, or shows
+  the tooltip while the finger stays down.
+- **`OnPan(axis, start, update, end)`** gives an element of your own the finger: swipe to
+  dismiss, a carousel. Implement `IPanScrollable` on a surface of your own that scrolls.
+- **A slider** follows a sideways swipe and lets a vertical one scroll the page.
+- **An element that captures the pointer on its press** keeps the finger from every scroller.
+
 ## Secrets
 
 `CredentialStore.Default` is the Android Keystore: an AES key that never leaves the device's
@@ -107,8 +135,8 @@ HultUI's own messages go to logcat under `DOTNET` (what a desktop app writes to 
 ## Not yet
 
 These are plan 20's later phases:
-- **Touch.** Taps click, but a swipe does not scroll. Touch scrolling, inertia and long press
-  are phase 3 (`docs/design/POINTER-IDENTITY.md`, `docs/design/GESTURES.md`).
+- **Touch text editing.** A finger places the caret but does not select; selection handles and
+  the edit menu are phase 4. No pinch yet.
 - **The soft keyboard covers the field.** The visible area and touch text editing are phase 4.
 - **No TalkBack** until its bridge (phase 6).
 - **File dialogs** return Android's `content://` addresses, which `File.Open` cannot open.

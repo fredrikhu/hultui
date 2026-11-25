@@ -2562,6 +2562,10 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             (uint)SDL_EventType.SDL_EVENT_MOUSE_BUTTON_UP => evt->button.windowID,
             (uint)SDL_EventType.SDL_EVENT_MOUSE_MOTION => evt->motion.windowID,
             (uint)SDL_EventType.SDL_EVENT_MOUSE_WHEEL => evt->wheel.windowID,
+            (uint)SDL_EventType.SDL_EVENT_FINGER_DOWN or
+            (uint)SDL_EventType.SDL_EVENT_FINGER_UP or
+            (uint)SDL_EventType.SDL_EVENT_FINGER_MOTION or
+            (uint)SDL_EventType.SDL_EVENT_FINGER_CANCELED => evt->tfinger.windowID,
             (uint)SDL_EventType.SDL_EVENT_WINDOW_MOUSE_LEAVE => evt->window.windowID,
             (uint)SDL_EventType.SDL_EVENT_KEY_DOWN or
             (uint)SDL_EventType.SDL_EVENT_KEY_UP => evt->key.windowID,
@@ -2667,6 +2671,15 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // application ends when its last window has closed (Application.IsRunning). A quit SDL
         // sends for anything else (Cmd+Q, SIGTERM, the session ending) still comes.
         SDL_SetHint(SDL_HINT_QUIT_ON_LAST_WINDOW_CLOSE, "0");
+
+        // Fingers are touch pointers, on every platform, a desktop touchscreen too
+        // (docs/design/POINTER-IDENTITY.md §5): SDL makes no mouse from a finger, and the window
+        // maps a primary finger onto the mouse's paths itself, with the touch rules. A pen stays
+        // SDL's mouse until pens get a note of their own, so it makes no finger either, nor the
+        // mouse one: each would press twice.
+        SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+        SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
+        SDL_SetHint(SDL_HINT_PEN_TOUCH_EVENTS, "0");
 
         // Windows only: no 1 ms timer resolution for the life of the process, which SDL asks for
         // by default; the frame loop's waits ask for it while frames are paced (SdlTimerResolution).

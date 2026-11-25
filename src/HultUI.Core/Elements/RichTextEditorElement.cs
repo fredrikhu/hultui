@@ -27,7 +27,7 @@ namespace HultUI.Core.Elements;
 /// the block changes; blocks are immutable, so "changed" is a reference compare. Only the blocks
 /// on screen are drawn.</para>
 /// </remarks>
-public partial class RichTextEditorElement : BoxElement, IScrollbarDraggable, IAutoScrollable, ITextServicesClient
+public partial class RichTextEditorElement : BoxElement, IScrollbarDraggable, IAutoScrollable, IPanScrollable, ITextServicesClient
 {
     private readonly RichEditState _state;
     private RichDocument _lastIncoming;
@@ -66,6 +66,7 @@ public partial class RichTextEditorElement : BoxElement, IScrollbarDraggable, IA
         OnOwn<PointerDownEvent>(OnPointerDown);
         OnOwn<PointerMoveEvent>(OnPointerMove);
         OnOwn<PointerUpEvent>(OnPointerUp);
+        OnOwn<PointerCancelEvent>(OnPointerCancel);
         OnOwn<ScrollEvent>(OnScroll);
     }
 

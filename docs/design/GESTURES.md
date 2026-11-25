@@ -1,13 +1,14 @@
 # Touch gestures — design note
 
-**Status (2026-11-25): design approved, nothing built.** The user approved §5's API as
-proposed and took every recommendation in §7:
+**Status (2026-11-26): built, as §9 records; not yet tried on a device.** The user approved
+§5's API as proposed on 2026-11-25 and took every recommendation in §7:
 - latch at the start
 - stop at the edge
 - Android-like physics everywhere
 - long press opens the context menu, else the tooltip
-- touch scrollbars later Plan 20, phase 3, second part ([plan](../plans/20-mobile-support.md)
-§2.3). It builds on the approved [pointer identity note](POINTER-IDENTITY.md): one primary
+- touch scrollbars later
+
+Plan 20, phase 3, second part ([plan](../plans/20-mobile-support.md) §2.3). It builds on the approved [pointer identity note](POINTER-IDENTITY.md): one primary
 pointer, touch pointers with IDs, `PointerCancel`, and other fingers routed to the capture
 holder.
 
@@ -282,3 +283,47 @@ then. Nothing in §2–§5 needs to change for it.
 - tests, and tuning on a device, take the rest
 
 Pinch is S–M when it is wanted.
+
+## 9. As built (2026-11-26)
+
+The API is §5's, with these names and shapes. Where the build settles what the note left open:
+
+- **`Window.Gestures.cs`** holds the arena. On a primary touch press the window collects the
+  path's candidates: every `IPanScrollable`, every element with an `OnPan` handler (its axis read
+  through an internal query event that `OnPan` answers, so the axis moves with the handlers when a
+  build patches the element), and whether anything on the path means something on a long press.
+  A press that captured the pointer collects nothing.
+- **The claim** comes at the first move past 8 DIP: the dominant axis, then the innermost candidate
+  that pans that way and, for a scroller, `CanPan` in the direction the content would move. The
+  press is cancelled through the same path as the system's cancel (`PointerCancel`, no click,
+  hover over). A scroller then takes up the movement past the slop, as Android's does, so the
+  content neither jumps by 8 DIP nor lags by the move that claimed. A scroller that can also move
+  across follows the finger both ways.
+- **`IPanScrollable`** is implemented by `ScrollViewElement` (so every list, and a `HorizontalPan`
+  shelf through the list's sideways scroller, which is a model object rather than an element),
+  `TextAreaElement` and the rich text editor, explicitly, so their public surface is unchanged. A
+  scroll view pans only along an axis whose overflow is `Scroll`.
+- **The fling** runs in `TickFling`, beside the autoscroll, on the platform's `TimeProvider`. Each
+  frame integrates the decay exactly (`v·τ·(1 − e^(−dt/τ))`), so the throw is the same at any frame
+  rate; the tests compare 30, 60 and 120 Hz to the unit. An axis that reaches its edge stops. A
+  scroller a rebuild replaced is looked for again under the lift point (the same kind of surface),
+  for up to three frames while the replacement has no layout, and gets the offset carried over
+  plus the travel owed meanwhile.
+- **Velocity** is a least-squares fit over the last 100 ms, zero when the finger reached where it
+  lifted more than 40 ms before (Android's "assume stopped").
+- **Long press** is a 500 ms timer (`Animate.After`) started on a press with a long-press meaning,
+  cancelled by the slop, the lift or a cancel. An `OnLongPress` handler on the path is the meaning
+  when there is one; otherwise the context menu, otherwise the tooltip until the finger lifts.
+- **The slider** is a horizontal pan candidate on touch, not a capture: a sideways drag moves the
+  thumb, a vertical one scrolls the page, and a tap sets the value at the tap.
+- **Text elements no longer drag-select by finger.** On a touch press the window sets no text drag
+  target, and the rich text editor does not capture, so a finger on a field scrolls the page. A
+  cancelled press ends their drag through the window (24 B a selectable label otherwise).
+- **The window's built-in scrollbar** takes no finger: a finger anywhere in the view scrolls it.
+- **Headless:** `Swipe(from, to, duration, steps)` pumps a frame between moves; `LongPress(element)`
+  holds 600 ms.
+- **Tests:** `TouchGestureTests` (22), with negative controls for the claim's `CanPan`, the slop
+  take-up, the capture opt-out, the fling's exact integration (Euler steps fail the frame-rate
+  test), the stop on touch, the rebuild carry and the context-menu path.
+- **Not done:** pinch (§6), haptics, drag-and-drop from a long press, touch scrollbars, and
+  tuning on a device. Nothing here has run on the emulator or the phone yet.
