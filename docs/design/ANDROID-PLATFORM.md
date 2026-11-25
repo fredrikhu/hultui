@@ -249,3 +249,9 @@ while building it:
 - **Predictive back** (Android 14's preview).
 - **Haptics.**
 - **The IME inset**, phase 4.
+
+**On a real phone (2026-11-25).** A Galaxy S25 (Android 17, three-button navigation):
+- **The safe area:** top 34.3 DIP, bottom 48 DIP (the button bar); dark icons over the light
+  theme, light over a dark one.
+- **Back:** closed an open dropdown, then moved the app to the launcher with the process kept.
+- **The Keystore store:** passed the same round trip and restart.

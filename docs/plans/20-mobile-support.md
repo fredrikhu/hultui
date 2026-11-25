@@ -455,8 +455,14 @@ Waiting for pushing to be allowed: the CI job.
   - rotation lays out again
   - content stays clear of the system bars
   - headless tests cover the lifecycle
+- Met on a real phone too, a Galaxy S25 (Android 17, arm64, Adreno 830), on 2026-11-25:
+  - first frame 665–682 ms from a cold start
+  - 60 trips with no growth, GPU memory 59 → 41 MB
+  - Back, safe areas and the Keystore store as on the emulator
+  - `spikes/AndroidHello/README.md`, "On a real phone"
+- Found there: SDL reports the display at 30 Hz, its idle rate, so HultUI paces at 30 fps on a
+  120 Hz screen. To fix with phase 3's scrolling.
 - Open:
-  - **a real device**, which is also the only GPU-memory check
   - content clear of the keyboard (the IME inset), which is phase 4's
   - the CI job
 

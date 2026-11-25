@@ -311,3 +311,9 @@ Nothing else in §2 or §3 needs to change for either feature.
   plays in the background must switch mpv to audio only first, as §7 says.
 - **`Terminating`** comes only from SDL. The headless session cannot raise it.
 - **The settle on iOS** is assumed, not measured.
+
+**On a real phone (2026-11-25).** A Galaxy S25, Android 17, Adreno 830, release build:
+- **Return from Home:** drawn just after return, with the app changing nothing (64,518 samples
+  before and after). So the settle redraw holds on a real driver.
+- **In the background:** 7 ticks in 7.7 s away with no frame drawn and no error.
+- **60 trips:** GPU memory 59.3 MB before and 40.7 MB after, PSS without growth.

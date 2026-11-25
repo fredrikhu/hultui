@@ -167,6 +167,39 @@ try in phase 2.
    GL or runtime errors, and a drawn screen after return (`scripts/background-check.ps1`).
    [`docs/design/APP-LIFECYCLE.md`](../../docs/design/APP-LIFECYCLE.md) §2 item 8 builds on this.
 
+## On a real phone (2026-11-25)
+
+**A Samsung Galaxy S25** (SM-S931B):
+- Android 17 (API 37), arm64-v8a
+- Adreno 830, OpenGL ES 3.2
+- 1080×2340 at density 480, so scale 3.0 and 360×780 DIP
+- three-button navigation
+- Release build, over USB
+
+The first run of the arm64 build. Everything the emulator showed holds:
+
+| Check | Result |
+|---|---|
+| First frame (`m-s25-first-frame.png`) | Drawn correctly at 3×. Content clears the status bar (34.3 DIP) and the button bar (48 DIP); the status icons are dark over the light theme, light over Fluent's dark one (`n-s25-fluent.png`) |
+| Cold start, steady (three runs) | Activity shown 132–143 ms; app ready 145–163 ms; **first frame 665–682 ms** from process start (the emulator: about 1.0 s). The first launch after installing took 5.8 s, once. About 520 ms between app ready and the first frame is HultUI's first layout and drawing, most likely being compiled by the JIT |
+| `resume-check.ps1` (ticker off, app changes nothing on return) | 64,518 drawn samples before Home and after return |
+| `background-check.ps1`, Home | 7 ticks in 7.7 s away, 0.0 frames/s, no errors, drawn on return. Not run with `-Lock`: the phone's lock screen asks for its PIN |
+| `cycle-check.ps1`, 60 trips | Same process, no errors, drawn after the last. **GPU memory (meminfo's Graphics) 59.3 MB before, 40.7 MB after.** PSS 177 → 160 → 160 → 166 → 159 → 157 → 169 MB every 10 trips: no growth |
+| Back | With the dropdown open it closed the list and the app stayed. With nothing open, the app's handler heard it and the app went to Samsung's launcher, process kept |
+| Keystore store (`-e sample credentials`, two launches) | Round trip, delete, an entry kept across launches, nothing in the clear |
+| ICU | `libicu.so` loads; the versioned names end in `_78` here, `_75` on the emulator. The unversioned names (`IcuLibrary`'s Android path) are what holds across devices |
+| The Fluent sample | Runs; its desktop layout leaves the page no room at 360 DIP |
+
+**New: the display's refresh rate is read wrong.**
+- SDL reported `refresh=30Hz` (the `[HultUI] gfx:` line), while the screen runs at up to 120 Hz.
+- `dumpsys display`: `renderFrameRate 120`, with modes of 120, 80 and 60 Hz among others.
+- SDL reads the rate the display happens to idle at when the app starts; Samsung's adaptive screen drops to 30 Hz when nothing moves.
+- HultUI paces frames at the window's `RefreshRate`, so on this phone animations, scrolling and the future fling would run at 30 fps.
+- The fix belongs with phase 3's smooth scrolling:
+  - read the display's peak rate in the activity
+  - ask for it (`Surface.setFrameRate`, or the window's preferred display mode)
+  - pace by it, or better by Android's vsync (`Choreographer`)
+
 ## What broke (for phase 2)
 
 1. **Black after returning from the background.** The app survives Home and return (no crash,
