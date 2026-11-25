@@ -6,7 +6,7 @@ file after every step and commits it with the step's work. Full survey reports a
 
 - **Round:** 19
 - **Phase:** build — round 19 (the survey merged 2026-11-24; 13 steps, questions 79–81 answered (b), (b), (a)
-  on 2026-11-24). Steps 1–10 landed; step 10b (the HDR run) measured, F16 keeps 3. Step 11 landed in part (question 82 open). Build order done (step 11 (a) waits for question 82; question 83 open). Next: the pre-suite work (merge main's 5 new commits, fix postercache-stall-test-race), then the full suite. Survey done 2026-11-24 in session e91920b9 (reports `17-reports/r19-*`; usage 33 → 40 % of the
+  on 2026-11-24). Steps 1–10 landed; step 10b (the HDR run) measured, F16 keeps 3. Step 11 landed in part (question 82 open). Build order done (step 11 (a) waits for question 82; question 83 open). Pre-suite done (afc6564b, 4e0d321f). Next: the full suite. Survey done 2026-11-24 in session e91920b9 (reports `17-reports/r19-*`; usage 33 → 40 % of the
   week, the 5-hour window 1 → 53 %).
   Round 18 RELEASED 2026-11-23: main 6366d201, CI run 45156444317 green on the first attempt. Round 19's files (the
   survey brief `brief-r19-survey.md`, `merge_r19.py`, build briefs `brief-r19b<N>.md`, `archive_r19.py`, agent ids
@@ -460,11 +460,6 @@ Re-ranked by the next survey.
   cleared at frame end but the caches are not, so the next unrelated layout re-measures the whole chain above the list.
   Step 5 (4e337d56) took the row-state drop's part. Count it on a wheel notch and a resize after scrolling. For the next
   survey.
-- **postercache-stall-test-race** (tests; round 19 step 12 found it in step 2's e3c163af; fix before the full suite) —
-  on WSL Fedora a `PosterCache` stalled-body test sees the stalled download still `Pending`, not `Failed`, when it
-  checks (1 failure in Aperture's first full run, 1 in 3 runs alone; Windows passes). A timing race in the test, not the
-  deadline: make it wait for the download's end (a gate or the load's own completion) rather than a clock, and check the
-  reverse edit still fails. CI's 2-core runners may hit it too.
 
 Closed from Waiting by the round 19 survey (→ Examined unless named): skia-rest-purge-vulkan (→ step 4),
 a11y-item-renames-unfetched (→ step 10, question 80), label-focus-no-clipboard (→ step 5 (b)),
@@ -1588,3 +1583,12 @@ From 2026-11-22 (round 18's survey); earlier entries are in the archive ([to 202
   reached from the keyboard, or the app handles the keys itself. The round 19 build order is done (13 steps and step
   10b; step 11 (a) waits for question 82). Next: the pre-suite work (postercache-stall-test-race; main merged if it
   moved; question 82 if answered), then the full suite.
+- 2026-11-25: round 19 pre-suite work (one agent): main merged into the branch (afc6564b, no conflicts: a typed date
+  field 32a108a3, a time field's seconds d01f2e1f, `IsHitTestVisible` across a patch 7650c857, owned windows / show
+  without activation / frame border colour 0891c1c1, files on the Windows clipboard 7f63a51b; each checked against this
+  round's steps 4, 5, 11, 12 and 13: no shared state); Core, Headless, SDL3, Skia, Media and Aperture pass on the merged
+  tree. postercache-stall-test-race fixed (4e0d321f: the test waits for all 12 downloads to land through the cache's own
+  callback, no clock; Fedora alone 3/20 failed before, 0/20 after; Windows at 2-core affinity 0/20; still fails without
+  the body deadline) — closed. Main's CI was red once at 0891c1c1 on Junction's
+  `CommitPatchTests.AnotherCommitsDetail_LetsTheShownOneGo` (its commit message says it fails the same at 7f63a51b) and
+  green at 7650c857 and 32a108a3: the full suite tells flake from failure. Next: the full suite.
