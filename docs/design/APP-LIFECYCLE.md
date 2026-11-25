@@ -99,10 +99,21 @@ Linux, where SDL sends none of these events.
    - later, audio with the screen locked (§7)
 
    An idle HultUI loop parks in `WaitForEvents` and costs nothing, so a running UI thread in the
-   background is not a battery cost by itself. **Verify in phase 2**, with the spike's timer:
-   - posted work runs in the background
-   - nothing is drawn there
-   - return still works
+   background is not a battery cost by itself.
+
+   **Verified 2026-11-25** with the spike's `scripts/background-check.ps1`. A 1 s ticker posts
+   to the UI thread and changes the tree each time; about 7.4 s in the background each run:
+
+   | Run | Ticks run while away | Frames drawn while away | GL/runtime error lines | Drawn after return |
+   |---|---|---|---|---|
+   | Home, SDL's block on (its default) | 0 | none (the frame log stops too) | 0 | yes |
+   | Home, `BLOCK_ON_PAUSE=0` | 7 | 0.0/s | 0 | yes |
+   | Screen locked, `BLOCK_ON_PAUSE=0` | 7 | 0.0/s | 0 | yes |
+
+   The frame log while away, block off: `passes/s=1.0–1.4 frames/s=0.0 parked-ms/s=1000
+   posts/s=0.9–1.0 minimized=1`. The loop sleeps between posts, runs them, and draws nothing:
+   today's minimized check already keeps it off the GPU, and the gate (item 2) will make that
+   independent of SDL's flag.
 
    SDL's companion hint that pauses SDL's own audio does not matter here: mpv has its own
    audio output.

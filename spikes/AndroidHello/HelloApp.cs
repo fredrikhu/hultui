@@ -29,6 +29,9 @@ internal static class HelloApp
     /// <summary>Milliseconds after returning to the foreground to draw again; 0 for never.</summary>
     public static int RedrawAfterMs;
 
+    /// <summary>SDL_HINT_ANDROID_BLOCK_ON_PAUSE; false keeps the UI thread running in the background.</summary>
+    public static bool BlockOnPause = true;
+
     public static void Run()
     {
         var clock = Stopwatch.StartNew();
@@ -37,7 +40,9 @@ internal static class HelloApp
         Environment.SetEnvironmentVariable("HULTUI_FRAMELOG", "1");
         Environment.SetEnvironmentVariable("HULTUI_FRAMELOG_SECS", "2");
         if (Renderer is not null) Environment.SetEnvironmentVariable("HULTUI_RENDERER", Renderer);
-        Info($"renderer={Renderer ?? "(default)"} rebind={Rebind}");
+        Info($"renderer={Renderer ?? "(default)"} rebind={Rebind} redraw={RedrawAfterMs} block={BlockOnPause}");
+        // Read by SDL each time it pumps events while paused; set before SDL_Init to be safe.
+        if (!BlockOnPause) SDL.SDL3.SDL_SetHint(SDL.SDL3.SDL_HINT_ANDROID_BLOCK_ON_PAUSE, "0");
         ProbeIcu();
         Info($"Main on thread {Environment.CurrentManagedThreadId}, runtime {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}");
 
@@ -80,8 +85,10 @@ internal static class HelloApp
                 .Background(i % 2 == 0 ? Color.FromHex("#1F2937") : Color.FromHex("#111827"))
                 .Children(Text.New($"Row {i}").FontSize(16f).TextColor(Color.White))).ToArray();
 
+        var tickLabel = Text.New("tick 0").FontSize(13f).FlexShrink(0);
         var root = Flex.Column(gap: 12).Padding(16).Children(
             Text.New("HultUI on Android").FontSize(26f).FontWeight(FontWeight.Bold).FlexShrink(0),
+            tickLabel,
             Text.New("This paragraph is long on purpose. If ICU's line breaker loaded, it wraps at "
                      + "word boundaries across several lines; if not, it runs off the right edge.")
                 .FontSize(15f).FlexShrink(0),
@@ -106,6 +113,16 @@ internal static class HelloApp
         }), null, 2000, Timeout.Infinite);
         window.Resized += () => Info($"resized: {window.LayoutWidth}x{window.LayoutHeight} DIP, scale {window.DisplayScale}");
         SdlProbe.Install();
+        // The background check: work posted to the UI thread every second, which also changes
+        // the tree. With SDL's block on, the ticks stop in the background; with it off they
+        // must go on, and the frame log must show no frames drawn there.
+        int ticks = 0;
+        using var ticker = new Timer(_ => Application.InvokeOnMainThread(() =>
+        {
+            ticks++;
+            tickLabel.Content = $"tick {ticks}";
+            Info($"tick {ticks}");
+        }), null, 1000, 1000);
         int resumes = 0;
         SdlProbe.OnForeground = () =>
         {
@@ -117,8 +134,6 @@ internal static class HelloApp
                 _ = Task.Delay(RedrawAfterMs).ContinueWith(_ => Application.InvokeOnMainThread(() =>
                     label.Content = $"Resumed {resumes}x (redrawn), tapped {count}"));
         };
-        using var flags = new Timer(_ => Application.InvokeOnMainThread(() => SdlProbe.LogWindowFlags("every 3 s")),
-            null, 3000, 3000);
         app.Run();
     }
 
