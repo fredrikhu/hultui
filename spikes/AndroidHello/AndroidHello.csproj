@@ -12,6 +12,9 @@
     <OutputType>Exe</OutputType>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- The Fluent sample is an exe; only its assembly (FluentApp) is used here, never its
+         entry point, so NETSDK1150's self-contained check does not apply. -->
+    <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationId>org.hultui.spike.androidhello</ApplicationId>
     <ApplicationTitle>HultUI spike</ApplicationTitle>
@@ -22,6 +25,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\HultUI\HultUI.csproj" />
+    <!-- The Fluent sample's UI (FluentApp), hosted with -e sample fluent: plan 20 phase 2's
+         "the sample and the Fluent sample run on the emulator". -->
+    <ProjectReference Include="..\..\samples\HultUI.Samples.Fluent\HultUI.Samples.Fluent.csproj"
+                      GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained" />
   </ItemGroup>
 
 </Project>

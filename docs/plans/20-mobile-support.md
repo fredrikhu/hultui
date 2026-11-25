@@ -419,6 +419,33 @@ branch under `spikes/AndroidHello/`, as `spikes/CefOsr` and `spikes/WebView2Capt
 
 ### Phase 2: Android platform layer (L)
 
+**Status 2026-11-25, branch `claude/android-spike`.**
+
+Built, with no new API beyond the approved lifecycle:
+- the lifecycle (`docs/design/APP-LIFECYCLE.md` §8)
+- GL ES as a proper path
+- a Vulkan request draws with GL ES on Android (`RendererSelection`)
+- ICU through the NDK's `libicu.so`, and a line-break fallback when ICU is missing
+- the §2.11 audit: every not-Windows branch is benign on Android; file dialogs (`content://`
+  URIs) and a second window stay open items
+
+Checked on the emulator:
+- the Fluent sample runs unchanged and navigates by tap. Its desktop layout is squeezed at phone
+  width, which is app layout work.
+- 60 trips to the background, through `scripts/cycle-check.ps1`: same process, no errors, the
+  screen drawn after every return. PSS went 115 → 125 → 129 → 132 → 125 → 125 → 136 MB, every
+  10 trips, so it falls back rather than grows in a line. The emulator reports no GPU memory,
+  so a GPU leak check needs a device.
+
+Waiting for the user's OK on their API (`docs/design/ANDROID-PLATFORM.md`):
+- the platform package and activity base, with the Keystore store
+- safe areas
+- the Back key
+
+Waiting for pushing to be allowed: the CI job.
+
+Not yet: a real device.
+
 - **A platform package.** `HultUI.Platform.Android` (`net11.0-android`): the activity base,
   Java callbacks (insets, back, lifecycle), and the Android credential store.
 - **GL ES** as a proper path, not a spike patch.

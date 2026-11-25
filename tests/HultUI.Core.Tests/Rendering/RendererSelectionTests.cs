@@ -40,7 +40,21 @@ public class RendererSelectionTests
     [InlineData(RendererKind.OpenGL, RendererKind.Software, RendererKind.OpenGL)]
     public void TheEnvironment_BeatsTheApp_WhichBeatsTheDefault(
         RendererKind? environment, RendererKind? requested, RendererKind expected) =>
-        Assert.Equal(expected, RendererSelection.Resolve(environment, requested));
+        Assert.Equal(expected, RendererSelection.Resolve(environment, requested, android: false));
+
+    [Theory]
+    // Android: an app's Vulkan is GL ES (the Vulkan path's interop is desktop-only, plan 20 §2.2)…
+    [InlineData(null, RendererKind.Vulkan, RendererKind.OpenGL)]
+    // …the environment's Vulkan is still Vulkan, for whoever is making it work there…
+    [InlineData(RendererKind.Vulkan, null, RendererKind.Vulkan)]
+    [InlineData(RendererKind.Vulkan, RendererKind.OpenGL, RendererKind.Vulkan)]
+    // …and everything else is as on the desktop.
+    [InlineData(null, null, RendererKind.OpenGL)]
+    [InlineData(null, RendererKind.Software, RendererKind.Software)]
+    [InlineData(RendererKind.Software, RendererKind.Vulkan, RendererKind.Software)]
+    public void OnAndroid_AnAppsVulkanDrawsWithGL(
+        RendererKind? environment, RendererKind? requested, RendererKind expected) =>
+        Assert.Equal(expected, RendererSelection.Resolve(environment, requested, android: true));
 
     [Fact]
     public void AFailedStart_FallsBack_OnlyWhenTheEnvironmentDidNotChoose()

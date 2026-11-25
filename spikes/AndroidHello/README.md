@@ -34,6 +34,10 @@ and what breaks first?
 - `scripts/background-check.ps1`: leaves the app in the background (Home or `-Lock`). It
   reports whether the UI thread ran there, whether anything was drawn, any GL errors, and the
   frame after return.
+- `scripts/cycle-check.ps1`: sends the app Home and back N times (ticker off), reading
+  `dumpsys meminfo` every 10 trips, and checks the process, errors and the last frame.
+- `-e sample fluent` runs the Fluent sample's UI (`FluentApp`, from the unchanged sample project)
+  instead of this app.
 - Intent extras for experiments: `-e renderer software`, `-e rebind 0|1`, `-e redraw <ms>`,
   `-e block 0` (SDL's `BLOCK_ON_PAUSE` off), `-e ticker 0` (no 1 s ticker, whose frame each
   second would hide a lost one; with it off and no `redraw`, the app changes nothing on return).

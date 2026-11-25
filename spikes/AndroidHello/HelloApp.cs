@@ -35,6 +35,19 @@ internal static class HelloApp
     /// <summary>The 1 s ticker. Off for the redraw checks: its frame each second would hide a lost one.</summary>
     public static bool Ticker = true;
 
+    /// <summary>Which app to run: null for this one, "fluent" for the Fluent sample's UI.</summary>
+    public static string? Sample;
+
+    /// <summary>The Fluent sample, unchanged, as samples/HultUI.Samples.Fluent/Program.cs runs it.</summary>
+    private static void RunFluent(Stopwatch clock)
+    {
+        using var app = new Application("Fluent Sample", 1280, 860, HultUI.Core.Styling.WindowStyle.Borderless);
+        var ui = new HultUI.Samples.Fluent.FluentApp(app, app.PrimaryWindow);
+        app.SetRoot(ui.Mount());
+        Info($"Fluent made at {clock.ElapsedMilliseconds} ms");
+        app.Run();
+    }
+
     public static void Run()
     {
         var clock = Stopwatch.StartNew();
@@ -54,7 +67,8 @@ internal static class HelloApp
             // SDL's Android port expects SDL_main; there is none here, so say main is ready
             // before SDL_Init, as an app with its own entry point must.
             SDL.SDL3.SDL_SetMainReady();
-            RunApp(clock);
+            if (Sample == "fluent") RunFluent(clock);
+            else RunApp(clock);
         }
         catch (Exception e)
         {

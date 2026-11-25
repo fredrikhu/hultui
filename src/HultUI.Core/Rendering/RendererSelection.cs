@@ -26,7 +26,18 @@ internal static class RendererSelection
     /// <summary>The renderer a window is created with: the environment wins over the app, and
     /// the app over the default. <see cref="RendererKind.Default"/> is OpenGL today.</summary>
     public static RendererKind Resolve(RendererKind? environment, RendererKind? requested) =>
-        (environment ?? requested ?? RendererKind.Default) switch
+        Resolve(environment, requested, OperatingSystem.IsAndroid());
+
+    /// <summary>
+    /// <see cref="Resolve(RendererKind?, RendererKind?)"/> with the platform given. On Android an
+    /// app's request for Vulkan draws with OpenGL (GL ES) instead: the Vulkan path shares memory
+    /// with a hidden desktop GL 4.5 context through Win32 handles or file descriptors, which
+    /// Android has neither of (it would take AHardwareBuffer), so GL ES is Android's renderer
+    /// until Vulkan earns its place there (plan 20, §2.2). Aperture and Reel ask for Vulkan. The
+    /// environment's <c>vulkan</c> is still obeyed, for whoever is making the Vulkan path work.
+    /// </summary>
+    internal static RendererKind Resolve(RendererKind? environment, RendererKind? requested, bool android) =>
+        (environment ?? (android && requested == RendererKind.Vulkan ? RendererKind.OpenGL : requested) ?? RendererKind.Default) switch
         {
             RendererKind.Vulkan => RendererKind.Vulkan,
             RendererKind.Software => RendererKind.Software,

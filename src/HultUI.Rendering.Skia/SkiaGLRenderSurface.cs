@@ -29,7 +29,8 @@ public sealed class SkiaGLRenderSurface : IRenderSurface, ISkiaExternalSurface, 
     /// surface does not. Null builds a fresh one, which the surface disposes with itself.</param>
     public SkiaGLRenderSurface(Func<string, IntPtr> glGetProcAddress, SkiaTextServices? text = null)
     {
-        // SPIKE (plan 20, phase 1): a GL ES context needs Skia's GLES interface.
+        // A GL ES context (Android: SDL3Window asks for ES 3.0 there) needs Skia's GLES interface,
+        // which resolves the ES entry points and knows the ES feature set.
         _glInterface = (OperatingSystem.IsAndroid()
                 ? GRGlInterface.CreateGles(name => glGetProcAddress(name))
                 : GRGlInterface.CreateOpenGl(name => glGetProcAddress(name)))
