@@ -280,6 +280,18 @@ Super chords of any other key, still reach the focused element. The keys that op
 `Window.ContextMenuKeys` (Menu and Shift+F10); a handler that stops them keeps them. Assistive
 technology's focus follows the menu's highlight.
 
+**In a focused list the keys open the row's menu.** The menu is the one a right-click on the row the
+keyboard is on opens: that of the list's `CurrentIndex`, else its `SelectedIndex`. It is the row's own
+menu, else the nearest one above the row (the list's among them), never that of an element inside
+the row. It opens under the row, on its first item, and the focus stays on the list, so Escape gives
+a reader the row's item again. A row off screen is scrolled in first, by the least scroll; when no
+menu opens, the list scrolls back. A list with neither index opens what it did: its own menu under
+its box, or nothing. Only a list that **holds** the focus is asked. A list whose keys come through a
+focused ancestor (`TakesAncestorFocus`, Vesper's pane) or through nothing at all is not asked. In
+Junction, only History's list holds the focus; the Files tree and the Changes list do not, so the keys
+open nothing there. To reach row menus from the keyboard, let the list hold the focus while nothing
+else does, as History does, or handle the keys yourself, as Vesper and Aperture do.
+
 ---
 
 ## Text input follows focus

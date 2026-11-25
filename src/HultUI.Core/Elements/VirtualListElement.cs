@@ -928,18 +928,47 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     }
 
     /// <inheritdoc/>
-    /// <remarks>The current item's row (its cell in <see cref="ListFlow.Columns"/>) while any of it
-    /// is in view; the list's own box otherwise.</remarks>
+    /// <remarks>The row (its cell in <see cref="ListFlow.Columns"/>) of the item the keyboard is on —
+    /// <see cref="CurrentIndex"/>, else <see cref="SelectedIndex"/> — while any of it is in view; the
+    /// list's own box otherwise.</remarks>
     public override Rect ContextMenuAnchor
     {
         get
         {
-            if ((uint)CurrentIndex >= (uint)_items.Count) return base.ContextMenuAnchor;
-            var r = ItemRect(CurrentIndex);
-            var content = WindowContentBox;
-            var row = new Rect(content.X + r.X - ScrollOffsetX, content.Y + r.Y - ScrollOffsetY, r.Width, r.Height);
-            return row.IntersectsWith(content) ? row : base.ContextMenuAnchor;
+            int index = KeyboardIndex;
+            return index >= 0 && RowInView(index, out var row) ? row : base.ContextMenuAnchor;
         }
+    }
+
+    /// <summary>The realized row of the item the keyboard is on (<see cref="ContextMenuAnchor"/>'s);
+    /// when none of it is in view, scrolled in the least and realized now, where a click would find
+    /// it. Null when the list has no such item, or no room laid out to show it in.</summary>
+    internal override Element? KeyboardContextMenuRow()
+    {
+        int index = KeyboardIndex;
+        if (index < 0) return null;
+        if (!_activeElements.ContainsKey(index) || !RowInView(index, out _))
+        {
+            ScrollIndexIntoView(index);
+            UpdateContentSize();
+        }
+        return _activeElements.TryGetValue(index, out var row) ? row.Element : null;
+    }
+
+    /// <summary>The item the keyboard is on: <see cref="CurrentIndex"/>, else
+    /// <see cref="SelectedIndex"/>; -1 when neither is an item.</summary>
+    private int KeyboardIndex =>
+        (uint)_currentIndex < (uint)_items.Count ? _currentIndex
+        : (uint)_selectedIndex < (uint)_items.Count ? _selectedIndex : -1;
+
+    /// <summary>Item <paramref name="index"/>'s row in window coordinates, and whether any of it is
+    /// in view.</summary>
+    private bool RowInView(int index, out Rect row)
+    {
+        var r = ItemRect(index);
+        var content = WindowContentBox;
+        row = new Rect(content.X + r.X - ScrollOffsetX, content.Y + r.Y - ScrollOffsetY, r.Width, r.Height);
+        return row.IntersectsWith(content);
     }
 
     private Rect CellRect(int index, int rows) =>
@@ -1176,6 +1205,16 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
     /// <summary>Lets go of the rows gathered in <see cref="_dropping"/>, and has the next frame
     /// realize the window again — the kept rows as they are, the others from the template.</summary>
+    /// <remarks>Paint, not layout, and a reader's refresh. Nothing around the list depends on its
+    /// rows (a parent measures it as a leaf, <see cref="MeasuredAsLeaf"/>), and the frame's drawing
+    /// realizes the window again (<see cref="UpdateContentSize"/>, with the window unset here): it
+    /// works out the extent, makes the rows let go of, lays them out at their places and places
+    /// every row. A place's height comes from <see cref="ItemHeight"/> or
+    /// <see cref="ItemHeightFor"/>, which a drop does not run again: heights that move go through
+    /// <see cref="InvalidateHeights"/>, a patch's height check (KeepUnchangedRows) or new items,
+    /// which mark layout themselves. Marked for layout, a row whose state changed measured every
+    /// box around the list again: a Junction Files tree key onto a folder laid out 65 boxes and
+    /// measured 227 containers and 176 leaves, for 8, 0 and 14 (plan 17 round 19).</remarks>
     private void DropGathered()
     {
         if (_dropping.Count == 0) return;
@@ -1187,8 +1226,10 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         _dropping.Clear();
         _visibleStart = -1;
         _visibleEnd = -1;
-        MarkLayoutDirty();
         MarkPaintDirty();
+        // A reader hears of the rows made again on the schedule a layout change has (the tree walked
+        // in place, coalesced), as a scroll does: what the layout mark used to ask of the window for it.
+        NotifyAccessibilityPropertyChanged(AccessibilityProperties.BoundingRect);
     }
 
     // ── Row geometry. With no height function these all reduce to the uniform arithmetic. ──
@@ -2047,10 +2088,11 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         return true;
     }
 
-    // Of what it copies below, the rows and their heights reach layout, and every path that
-    // changes them marks it: InvalidateItems, DropGathered, and the height check in
-    // KeepUnchangedRows. An item-rows list patched by a rebuild that changed none of them keeps
-    // its layout, and so do the boxes around it.
+    // Of what it copies below, the rows' heights reach layout, and every path that changes them
+    // marks it: InvalidateItems and the height check in KeepUnchangedRows. The rows themselves are
+    // made, laid out and placed as the list is drawn (DropGathered marks paint). An item-rows list
+    // patched by a rebuild that changed none of its heights keeps its layout, and so do the boxes
+    // around it.
     private protected override bool PatchMarksOwnLayout => true;
 
     internal override void PatchFrom(Element source)

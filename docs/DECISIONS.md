@@ -1236,6 +1236,35 @@ raster and capture paths need the pixels; and decoding again on demand would put
 decodes on the UI thread. Not tried: a rest-time `PurgeUnusedResources` on Vulkan (about −70 MB at
 Aperture's Home), which is framework-wide and needs its own measurement.
 
+### Aperture keeps a hero's whole picture, not only the rows its box shows (round 19)
+
+An item page's hero is asked for at its box's width and drawn `Cover` into a box never taller than
+420 layout units, so a 16:9 backdrop shows about half of its rows and a 2:3 poster under a fifth.
+Plan 17's round 19 step 11 built a band: `PosterCache` cut each hero to the middle rows the tallest
+box at the step below the asked width can show (one step more for a stand-in), plus 2 rows at each
+end for the filter, and `HeroBytesKept` went from 24 to 12 MB so the same number of heroes is kept.
+Measured on the lab Jellyfin as a library user (NativeAOT, Vulkan, the 4K at 150 %, 120 Hz; 6 item
+pages and back to Home, in a 1440×900 window and then in the monitor's work area; base and band
+alternated over two holds; the mean of two pairs, read before any rest purge):
+
+| At Home after 6 pages | Hero pixels MB | Picture textures MB | DXGI local MB | Private MB |
+|---|---|---|---|---|
+| 1440×900 | 19.3 → 11.4 | 33.3 → 25.3 | 102.0 → 93.2 (−8.6 %) | 239.3 → 219.8 (−8.2 %) |
+| filling the 4K | 19.3 → 8.6 (3 → 4 heroes) | 41.3 → 30.6 | 190.5 → 178.3 (−6.4 %) | 284.9 → 257.4 (−9.6 %) |
+
+The server sends no backdrop larger than its original (most were 1920×1080, one 3840×2160), so
+filling the 4K saved far less than heroes of 33 MB each would.
+
+Declined: the frames are not the same. Cutting the band moves the coordinates Skia samples the
+picture at by float rounding, on the GPU and in raster alike: each hero frame of the real window
+differs from the base's by one level in 112–4,830 pixels (0.004–0.064 % of the frame, all inside
+the hero), and headless frames in 0.001–0.05 % of the hero's bytes. A band aligned to 64 rows still
+differs, and so does one drawn without mipmaps in four of nine shapes tried (whole rows, up to 16
+levels), wherever a row's position rounds the other way. A window
+narrowed by more than one step before its new picture lands also draws the old band zoomed (76 % of
+the hero's bytes, up to 60 levels) until it does. It can come back if a one-level difference inside
+a hero is acceptable.
+
 ### A ref's lock file alone is a working-tree event, not dropped (round 13)
 
 Plan 17's round 13, step 1 stopped Junction's repository watcher from reading a ref transaction

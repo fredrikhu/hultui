@@ -708,7 +708,12 @@ header and footer, this way (round 5, step 12), and adds four lessons:
 - **Split a part by what changes together.** One header part per pane made Tab build both tab
   strips and column headers as well (159 KB a key), because the trail shows which pane is active:
   as three parts, Tab builds the two trails (106 KB), and the pointer over a sort column builds one
-  column header and no window (378 → 26 KB a move).
+  column header and no window (378 → 26 KB a move). Since plan 17 round 19 Tab builds no trail
+  either: a trail shows the active pane in one colour, which the change sets on the live element
+  instead (the drive crumb's label through a `Ref`, `TextColor` and `MarkStyleDirty`; a result
+  set's pill with `Restyle`, as it has a hover tint), and the trail builds only when that element
+  is not on screen. Headless, JIT: Tab 89–97 → 16 KB, a click into the other pane 125 → 46–52 KB;
+  NativeAOT in a real window 83 → 16–17 KB a Tab.
 - **Set what a build shows before asking for it.** Duplicating a tab set the copy's view and sort
   after the build that showed the tab; the next rebuild of anything used to cover that, and a kept
   part does not. With parts, a full rebuild no longer happens by accident.
@@ -1165,6 +1170,28 @@ for speed:
   Discovery map behind the Requests view, 8 MB at 2,000 endpoints. Now the frame that removes the scroll
   view lets go of it, as do an overlay that closes with it and a new root. An app has nothing to do; a
   retention check that wheels before it switches views measured the latch before this, not the app.
+- **The exception: one page kept for Back, bounded** (round 19, the user's choice on question 79).
+  Aperture's Back made the whole page again, Home or a library's grid of 300 films, about 290 KB and 290
+  elements, where opening an item's page was 13 to 135 KB. Now the last Home or grid left is kept out of
+  the window, and shown again on Back, Escape, the mouse's back button, Forward, a number key or the rail
+  (`ApertureApp.KeptPage.cs`). It is moved, not removed: `AddChild` under a holder no window ever shows
+  fires no lifecycle event, so the page stays mounted and its shelf parts keep their hosts (removed, each
+  part would build again as it came back). Nothing in it is hosted, since `IsHosted` walks to the
+  holder, so while it is away `KeptElements` hands nothing of it back, and the window neither draws it,
+  hit-tests it, gives it the keyboard nor reads it out (take the keyboard off it as it leaves). It goes
+  back into the window before its build, in place of the page being left, so that build is an ordinary
+  build of the page on screen: what did not change is handed back, a shelf builds only when its heading
+  or a card on its page moved, the grid keeps its rows and where it was scrolled, and what the data
+  changed while away is made again. What makes it bounded, where the holders above were not: **one
+  page**, about 0.27 MB at 300 films (another page left takes its place); **let go of** (removed from its
+  holder, so unmounted as a replaced view is) on a sign-out or sign-in, a change of display scale or
+  theme, a refresh or a played film (the data's generation moves), and when another library, sort or
+  filter replaces the grid's list; and its picture waits stay only while it is kept ("Let go of a wait
+  whose element left the window", above). Headless (JIT, 1,440×900, 300 films): Back to Home 294–298 →
+  15.8 KB, 297 → 7 elements made, 6 → 0 shelf builds; Back to the grid 287 → 35 KB, 292 → 32 elements, 6
+  → 0 rows; the first Back after cursor keys also makes the cards the ring moved between with no build
+  (47 and 43 KB). The heap after 100 open-and-Back cycles is the same back on the page (5.89–5.91 MB
+  against 5.89) and 0.27–0.28 MB more on an item's page, the kept page.
 
 To find a holder: take a weak reference to an element of the view, switch views, collect
 (`GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();`), and if it is alive, walk the app's fields
@@ -1285,6 +1312,24 @@ posters served after 15 ms): a library's first open 1,109–1,150 → 594–600 
 that brings a row 145–205 → 59–82 KB and no build; Home's start 1,236 → 865 KB, builds 8 → 3; a film
 page with its cast 376–378 → 210–212 KB; one landing 31–84 → 0.2–0.5 KB. Frames are byte-identical to
 the builds', before a picture lands and after.
+
+**Let go of a wait whose element left the window, after a frame.** Each wait is a ref, and a ref holds
+its element and the view around it ("A ref into a view keeps the whole view"). A picture that never
+lands (a body that went quiet after its headers) kept every page visited after it, 0.33 MB a page:
+headless, 160 films, eight stalled bodies, 100 open and Back cycles and 150 pages, the heap went from
+1.72 to 41.06 MB with 4,885 waits for 443 pictures. Aperture now drops, in a post-frame callback asked
+for by a build that made a waiting element or left any wait behind, the waits whose element is out of
+the window and the older of two whose element is the same (a twin's ref is pointed at the live element
+by the patch): one wait is left for each element on screen that waits, and the run above, with the
+stalls never ending, stays at 1.36–1.86 MB (the healthy run's 1.35–1.81). **Not in a build:** while the owner builds, a kept part and the
+elements it hands back are out of the tree (`IsHosted` false), and an element just made is out of it
+until the build is patched in; a prune there took the waits of live cards, which kept their glyph.
+After a frame an element out of the window never comes back: `KeptElements` hands back only what the
+window holds, and a part whose host left is made again by its next `Mount()`. The one exception is the
+page Aperture keeps for Back ("A ref into a view keeps the whole view", round 19): it comes back as it
+was, so its waits stay while it is kept and its pictures go into it when they land, and they go with the
+first prune after it is let go of. A download also has a deadline that covers its body
+(`PosterCache.Deadline`), so a stall ends as a failure.
 
 ---
 

@@ -905,6 +905,85 @@ public sealed class VulkanProbeTests
     }
 
     /// <summary>
+    /// A window at rest keeps the textures of what it draws, not of every picture it has drawn.
+    /// Skia keeps a picture's texture while the picture lives, on screen or not, and staged uploads
+    /// until a scratch purge: Aperture back at Home after a walk down its grid kept 59.85 MB. Once
+    /// the window has drawn nothing for a rest (the probe shortens it to 1.5 s), the surface purges
+    /// what its last frame did not draw with, once, from the loop's own deadline; never while frames
+    /// keep coming. The pictures on screen stay uploaded, the frame after the purge is the frame
+    /// before it, pixel for pixel, and the pictures purged come back from their pixels in the frame
+    /// that shows them again. Under the validation layer where it is installed.
+    /// </summary>
+    [VulkanUiTheory]
+    [InlineData("8-bit")]
+    [InlineData("f16-offscreen")]
+    public void AfterARest_TheWindowPurgesOnce_AndDrawsTheSameFrame(string variant)
+    {
+        string frames = Path.Combine(Path.GetTempPath(), $"hultui-vulkan-restpurge-{Guid.NewGuid():N}");
+        string validation = frames + ".log";
+        string[] saved = [".a.png", ".before.png", ".after.png", ".back.png"];
+        try
+        {
+            var environment = new Dictionary<string, string?>
+            {
+                ["HULTUI_STARTUP"] = "1",
+                ["VK_LOADER_LAYERS_ENABLE"] = "*validation*",
+                ["VK_LAYER_VALIDATE_SYNC"] = "1",
+                ["VK_LAYER_LOG_FILENAME"] = validation,
+                ["VK_LOADER_DEBUG"] = "warn",
+                ["HULTUI_VULKAN_FIXED_EXTENT"] = null,
+                ["HULTUI_VULKAN_PRESENT"] = null,
+                ["HULTUI_VULKAN_F16"] = variant == "8-bit" ? "0" : "1",
+                ["HULTUI_VULKAN_WHITE_SCALE"] = variant == "8-bit" ? null : "2",
+            };
+            var run = RunProbe(environment, $"--rest-purge --save-frame={frames}");
+
+            Assert.True(run.ExitCode == 0, run.Output);
+            Assert.Contains("probe: done", run.Output);
+            int Images(string stage)
+            {
+                var m = System.Text.RegularExpressions.Regex.Match(run.Output, $@"probe: {stage} stencils \d+ images (\d+)");
+                Assert.True(m.Success, $"no '{stage}' line:\n{run.Output}");
+                return int.Parse(m.Groups[1].Value);
+            }
+            // Frames kept coming, about one a display interval, and nothing was purged meanwhile.
+            var drawn = System.Text.RegularExpressions.Regex.Match(run.Output, @"probe: frames (\d+) in (\d+) ms");
+            Assert.True(drawn.Success, run.Output);
+            Assert.True(int.Parse(drawn.Groups[1].Value) >= 60, $"too few frames to keep the purge off:\n{run.Output}");
+            Assert.Equal(Images("second"), Images("frames"));
+            // The six pictures off screen went; the two on screen stayed. Back on the first page, the
+            // six are uploaded again.
+            Assert.Equal(Images("second") - 6, Images("rested"));
+            Assert.Equal(Images("second"), Images("back"));
+
+            // Once, the rest after the last frame, woken by its own deadline.
+            var purges = System.Text.RegularExpressions.Regex.Matches(run.Output, @"\[startup\] vulkan rest purge .*t=\s*([\d.,]+) ms");
+            Assert.True(purges.Count == 1, $"{purges.Count} purges:\n{run.Output}");
+            var done = System.Text.RegularExpressions.Regex.Match(run.Output, @"\[startup\] probe frames done .*t=\s*([\d.,]+) ms");
+            Assert.True(done.Success, run.Output);
+            static double Ms(string s) => double.Parse(s.Replace(',', '.'), System.Globalization.CultureInfo.InvariantCulture);
+            double after = Ms(purges[0].Groups[1].Value) - Ms(done.Groups[1].Value);
+            Assert.True(after is > 1450 and < 2500, $"the purge came {after:0} ms after the last frame:\n{run.Output}");
+
+            static byte[] Hash(string path) => System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path));
+            Assert.Equal(Hash(frames + ".before.png"), Hash(frames + ".after.png"));
+            Assert.Equal(Hash(frames + ".a.png"), Hash(frames + ".back.png"));
+
+            if (run.Output.Contains("\"VK_LAYER_KHRONOS_validation\" forced enabled"))
+            {
+                string reported = File.Exists(validation) ? File.ReadAllText(validation) : "";
+                Assert.True(reported.Length == 0, "the validation layer reported:\n" +
+                    (reported.Length > 4000 ? reported[..4000] : reported));
+            }
+        }
+        finally
+        {
+            foreach (string suffix in saved) File.Delete(frames + suffix);
+            File.Delete(validation);
+        }
+    }
+
+    /// <summary>
     /// A window that draws while minimized, then is restored and resized. On Windows a minimized
     /// Vulkan surface has no area, so the frame's swapchain went out of date and none could be
     /// built; the old one was dropped without being destroyed. Restored at the same size, the

@@ -560,7 +560,9 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     public void Present()
     {
         if (!_frameOpen) return;
-        if (_sizeRest.Owed) _sizeRest.Presenting(System.Diagnostics.Stopwatch.GetTimestamp());
+        long presenting = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (_sizeRest.Owed) _sizeRest.Presenting(presenting);
+        _rest.Presenting(presenting);
         // The frame was drawn at 0..1; this is where it gets the display's SDR white level,
         // once, as an image rather than as a property of every paint. Drawn as a surface rather
         // than through Snapshot: the same draw of the same texture, without a managed SKImage
@@ -695,10 +697,19 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     /// <see cref="SizeRestPurge"/>.</summary>
     private readonly SizeRestPurge _sizeRest = new();
 
-    /// <summary>When the purge after the last size change is due, as a
+    /// <summary>How long a window draws nothing before <see cref="PurgeAfterRest"/>:
+    /// <see cref="RestPurge.Delay"/>, or less for a probe that sets it before the window is made.</summary>
+    internal static TimeSpan RestPurgeDelay { get; set; } = RestPurge.Delay;
+
+    /// <summary>When the purge of what the last frame did not draw with is owed, once the window
+    /// rests; see <see cref="RestPurge"/>.</summary>
+    private readonly RestPurge _rest = new(RestPurgeDelay);
+
+    /// <summary>When the first of this surface's purges is due, as a
     /// <see cref="System.Diagnostics.Stopwatch"/> timestamp, or <see cref="long.MaxValue"/> with none
-    /// owed. The window's frame loop waits for it (<see cref="PurgeAfterSizeRest"/>).</summary>
-    internal long SizeRestPurgeAt => _sizeRest.DueAt;
+    /// owed: the one after the last size change (<see cref="PurgeAfterSizeRest"/>) and the one at
+    /// rest (<see cref="PurgeAfterRest"/>). The window's frame loop waits for it.</summary>
+    internal long NextPurgeAt => _disposed ? long.MaxValue : Math.Min(_sizeRest.DueAt, _rest.DueAt);
 
     /// <summary>
     /// Frees what Skia keeps that the last frame did not draw with, once a size change has rested
@@ -725,6 +736,41 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
             _grContext.GetResourceCacheUsage(out int resources, out long bytes);
             StartupTrace.Mark(string.Create(System.Globalization.CultureInfo.InvariantCulture,
                 $"vulkan size rest purge in {ms:0.00} ms, unused for {msNotUsed} ms: skia cache " +
+                $"{bytesBefore / 1048576.0:0.0} MB in {resourcesBefore} resources -> {bytes / 1048576.0:0.0} MB in {resources}"));
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Frees what Skia keeps that the last frame did not draw with, once the window has drawn
+    /// nothing for <see cref="RestPurgeDelay"/> (<see cref="RestPurge"/>): the textures of pictures
+    /// off screen, and the spares, upload staging among them. Called as
+    /// <see cref="PurgeAfterSizeRest"/> is; a frame open, or a purge not yet due, and it does nothing.
+    ///
+    /// <para>Vulkan only. On NVIDIA's GL driver the same purge takes Skia's cache down 36 to 45 MB
+    /// and the process's GPU memory not at all (DXGI local 82.5 → 80.0 MB, private −2.2 MB): the
+    /// driver keeps what Skia gives back.</para>
+    /// </summary>
+    /// <param name="now">A <see cref="System.Diagnostics.Stopwatch"/> timestamp.</param>
+    /// <returns>Whether it purged.</returns>
+    internal bool PurgeAfterRest(long now)
+    {
+        if (_disposed || _frameOpen || !_rest.TakeDue(now, out long msNotUsed)) return false;
+        long start = StartupTrace.Enabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+        int resourcesBefore = 0;
+        long bytesBefore = 0;
+        if (StartupTrace.Enabled) _grContext.GetResourceCacheUsage(out resourcesBefore, out bytesBefore);
+        // Up to the last frame's start (RestPurge.TakeDue): Skia finds that frame's work finished as
+        // it starts, so what the frame drew with became unused after that time, and stays.
+        _grContext.PurgeUnusedResources(msNotUsed);
+        // Then the spares, the upload staging among them: unused only from the moment just above.
+        _grContext.PurgeUnlockedResources(scratchResourcesOnly: true);
+        if (StartupTrace.Enabled)
+        {
+            double ms = System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+            _grContext.GetResourceCacheUsage(out int resources, out long bytes);
+            StartupTrace.Mark(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                $"vulkan rest purge in {ms:0.00} ms, unused for {msNotUsed} ms: skia cache " +
                 $"{bytesBefore / 1048576.0:0.0} MB in {resourcesBefore} resources -> {bytes / 1048576.0:0.0} MB in {resources}"));
         }
         return true;

@@ -215,7 +215,7 @@ public class OptimisticStagingTests
         try
         {
             return typeof(JunctionApp).GetMethod("LoadChanges", BindingFlags.NonPublic | BindingFlags.Instance)!
-                .Invoke(app, [path, false, shared, null])!;
+                .Invoke(app, [path, false, shared, null, null])!;
         }
         catch (TargetInvocationException e) when (e.InnerException is { } inner)
         {

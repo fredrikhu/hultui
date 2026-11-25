@@ -757,9 +757,18 @@ public abstract class Element
     /// The box, in window coordinates, that a context menu opened from the keyboard (the Menu
     /// key, Shift+F10) is placed against: below its bottom-left corner, or above its top-left
     /// corner when there is no room below. <see cref="WindowBorderBox"/> by default; a list
-    /// answers its current row.
+    /// answers the row of the item the keyboard is on (its current item, else its selected one).
     /// </summary>
     public virtual Rect ContextMenuAnchor => WindowBorderBox;
+
+    /// <summary>
+    /// Where a context menu opened from the keyboard on this element (the Menu key, Shift+F10,
+    /// <c>Window.OpenContextMenu(element)</c>) is looked for from, when not here: a list answers the
+    /// realized row of the item the keyboard is on, brought into view first when it is off screen,
+    /// so the keys open the menu a right-click on that row opens — the row's own, else the nearest
+    /// one above it, the list's among them. Null (the default): from this element.
+    /// </summary>
+    internal virtual Element? KeyboardContextMenuRow() => null;
 
     // ──── Focus ────
     public bool IsFocusable { get; set; }

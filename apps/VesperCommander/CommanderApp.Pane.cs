@@ -656,7 +656,7 @@ public partial class CommanderApp
         var d = Box.New().FlexShrink(0)
             .Padding(new Thickness(1, 5, 1, 5)).CornerRadius(4f).Cursor(CursorType.Pointer)
             .Tooltip(server ? $"Go to {label}" : "Select drive (Alt+F1)")
-            .Children(Ui.Mono(label, 11.5f, active ? Nocturne.Accent300 : Nocturne.On(0.55)));
+            .Children(Ui.Mono(label, 11.5f, DriveLabelColor(active)).WithRef(PaneOf(side).DriveLabel));
         d.OnClick(_ =>
         {
             _active = side;
@@ -664,6 +664,10 @@ public partial class CommanderApp
         });
         return d.HoverBg(Nocturne.Neutral900, Color.Transparent);
     }
+
+    /// <summary>The drive crumb's label, lit in the active pane: as built, and as a change of the
+    /// active pane recolours it (<see cref="LightTrail"/>).</summary>
+    private static Color DriveLabelColor(bool active) => active ? Nocturne.Accent300 : Nocturne.On(0.55);
 
     /// <summary>What the trail is rooted at, which is not always the volume. For a drive that is
     /// the path root; for a share it is the <i>server</i>. <c>Path.GetPathRoot</c> answers

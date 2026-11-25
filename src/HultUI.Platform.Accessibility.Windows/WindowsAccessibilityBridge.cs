@@ -69,14 +69,20 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     // The elements an apply let go of, with their native objects, handed to the disconnect thread once
     // it has let go of the lock (Disconnect). UI thread only.
     private readonly List<(ElementId Id, IntPtr Native)> _disconnects = [];
-    // Handed to the disconnect thread and not taken yet, in order. Its own lock guards it and the three
-    // fields after it.
-    private readonly List<(ElementId Id, IntPtr Native)> _handed = [];
-    // The elements whose providers a thread is telling UI Automation of now (TellNext).
+    // Handed to the disconnect thread and not taken yet, in order: the providers to tell gone, and the raises
+    // held behind them (Emit). Its own lock guards it and the fields after it.
+    private readonly List<Handed> _handed = [];
+    // The elements whose providers a thread is telling UI Automation of now (RunNext).
     private readonly List<ElementId> _telling = [];
+    // Whether a thread is raising a held raise now (RunNext).
+    private bool _raising;
+    // Raises held and not yet raised (handed, or being raised): while there is one, every later raise is held
+    // too, so none overtakes it.
+    private int _held;
     // Whether the disconnect thread has this bridge to visit (DisconnectThread.Wake), so it is woken once.
     private bool _handedOn;
-    // Handed and not yet told: _handed's count and _telling's. Written under the lock, read without it.
+    // Handed and not yet done, tells and held raises: _handed's count, _telling's and the raise being raised.
+    // Written under the lock, read without it.
     private int _untold;
     private IntPtr _hostProviderPtr;
     private AccessibilityNode? _rootNode;
@@ -176,6 +182,10 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     /// <summary>Every wrapper the bridge keeps, for tests of its upkeep.</summary>
     internal IEnumerable<UiaFragment> Wrappers => _wrappers.Values;
 
+    /// <summary>How many elements have a native object the bridge keeps (one a client was given, or an
+    /// event raised on), for tests of its upkeep.</summary>
+    internal int NativeObjects => _nativeByElement.Count;
+
     internal ElementId? FocusedNodeId
     {
         get
@@ -261,13 +271,12 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     /// stable runtime id, so a new object per navigation result is fine. The
     /// returned pointer carries the single reference UIA will release.
     /// </summary>
+    /// <remarks>For a client (a navigation, its focus, a hit test): the item node's provider that had
+    /// the item's runtime id before the list was served on demand is told gone first (<see cref="TellFirst(ElementId, int)"/>).</remarks>
     internal IntPtr NativeVirtualItem(ElementId listId, int index)
     {
-        IntPtr primary = NativeProvider.Create(new UiaVirtualItem(this, listId, index));
-        if (primary == IntPtr.Zero) return IntPtr.Zero;
-        IntPtr fragment = NativeProvider.Tearoff(primary, NativeProvider.As.Fragment);
-        Marshal.Release(primary); // hand the caller the fragment's single reference
-        return fragment;
+        TellFirst(listId, index);
+        return VirtualItem(listId, index, NativeProvider.As.Fragment);
     }
 
     /// <summary>
@@ -278,11 +287,19 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     /// </summary>
     internal IntPtr NativeVirtualItemSimple(ElementId listId, int index)
     {
+        TellFirst(listId, index);
+        return VirtualItem(listId, index, NativeProvider.As.Simple);
+    }
+
+    /// <summary>A virtualized list item's provider as tear-off <paramref name="which"/>, carrying one reference;
+    /// tells nothing first. For a raise, which is held behind the tell instead (<see cref="Emit"/>).</summary>
+    private IntPtr VirtualItem(ElementId listId, int index, NativeProvider.As which)
+    {
         IntPtr primary = NativeProvider.Create(new UiaVirtualItem(this, listId, index));
         if (primary == IntPtr.Zero) return IntPtr.Zero;
-        IntPtr simple = NativeProvider.Tearoff(primary, NativeProvider.As.Simple);
-        Marshal.Release(primary); // hand the caller the simple tear-off's single reference
-        return simple;
+        IntPtr tearoff = NativeProvider.Tearoff(primary, which);
+        Marshal.Release(primary); // hand the caller the tear-off's single reference
+        return tearoff;
     }
 
     /// <summary>
@@ -822,9 +839,14 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
         long leaving = told != 0 && ResolveFocusTarget() != told ? told : 0;
         foreach (var change in changes)
         {
-            if (leaving != 0 && change.PropertyName == AccessibilityProperties.Name
-                && unchecked((long)change.Node.ElementId.Value) == leaving)
-                continue;
+            if (change.PropertyName == AccessibilityProperties.Name)
+            {
+                long raw = unchecked((long)change.Node.ElementId.Value);
+                if (leaving != 0 && raw == leaving) continue;
+                // The reader's focus is told whatever it holds: it may have been given the item served on
+                // demand with the same runtime id, before the list had item nodes.
+                if (raw != told && NeverGiven(change.Node.ElementId)) continue;
+            }
             // An item node's wrapper is made here when it has none yet, from its node in the tree.
             if (!TryWrapper(change.Node.ElementId, out var wrapper)) continue;
             if (change.PropertyName == AccessibilityProperties.ScrollPosition)
@@ -839,6 +861,22 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
                 RaisePropertyChanged(wrapper, change.PropertyName);
         }
     }
+
+    /// <summary>
+    /// Whether <paramref name="id"/> is a list's item node that no client was given: it has no native
+    /// object yet (a client's navigation, a hit test, its focus or an event raised on it makes one, and
+    /// it is kept while the item is). Its rename is not told, and no wrapper or native object is made for
+    /// it: a client that never had the item has nothing to bring up to date, and reads the name when it
+    /// first gets it. Told, the rename made the item's provider only for the event, and UI Automation's
+    /// work for it filled the frame: Vesper's move between folders of 151 and 191 entries raised 153–154
+    /// Name changes, and with a reader-like client asking the move's frame took 5.9–6.5 ms, 1.6–1.8 ms
+    /// without them (12,384 → 834 provider calls on the UI thread; 160 → 10 native objects kept after the
+    /// first move; plan 17 round 19 step 10, a real window on NativeAOT). A client listening for Name
+    /// changes on the window's subtree no longer hears renames of rows it never got, as it never heard them
+    /// of a list's items served on demand. Any thread may make the native object meanwhile; one made after
+    /// this read is made from the renamed node, which the apply put in place before it.
+    /// </summary>
+    private bool NeverGiven(ElementId id) => VirtualItemId.IsItem(id) && !_nativeByElement.ContainsKey(id);
 
     /// <summary>
     /// A list served on demand has another number of items: what a list of item nodes raises for
@@ -859,7 +897,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     /// on each item whose state changed — the one that had the selection, the one that has it — in
     /// item order, with its state now: what a list of item nodes raises for the same move (their
     /// IsSelected changes). Each on a provider of the item made for the event
-    /// (<see cref="NativeVirtualItemSimple"/>), which UI Automation knows by its runtime id. O(1) for a
+    /// (<see cref="VirtualItem"/>), which UI Automation knows by its runtime id. O(1) for a
     /// move of one selection, whatever the list's length. An item that went with the list's end
     /// raises nothing, as an item node removed does not.
     /// </summary>
@@ -876,11 +914,11 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     /// <summary>A property change of an item served on demand, with its new value, which this frees.</summary>
     private void RaiseItemProperty(ElementId listId, int index, int propertyId, UiaVariant newValue)
     {
-        IntPtr prov = NativeVirtualItemSimple(listId, index);
+        IntPtr prov = VirtualItem(listId, index, NativeProvider.As.Simple);
         if (prov == IntPtr.Zero) { newValue.Free(); return; }
-        Raised?.Invoke(new UiaRaised(UiaRaisedKind.Property, propertyId, VirtualItemId.For(listId, index)));
-        try { UiaInterop.UiaRaiseAutomationPropertyChangedEvent(prov, propertyId, UiaVariant.Empty, newValue); }
-        finally { newValue.Free(); Marshal.Release(prov); }
+        var id = VirtualItemId.For(listId, index);
+        Raised?.Invoke(new UiaRaised(UiaRaisedKind.Property, propertyId, id));
+        Emit(new Handed { Id = id, Native = prov, Kind = UiaRaisedKind.Property, What = propertyId, Value = newValue }, served: true);
     }
 
     // The apply pass, counted, so a wrapper the rebase did not reach, and one this pass added,
@@ -955,7 +993,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     /// answer UIA_E_ELEMENTNOTAVAILABLE at once (<see cref="IElementBound"/>); its provider is told gone
     /// and cut from its wrapper a moment later. Every one is told before the window's providers are let
     /// go (<see cref="Dispose"/>), and an element's old provider before a new one is made for it
-    /// (<see cref="TellFirst"/>).
+    /// (<see cref="TellFirst(ElementId)"/>), or raised on (<see cref="Emit"/>).
     /// </remarks>
     private void Disconnect()
     {
@@ -963,7 +1001,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
         bool wake;
         lock (_handed)
         {
-            _handed.AddRange(_disconnects);
+            foreach (var (id, native) in _disconnects) _handed.Add(new Handed { Id = id, Native = native });
             Volatile.Write(ref _untold, _untold + _disconnects.Count);
             wake = !_handedOn;
             _handedOn = true;
@@ -973,47 +1011,196 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     }
 
     /// <summary>
-    /// Takes the next provider handed to the disconnect thread — the first, or <paramref name="only"/>'s —
-    /// and tells UI Automation it is gone, on this thread; false when there is none. Counted as being told
-    /// (<see cref="_telling"/>) until it is, so a thread that needs it told waits for it.
+    /// What the disconnect thread is handed: an element's provider to tell UI Automation is gone
+    /// (<see cref="Disconnect"/>; <see cref="Native"/> its native object), or a raise held behind such a tell
+    /// (<see cref="Emit"/>; <see cref="Native"/> the provider it is raised on, AddRef'd, and its
+    /// <see cref="Value"/> owned).
     /// </summary>
-    private bool TellNext(ElementId? only = null)
+    private struct Handed
     {
-        (ElementId Id, IntPtr Native) next = default;
+        /// <summary>The element told gone, or raised on (null for the window's root).</summary>
+        public ElementId? Id;
+        public IntPtr Native;
+        public bool IsRaise;
+        public UiaRaisedKind Kind;
+        /// <summary>The event's, the property's or the structure change's id.</summary>
+        public int What;
+        /// <summary>A property change's new value.</summary>
+        public UiaVariant Value;
+        /// <summary>A notification's text and how a reader treats it.</summary>
+        public string? Text;
+        public int Processing;
+    }
+
+    /// <summary>
+    /// Raises <paramref name="raise"/> on the UI thread now, or hands it to the disconnect thread, which raises
+    /// it once everything handed before it is done (<see cref="RunNext"/>): a raise on an item a list serves
+    /// on demand (<paramref name="served"/>) whose runtime id is an item node's provider that is not told gone
+    /// yet, and while one is held, every raise after it, so none overtakes it.
+    /// </summary>
+    /// <remarks>
+    /// An item node and the item served on demand in its place share one runtime id
+    /// (<see cref="VirtualItemId"/>). A list that crossed from 200 items or fewer to more lets its item
+    /// nodes' providers go and, in the same frame, raises its items' changes and the focus event on items
+    /// served on demand. UI Automation knows an element by its runtime id, so an old provider told gone
+    /// after the new one was raised on took that one with it: a client could not read the element of the
+    /// focus event it was given (COMException UIA_E_ELEMENTNOTAVAILABLE). Vesper, a folder of 3 entries
+    /// into one of 1,001, with a reader-like client: the focus event lost in 4 of 12 crossings (plan 17
+    /// round 19, a real window). Telling the old provider first on the UI thread cost a
+    /// <c>UiaDisconnectProvider</c> there: 4.5–4.7 ms, in 1 of 3 crossings. Held, the raises go out in the
+    /// order the UI thread made them, after the tells handed before them, as before the disconnects left
+    /// the UI thread; one that waits for nothing goes out at once.
+    /// </remarks>
+    private void Emit(Handed raise, bool served = false)
+    {
+        raise.IsRaise = true;
+        if (Volatile.Read(ref _untold) != 0 && Hold(raise, served)) return;
+        RaiseNow(raise);
+    }
+
+    /// <summary>Hands <paramref name="raise"/> to the disconnect thread behind what it holds, when it has to
+    /// wait (<see cref="Emit"/>); false when it may go out now.</summary>
+    private bool Hold(in Handed raise, bool served)
+    {
+        bool wake;
         lock (_handed)
         {
-            for (int i = 0; i < _handed.Count; i++)
-            {
-                if (only is { } id && _handed[i].Id != id) continue;
-                next = _handed[i];
-                _handed.RemoveAt(i);
-                _telling.Add(next.Id);
-                break;
-            }
-            if (next.Native == IntPtr.Zero)
-            {
-                if (only is null) _handedOn = false;   // the disconnect thread's visit ends
-                return false;
-            }
+            if (_held == 0 && !(served && IsUntold(raise.Id!.Value))) return false;
+            _handed.Add(raise);
+            _held++;
+            Volatile.Write(ref _untold, _untold + 1);
+            wake = !_handedOn;
+            _handedOn = true;
         }
-        t_telling = true;
-        try { Tell(next.Id, next.Native); }
-        catch (Exception ex) { Console.Error.WriteLine($"[HultUI] accessibility disconnect failed: {ex}"); }
-        finally
-        {
-            t_telling = false;
-            lock (_handed)
-            {
-                _telling.Remove(next.Id);
-                Volatile.Write(ref _untold, _untold - 1);
-            }
-        }
+        if (wake) DisconnectThread.Wake(this);
         return true;
     }
 
-    // Whether this thread is in Tell: UI Automation may call a provider back meanwhile, and a thread
-    // never waits for itself.
-    [ThreadStatic] private static bool t_telling;
+    /// <summary>Whether the provider of <paramref name="id"/> an apply let go is not told gone yet. Under
+    /// <see cref="_handed"/>'s lock; O(handed).</summary>
+    private bool IsUntold(ElementId id)
+    {
+        if (_telling.Contains(id)) return true;
+        foreach (var h in _handed)
+            if (!h.IsRaise && h.Id == id) return true;
+        return false;
+    }
+
+    /// <summary>Tells UI Automation of one raise, on this thread, and lets go of its provider and value.</summary>
+    private void RaiseNow(in Handed r)
+    {
+        RaisedToUia?.Invoke(new UiaRaised(r.Kind, r.What, r.Id));
+        try
+        {
+            switch (r.Kind)
+            {
+                case UiaRaisedKind.Event:
+                    UiaInterop.UiaRaiseAutomationEvent(r.Native, r.What);
+                    break;
+                case UiaRaisedKind.Property:
+                    UiaInterop.UiaRaiseAutomationPropertyChangedEvent(r.Native, r.What, UiaVariant.Empty, r.Value);
+                    break;
+                case UiaRaisedKind.Structure:
+                    UiaInterop.UiaRaiseStructureChangedEvent(r.Native, r.What, IntPtr.Zero, 0);
+                    break;
+                default:
+                    UiaInterop.RaiseNotification(r.Native, UiaInterop.NotificationKind_Other, r.Processing, r.Text ?? "", NotificationActivity);
+                    break;
+            }
+        }
+        finally
+        {
+            var value = r.Value;
+            value.Free();
+            Marshal.Release(r.Native);
+        }
+    }
+
+    /// <summary>For tests: told of each UIA event as UI Automation is told it, on the thread that tells it: the
+    /// UI thread, or the disconnect thread for a raise held behind a provider it had to tell gone first
+    /// (<see cref="Emit"/>). <see cref="Raised"/> is told of each on the UI thread, in the same order, as it is made.</summary>
+    internal Action<UiaRaised>? RaisedToUia;
+
+    private enum Next { Done, Busy, Ran }
+
+    /// <summary>
+    /// Takes the next entry handed to the disconnect thread that may run now — the first, or the tell of
+    /// <paramref name="only"/>'s provider — and runs it on this thread: tells UI Automation a provider is gone,
+    /// or raises a held raise. <see cref="Next.Done"/> when there is none (or <paramref name="only"/>'s is not
+    /// handed); <see cref="Next.Busy"/> when it has to wait for what another thread runs. A raise runs when
+    /// nothing else does, and nothing runs while a raise does; a tell is taken out of turn only when no raise
+    /// is ahead of it, so a raise never comes before a tell handed ahead of it, nor after one handed behind
+    /// it. An entry counts as handed (<see cref="_untold"/>) until it is done, so a thread that needs it
+    /// done waits for it.
+    /// </summary>
+    private Next RunNext(ElementId? only = null)
+    {
+        Handed next;
+        lock (_handed)
+        {
+            int at = -1;
+            if (only is { } id)
+            {
+                bool raiseAhead = _raising;
+                for (int i = 0; i < _handed.Count; i++)
+                {
+                    if (_handed[i].IsRaise) raiseAhead = true;
+                    else if (_handed[i].Id == id) { at = i; break; }
+                }
+                if (at < 0) return Next.Done;
+                if (raiseAhead) return Next.Busy;
+            }
+            else if (_handed.Count == 0)
+            {
+                _handedOn = false;   // the disconnect thread's visit ends
+                return Next.Done;
+            }
+            else if (_raising || (_handed[0].IsRaise && _telling.Count != 0)) return Next.Busy;
+            else at = 0;
+            next = _handed[at];
+            _handed.RemoveAt(at);
+            if (next.IsRaise) _raising = true;
+            else _telling.Add(next.Id!.Value);
+        }
+        t_running = true;
+        try
+        {
+            if (next.IsRaise) RaiseNow(next);
+            else Tell(next.Id!.Value, next.Native);
+        }
+        catch (Exception ex) { Console.Error.WriteLine($"[HultUI] accessibility {(next.IsRaise ? "raise" : "disconnect")} failed: {ex}"); }
+        finally
+        {
+            t_running = false;
+            lock (_handed)
+            {
+                if (next.IsRaise)
+                {
+                    _raising = false;
+                    _held--;
+                }
+                else _telling.Remove(next.Id!.Value);
+                Volatile.Write(ref _untold, _untold - 1);
+            }
+        }
+        return Next.Ran;
+    }
+
+    /// <summary>The disconnect thread's visit: runs what this bridge handed it, in turn, until none is left.</summary>
+    private void Visit()
+    {
+        var spin = new SpinWait();
+        Next step;
+        while ((step = RunNext()) != Next.Done)
+        {
+            if (step == Next.Busy) spin.SpinOnce();
+            else spin.Reset();
+        }
+    }
+
+    // Whether this thread is running a handed entry (RunNext): UI Automation may call a provider back
+    // meanwhile, and a thread never waits for itself.
+    [ThreadStatic] private static bool t_running;
 
     /// <summary>Tells UI Automation an element's provider is gone, and cuts it from its wrapper.</summary>
     private void Tell(ElementId id, IntPtr native)
@@ -1028,20 +1215,33 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     }
 
     /// <summary>
-    /// Tells on this thread what the disconnect thread has not taken — every one, or <paramref name="only"/>'s
-    /// — then waits for what another thread is telling of them: one call, microseconds off the UI thread.
-    /// The wait spins, never pumps messages, and gives up after two seconds.
+    /// Runs on this thread what the disconnect thread has not taken — every entry, in order (a window's
+    /// close), or <paramref name="only"/>'s tell — then waits for what another thread runs of them: one
+    /// call, microseconds off the UI thread. A tell behind a held raise waits for the disconnect thread to
+    /// get to it. The wait spins, never pumps messages, and gives up after two seconds.
     /// </summary>
     private void TellNow(ElementId? only)
     {
-        while (TellNext(only) && only is null) { }
-        if (t_telling) return;
         var spin = new SpinWait();
         long until = Environment.TickCount64 + 2000;
+        while (true)
+        {
+            var step = RunNext(only);
+            if (step == Next.Ran)
+            {
+                if (only is not null) return;
+                spin.Reset();
+                continue;
+            }
+            if (step == Next.Done) break;
+            if (t_running || Environment.TickCount64 > until) return;
+            spin.SpinOnce(sleep1Threshold: -1);
+        }
+        if (t_running) return;
         while (Environment.TickCount64 <= until)
         {
             lock (_handed)
-                if (only is { } id ? !_telling.Contains(id) : _telling.Count == 0) return;
+                if (only is { } id ? !_telling.Contains(id) : _telling.Count == 0 && !_raising) return;
             spin.SpinOnce(sleep1Threshold: -1);
         }
     }
@@ -1050,8 +1250,19 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     /// told first (<see cref="ElementRef"/>).</summary>
     private void TellFirst(ElementId id) => TellNow(id);
 
-    /// <summary>For tests: waits until the disconnect thread has told every provider handed to it, or
-    /// <paramref name="timeout"/> passes; true when none is left.</summary>
+    /// <summary>
+    /// An item a list serves on demand is about to be handed to a client: the provider of the item node that
+    /// had its runtime id, if not yet told gone, is told first (or waited for), so UI Automation does not take
+    /// the item from the client when it hears of that one. On a client's thread; a raise holds behind the
+    /// tell instead (<see cref="Emit"/>). One read while nothing is handed.
+    /// </summary>
+    private void TellFirst(ElementId listId, int index)
+    {
+        if (Volatile.Read(ref _untold) != 0) TellNow(VirtualItemId.For(listId, index));
+    }
+
+    /// <summary>For tests: waits until the disconnect thread has told every provider handed to it, and raised
+    /// every raise held behind them, or <paramref name="timeout"/> passes; true when none is left.</summary>
     internal bool FlushDisconnects(TimeSpan timeout)
     {
         long until = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
@@ -1065,11 +1276,12 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     }
 
     /// <summary>
-    /// The thread the providers an apply lets go are told gone on (<see cref="Disconnect"/>): one for the
-    /// process, made at the first, in the multithreaded apartment (the providers are free-threaded: no
-    /// ProviderOptions_UseComThreading, and IAgileObject). It visits each bridge that handed it providers,
-    /// in turn; the UI thread never waits for it, but for the one call it may be in at a window's close.
-    /// A background thread: what is left at the process's exit is not told.
+    /// The thread the providers an apply lets go are told gone on (<see cref="Disconnect"/>), and the raises
+    /// held behind them raised on (<see cref="Emit"/>): one for the process, made at the first, in the
+    /// multithreaded apartment (the providers are free-threaded: no ProviderOptions_UseComThreading, and
+    /// IAgileObject). It visits each bridge that handed it something, in turn; the UI thread never waits
+    /// for it, but for the one call it may be in at a window's close. A background thread: what is left at
+    /// the process's exit is not told.
     /// </summary>
     private static class DisconnectThread
     {
@@ -1101,7 +1313,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
                     while (s_bridges.Count == 0) Monitor.Wait(s_bridges);
                     bridge = s_bridges.Dequeue();
                 }
-                while (bridge.TellNext()) { }
+                bridge.Visit();
             }
         }
     }
@@ -1328,11 +1540,11 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     private void RaiseFocusEvent(long raw)
     {
         var id = new ElementId(unchecked((ulong)raw));
-        IntPtr prov = ServedItem(id, out var listId, out int index) ? NativeVirtualItemSimple(listId, index) : NativeFragmentSimple(id);
+        bool served = ServedItem(id, out var listId, out int index);
+        IntPtr prov = served ? VirtualItem(listId, index, NativeProvider.As.Simple) : NativeFragmentSimple(id);
         if (prov == IntPtr.Zero) return;
         Raised?.Invoke(new UiaRaised(UiaRaisedKind.Event, UiaInterop.UIA_AutomationFocusChangedEventId, id));
-        try { UiaInterop.UiaRaiseAutomationEvent(prov, UiaInterop.UIA_AutomationFocusChangedEventId); }
-        finally { Marshal.Release(prov); }
+        Emit(new Handed { Id = id, Native = prov, Kind = UiaRaisedKind.Event, What = UiaInterop.UIA_AutomationFocusChangedEventId }, served);
     }
 
     /// <summary>
@@ -1347,15 +1559,13 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
         if (provider == IntPtr.Zero) provider = NativeRootSimple();
         if (provider == IntPtr.Zero) return;
         Raised?.Invoke(new UiaRaised(UiaRaisedKind.Notification, 0, source?.ElementId));
-        try
+        Emit(new Handed
         {
-            UiaInterop.RaiseNotification(provider, UiaInterop.NotificationKind_Other,
-                politeness == AnnouncementPoliteness.Assertive
-                    ? UiaInterop.NotificationProcessing_ImportantAll
-                    : UiaInterop.NotificationProcessing_All,
-                text, NotificationActivity);
-        }
-        finally { Marshal.Release(provider); }
+            Id = source?.ElementId, Native = provider, Kind = UiaRaisedKind.Notification, Text = text,
+            Processing = politeness == AnnouncementPoliteness.Assertive
+                ? UiaInterop.NotificationProcessing_ImportantAll
+                : UiaInterop.NotificationProcessing_All,
+        });
     }
 
     /// <summary>What a reader is told the announcements are: one kind, so it can treat a run of
@@ -1368,8 +1578,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
         IntPtr prov = parentId is null ? NativeRootSimple() : NativeFragmentSimple(parentId.Value);
         if (prov == IntPtr.Zero) return;
         Raised?.Invoke(new UiaRaised(UiaRaisedKind.Structure, changeType, parentId));
-        try { UiaInterop.UiaRaiseStructureChangedEvent(prov, changeType, IntPtr.Zero, 0); }
-        finally { Marshal.Release(prov); }
+        Emit(new Handed { Id = parentId, Native = prov, Kind = UiaRaisedKind.Structure, What = changeType });
     }
 
     private void RaisePropertyChanged(UiaFragment wrapper, string propertyName)
@@ -1380,14 +1589,10 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
             // Events, not property changes: a reader re-reads the text, or reads at the caret.
             IntPtr source = NativeFragmentSimple(wrapper.ElementId);
             if (source == IntPtr.Zero) return;
-            Raised?.Invoke(new UiaRaised(UiaRaisedKind.Event, propertyName == AccessibilityProperties.Text
-                ? UiaInterop.UIA_Text_TextChangedEventId : UiaInterop.UIA_Text_TextSelectionChangedEventId, wrapper.ElementId));
-            try
-            {
-                UiaInterop.UiaRaiseAutomationEvent(source, propertyName == AccessibilityProperties.Text
-                    ? UiaInterop.UIA_Text_TextChangedEventId : UiaInterop.UIA_Text_TextSelectionChangedEventId);
-            }
-            finally { Marshal.Release(source); }
+            int eventId = propertyName == AccessibilityProperties.Text
+                ? UiaInterop.UIA_Text_TextChangedEventId : UiaInterop.UIA_Text_TextSelectionChangedEventId;
+            Raised?.Invoke(new UiaRaised(UiaRaisedKind.Event, eventId, wrapper.ElementId));
+            Emit(new Handed { Id = wrapper.ElementId, Native = source, Kind = UiaRaisedKind.Event, What = eventId });
             return;
         }
         // A menu's entry offers no SelectionItem: its highlight is told as the focus moving to it.
@@ -1482,12 +1687,10 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
     /// as UIA allows and Chromium does.</summary>
     private void RaiseProperty(UiaFragment wrapper, int propertyId, UiaVariant newValue)
     {
-        var oldValue = UiaVariant.Empty;
         IntPtr prov = NativeFragmentSimple(wrapper.ElementId);
         if (prov == IntPtr.Zero) { newValue.Free(); return; }
         Raised?.Invoke(new UiaRaised(UiaRaisedKind.Property, propertyId, wrapper.ElementId));
-        try { UiaInterop.UiaRaiseAutomationPropertyChangedEvent(prov, propertyId, oldValue, newValue); }
-        finally { newValue.Free(); Marshal.Release(prov); }
+        Emit(new Handed { Id = wrapper.ElementId, Native = prov, Kind = UiaRaisedKind.Property, What = propertyId, Value = newValue });
     }
 
     // ── Window procedure: serve WM_GETOBJECT with the native root provider ──
@@ -1610,8 +1813,9 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IT
             UiaInterop.SetWindowLongPtr(_hwnd, UiaInterop.GWLP_WNDPROC, _originalWndProc);
         _byHwnd.TryRemove(_hwnd, out _);
 
-        // Every provider an apply let go is told gone before UI Automation lets go of the window's: what
-        // the disconnect thread has not taken is told here, and the one it may be telling waited for.
+        // Every provider an apply let go is told gone before UI Automation lets go of the window's, and every
+        // raise held behind them raised: what the disconnect thread has not taken is run here, in order, and
+        // the one it may be running waited for.
         TellNow(null);
 
         // After the window procedure is restored, so no WM_GETOBJECT hands out a provider being

@@ -355,7 +355,7 @@ internal sealed class LruCache<TKey, TValue> where TKey : notnull
             _lookup = cache._map.GetAlternateLookup<TAlternate>();
         }
 
-        /// <summary><see cref="TryGet(TKey, out TValue)"/>, by the other key.</summary>
+        /// <summary><see cref="LruCache{TKey, TValue}.TryGet(TKey, out TValue)"/>, by the other key.</summary>
         public bool TryGet(TAlternate key, out TValue value)
         {
             if (_lookup.TryGetValue(key, out var node))
@@ -390,7 +390,7 @@ internal sealed class LruCache<TKey, TValue> where TKey : notnull
     }
 
     /// <summary>
-    /// <see cref="Put"/> for a key that <see cref="TryGet"/> has just failed to find: it skips
+    /// <see cref="Put"/> for a key that <see cref="TryGet(TKey, out TValue)"/> has just failed to find: it skips
     /// looking the key up again. On a path that meets most strings once, the lookups of a
     /// TryGet-then-Put pair are a measurable part of what the cache costs.
     /// </summary>

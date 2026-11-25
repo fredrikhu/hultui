@@ -45,6 +45,50 @@ public class MnemonicCueTests
         Assert.Equal((2, 0), Labels(session, w.Deactivate));   // Alt+Tab: the release goes to another window
     }
 
+    /// <summary>
+    /// Alt draws a frame only in a window that shows a mnemonic. One that shows none draws nothing
+    /// for it, pressed or let go, as for a bare Shift or Ctrl: each press drew two frames of the same
+    /// pixels in every app, none of which uses mnemonics (plan 17 round 19). A mnemonic that comes
+    /// while Alt is held is drawn with its cue and let go without it; once it has gone, Alt draws
+    /// nothing again.
+    /// </summary>
+    [Fact]
+    public void AltDrawsAFrame_OnlyInAWindowThatShowsAMnemonic()
+    {
+        using var session = HeadlessSession.Create(400, 200, options: new HeadlessOptions { RecordDrawCalls = true });
+        var button = Button.New("Apply");
+        var checkbox = Checkbox.New(false, "&Wrap lines");
+        session.Window.SetRoot(Flex.Column(gap: 8).Padding(20f).Children(button, checkbox));
+        for (int i = 0; i < 10 && session.PumpFrame(); i++) { }
+        Assert.False(session.PumpFrame(), "the window did not settle");
+        var w = session.Window;
+
+        void Alt(bool down)
+        {
+            if (down) w.KeyDown(KeyCode.AltLeft, KeyModifiers.Alt, modifierKeys: ModifierKeys.AltLeft);
+            else w.KeyUp(KeyCode.AltLeft);
+        }
+
+        Alt(down: true);
+        Assert.False(session.PumpFrame(), "Alt drew a frame in a window with no mnemonic");
+        Alt(down: false);
+        Assert.False(session.PumpFrame(), "letting go of Alt drew a frame in a window with no mnemonic");
+
+        Alt(down: true);
+        Assert.False(session.PumpFrame());
+        Assert.Equal((2, 1), Labels(session, () => checkbox.UseMnemonic = true));
+        Assert.Equal((2, 0), Labels(session, () => Alt(down: false)));
+        Assert.Equal((2, 1), Labels(session, () => Alt(down: true)));
+        Assert.Equal((2, 0), Labels(session, () => Alt(down: false)));
+
+        checkbox.UseMnemonic = false;
+        session.PumpFrame();
+        Alt(down: true);
+        Assert.False(session.PumpFrame(), "Alt drew a frame after the window's last mnemonic went");
+        Alt(down: false);
+        Assert.False(session.PumpFrame());
+    }
+
     /// <summary>The next frame after <paramref name="act"/>: how many of the labels "Apply" and
     /// "Wrap lines" it drew, and how many of those with the underline span.</summary>
     private static (int Drawn, int Underlined) Labels(HeadlessSession session, Action act)

@@ -128,8 +128,9 @@ public partial class JunctionApp
         if (IsImagePath(path) && BuildImageDiffBody(path) is { } imagePane)
             return imagePane;
         // A file of a commit read a file at a time whose patch is on its way, with no diff of the
-        // commit to keep on screen meanwhile (CommitPane keeps the last one when there is).
-        if (diff is null && CommitPatchLoading(path))
+        // commit to keep on screen meanwhile (CommitPane keeps the last one when there is), or a file
+        // of a working tree read in part whose diff is (ChangePatchLoading).
+        if (diff is null && (CommitPatchLoading(path) || ChangePatchLoading(path)))
             return Box.New().FlexGrow(1)
                 .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
                 .Children(Text.New("Loading…").FontSize(13f).TextColor(Nocturne.On(0.45)));
@@ -1814,10 +1815,7 @@ public partial class JunctionApp
             // ChangesView, not the raw load: a file whose staging is still in flight has
             // already moved sides in the list, and its diff has to move with it or the pane
             // beside the row it just left goes blank until git answers.
-            var changes = ChangesView;
-            var dict = _changeSelStaged ? changes.StagedDiffs : changes.UnstagedDiffs;
-            dict.TryGetValue(_changeSelPath, out var d);
-            return (_changeSelPath, d);
+            return (_changeSelPath, ChangesDiffFor(ChangesView, _changeSelStaged, _changeSelPath));
         }
         return (_selectedFilePath ?? "", null);
     }
@@ -1850,6 +1848,17 @@ public partial class JunctionApp
             if (target is null && FilePatchPending(detail, open))
             {
                 _editorDiffOnLanding = (detail.Patches, open);
+                return;
+            }
+        }
+        else if (View == JunctionView.Changes && _changeSelPath is { } shown && !_changeSelConflicted)
+        {
+            // The same wait in Changes, for a file of a working tree read in part (AskChangePatch).
+            var changes = ChangesView;
+            target = ChangesDiffFor(changes, _changeSelStaged, shown);   // asks for the diff if nothing has yet
+            if (target is null && ChangePatchPending(changes.Patches, _changeSelStaged, shown))
+            {
+                _editorDiffOnLanding = (changes.Patches, shown);
                 return;
             }
         }

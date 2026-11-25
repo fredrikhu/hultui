@@ -189,6 +189,21 @@ one stencil, Skia's budget 32.0 → 11.2 MB, DXGI local 105 → 84 MB, in 1.1–
 textures of images alive but not drawn since, which come back from their pixels if they are shown
 again. Never inside a drag, whose every step puts it off. GL keeps one stencil, framebuffer 0's.
 
+**And at rest, what the last frame did not draw with** (2026-11-24). Skia keeps the texture of
+every picture it has drawn while the picture lives, on screen or not, up to its 256 MB budget, and
+the buffers it staged uploads through until a scratch purge. Once a window has drawn nothing for
+30 s, the surface purges what became unused before its last frame began, then the spares, the
+staging among them (`RestPurge`), from the same deadline of the frame loop's: once a rest, put off
+by every frame, so a playing video or an animation never purges. Aperture on a fake library (the
+1440p at 100 %) back at Home after a walk down its grid: Skia 59.9 → 11.8 MB, DXGI local 91.3 →
+51.3–55.3 MB, private −16 %; after six item pages, local 66.7 → 55.0 MB and non-local 25.4 → 13.4.
+A picture purged comes back from its pixels in the frame that shows it again: +0.9 ms of that
+frame's render for the grid's posters, +1.4 ms for an item page, every frame byte for byte the
+same. What only the frame before the last drew with (the page a Back left) stays until the next
+rest after another frame. A paused video's frames are held, so a paused Reel frees 0.6 MB of
+spares. GL does not purge: on NVIDIA's GL driver the same purge takes Skia's cache down 36–45 MB
+and DXGI local not at all.
+
 ### Display colour: HDR state, SDR white, peak
 
 | | HDR state | SDR white | peak |

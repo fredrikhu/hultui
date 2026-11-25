@@ -562,11 +562,77 @@ public class GitRepository
 
     public List<GitFileDiff> GetWorkingDiff(bool staged, string? baseRef = null, bool ignoreWhitespace = false)
     {
+        return ParseUnifiedDiff(Query(WorkingDiffArgs(staged, baseRef, ignoreWhitespace).ToArray()).Stdout);
+    }
+
+    private static List<string> WorkingDiffArgs(bool staged, string? baseRef, bool ignoreWhitespace)
+    {
         var args = new List<string> { "diff" };
         if (staged) args.Add("--cached");
         if (ignoreWhitespace) args.Add(IgnoreWhitespaceFlag);
         if (staged && baseRef != null) args.Add(baseRef);
+        return args;
+    }
 
+    /// <summary>
+    /// The staged or the unstaged diff, read whole only when it is shorter than <paramref name="maxChars"/>
+    /// characters (<c>Whole</c>). A longer one is not read past that many: git is stopped there, and what comes
+    /// back is the patches of the files that ended inside them. The others are read a file at a time when they
+    /// are wanted (<see cref="GetWorkingFileDiff"/>).
+    ///
+    /// <para>The Changes view shows one file's diff at a time, and its load read and parsed every changed line
+    /// of the working tree into objects, at start too, the view not shown: a deleted folder of 458,215 lines
+    /// was 233.8 MB allocated and 78.8 MB kept. Read without the index refresh (<see cref="NoIndexRefresh"/>):
+    /// git stopped inside it would leave <c>index.lock</c> behind.</para>
+    /// </summary>
+    internal (List<GitFileDiff> Diffs, bool Whole) GetWorkingDiff(bool staged, bool ignoreWhitespace, int maxChars)
+    {
+        var args = NoIndexRefresh(WorkingDiffArgs(staged, null, ignoreWhitespace)).ToArray();
+        var (result, whole) = GitProcess.RunUpTo(Path, maxChars, FilePatchesLength, args);
+        if (whole && !result.Success) throw new GitCommandException(args, result);
+        return (ParseUnifiedDiff(result.Stdout), whole);
+    }
+
+    /// <summary>
+    /// <c>git -c diff.autoRefreshIndex=false diff ...</c>. A <c>git diff</c> of the working tree that met a file
+    /// whose times moved while its text did not (a file touched, a fresh copy, a line-ending filter) goes on,
+    /// after its output, to refresh the index under <c>index.lock</c> and write it; <c>--no-optional-locks</c>
+    /// does not stop that (git 2.53). Its output is the same without it, and the status the load reads refreshes
+    /// the index anyway.
+    ///
+    /// <para>Stopped inside that refresh, git would leave the lock behind and every git command after it failing;
+    /// and a file read on its own ran beside the user's clicks: the file shown, the files beside it read ahead.
+    /// A staging click's <c>git apply --cached</c> at that moment failed on the lock ("index.lock: File exists"),
+    /// and the write the watcher heard reloaded the view.</para>
+    /// </summary>
+    private static List<string> NoIndexRefresh(List<string> args)
+    {
+        args.InsertRange(0, ["-c", "diff.autoRefreshIndex=false"]);
+        return args;
+    }
+
+    /// <summary>How much of the start of a patch is whole files' patches: up to the last <c>diff --git</c>
+    /// line, or nothing when the first file runs past what there is.</summary>
+    internal static int FilePatchesLength(ReadOnlySpan<char> patch)
+    {
+        if (!patch.StartsWith("diff --git ", StringComparison.Ordinal)) return 0;
+        int last = patch.LastIndexOf("\ndiff --git ", StringComparison.Ordinal);
+        return last < 0 ? 0 : last + 1;
+    }
+
+    /// <summary>
+    /// One file's staged or unstaged diff, as the whole diff (<see cref="GetWorkingDiff(bool, string?, bool)"/>)
+    /// has it: the same command limited to that file and, for a rename, to the path it came from as well
+    /// (limited to the new path alone, git finds nothing it was renamed from and calls the file added). The
+    /// paths are literal, so a name with <c>*</c> or <c>[</c> in it matches only itself. Read without the index
+    /// refresh (<see cref="NoIndexRefresh"/>): these run behind the user's clicks.
+    /// </summary>
+    internal List<GitFileDiff> GetWorkingFileDiff(bool staged, string path, string? oldPath, bool ignoreWhitespace = false)
+    {
+        var args = NoIndexRefresh(WorkingDiffArgs(staged, null, ignoreWhitespace));
+        args.Add("--");
+        args.Add(":(literal)" + path);
+        if (oldPath is { Length: > 0 } && oldPath != path) args.Add(":(literal)" + oldPath);
         return ParseUnifiedDiff(Query(args.ToArray()).Stdout);
     }
 

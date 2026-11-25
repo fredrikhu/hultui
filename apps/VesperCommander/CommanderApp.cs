@@ -439,6 +439,8 @@ public partial class CommanderApp : Component, IDisposable
         // Coming back to the window is when a file taken out to an external editor gets
         // re-checked (CommanderApp.ArchiveEdit.cs).
         window.Activated += OnWindowActivated;
+        // A collection after a colour walk waits for the input to stop (CommanderApp.DiffHighlight.cs).
+        window.InputActivity += NoteInput;
         _settings = SettingsStore.Load();
         SeedFindDefaults();
         // A sideways offset is app state, so moving it has to rebuild the rows.
@@ -3752,6 +3754,10 @@ public partial class CommanderApp : Component, IDisposable
     {
         _window.Resized -= OnWindowResized;
         _window.Activated -= OnWindowActivated;
+        _window.InputActivity -= NoteInput;
+        StopViewerHighlight();
+        StopDiffHighlight();
+        _collectWhenIdle = false;   // a collection on its way finds nothing to do
         SaveSession();
         (_lastImage as IDisposable)?.Dispose();
         _thumbsCache?.Dispose();

@@ -26,6 +26,17 @@ internal static class Mnemonics
         return (label.ToString(), index);
     }
 
+    /// <summary>Whether a label that marks a mnemonic draws its underline now (Alt held,
+    /// <see cref="Events.FocusManager.MnemonicCues"/>). Called as the label draws, so it also tells
+    /// the window that one is on screen (<see cref="Events.FocusManager.MnemonicsDrawn"/>): Alt
+    /// pressed or let go redraws only a window that shows one.</summary>
+    internal static bool ShowsCue(Events.FocusManager? focus)
+    {
+        if (focus is null) return false;
+        focus.MnemonicsDrawn = true;
+        return focus.MnemonicCues;
+    }
+
     // One list per index, made once: a label underlined while Alt is held is drawn every frame.
     private static readonly TextSpan[]?[] s_underlines = new TextSpan[]?[64];
 

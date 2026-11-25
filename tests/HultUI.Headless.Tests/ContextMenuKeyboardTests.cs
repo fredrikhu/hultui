@@ -554,4 +554,228 @@ public class ContextMenuKeyboardTests
         Assert.Equal(flyout.Id, focused.ElementId);
         Assert.StartsWith("Size", focused.Children[focused.CurrentItem].Name);
     }
+
+    // ── A focused list: the menu of the row the keyboard is on ────────────
+    // The keys looked for a menu from the list up, never in its rows: with menus on the rows (all of
+    // Junction's), they opened nothing.
+
+    /// <summary>A focused list of 100 rows of 20 px in a 400×300 window (rows 0–14 in view). Each row
+    /// has, with <paramref name="rowMenus"/>, its menu ("Open item N"), and holds a box with a menu of
+    /// its own ("Child").</summary>
+    private static (HeadlessSession Session, VirtualListElement<string> List) MountList(bool rowMenus = true, bool composite = false)
+    {
+        var session = HeadlessSession.Create(400, 300);
+        var list = VirtualListElement<string>.New()
+            .ItemHeight(20f)
+            .Items(Enumerable.Range(0, 100).Select(i => $"item {i}").ToList())
+            .RenderWith(t =>
+            {
+                var child = Box.New().Width(16f).Height(16f);
+                child.ContextMenu(() => [new ContextMenuItem { Label = "Child" }]);
+                var row = Flex.Row().Children(TextB.New(t).FontSize(12f), child);
+                if (rowMenus) row.ContextMenu(() => [new ContextMenuItem { Label = "Open " + t }]);
+                return row;
+            })
+            .AccessibleItemLabel(t => t);
+        list.RowsAreComposite = composite;
+        list.IsFocusable = true;
+        session.Window.SetRoot(Flex.Column().FlexGrow(1).Children(list.FlexGrow(1)));
+        session.PumpFrames(2);
+        list.Focus();
+        session.PumpFrame();
+        return (session, list);
+    }
+
+    private static ContextMenuElement? MenuOf(HeadlessSession session) =>
+        session.Window.OverlayContents.OfType<ContextMenuElement>().SingleOrDefault();
+
+    private static string[] Labels(ContextMenuElement menu)
+    {
+        var source = (IAccessibleItemSource)menu;
+        return Enumerable.Range(0, source.ItemCount).Select(i => source.GetItemLabel(i) ?? "").ToArray();
+    }
+
+    /// <summary>Item <paramref name="index"/>'s row where it is in the window, from the list's own sums.</summary>
+    private static Rect RowBox(VirtualListElement<string> list, int index)
+    {
+        var r = list.ItemRect(index);
+        var content = list.WindowContentBox;
+        return new Rect(content.X + r.X - list.ScrollOffsetX, content.Y + r.Y - list.ScrollOffsetY, r.Width, r.Height);
+    }
+
+    /// <summary>The realized row element of item <paramref name="index"/>.</summary>
+    private static Element RowOf(VirtualListElement<string> list, int index)
+    {
+        var band = RowBox(list, index);
+        return list.Children.Single(e => e.ContextMenuItems is not null
+            && Math.Abs(e.WindowBorderBox.Y + e.WindowBorderBox.Height / 2 - (band.Y + band.Height / 2)) < band.Height / 2);
+    }
+
+    [Theory]
+    [InlineData(KeyCode.F10, KeyModifiers.Shift)]
+    [InlineData(KeyCode.Menu, KeyModifiers.None)]
+    public void InAFocusedList_TheKeysOpenTheCurrentRowsMenu_UnderTheRow(KeyCode key, KeyModifiers modifiers)
+    {
+        var (session, list) = MountList();
+        using var _ = session;
+        list.CurrentIndex = 3;
+        list.SelectedIndex = 7;
+        session.PumpFrame();
+
+        session.Window.PressKey(key, modifiers);
+        session.PumpFrame();
+
+        var menu = MenuOf(session)!;
+        Assert.Equal(["Open item 3"], Labels(menu));
+        var row = RowBox(list, 3);
+        Assert.Equal(row.X, menu.WindowBorderBox.X, 0.5f);
+        Assert.Equal(row.Bottom, menu.WindowBorderBox.Y, 0.5f);
+        Assert.Equal(0, menu.HoveredIndex);
+        Assert.Same(list, session.Window.Window.FocusedElement);
+
+        session.Window.PressKey(KeyCode.Escape);
+        session.PumpFrame();
+        Assert.Null(MenuOf(session));
+        Assert.Same(list, session.Window.Window.FocusedElement);
+    }
+
+    /// <summary>With no current item (−1), the keyboard is on the selected one: its row's menu opens.</summary>
+    [Fact]
+    public void WithNoCurrentItem_TheSelectedRowsMenuOpens_UnderIt()
+    {
+        var (session, list) = MountList();
+        using var _ = session;
+        list.SelectedIndex = 5;
+        session.PumpFrame();
+
+        session.Window.PressKey(KeyCode.F10, KeyModifiers.Shift);
+        session.PumpFrame();
+
+        var menu = MenuOf(session)!;
+        Assert.Equal(["Open item 5"], Labels(menu));
+        Assert.Equal(RowBox(list, 5).Bottom, menu.WindowBorderBox.Y, 0.5f);
+    }
+
+    /// <summary>Composite rows: the row's own menu, not that of an element in it (a right-click there
+    /// would open the element's).</summary>
+    [Fact]
+    public void ACompositeRow_OpensItsOwnMenu_NotThatOfAnElementInIt()
+    {
+        var (session, list) = MountList(composite: true);
+        using var _ = session;
+        list.SelectedIndex = 2;
+        session.PumpFrame();
+
+        session.Window.PressKey(KeyCode.Menu);
+        session.PumpFrame();
+
+        Assert.Equal(["Open item 2"], Labels(MenuOf(session)!));
+    }
+
+    /// <summary>A row off screen is scrolled in, the least, and the menu opens against it (above it
+    /// here: it lands on the window's bottom edge), as a click on it would find it.</summary>
+    [Fact]
+    public void ARowOffScreen_IsScrolledIn_AndItsMenuOpensAgainstIt()
+    {
+        var (session, list) = MountList();
+        using var _ = session;
+        list.SelectedIndex = 60;
+        session.PumpFrame();
+        Assert.Equal(0f, list.ScrollOffsetY);
+
+        session.Window.PressKey(KeyCode.F10, KeyModifiers.Shift);
+        session.PumpFrame();
+
+        var menu = MenuOf(session)!;
+        Assert.Equal(["Open item 60"], Labels(menu));
+        var row = RowBox(list, 60);
+        Assert.Equal(list.WindowContentBox.Bottom, row.Bottom, 0.5f);
+        Assert.Equal(row.X, menu.WindowBorderBox.X, 0.5f);
+        Assert.Equal(row.Y, menu.WindowBorderBox.Bottom, 0.5f);
+        Assert.Equal(row.Y, RowOf(list, 60).WindowBorderBox.Y, 0.5f);   // realized where the frame drew it
+    }
+
+    /// <summary>A list with no current or selected item opens what it did: nothing, or its own menu
+    /// under its box, and does not move.</summary>
+    [Fact]
+    public void WithNoCurrentOrSelectedItem_TheListOpensWhatItDid()
+    {
+        var (session, list) = MountList();
+        using var _ = session;
+
+        session.Window.PressKey(KeyCode.F10, KeyModifiers.Shift);
+        session.PumpFrame();
+        Assert.Null(MenuOf(session));
+
+        list.ContextMenu(() => [new ContextMenuItem { Label = "List" }]);
+        session.Window.PressKey(KeyCode.F10, KeyModifiers.Shift);
+        session.PumpFrame();
+        Assert.Equal(["List"], Labels(MenuOf(session)!));
+        Assert.Equal(list.WindowBorderBox.X, MenuOf(session)!.WindowBorderBox.X, 0.5f);
+        Assert.Equal(0f, list.ScrollOffsetY);
+    }
+
+    /// <summary>A list whose rows have no menu (Meridian's History): nothing opens, the key reached the
+    /// list as before, and a list that scrolled to find the row off screen goes back.</summary>
+    [Fact]
+    public void ARowWithNoMenu_OpensNothing_AndTheListStaysWhereItWas()
+    {
+        var (session, list) = MountList(rowMenus: false);
+        using var _ = session;
+        int keys = 0;
+        list.On<KeyDownEvent>(e => { if (e.Key == KeyCode.F10) keys++; });
+        list.SelectedIndex = 60;
+        session.PumpFrame();
+
+        session.Window.PressKey(KeyCode.F10, KeyModifiers.Shift);
+        session.PumpFrame();
+
+        Assert.Null(MenuOf(session));
+        Assert.Equal(1, keys);
+        Assert.Equal(0f, list.ScrollOffsetY);
+        Assert.False(session.Window.Window.OpenContextMenu(list));
+        Assert.Equal(0f, list.ScrollOffsetY);
+    }
+
+    /// <summary>What a reader hears is what it hears of the row's menu opened from the row
+    /// (<c>OpenContextMenu(row)</c>): a focus event on the first item, and on Escape one back on the
+    /// list's item.</summary>
+    [Fact]
+    public void AReader_HearsTheRowsMenu_AsWhenItIsOpenedFromTheRow()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var (session, list) = MountList();
+        using var _ = session;
+        list.SelectedIndex = 4;
+        session.PumpFrame();
+        using var reader = HeadlessUiaReader.Install(session.Window);
+        for (int i = 0; i < 4; i++) session.PumpFrame(TimeSpan.FromMilliseconds(100));
+
+        var byRow = Hear(session, reader, () => session.Window.Window.OpenContextMenu(RowOf(list, 4)));
+        var byKey = Hear(session, reader, () => session.Window.PressKey(KeyCode.F10, KeyModifiers.Shift));
+
+        Assert.Equal(byRow, byKey);
+        Assert.Equal("focus 'Open item 4'", byKey.Open.Split(" | ")[1]);
+        Assert.Equal("focus 'item 4'", byKey.Escape.Split(" | ")[1]);
+    }
+
+    /// <summary>The events raised (kind and id, in order) and the names the focus events went to, at
+    /// an opening and at the Escape after it.</summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static (string Open, string Escape) Hear(HeadlessSession session, HeadlessUiaReader reader, Action open)
+    {
+        reader.Clear();
+        open();
+        for (int i = 0; i < 3; i++) session.PumpFrame(TimeSpan.FromMilliseconds(100));
+        string opened = Heard(reader);
+        reader.Clear();
+        session.Window.PressKey(KeyCode.Escape);
+        for (int i = 0; i < 3; i++) session.PumpFrame(TimeSpan.FromMilliseconds(100));
+        return (opened, Heard(reader));
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static string Heard(HeadlessUiaReader reader) =>
+        string.Join(' ', reader.Raised.Select(e => $"{e.Kind}:{e.Id}")) + " | "
+        + string.Join(' ', reader.FocusEvents().Select(id => $"focus '{(id is { } e ? reader.Name(e) : null)}'"));
 }

@@ -906,6 +906,9 @@ public class ViewerTests
         /// depends on the width, which makes the resize part of the behaviour.</summary>
         public HeadlessSession Session => _session;
 
+        /// <summary>The app, for its walk counters (HighlightWalkTests).</summary>
+        public CommanderApp App => _app;
+
         public void Press(KeyCode key, KeyModifiers modifiers = KeyModifiers.None)
         {
             _session.Window.PressKey(key, modifiers);

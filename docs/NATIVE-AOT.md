@@ -166,7 +166,10 @@ last input too (`Window.InputActivity`), or the pause lands in a frame of the sc
 the burst. Decide by the size of the burst, not by what it kept: a walk that finishes keeps nothing
 and still leaves its committed memory (Junction after a 7,453-line walk: 123.1 MB working set, 33.5 MB
 committed, at rest for good; 98.0 MB and 8.4 MB with the collection, round 18), while a small one is
-not worth a collection (Junction collects after 2,000 lines or 32 MB allocated).
+not worth a collection (Junction and Vesper Commander collect after 2,000 lines or 32 MB allocated).
+And stop a burst whose result nobody will take: give the walk a cancellation token that closing its
+view cancels (`SyntaxHighlighter.TokenizeLines` takes one). Vesper's file viewer walked on for 31–36
+MB and half a second of a core after an 8,000-line file was closed 150 ms after it opened (round 19).
 `System.GC.ConserveMemory` (5) did less (175.4 MB) and adds gen-2 collections to every app; the apps
 do not set it.
 

@@ -164,6 +164,8 @@ public sealed partial class ApertureApp
         _gridItems.Clear();
         _gridKey = null;
         _dataGeneration++;
+        // The page kept for Back is the session's (ApertureApp.KeptPage.cs).
+        DropKeptPage();
 
         if (serverId is not null && !keepAccount) _settings.Forget(serverId);
         else if (serverId is not null) { _settings.Data.ActiveServerId = serverId; _settings.Save(); }

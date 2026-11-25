@@ -67,6 +67,22 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     private IRenderContext? _widthsContext;
     private System.Globalization.CultureInfo? _widthsCulture;
 
+    // The widths each hard line's rows hold for, beside _lineWidths and carried with them (empty
+    // where not known): a line that wraps at a new width keeps them (WrapLine), and at the next
+    // width, a line whose range holds it takes its rows from the last width's instead of being
+    // searched again (WrapLines). Empty until the first pass at a new width over lines laid out at
+    // another (the open and an edit find none); 8 bytes a line. _rangesAdvance is the monospace
+    // advance they were found with (rows that break by count depend on it).
+    private WrapRange[] _lineRanges = [];
+    private float _rangesAdvance;
+
+    // While such a pass runs: the rows at the last width, copied before it writes over them
+    // (_previousStarts, kept for the next), how far the lines taking theirs have read them, and where
+    // the lines are in them — those before the edit at the same places, those after it moved.
+    private List<int>? _previousStarts;
+    private List<int>? _reuseRows;
+    private int _reuseRow, _reuseFront, _reuseShift;
+
     // Where each line's spans begin: _spanReach[k] is the furthest any of Spans[0..k] ends. The
     // spans are sorted by start but may overlap, so their ends alone are not sorted (a long
     // string's span ends after the search tint inside it, which comes next); this running
@@ -488,6 +504,31 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     /// area to working them out only when something that moves a break changed.</summary>
     internal int LineStartPasses => _linesVersion;
 
+    /// <summary>How many hard lines too long to fit were broken into rows (searched, or by their
+    /// count), for the tests that hold a resize to the lines whose breaks move.</summary>
+    internal int LinesWrapped { get; private set; }
+
+    /// <summary>
+    /// Whether a hard line that wraps keeps the widths its rows hold for, and at another width
+    /// inside them takes its rows from the last width's instead of being broken again
+    /// (<see cref="WrapRange"/>). False is the reference path, every line that does not fit
+    /// broken again at every width, for the tests that hold the two to the same rows.
+    /// </summary>
+    internal bool KeepsWrapRanges { get; set; } = true;
+
+    /// <summary>
+    /// The widths [Lo, Hi) at which a hard line breaks into the rows it has; the default holds
+    /// none. Each row narrows it to the widths at which it breaks at the same place: the longest
+    /// prefix that fits walks back to the same space — from the prefix through that space to the
+    /// one that reaches the next — or, with no space, is the same (<see cref="FindLineBreak"/>,
+    /// <see cref="BreakByCount"/>). The rows after one start where it ends, so at any width inside
+    /// them all, the line breaks where it did.
+    /// </summary>
+    private readonly record struct WrapRange(float Lo, float Hi)
+    {
+        public bool Holds(float width) => Lo <= width && width < Hi;
+    }
+
     /// <summary>
     /// A growing area's content: the width layout offers (the text wraps to it) by its wrapped
     /// line count in rows. A non-growing area measures nothing of its own, as before — its size
@@ -553,7 +594,10 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     /// style's metrics, the render context or the UI culture changed. A line's breaks depend
     /// on nothing but its own text, the width and those three (see WrapLines for why that
     /// holds), so the list is the one wrapping every line would give. A new width wraps every
-    /// line, still measuring only those whose width is not kept.
+    /// line, still measuring only those whose width is not kept, and a line kept from the last
+    /// width whose rows hold for this one too (<see cref="WrapRange"/>) takes them from there: a
+    /// resize drag of 1 px searched every wrapped line of a document again at each step, though
+    /// 92–97 % of them kept the rows they had (plan 17, round 19).
     /// <para>A new text that differs from the last at both ends — a response sent again with a
     /// time at its top and its bottom, a file read again — touches every line between, most of
     /// them the same as before. Where the lines replaced are many, a wrapped line among them is
@@ -589,11 +633,34 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
 
         if (tail == count && !lookUp)
         {
+            // A new width over lines laid out at the last: each line that wraps keeps the widths
+            // its rows hold for, and the lines kept take theirs from the last width's where those
+            // hold this one, copied before the pass writes over them. Not at an open or an edit,
+            // which pay for no range until a resize asks for one.
+            bool ranged = !sameWidth && KeepsWrapRanges && count > 0 && kept.Front + kept.Back > 0;
+            if (ranged)
+            {
+                if (_lineRanges.Length != _lineWidths.Length) _lineRanges = new WrapRange[_lineWidths.Length];
+                var previous = _previousStarts ??= new List<int>(count);
+                previous.Clear();
+                previous.AddRange(starts);
+                (_reuseRows, _reuseRow, _reuseFront, _reuseShift) = (previous, 0, kept.Front, oldLength - _text.Length);
+            }
+
             // Nothing after the edit: the lines it touched go on the end (every line, when
             // nothing is kept).
             CollectionsMarshal.SetCount(starts, head);
             if (head == 0 && starts.Capacity < kept.Count) starts.Capacity = kept.Count;
-            WrapLines(starts, front, from, kept.Count - back, wrapWidth, style);
+            try
+            {
+                WrapLines(starts, front, from, kept.Count - back, wrapWidth, style, ranged);
+            }
+            finally
+            {
+                _reuseRows = null;
+                if (_previousStarts is { } spare && spare.Capacity > 4 * starts.Count + 1024)
+                    _previousStarts = null;
+            }
         }
         else
         {
@@ -605,7 +672,7 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
             touched.EnsureCapacity(kept.Count - back - front);
             try
             {
-                WrapLines(touched, front, from, kept.Count - back, wrapWidth, style);
+                WrapLines(touched, front, from, kept.Count - back, wrapWidth, style, ranged: false);
             }
             finally
             {
@@ -622,18 +689,27 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     }
 
     // Appends the rows of hard lines [line..endLine) to `into`, the first of them starting at
-    // `pos`: each line's start, then where it breaks if it does not fit whole.
+    // `pos`: each line's start, then where it breaks if it does not fit whole. `ranged`: a pass at
+    // a new width (see ComputeLineStarts), where a line keeps the widths its rows hold for, and
+    // takes them from the last width's where those hold this one.
     private void WrapLines(List<int> into, int line, int pos, int endLine, float wrapWidth,
-        ResolvedInheritedStyle style)
+        ResolvedInheritedStyle style, bool ranged)
     {
         // Asked once a pass, not kept: the context answers for the face the style resolves to
         // now, which a font registered since may have changed.
         float asciiAdvance = FitsByCount && _renderCtx is not null ? _renderCtx.MonospaceAsciiAdvance(style) : 0f;
+        // Ranges found with another advance say nothing of rows broken by this one's count.
+        var ranges = _lineRanges;
+        if (ranges.Length > 0 && !asciiAdvance.Equals(_rangesAdvance)) Array.Clear(ranges);
+        _rangesAdvance = asciiAdvance;
         for (; line < endLine; line++)
         {
             into.Add(pos);
             int hardEnd = _text.IndexOf('\n', pos);
             if (hardEnd < 0) hardEnd = _text.Length;
+            // None while its rows are written: a line's range is that of the rows it has.
+            var range = default(WrapRange);
+            if (ranges.Length > 0) (range, ranges[line]) = (ranges[line], default);
 
             // A guess at a character's width, for where to start looking for each break; the
             // line's own measurements correct it as they go (see FindLineBreak). The same guess
@@ -645,13 +721,40 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
             float charWidth = style.FontSize * 0.55f;
 
             // A line that fits is one width, kept for the next time (_lineWidths), and only one
-            // that does not is cut into clusters and searched, unless it was wrapped before.
-            if (!FitsWhole(line, pos, hardEnd, wrapWidth, style, asciiAdvance, ref charWidth)
-                && _replaced?.TryMove(_text, pos, hardEnd, into) != true)
-                WrapLine(into, pos, hardEnd, wrapWidth, style, asciiAdvance, ref charWidth);
+            // that does not is cut into clusters and searched, unless it was wrapped before:
+            // at this width with the same text (_replaced), or at another its rows hold for.
+            if (!FitsWhole(line, pos, hardEnd, wrapWidth, style, asciiAdvance, ref charWidth))
+            {
+                if (ranged && range.Holds(wrapWidth) && TakeRows(line, pos, hardEnd, into))
+                    ranges[line] = range;
+                else if (_replaced?.TryMove(_text, pos, hardEnd, into) != true)
+                {
+                    var found = WrapLine(into, pos, hardEnd, wrapWidth, style, asciiAdvance, ranged, ref charWidth);
+                    if (ranged) ranges[line] = found;
+                }
+            }
             pos = hardEnd + 1;
         }
         _clusters?.Done();
+    }
+
+    // Appends the rows after the first of hard line `line`, [pos..hardEnd), as the last width had
+    // them (_reuseRows): a line kept before the edit starts at the same place there, one after it
+    // _reuseShift chars further. False if no line starts there, which a kept range never meets.
+    private bool TakeRows(int line, int pos, int hardEnd, List<int> into)
+    {
+        var old = CollectionsMarshal.AsSpan(_reuseRows);
+        int oldPos = line < _reuseFront ? pos : pos + _reuseShift;
+        int r = _reuseRow;
+        while (r < old.Length && old[r] < oldPos) r++;
+        _reuseRow = r;
+        if (r == old.Length || old[r] != oldPos) return false;
+        // Its rows are inside it: the next line starts past its end.
+        int oldEnd = oldPos + (hardEnd - pos), shift = pos - oldPos;
+        for (r++; r < old.Length && old[r] <= oldEnd; r++)
+            into.Add(old[r] + shift);
+        _reuseRow = r;
+        return true;
     }
 
     // `starts` with entries [head..tail) replaced by `touched` and the entries from tail on moved
@@ -820,17 +923,21 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     // Where [start..hardEnd), too long to fit whole, breaks into lines: each wrapped line's
     // start after the first, appended to `into`. In a face proven monospace for printable ASCII
     // (`asciiAdvance` above 0) a row of it breaks by its count; any other row is searched, by
-    // the line's user-perceived characters if it has any of more than one char.
-    private void WrapLine(List<int> into, int start, int hardEnd, float wrapWidth, ResolvedInheritedStyle style,
-        float asciiAdvance, ref float charWidth)
+    // the line's user-perceived characters if it has any of more than one char. With `ranged`,
+    // the widths the rows hold for (WrapRange), each row narrowing them; none where a row cannot
+    // say.
+    private WrapRange WrapLine(List<int> into, int start, int hardEnd, float wrapWidth, ResolvedInheritedStyle style,
+        float asciiAdvance, bool ranged, ref float charWidth)
     {
+        LinesWrapped++;
         Clusters? clusters = null;
         bool looked = false;
+        float lower = float.NegativeInfinity, upper = ranged ? float.PositiveInfinity : float.NegativeInfinity;
         int segStart = start;
         while (segStart < hardEnd)
         {
             // How many chars fit on this wrapped line?
-            int lineEnd = asciiAdvance > 0f ? BreakByCount(segStart, hardEnd, wrapWidth, asciiAdvance) : -1;
+            int lineEnd = asciiAdvance > 0f ? BreakByCount(segStart, hardEnd, wrapWidth, asciiAdvance, ref lower, ref upper) : -1;
             if (lineEnd < 0)
             {
                 if (!looked)
@@ -839,14 +946,41 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
                     if (HasJoiners(start, hardEnd))
                         (clusters = _clusters ??= new()).Line(_text, start, hardEnd, wholeLine: !ClustersByRow);
                 }
+                if (asciiAdvance > 0f && lower < upper)
+                    NotByCount(segStart, hardEnd, wrapWidth, asciiAdvance, ref lower);
                 clusters?.Row(segStart);
-                lineEnd = FindLineBreak(segStart, hardEnd, wrapWidth, style, clusters, ref charWidth);
+                lineEnd = FindLineBreak(segStart, hardEnd, wrapWidth, style, clusters, ref charWidth, ref lower, ref upper);
             }
             if (lineEnd >= hardEnd)
                 break;
             into.Add(lineEnd);
             segStart = lineEnd;
         }
+        return lower < upper ? new WrapRange(lower, upper) : default;
+    }
+
+    // Narrows `lower` to the widths at which the row from `start`, searched here, is not broken by
+    // its count either (BreakByCount) — which would take it where the measured search does, but not
+    // to the bit. The count reads the characters it takes and one more, so at the widths where it
+    // would take one outside printable ASCII it does not break: from the row's first such character
+    // on, its j-th (a sixteenth of an advance more, for the rounding of width / advance). If the
+    // count here reached none, it failed for the width alone (on the rounding either side of a
+    // multiple of the advance, or under one advance), at widths near this one only: no range.
+    private void NotByCount(int start, int hardEnd, float wrapWidth, float advance, ref float lower)
+    {
+        float room = wrapWidth / advance;
+        if (!(room >= 1f))
+        {
+            lower = float.PositiveInfinity;
+            return;
+        }
+        int reach = (int)Math.Min(room, hardEnd - start) + 2;
+        reach = Math.Min(reach, hardEnd - start);
+        int j = MemoryMarshal.Cast<char, ushort>(_text.AsSpan(start, reach)).IndexOfAnyExceptInRange((ushort)0x20, (ushort)0x7E);
+        if (j < 0)
+            lower = float.PositiveInfinity;
+        else if (j > 0)
+            lower = Math.Max(lower, (j + 1f / 16) * advance);
     }
 
     /// <summary>
@@ -961,7 +1095,10 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         else
             count = text.AsSpan().Count('\n') + 1;
 
+        // The lines' wrap ranges go with their widths, where a pass has kept any (_lineRanges).
         var widths = _lineWidths;
+        var ranges = _lineRanges;
+        bool ranged = ranges.Length > 0;
         if (widths.Length < count || widths.Length > 4 * count + 64)
         {
             // Room for some lines more, so typing Enter does not copy the array each time; and a
@@ -970,10 +1107,21 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
             Array.Copy(widths, resized, front);
             Array.Copy(widths, oldCount - back, resized, count - back, back);
             _lineWidths = widths = resized;
+            if (ranged)
+            {
+                var resizedRanges = new WrapRange[resized.Length];
+                Array.Copy(ranges, resizedRanges, front);
+                Array.Copy(ranges, oldCount - back, resizedRanges, count - back, back);
+                _lineRanges = ranges = resizedRanges;
+            }
         }
         else
+        {
             Array.Copy(widths, oldCount - back, widths, count - back, back);  // overlapping is fine
+            if (ranged) Array.Copy(ranges, oldCount - back, ranges, count - back, back);
+        }
         widths.AsSpan(front, count - back - front).Fill(float.NaN);
+        if (ranged) ranges.AsSpan(front, count - back - front).Clear();
 
         _lineWidthCount = count;
         _widthsText = text;
@@ -1172,9 +1320,21 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     /// shaped some 150,000 characters' worth, and a 900-line document took 30 ms and 41 MB
     /// to open. More of a line never measures narrower, so a prefix that does not fit
     /// settles that the rest does not either.</para>
+    /// <para>The search ends having measured the lo clusters that fit and the lo + 1 that do
+    /// not (or the rest, which fits), and the walk back to a space reads only where the first
+    /// ends: so the row is the same at any width at which lo is a count that walks back to the
+    /// same space — from the one through it to the one before the next space — and
+    /// [<paramref name="lower"/>, <paramref name="upper"/>) is narrowed to their widths (from no
+    /// width up for one cluster, which is the floor). That holds while a longer prefix never
+    /// measures narrower, which shaping does not promise (Arabic joining forms, kerning): where it
+    /// fails, a search started from another guess could stop at another such pair. So the range is
+    /// kept only where no prefix measured outside those counts breaks that rule, nor those just
+    /// outside them, read until they differ by a character; otherwise it is left empty. An
+    /// equality run over real documents in ten scripts holds it to the rows of a pass keeping
+    /// none.</para>
     /// </summary>
     private int FindLineBreak(int start, int hardEnd, float wrapWidth, ResolvedInheritedStyle style,
-        Clusters? clusters, ref float charWidth)
+        Clusters? clusters, ref float charWidth, ref float lower, ref float upper)
     {
         if (start >= hardEnd) return hardEnd;
 
@@ -1211,6 +1371,12 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         int lo = 1, hi = int.MaxValue;
         bool bounded = false;
         float loWidth = 0;
+        // For the range: the width of the last prefix that did not fit (lo + 1 at the end, or 1
+        // under the floor), and every prefix measured (a search makes a dozen or so).
+        float hiWidth = 0;
+        bool ranging = lower < upper;
+        var probes = ranging ? _searchProbes ??= [] : null;
+        probes?.Clear();
         int probe = AtMost(Math.Max((int)(wrapWidth / Math.Max(charWidth, 0.01f)), 1));
         int step = 0;
         for (int round = 0; ; round++)
@@ -1218,9 +1384,19 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
             int end = End(probe);
             float width = Measure(end - start);
             if (probe >= 8) charWidth = width / probe;
+            probes?.Add((probe, width));
             if (width <= wrapWidth)
             {
-                if (end == hardEnd) return hardEnd;
+                if (end == hardEnd)
+                {
+                    // The rest fits, and does at any width wider: from its own (or none, one
+                    // cluster), or from a shorter prefix's that is wider, measured or near it.
+                    if (ranging && probe > 1)
+                        lower = prefixes is null
+                            ? float.PositiveInfinity
+                            : Math.Max(lower, Math.Max(WidestBefore(probe, width, charWidth), FittedBelow(probes!, probe, wrapWidth)));
+                    return hardEnd;
+                }
                 lo = probe;
                 loWidth = width;
             }
@@ -1228,6 +1404,7 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
             {
                 hi = probe - 1;
                 bounded = true;
+                hiWidth = width;
             }
             if (lo >= hi) break;
 
@@ -1252,15 +1429,128 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         while (breakAt > start && !char.IsWhiteSpace(_text[breakAt - 1]))
             breakAt--;
 
-        if (breakAt > start)
+        // The widths at which this row breaks where it does. Where the walk back found a space,
+        // lo can be any count from the clusters through that space (kLow) to those just short of
+        // the next space after fitEnd, which would move the break (kHigh, at most 64 chars on, and
+        // inside the prefix table): a longer prefix that does not reach that space walks back to
+        // the same one. Breaking between characters, only lo itself (kHigh lo + 1). From kLow's
+        // width (none under it for one cluster: the floor takes it at any width) up to kHigh's,
+        // and where a shorter prefix is wider than kLow's, measured or near it, from that one's,
+        // and where a longer one is narrower than kHigh's, up to that one's: at any width between,
+        // every prefix shorter than kLow fits and none from kHigh on does, so a search from any
+        // guess stops at a count that walks back to the same space.
+        // A row with no prefix table (BiDi text: right to left, emoji, Thai, marks), each prefix
+        // measured on its own, keeps none: Arabic's joining forms make prefixes narrower near
+        // most breaks, and the window's prefixes, each laid out anew, cost what taking the rows
+        // saved (README.ar in Meridian at 960: 628 -> 646 KB a step, 376 -> 36 lines searched).
+        if (ranging && prefixes is null)
+            lower = float.PositiveInfinity;
+        else if (ranging)
         {
-            // Skip trailing spaces at the break point
-            return breakAt;
+            bool floor = lo > hi;   // no prefix fitted: hi is 0, lo the one-cluster floor
+            int kLow = lo, kHigh = hi + 1;
+            float wLow = loWidth, wHigh = hiWidth;
+            if (!floor && breakAt > start)
+            {
+                int k = ClustersTo(breakAt, lo);
+                if (k > 0 && k < lo)
+                    (kLow, wLow) = (k, Measure(breakAt - start));
+                int space = fitEnd, reach = Math.Min(hardEnd, fitEnd + 64);
+                while (space < reach && !char.IsWhiteSpace(_text[space])) space++;
+                if (space < reach)
+                {
+                    int kh = lo + 1;
+                    while (AtMost(kh) == kh && End(kh) <= space) kh++;
+                    if (kh > lo + 1 && AtMost(kh) == kh && (prefixes is null || End(kh) - start <= prefixes.Length))
+                        (kHigh, wHigh) = (kh, Measure(End(kh) - start));
+                }
+            }
+            float from = floor || kLow == 1
+                ? float.NegativeInfinity
+                : Math.Max(WidestBefore(kLow, wLow, charWidth), FittedBelow(probes!, kLow, wrapWidth));
+            float to = Math.Min(NarrowestAfter(kHigh, wHigh, charWidth), FailedAbove(probes!, kHigh, wrapWidth));
+            if (from < to)
+            {
+                lower = Math.Max(lower, from);
+                upper = Math.Min(upper, to);
+            }
+            else
+                lower = float.PositiveInfinity;
         }
 
-        // No word boundary found — break between characters
-        return fitEnd;
+        return breakAt > start ? breakAt : fitEnd;
+
+        // The count of clusters that ends at `pos`, at most lo, or 0 if none does (a space a mark
+        // joins to).
+        int ClustersTo(int pos, int lo)
+        {
+            if (clusters is null) return pos - start;
+            int a = 1, b = lo;
+            while (a < b)
+            {
+                int m = (a + b) >> 1;
+                if (End(m) < pos) a = m + 1;
+                else b = m;
+            }
+            return End(a) == pos ? a : 0;
+        }
+
+        // The widest prefix the search measured that fitted, of fewer than k clusters; and the
+        // narrowest that did not fit, of more than k.
+        static float FittedBelow(List<(int Clusters, float Width)> probes, int k, float wrapWidth)
+        {
+            float widest = float.NegativeInfinity;
+            foreach (var (n, w) in probes)
+                if (n < k && w <= wrapWidth) widest = Math.Max(widest, w);
+            return widest;
+        }
+
+        static float FailedAbove(List<(int Clusters, float Width)> probes, int k, float wrapWidth)
+        {
+            float narrowest = float.PositiveInfinity;
+            foreach (var (n, w) in probes)
+                if (n > k && w > wrapWidth) narrowest = Math.Min(narrowest, w);
+            return narrowest;
+        }
+
+        // The widest of k clusters' `width` and the prefixes shorter than k, read back from k until
+        // one is narrower than the widest by a character (the row's average), where shaping's
+        // narrowings stop — a joining form or a kerning pair takes back a fraction of one. Arabic
+        // at the end of a word: 899.7, 898.7, then 898.7 with the space after it. Eight read without
+        // getting there, as with marks or spaces that measure nothing: no range (infinity).
+        float WidestBefore(int k, float width, float margin)
+        {
+            float widest = width;
+            for (int j = k - 1; j >= 1; j--)
+            {
+                if (k - j > 8) return float.PositiveInfinity;
+                float w = Measure(End(j) - start);
+                widest = Math.Max(widest, w);
+                if (w <= widest - margin) break;
+            }
+            return widest;
+        }
+
+        // The narrowest of k clusters' `width` and the prefixes longer than k, read on from k as far
+        // as the same, inside the prefix table (one past it would itemize a longer one: no range).
+        float NarrowestAfter(int k, float width, float margin)
+        {
+            float narrowest = width;
+            for (int j = k + 1; AtMost(j) == j; j++)
+            {
+                if (j - k > 8 || (prefixes is not null && End(j) - start > prefixes.Length))
+                    return float.NegativeInfinity;
+                float w = Measure(End(j) - start);
+                narrowest = Math.Min(narrowest, w);
+                if (w >= narrowest + margin) break;
+            }
+            return narrowest;
+        }
     }
+
+    // The prefixes a line-break search measured, as (clusters, width), for its range; kept between
+    // searches.
+    private List<(int Clusters, float Width)>? _searchProbes;
 
     /// <summary>
     /// Where the row from <paramref name="start"/> breaks by its count, in a face proven
@@ -1274,8 +1564,13 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     /// search's one-character floor) nor NaN. A 1 MB minified script wrapped at 703 px built a
     /// prefix table and shaped the words its probes cut for every one of its 12,525 rows:
     /// 63.6 MB to open.
+    /// <para>A row broken here narrows [<paramref name="lower"/>, <paramref name="upper"/>) to the
+    /// widths at which it breaks at the same place: from the count through the space it walked
+    /// back to, up to the one that reaches the next space, each clear of its multiple's rounding
+    /// by twice the slack (between characters, the count n alone; from n advances up, for the
+    /// rest of the line).</para>
     /// </summary>
-    private int BreakByCount(int start, int hardEnd, float wrapWidth, float advance)
+    private int BreakByCount(int start, int hardEnd, float wrapWidth, float advance, ref float lower, ref float upper)
     {
         float room = wrapWidth / advance;
         if (!(room >= 1f)) return -1;
@@ -1283,13 +1578,39 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         int n = room < length ? (int)room : length;
         float slack = (n + 1) * advance * (1f / 4096) + 1e-3f;
         if (n == length)   // the rest of the line fits, by its count, or is measured
-            return length * advance <= wrapWidth - slack && IsPrintableAscii(_text.AsSpan(start, length)) ? hardEnd : -1;
+        {
+            if (!(length * advance <= wrapWidth - slack && IsPrintableAscii(_text.AsSpan(start, length))))
+                return -1;
+            lower = Math.Max(lower, length * advance + 2 * slack);
+            return hardEnd;
+        }
         if (n * advance > wrapWidth - slack || (n + 1) * advance <= wrapWidth + slack
             || !IsPrintableAscii(_text.AsSpan(start, n + 1)))
             return -1;
         int fitEnd = start + n, breakAt = fitEnd;
         while (breakAt > start && !char.IsWhiteSpace(_text[breakAt - 1]))
             breakAt--;
+
+        // The counts that break here too: from the one through that space (nLow) to the one that
+        // stops at the next space after fitEnd (nHigh), 64 chars on at most, its n + 1 characters
+        // printable ASCII; between characters, n alone. At a width on the rounding of a multiple
+        // m of the advance between them the row is searched, and finds m - 1 or m, as the count
+        // would: the same break. Only in a pass that keeps ranges: reading on to the next space
+        // for each row an open breaks by count cost a 1 MB minified script ~10 % of its open.
+        if (lower < upper)
+        {
+            int nLow = n, nHigh = n;
+            if (breakAt > start)
+            {
+                nLow = breakAt - start;
+                int space = fitEnd, reach = Math.Min(hardEnd, fitEnd + 64);
+                while (space < reach && !char.IsWhiteSpace(_text[space])) space++;
+                if (space < reach && IsPrintableAscii(_text.AsSpan(fitEnd, space + 1 - fitEnd)))
+                    nHigh = space - start;
+            }
+            lower = Math.Max(lower, nLow * advance + 2 * ((nLow + 1) * advance * (1f / 4096) + 1e-3f));
+            upper = Math.Min(upper, (nHigh + 1) * advance - 2 * ((nHigh + 1) * advance * (1f / 4096) + 1e-3f));
+        }
         return breakAt > start ? breakAt : fitEnd;
     }
 

@@ -472,6 +472,89 @@ public class ApertureUnitTests
         }
     }
 
+    /// <summary>
+    /// Bodies that stop after their headers (a connection gone quiet mid-transfer, with no keepalive to
+    /// notice). The client's timeout covers the request only, up to the headers, so until plan 17 round
+    /// 19 such a read held its slot for the session, and eight of them stopped every picture after
+    /// them. The download's deadline covers the body too: each lands failed, its slot comes back, and
+    /// the pictures queued behind them load.
+    /// </summary>
+    [Fact]
+    public void BodiesThatStall_FailAtTheDeadline_AndThePicturesBehindThemLoad()
+    {
+        using var landed = new SemaphoreSlim(0);
+        using var cache = new PosterCache(() => landed.Release(), http: new HttpClient(new StalledBodyHandler("/stall/")))
+        {
+            Deadline = TimeSpan.FromMilliseconds(300),
+        };
+        var stalled = Enumerable.Range(0, 8).Select(i => new Uri($"http://jellyfin.test/Items/stall/{i}/Images/Primary")).ToArray();
+        var healthy = Enumerable.Range(0, 4).Select(i => new Uri($"http://jellyfin.test/Items/ok/{i}/Images/Primary")).ToArray();
+        foreach (var url in stalled) Assert.Equal(PosterCache.Status.Pending, cache.Get(url).Status);
+        // Every slot is taken by a stalled body now: these wait for one to come back.
+        foreach (var url in healthy) Assert.Equal(PosterCache.Status.Pending, cache.Get(url).Status);
+
+        // Wait for every download to land, failed or loaded. Each deadline runs from its own slot, so
+        // the stalled bodies fail a few milliseconds apart, and four failures free the four slots the
+        // healthy pictures need: waiting for those pictures alone saw the last stalled ones still
+        // Pending (WSL Fedora, 3 runs in 20). Without the deadline nothing lands and the wait fails.
+        int downloads = stalled.Length + healthy.Length;
+        for (int i = 0; i < downloads; i++)
+            Assert.True(landed.Wait(TimeSpan.FromSeconds(5)), $"{i} of {downloads} downloads landed");
+        Assert.All(healthy, url => Assert.True(cache.Get(url) is ({ IsLoaded: true }, PosterCache.Status.Ready), $"{url} did not load"));
+        Assert.All(stalled, url => Assert.Equal(PosterCache.Status.Failed, cache.Get(url).Status));
+        Assert.Equal(0, cache.PendingCount);
+    }
+
+    /// <summary>A small PNG for every request, but for those whose URL contains <c>stall</c>: headers
+    /// that promise 100,000 bytes, then a body that sends nothing until the client is disposed.</summary>
+    private sealed class StalledBodyHandler(string stall) : HttpMessageHandler
+    {
+        private readonly TaskCompletionSource _disposed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            if (!request.RequestUri!.ToString().Contains(stall, StringComparison.Ordinal))
+            {
+                using var bitmap = new SkiaSharp.SKBitmap(4, 6);
+                using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+                using var data = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 90);
+                return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new ByteArrayContent(data.ToArray()) });
+            }
+            var response = new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StreamContent(new StalledStream(_disposed.Task)) };
+            response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+            response.Content.Headers.ContentLength = 100_000;
+            return Task.FromResult(response);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            _disposed.TrySetResult();   // a body still read without the deadline ends with the test
+            base.Dispose(disposing);
+        }
+    }
+
+    /// <summary>A body that sends nothing until <paramref name="end"/>, and then ends.</summary>
+    private sealed class StalledStream(Task end) : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => 0; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) { end.Wait(); return 0; }
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        {
+            await end.WaitAsync(ct).ConfigureAwait(false);
+            return 0;
+        }
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct) =>
+            ReadAsync(buffer.AsMemory(offset, count), ct).AsTask();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
     private static HultUI.Core.Rendering.IImageSource Loaded(PosterCache cache, Uri url)
     {
         var deadline = DateTime.UtcNow.AddSeconds(5);

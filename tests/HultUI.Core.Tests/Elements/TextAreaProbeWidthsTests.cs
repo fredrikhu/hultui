@@ -83,6 +83,9 @@ public class TextAreaProbeWidthsTests
         string text = line + "\nقصير\n" + line;
         var ctx = new Widths();
         var area = Mount(text, ctx);
+        // Each width searched (its lines take no rows from a width before: KeepsWrapRanges), as
+        // the widths counted here are the search's.
+        area.KeepsWrapRanges = false;
         var reference = Mount(text, new TextsOnly());
         foreach (float width in new[] { 300f, 260f, 261f, 420f, 180f })
         {

@@ -658,7 +658,7 @@ public class TextElement : Element
         _paragraph = null;
         if (_spans is { Count: > 0 } spans)
             ctx.DrawText(Content, contentBox, style, Overflow, MaxLines, spans);
-        else if (_mnemonicIndex >= 0 && _mnemonicIndex < Content.Length && FocusManager?.MnemonicCues == true)
+        else if (_mnemonicIndex >= 0 && _mnemonicIndex < Content.Length && Mnemonics.ShowsCue(FocusManager))
             ctx.DrawText(Content, contentBox, style, Overflow, MaxLines, Mnemonics.Underline(_mnemonicIndex));
         else
             ctx.DrawText(Content, contentBox, style, Overflow, MaxLines);

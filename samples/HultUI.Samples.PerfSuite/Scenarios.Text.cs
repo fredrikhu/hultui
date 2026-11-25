@@ -11,6 +11,20 @@ namespace PerfSuite;
 
 static partial class Scenarios
 {
+    // An untimed drag before the timed steps, at widths 2 px off theirs: each paragraph's line-break memo and
+    // wrap range, and the fill of the pipeline's width-keyed layout cache, are paid here once, as an app that
+    // has been running has paid them, and no timed width is answered by what this leaves in that cache. Timed
+    // 5 steps after a fresh session, the wrap rows read those one-time costs as each step's (plan 17, round 19:
+    // the BiDi row's memo landed inside the timed steps, +23 %).
+    private static void WarmDrag(Ctx ctx)
+    {
+        for (int i = 0; i < 40; i++)
+        {
+            ctx.Window.SetClientSize(Ui.DragWidth(i, from: 1042), 760);
+            ctx.Pump();
+        }
+    }
+
     private static IEnumerable<Scenario> TextScenarios()
     {
         yield return new Scenario("text/wrap 150 paragraphs resize",
@@ -23,6 +37,7 @@ static partial class Scenarios
                     paragraphs[i] = Text.New(Ui.Paragraph(ctx.Rng, 60)).FontSize(13f).LineHeight(19f);
                 column.ReplaceChildren(paragraphs);
                 ctx.Mount(ScrollView.New().FlexGrow(1).Children(column));
+                WarmDrag(ctx);
                 return new Op { Run = step => ctx.Window.SetClientSize(Ui.DragWidth(step), 760) };
             });
 
@@ -137,6 +152,7 @@ static partial class Scenarios
                     paragraphs[i] = Text.New(Ui.BidiParagraph(ctx.Rng, 60)).FontSize(13f).LineHeight(19f);
                 column.ReplaceChildren(paragraphs);
                 ctx.Mount(ScrollView.New().FlexGrow(1).Children(column));
+                WarmDrag(ctx);
                 return new Op { Run = step => ctx.Window.SetClientSize(Ui.DragWidth(step), 760) };
             });
 
@@ -165,6 +181,7 @@ static partial class Scenarios
                     paragraphs[i] = Text.New(Ui.HebrewParagraph(ctx.Rng, 60)).FontSize(13f).LineHeight(19f);
                 column.ReplaceChildren(paragraphs);
                 ctx.Mount(ScrollView.New().FlexGrow(1).Children(column));
+                WarmDrag(ctx);
                 return new Op { Run = step => ctx.Window.SetClientSize(Ui.DragWidth(step), 760) };
             });
 

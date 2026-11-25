@@ -189,16 +189,19 @@ public class TextAreaBreakByCountTests
         var reference = Mount(text, new Mono(), fitsByCount: false);
         var style = area.ResolvedInherited;
         var breakByCount = typeof(TextAreaElement).GetMethod("BreakByCount", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        // Its last two (ref) arguments: the widths a row it breaks holds for, narrowed from all.
+        int ByCount(float width, float advance) =>
+            (int)breakByCount.Invoke(area, [0, 300, width, advance, float.NegativeInfinity, float.PositiveInfinity])!;
         float[] widths = [float.NaN, 0f, -0f, -50f, float.NegativeInfinity, 0.5f * Mono.Advance, 0.999f * Mono.Advance];
 
         // Asked first: a count of none under the guard's reverse would wrap forever below.
         foreach (float width in widths)
-            Assert.Equal(-1, (int)breakByCount.Invoke(area, [0, 300, width, Mono.Advance])!);
-        Assert.Equal(-1, (int)breakByCount.Invoke(area, [0, 300, 7f * 40, float.NaN])!);
+            Assert.Equal(-1, ByCount(width, Mono.Advance));
+        Assert.Equal(-1, ByCount(7f * 40, float.NaN));
 
         foreach (float width in widths)
             Assert.True(Rows(reference, width, style).AsSpan().SequenceEqual(Rows(area, width, style)), $"at {width} the rows differ");
         // One advance and a hair: by count, one character a row.
-        Assert.Equal(1, (int)breakByCount.Invoke(area, [0, 300, 1.25f * Mono.Advance, Mono.Advance])!);
+        Assert.Equal(1, ByCount(1.25f * Mono.Advance, Mono.Advance));
     }
 }

@@ -620,8 +620,9 @@ public class GridRowKeepTests
         return sb.ToString();
     }
 
-    /// <summary>Another view lets the library grid go (plan 17 round 10). The app's ref to the grid held
-    /// the whole library view through its parents behind Settings; a build that shows no grid now
+    /// <summary>Another view lets the library grid go (plan 17 round 10) once it is no longer the page kept
+    /// for Back (round 19): here Home, opened and left, is kept in its place. The app's ref to the grid
+    /// held the whole library view through its parents behind Settings; a build that shows no grid now
     /// empties it and keeps the one thing the next library build read from it, the viewport's height.
     /// Back in the library the grid is made as before.</summary>
     [Fact]
@@ -634,6 +635,12 @@ public class GridRowKeepTests
 
             app.Navigate(new Route(ApertureView.Settings));
             Settle(session);
+            Assert.Equal(library, app.KeptRoute);
+            app.Navigate(new Route(ApertureView.Home));
+            Settle(session);
+            app.Navigate(new Route(ApertureView.Settings));
+            Settle(session);
+            Assert.Equal(ApertureView.Home, app.KeptRoute?.View);
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();
