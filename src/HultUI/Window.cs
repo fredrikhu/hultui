@@ -3972,9 +3972,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         return FinishHover(target, at);
     }
 
+    /// <summary><see cref="HoverAt"/>'s tail, the mouse's and a finger's alike.</summary>
     private (Element? Target, Point At) FinishHover(Element? target, Point at)
     {
-
         // Tooltip tracking
         UpdateTooltipHover(target);
 

@@ -200,6 +200,21 @@ The first run of the arm64 build. Everything the emulator showed holds:
   - ask for it (`Surface.setFrameRate`, or the window's preferred display mode)
   - pace by it, or better by Android's vsync (`Choreographer`)
 
+## Touch on the emulator (phase 3, 2026-11-26)
+
+`scripts/touch-check.ps1` drives the phase 3 build through `adb shell input` and reads the
+app's logcat lines. On the emulator (scale 2.625), all six checks pass:
+
+| Check | Result |
+|---|---|
+| A tap on the button | A click, its press stamped `Touch`, pointer ID 2, primary |
+| A slow drag on the list (214 DIP in 6 s) | Scrolled 206: the finger's travel less the 8 DIP slop, with no fling. At 4 s the finger moved 53 DIP/s, over the 50 a fling needs, and the list rightly went on 14 more |
+| A fast swipe (214 DIP in 60 ms) | Flung 970 DIP and stopped at the list's end (`o-touch-fling-end.png`) |
+| A long press (900 ms at one point) | The press, then its cancel, then `OnLongPress`, with no click |
+
+Not checked yet: two fingers (the emulator's multi-touch needs its window), a drag on a slider in
+the list, frame time while flinging, and all of it on the S25, including the refresh-rate fix.
+
 ## What broke (for phase 2)
 
 1. **Black after returning from the background.** The app survives Home and return (no crash,

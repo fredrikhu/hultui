@@ -1,6 +1,6 @@
 # Touch gestures — design note
 
-**Status (2026-11-26): built, as §9 records; not yet tried on a device.** The user approved
+**Status (2026-11-26): built, as §9 records; checked on the emulator, not yet on the phone.** The user approved
 §5's API as proposed on 2026-11-25 and took every recommendation in §7:
 - latch at the start
 - stop at the edge
@@ -325,5 +325,8 @@ The API is §5's, with these names and shapes. Where the build settles what the 
 - **Tests:** `TouchGestureTests` (22), with negative controls for the claim's `CanPan`, the slop
   take-up, the capture opt-out, the fling's exact integration (Euler steps fail the frame-rate
   test), the stop on touch, the rebuild carry and the context-menu path.
+- **The emulator** (`spikes/AndroidHello/scripts/touch-check.ps1`): a slow drag scrolled the
+  finger's travel less the slop exactly, a 60 ms swipe flung 970 DIP to the list's end, a long
+  press cancelled the press and ran `OnLongPress` with no click.
 - **Not done:** pinch (§6), haptics, drag-and-drop from a long press, touch scrollbars, and
-  tuning on a device. Nothing here has run on the emulator or the phone yet.
+  tuning on the phone.

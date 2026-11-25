@@ -502,11 +502,12 @@ touch driver. Pinch waits until an element needs it.
 - The headless tests cover slop, latching, handoff, velocity and cancellation on virtual time.
 - The perf suite is flat.
 
-**Status (2026-11-26): built and tested headless; not yet run on a device.** Pointer identity
+**Status (2026-11-26): built, tested headless, and checked on the emulator; not on the phone yet.** Pointer identity
 (`docs/design/POINTER-IDENTITY.md` §8) and the gestures (`docs/design/GESTURES.md` §9), with
 `TouchPointerTests` (19) and `TouchGestureTests` (22). Left for this phase:
-- the emulator and the phone: taps, swipes, flings and long presses through `adb shell input`,
-  and frame time while flinging Aperture's grid
+- the phone (the emulator passed a tap, a drag, a fling and a long press,
+  `spikes/AndroidHello/scripts/touch-check.ps1`), two fingers, and frame time while flinging
+  Aperture's grid
 - the Fluent sample and Aperture by touch (the first exit criterion)
 - the perf suite
 
@@ -515,6 +516,10 @@ touch driver. Pinch waits until an element needs it.
 New `TextInputKind` members and return-key hints. The focused field scrolls into view above the
 keyboard. Caret placement, word selection, handles and the edit menu for `TextInput`,
 `TextArea` and the rich text editor.
+
+**Status (2026-11-26): design note written, awaiting the user's OK**
+(`docs/design/SOFT-KEYBOARD.md`, six decisions in §6). It recommends leaving return-key labels
+out: SDL 3 has no property for them.
 
 **Exit criteria**
 
@@ -548,6 +553,9 @@ keyboard. Caret placement, word selection, handles and the edit menu for `TextIn
 ### Phase 6: TalkBack bridge (L, can overlap phase 5)
 
 `HultUI.Platform.Accessibility.Android` (§2.9).
+
+**Status (2026-11-26): design note written, awaiting the user's OK** (`docs/design/TALKBACK.md`,
+four decisions in §6). No public API.
 
 **Exit criteria**
 

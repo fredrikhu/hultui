@@ -263,5 +263,6 @@ The API is §4's, unchanged. Where the build differs from the note, or settles w
   controls, each rule broken in turn: the slop, the double tap's reach, the release on the
   pressed element, the cancel event, the tooltip guard, the slider's primary guard and its
   cancel each fail their test.
-- **Not verified on a device yet.** The emulator takes `adb shell input tap` and `swipe`; two
-  fingers need its own multi-touch or the phone.
+- **On the emulator** a tap clicked, stamped `Touch`, ID 2, primary
+  (`spikes/AndroidHello/scripts/touch-check.ps1`). Two fingers need the emulator's own
+  multi-touch or the phone; not checked yet.

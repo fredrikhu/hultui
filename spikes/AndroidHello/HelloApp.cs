@@ -114,6 +114,10 @@ internal static class HelloApp
             label.Content = $"Tapped {count} time{(count == 1 ? "" : "s")}";
             Info($"click {count}");
         });
+        // Phase 3's check (scripts/touch-check.ps1): a long press, and where a press lands.
+        button.OnLongPress(e => Info($"long press ({e.PointerType})"));
+        button.OnPointerDown(e => Info($"press {e.PointerType} id {e.PointerId} primary {e.IsPrimary}"));
+        button.OnPointerCancel(_ => Info("press cancelled"));
 
         var input = TextInput.New();
         input.Placeholder = "Type here";
@@ -123,6 +127,18 @@ internal static class HelloApp
             Box.New().Padding(new Thickness(12, 16, 12, 16))
                 .Background(i % 2 == 0 ? Color.FromHex("#1F2937") : Color.FromHex("#111827"))
                 .Children(Text.New($"Row {i}").FontSize(16f).TextColor(Color.White))).ToArray();
+
+        var list = ScrollView.New().FlexGrow(1).Children(Flex.Column().FlexShrink(0).Children(rows));
+        // A finger's scroll and fling, as the offset it reaches, once a frame at most.
+        float loggedAt = -1;
+        list.UserScrolled = () =>
+        {
+            float at = MathF.Round(list.ScrollOffsetY);
+            if (at == loggedAt) return;
+            loggedAt = at;
+            Info($"scrolled {at:0}");
+        };
+        rows[0].OnClick(_ => Info("row 1 clicked"));
 
         var tickLabel = Text.New("tick 0").FontSize(13f).FlexShrink(0);
         var root = Flex.Column(gap: 12).Padding(16).Children(
@@ -135,7 +151,7 @@ internal static class HelloApp
             input.FlexShrink(0),
             // An overlay for Back to close: tapped open, its list is an overlay of the window.
             Dropdown.New(["First choice", "Second choice", "Third choice"], 0).FlexShrink(0),
-            ScrollView.New().FlexGrow(1).Children(Flex.Column().FlexShrink(0).Children(rows)));
+            list);
 
         // Logs Back without taking it, so it goes on to Escape's work and then the system's back.
         root.OnKeyDown(e =>
@@ -156,6 +172,8 @@ internal static class HelloApp
         using var report = new Timer(_ => Application.InvokeOnMainThread(() =>
         {
             Info($"after 2 s: layout {window.LayoutWidth}x{window.LayoutHeight} DIP, display scale {window.DisplayScale}");
+            // Where the touch check aims, in layout units: the button and the list.
+            Info($"geometry button {Dims(button.WindowBorderBox)} list {Dims(list.WindowBorderBox)}");
             // The start-up trace, into logcat too: run-as cannot read it from a release build.
             string trace = Environment.GetEnvironmentVariable("HULTUI_STARTUP")!;
             if (File.Exists(trace))
@@ -211,4 +229,6 @@ internal static class HelloApp
     }
 
     private static void Info(string message) => Log.Info(Tag, message);
+
+    private static string Dims(Rect r) => FormattableString.Invariant($"{r.X:0.#},{r.Y:0.#},{r.Width:0.#},{r.Height:0.#}");
 }

@@ -1,0 +1,186 @@
+# Soft keyboard and touch text editing — design note
+
+**Status (2026-11-26): proposal, nothing built.** Needs the user's OK on §5's API and the
+decisions in §6. Plan 20, phase 4 ([plan](../plans/20-mobile-support.md) §2.4). It builds on
+the [gestures note](GESTURES.md): long press, pan, and `PointerCancel`.
+
+The phone user expects three things of a text field:
+- the right keyboard: digits for a number, `@` for an email, no autocorrect in a URL
+- the field stays in view above the keyboard, and the content under the keyboard can still be
+  scrolled to
+- text is selected and edited by touch: a long press selects a word, handles drag its ends, and
+  a bar offers Cut, Copy, Paste and Select all
+
+## 1. Today
+
+- **The keyboard shows and hides already.** Focus on a `TextInput`, `TextArea`, rich text
+  editor or `ITextServicesClient` calls `ITextInputHost.StartTextInput`
+  (`Window.OnFocusChanged`); focus elsewhere calls `StopTextInput`. On Android
+  `SDL_StartTextInput` is what shows the soft keyboard, so the spike's field typed
+  (`spikes/AndroidHello/README.md`).
+- **`TextInputKind` has `Text` and `Password`** (`src/HultUI.Core/Platform/TextInputKind.cs`). A
+  `TextInput` asks for `Password` when `Masked`, else `Text` (`TextInputElement.InputKind`,
+  internal). The text area and the editor ask for plain text input, with no kind.
+  `SDL3Window.StartTextInput` passes `Password` to SDL as
+  `SDL_TEXTINPUT_TYPE_TEXT_PASSWORD_HIDDEN` through `SDL_StartTextInputWithProperties`.
+- **SDL 3's text-input properties** (as the SDL3-CS binding lists them):
+  - `SDL_PROP_TEXTINPUT_TYPE_NUMBER`: text, name, email, username, hidden and visible passwords,
+    number, hidden and visible number passwords
+  - `SDL_PROP_TEXTINPUT_CAPITALIZATION_NUMBER`: none, sentences, words, letters
+  - `SDL_PROP_TEXTINPUT_AUTOCORRECT_BOOLEAN` and `SDL_PROP_TEXTINPUT_MULTILINE_BOOLEAN`
+  - `SDL_PROP_TEXTINPUT_ANDROID_INPUTTYPE_NUMBER`, Android's own `InputType` bits, which
+    override the rest there
+  - none for the IME's action (Android's `imeOptions`: Search, Go, Next, Done on the return key)
+- **The keyboard covers the content.** The activity is edge-to-edge (target SDK 35 enforces it),
+  so Android no longer resizes the window for the keyboard (`adjustResize`). The keyboard's
+  height is the `ime()` inset. `HultUIActivity`'s insets listener reads only
+  `systemBars() | displayCutout()` into `Window.SafeArea` (`docs/design/ANDROID-PLATFORM.md` §3).
+  The soft keyboard is not part of the safe area (`docs/ANDROID.md`).
+- **Touch text editing does not exist.** Since phase 3 a finger places the caret and scrolls;
+  it never drag-selects, because that would stop a finger on a field from scrolling the page
+  (`GESTURES.md` §2). A long press opens the field's own context menu (Cut, Copy, Paste), the
+  gestures note's rule for any element with one. A double tap selects the word, as a double
+  click does.
+
+## 2. Input kinds
+
+New `TextInputKind` members, each mapped to SDL's properties, with the capitalization and
+autocorrect a phone gives such a field:
+
+| Kind | SDL type | Android `InputType` override | Capitalize | Autocorrect |
+|---|---|---|---|---|
+| `Text` | text | — | sentences | on |
+| `Password` | hidden password | — | none | off |
+| `Number` | number | `NUMBER` | — | — |
+| `Decimal` | number | `NUMBER \| NUMBER_FLAG_DECIMAL \| NUMBER_FLAG_SIGNED` | — | — |
+| `Phone` | text | `PHONE` | — | — |
+| `Email` | email | — | none | off |
+| `Url` | text | `TEXT \| TEXT_VARIATION_URI` | none | off |
+| `Username` | username | — | none | off |
+| `Name` | name | — | words | off |
+| `Search` | text | — | none | on |
+
+- **Multiline is not a kind.** The text area and the rich text editor always ask for it
+  (`SDL_PROP_TEXTINPUT_MULTILINE_BOOLEAN`), so Enter makes a new line rather than closing the
+  keyboard. A `TextInput` never does.
+- **`NumericUpDown`** asks for `Number` (or `Decimal` when it has decimal places).
+- **A `TextInput` says its kind** through a new property; `Masked` still wins and makes it
+  `Password`.
+- **The desktop** ignores every kind but `Password`, as today.
+- **The return key's label** (Search, Go, Next, Done) has no SDL property. It would need a Java
+  shim that replaces SDL's input connection. Enter still arrives as `KeyCode.Return` with any
+  label, so §6 recommends leaving it out of this phase.
+
+## 3. The keyboard's area
+
+The keyboard is the `ime()` inset, read in the same listener as the safe area and passed to the
+window as its own value. Two shapes were considered:
+
+- **A. Fold it into `Window.SafeArea`.** No new API: the root shrinks above the keyboard, and
+  `SafeAreaChanged` fires. But an app that pads itself by the safe area (a full-bleed background
+  with `LaysOutInSafeArea = false`) would then pad by the keyboard too, and every platform keeps
+  the two apart (Android's `systemBars()` and `ime()`, iOS's safe area and keyboard frame,
+  Flutter's `padding` and `viewInsets`).
+- **B. A value of its own (recommended).**
+  - `Window.KeyboardInset` (layout units, the keyboard's height over the window's bottom edge,
+    0 when hidden) and `KeyboardInsetChanged`.
+  - `Window.LaysOutAboveKeyboard`, default true: the root is laid out in the safe area less the
+    keyboard, as `adjustResize` did. An app that animates its own bottom bar sets it false and
+    reads the inset.
+  - Overlays (menus, dialogs, the edit bar of §4) stay above the keyboard either way.
+
+**The focused field is kept in view.** When the inset grows, or focus moves while it is up,
+the window scrolls the focused element into view in its nearest scroll view, in the area above
+the keyboard (`ScrollViewElement.ScrollIntoView`, which exists). No API.
+
+**The keyboard animates in** over about 250 ms. Android reports the inset per frame through
+`WindowInsetsAnimation`; the window takes only the end value, so a show is one layout, not
+fifteen. What is drawn under the rising keyboard for those frames is the old layout, as most apps
+do.
+
+**To check on the emulator first:** that edge-to-edge with the activity's default soft-input mode
+delivers `ime()` insets to the listener. If it does not, the manifest's `windowSoftInputMode`
+gets `adjustResize`, which on API 30+ still dispatches the inset without resizing.
+
+## 4. Touch text editing
+
+For `TextInput`, `TextArea` and the rich text editor, through one internal interface the three
+implement (caret and selection rectangles, select the word at a point, move one end of the
+selection, the edit items), so the window draws the handles and the bar once.
+
+- **A tap** places the caret, as now. It also shows the **insertion handle** under the caret for
+  a few seconds, which drags the caret. A tap on the handle shows the bar with Paste and Select all.
+- **A long press on text selects the word under the finger** and shows the **two selection
+  handles** and the **edit bar**. This replaces the context menu on text elements (§6 asks). The
+  bar's items are the context menu's items, the same list (`BuildContextMenuItems`), laid out as
+  a horizontal bar above the selection, or below it when there is no room.
+- **Dragging a handle** moves its end of the selection, by character; Android snaps to words while
+  a handle moves outwards, and so does this. A handle dragged to the field's edge scrolls the field
+  (the existing `TickSelectionEdgeScroll`). The handles are overlays above the text, sized for a
+  finger (about 22 DIP), in the theme's primary colour.
+- **A pan still scrolls.** A finger that moves on the text without a handle scrolls the page, or
+  the text area itself (`IPanScrollable`), and leaves the selection as it is.
+- **The bar and handles go** on a tap elsewhere, typing, focus moving, or scrolling (they return
+  when the scroll ends, as on Android).
+- **No magnifier** in this phase. Android's `Magnifier` widget magnifies a `View`; SDL draws into a
+  `SurfaceView`, which needs checking, and HultUI could draw its own from the frame later.
+- **The mouse is unchanged.** All of this is for touch pointers only.
+
+## 5. Public API proposal (needs the user's OK)
+
+```csharp
+// HultUI.Core.Platform
+public enum TextInputKind
+{
+    Text, Password,                                       // as today
+    Number, Decimal, Phone, Email, Url, Username, Name, Search,
+}
+
+// TextInputElement, beside Masked; the builder beside .Masked()
+public TextInputKind Kind { get; set; }                    // default Text; Masked makes it Password
+public static TextInputElement Kind(this TextInputElement input, TextInputKind kind);
+
+// HultUI.Window, beside SafeArea (shape B of §3)
+public float KeyboardInset { get; }                        // layout units; 0 with no soft keyboard
+public event Action? KeyboardInsetChanged;
+public bool LaysOutAboveKeyboard { get; set; } = true;
+```
+
+`ITextInputHost.StartTextInput(TextInputKind)` already exists; it gains a `multiline` overload
+with a default, so existing hosts compile. The headless driver records the kind
+(`TextInputHost.Kind`) and gets `HeadlessWindow.SetKeyboardInset(float)`, as it has
+`SetSafeArea`. Everything in §4 is internal.
+
+## 6. Decisions for the user
+
+1. **The keyboard's area:** shape B, a `KeyboardInset` of its own with the root laid out above
+   it by default (recommended), or shape A, folded into the safe area.
+2. **The kinds:** the ten in §5 (recommended), or fewer to start (`Number`, `Email`, `Url`).
+3. **Return-key labels:** leave them out for now (recommended), or a Java shim over SDL's input
+   connection.
+4. **Long press on text** selects the word with handles and the edit bar, in place of the
+   context menu (recommended, as Android and iOS do), or keeps opening the menu.
+5. **No magnifier** in this phase (recommended).
+6. **The API in §5, with these names.**
+
+## 7. Tests, and size
+
+**Headless:**
+- each kind reaches the host; `Masked` overrides `Kind`; the text area asks for multiline
+- a keyboard inset shrinks the root by default, not with `LaysOutAboveKeyboard = false`, and fires
+  `KeyboardInsetChanged` once
+- the focused field below the keyboard's top is scrolled above it
+- a long press on a word selects it and shows the handles and the bar; Copy from the bar copies it
+- a handle drag extends the selection, by word outwards; to the edge, the field scrolls
+- a pan on a field scrolls the page and keeps the selection
+- the mouse's selection and context menu unchanged: the existing suites
+
+**Device:**
+- the numeric keyboard for a number field, `@` for email, on the emulator and the phone
+- the field above the keyboard in Aperture's login and search
+- select, copy and paste a word by touch (the plan's exit criteria)
+
+**Size:** M–L.
+- kinds and the keyboard inset: about a week
+- touch editing (the interface on three controls, handles, the bar): two to three weeks
+- device checks and tuning: the rest
