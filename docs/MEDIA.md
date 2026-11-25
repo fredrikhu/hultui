@@ -103,6 +103,12 @@ the file is loaded. Pass `Open(source, autoPlay: true)` instead: the player wait
 the load and then plays. `FakeMediaBackend` loads synchronously, so a test that calls
 `Play()` after `Open()` passes and the app built the same way does not.
 
+**A player pauses when the app leaves the screen.** On Android, Home, the app switcher and
+the screen lock raise `Application.EnteringBackground`. Every `MediaPlayer` made while that
+application was current pauses then, and a pending `autoPlay` is dropped. Nothing resumes it on
+the return; the user does. Playing on in the background (audio with the screen locked) is a
+later opt-in (`docs/design/APP-LIFECYCLE.md` §7). On Windows and Linux this never happens.
+
 **The video does not load until it has been drawn once.** With `vo=libmpv` a file
 cannot start without a render context, and the kind of context is only known at the
 first draw. `VideoElement` renders even before the first frame for exactly this reason;

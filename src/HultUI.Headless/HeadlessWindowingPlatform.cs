@@ -12,7 +12,8 @@ namespace HultUI.Headless;
 /// (<see cref="SetMonitors"/>), as a real platform delivers a hot-plug, and to the
 /// desktop's colour scheme (<see cref="SetColorScheme"/>).
 /// </summary>
-internal sealed class HeadlessWindowingPlatform : IWindowingPlatform, IMonitorSource, IDesktopSettingsSource, ISideBySidePlatform
+internal sealed class HeadlessWindowingPlatform : IWindowingPlatform, IMonitorSource, IDesktopSettingsSource, ISideBySidePlatform,
+    IAppLifecycleSource
 {
     private readonly HeadlessTimeProvider _time;
     private readonly List<HeadlessPlatformWindow> _windows = [];
@@ -84,6 +85,52 @@ internal sealed class HeadlessWindowingPlatform : IWindowingPlatform, IMonitorSo
         _windows.Add(window);
         window.NoteWhereItIs();
         return window;
+    }
+
+    // ──── App lifecycle: driven by the session (HeadlessSession.EnterBackground and the rest),
+    //      raised at once on the calling thread, as SDL's event watch raises them on Android.
+
+    private AppLifecycleState _lifecycle = AppLifecycleState.Foreground;
+
+    /// <inheritdoc/>
+    public AppLifecycleState LifecycleState => _lifecycle;
+
+    /// <inheritdoc/>
+    public event Action? EnteringBackground;
+
+    /// <inheritdoc/>
+    public event Action? EnteredForeground;
+
+    /// <inheritdoc/>
+    public event Action? LowMemory;
+
+    /// <inheritdoc/>
+    public event Action? Terminating { add { } remove { } }
+
+    /// <summary>The text services the session's windows share, for the low-memory tests.</summary>
+    internal SkiaTextServices? TextServices => _text;
+
+    internal void EnterBackground()
+    {
+        if (_lifecycle == AppLifecycleState.Background) return;
+        _lifecycle = AppLifecycleState.Background;
+        EnteringBackground?.Invoke();
+    }
+
+    internal void EnterForeground()
+    {
+        if (_lifecycle == AppLifecycleState.Foreground) return;
+        _lifecycle = AppLifecycleState.Foreground;
+        EnteredForeground?.Invoke();
+    }
+
+    internal void SignalLowMemory()
+    {
+        // A headless window draws on the CPU, so only the text caches, as SDL's platform trims
+        // them (its windows also give back what Skia keeps on the GPU).
+        _text?.TrimCaches();
+        _pinnedText?.TrimCaches();
+        LowMemory?.Invoke();
     }
 
     /// <summary>

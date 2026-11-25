@@ -9,7 +9,9 @@ $extraArgs = @($Extras -split ' ' | Where-Object { $_ })
 $ErrorActionPreference = 'Stop'
 $adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
 $activity = 'org.hultui.spike.androidhello/crc64ea9bba10985cac6f.MainActivity'
-$results = Join-Path $PSScriptRoot '..\results'
+# Raw captures go to a temp folder; results/ keeps only the curated frames the README shows.
+$results = Join-Path $env:TEMP 'hultui-spike-captures'
+New-Item -ItemType Directory -Force $results | Out-Null
 Add-Type -AssemblyName System.Drawing
 
 function Get-DrawnSamples([string] $png) {

@@ -32,6 +32,9 @@ internal static class HelloApp
     /// <summary>SDL_HINT_ANDROID_BLOCK_ON_PAUSE; false keeps the UI thread running in the background.</summary>
     public static bool BlockOnPause = true;
 
+    /// <summary>The 1 s ticker. Off for the redraw checks: its frame each second would hide a lost one.</summary>
+    public static bool Ticker = true;
+
     public static void Run()
     {
         var clock = Stopwatch.StartNew();
@@ -122,11 +125,12 @@ internal static class HelloApp
             ticks++;
             tickLabel.Content = $"tick {ticks}";
             Info($"tick {ticks}");
-        }), null, 1000, 1000);
+        }), null, Ticker ? 1000 : Timeout.Infinite, Ticker ? 1000 : Timeout.Infinite);
         int resumes = 0;
         SdlProbe.OnForeground = () =>
         {
             if (Rebind) SdlProbe.RebindGL();
+            if (RedrawAfterMs == 0 && !Ticker) return;   // the clean check: the app changes nothing on return
             label.Content = $"Resumed {++resumes}x, tapped {count}";
             // The experiment: the frame drawn right after DID_ENTER_FOREGROUND never shows
             // (the new surface is not ready for it); one drawn a little later does.

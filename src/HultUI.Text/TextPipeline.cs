@@ -363,6 +363,29 @@ public sealed class TextPipeline
         }
     }
 
+    /// <summary>
+    /// Empties every cache the pipeline keeps (layouts, shaping, words, right-to-left runs, widths,
+    /// line memos), up to about 80 MB at their bounds: what the system's low-memory signal asks
+    /// for (docs/design/APP-LIFECYCLE.md). Text is shaped again as it is next laid out. Called on
+    /// the thread that lays text out, as every other call is.
+    /// </summary>
+    internal void TrimCaches()
+    {
+        _cache.Clear();
+        _wrapRanges.Clear();
+        _shapeCache.Clear();
+        _wordShapeCache.Clear();
+        _rtlRunCache.Clear();
+        _widths?.Cache.Clear();
+        _minContentCache.Clear();
+        _memos.Clear();
+        _memoWidths.Clear();
+        _memoLines.Clear();
+        _lineStyles?.Clear();
+        _lineStyle = null;
+        Array.Clear(_seen);
+    }
+
     // Into the pipeline's kept list (_fontRuns), good until the next call: every
     // caller reads the runs before it itemizes again, and nothing it calls while it reads them
     // itemizes into this list (a foreach over it would throw if anything did). A new list a call

@@ -75,6 +75,19 @@ internal sealed class WordCache(int capacity, long maxWeight)
     /// slots of those it evicts, so this stops growing.</summary>
     internal int Slots => _entries.Length;
 
+    /// <summary>Empties the cache and lets go of its arrays, as when it was new: what the system's
+    /// low-memory signal asks for (TextPipeline.TrimCaches).</summary>
+    public void Clear()
+    {
+        _buckets = [];
+        _entries = [];
+        _used = 0;
+        _free = -1;
+        _freeCount = 0;
+        _newest = _oldest = -1;
+        _weight = 0;
+    }
+
     /// <summary>The font and size's share of a word's hash, the same for every word of a run: worked
     /// out once for them all.</summary>
     public static int FontHash(IResolvedFont font, float fontSize) =>

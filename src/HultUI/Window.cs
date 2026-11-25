@@ -2092,8 +2092,35 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         return false;
     }
 
+    /// <summary>Frames a settle still owes, the one being drawn included (SettleRedraw).</summary>
+    private int _settleFrames;
+
+    /// <summary>
+    /// Whether the platform's surface loses the first frame drawn after it changes, so a resize
+    /// settles (<see cref="SettleRedraw"/>). Android does: after a rotation the first frame showed
+    /// at the old size and the next was right (spikes/AndroidHello). iOS is assumed to until
+    /// measured. Settable for tests.
+    /// </summary>
+    internal static bool SurfaceLosesFirstFrame { get; set; } = OperatingSystem.IsAndroid() || OperatingSystem.IsIOS();
+
+    /// <summary>
+    /// Draws the whole window in the next frame and once more in the frame interval after it.
+    /// After the app returns from the background, or a surface change on a platform that loses
+    /// the first frame drawn into a new surface (Android: measured on the emulator, the first
+    /// frame after a return never showed, on GL and on the software renderer alike, and one drawn
+    /// 16 ms later did). Costs one frame per return or rotation; never runs on the desktop.
+    /// </summary>
+    internal void SettleRedraw()
+    {
+        _settleFrames = 2;
+        _root?.MarkPaintDirty();
+        for (int i = 0; i < _overlays.Count; i++)
+            _overlays[i].Content.MarkPaintDirty();
+    }
+
     internal void OnWindowResized()
     {
+        if (SurfaceLosesFirstFrame) SettleRedraw();
         // A move to a monitor at another scale arrives as a resize. Told before Resized, so what
         // an app's handler builds is made at the new scale either way.
         float scale = PlatformWindow.DisplayScale;
@@ -2510,7 +2537,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // a video nobody could see. Everything above has run — assistive technology's actions,
         // style, layout, the accessibility tree — and the paint dirt is kept, so the first frame
         // after the restore draws it. A video still has to be served (ServiceUndrawnSources).
-        if (!evenIfMinimized && PlatformWindow.IsMinimized)
+        // An app in the background stops here too, forced or not (docs/design/APP-LIFECYCLE.md):
+        // on Android the surface is gone, and iOS ends an app that does GPU work off screen.
+        if ((!evenIfMinimized && PlatformWindow.IsMinimized) || Application.InBackground)
         {
             // A change that was only structure, style or layout has no paint dirt of its own,
             // and none of it is on screen: the root takes some for the restore. The structural
@@ -2609,6 +2638,10 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // A Vulkan surface whose swapchain is rebuilt for what this frame showed (an HDR video came
         // on screen or left it) draws the next frame on the new one, though nothing else changed.
         if (PlatformWindow.Surface is IPictureRangeSurface pictures && pictures.TakeOwedFrame())
+            _root.MarkPaintDirty();
+
+        // A settle (SettleRedraw) draws everything once more, in the next frame interval.
+        if (_settleFrames > 0 && --_settleFrames > 0)
             _root.MarkPaintDirty();
 
         // After the present, against the tree this frame drew: what it marks shows in the next.

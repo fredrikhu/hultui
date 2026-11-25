@@ -1213,6 +1213,15 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         if (!_disposed) _sizeRest.Released(System.Diagnostics.Stopwatch.GetTimestamp());
     }
 
+    /// <summary>The system's low-memory signal: the text caches always, and with
+    /// <paramref name="gpu"/> every GPU resource Skia keeps unlocked, as
+    /// <see cref="SkiaGLRenderSurface"/> does (docs/design/APP-LIFECYCLE.md).</summary>
+    internal void TrimMemory(bool gpu)
+    {
+        _text.TrimCaches();
+        if (gpu && !_disposed && !_frameOpen) _grContext.PurgeUnlockedResources(scratchResourcesOnly: false);
+    }
+
     public void Dispose()
     {
         if (_disposed) return;

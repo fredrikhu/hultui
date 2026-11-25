@@ -965,6 +965,28 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// theme; cleared by the platform as it raises <see cref="IDesktopSettingsSource.Changed"/>.</summary>
     internal static bool DesktopSettingsChanged { get; set; }
 
+    /// <summary>The app-lifecycle events <see cref="PollAllEvents"/> took from the queue (type and
+    /// timestamp), in order; drained by the platform, which handled most already from its event
+    /// watch as they were pushed (SdlWindowingPlatform).</summary>
+    internal static List<(uint Type, ulong Timestamp)> AppEvents { get; } = [];
+
+    /// <summary>Every open SDL window, for what the platform does to all of them at once.</summary>
+    internal static IEnumerable<SDL3Window> All => _registry.Values;
+
+    /// <summary>
+    /// The system's low-memory signal (docs/design/APP-LIFECYCLE.md): the text caches always, and
+    /// with <paramref name="gpu"/> what Skia keeps on the GPU. Only while the app is on screen:
+    /// in the background Android has taken the surface, and making the context current without
+    /// one is not proven safe on every driver, so the GPU's caches wait.
+    /// </summary>
+    internal void TrimMemory(bool gpu)
+    {
+        if (gpu && _surface is not null) MakeCurrent();
+        _surface?.TrimMemory(gpu);
+        _vulkanSurface?.TrimMemory(gpu);
+        _rasterSurface?.TrimMemory();
+    }
+
     /// <summary>SDL's reading of the desktop's light or dark preference (the portal's
     /// <c>color-scheme</c> on Linux); NoPreference before video init and when SDL cannot tell.</summary>
     internal static ColorScheme ToColorScheme(SDL_SystemTheme theme) => theme switch
@@ -1015,6 +1037,15 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
                 case (uint)SDL_EventType.SDL_EVENT_SYSTEM_THEME_CHANGED:
                     // Like a display change: the platform tells the app once the queue is drained.
                     DesktopSettingsChanged = true;
+                    break;
+
+                case (uint)SDL_EventType.SDL_EVENT_WILL_ENTER_BACKGROUND:
+                case (uint)SDL_EventType.SDL_EVENT_DID_ENTER_FOREGROUND:
+                case (uint)SDL_EventType.SDL_EVENT_LOW_MEMORY:
+                case (uint)SDL_EventType.SDL_EVENT_TERMINATING:
+                    // The platform's event watch handled it as it was pushed, when that was on
+                    // the UI thread; it handles the rest from here, once the queue is drained.
+                    AppEvents.Add((evt.type, evt.common.timestamp));
                     break;
 
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_CLOSE_REQUESTED:
@@ -2541,6 +2572,15 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // Windows only: no 1 ms timer resolution for the life of the process, which SDL asks for
         // by default; the frame loop's waits ask for it while frames are paced (SdlTimerResolution).
         SdlTimerResolution.AtRest();
+
+        // Android: SDL must not park its thread, which is HultUI's UI thread, while the app is in
+        // the background. Parked, nothing posted to the UI thread ran there: a network reply, a
+        // timer, the media layer's events, and later audio with the screen locked. HultUI's own
+        // background gate (Application.InBackground) keeps it off the GPU instead. Measured on the
+        // emulator: a 1 s ticker ran 0 times in 7.4 s away with SDL's default and 7 times with
+        // this, no frame drawn, no GL error (docs/design/APP-LIFECYCLE.md §2 item 8).
+        if (OperatingSystem.IsAndroid())
+            SDL_SetHint(SDL_HINT_ANDROID_BLOCK_ON_PAUSE, "0");
 
         if (!SDL_Init(SDL_InitFlags.SDL_INIT_VIDEO))
             throw new InvalidOperationException($"SDL_Init failed: {GetError()}");

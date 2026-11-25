@@ -1,8 +1,9 @@
 # App lifecycle — design note
 
-**Status (2026-11-25): design approved, nothing built.** The user approved §3's API as
-proposed: the names `EnteringBackground` and `EnteredForeground`, media pausing by default, and
-`LifecycleState` on every platform (§6). Plan 20, phase 2 ([plan](../plans/20-mobile-support.md)).
+**Status (2026-11-25): design approved and built, on branch `claude/android-spike`.** The user
+approved §3's API as proposed: the names `EnteringBackground` and `EnteredForeground`, media
+pausing by default, and `LifecycleState` on every platform (§6). What was built, how it was
+checked, and what is left are in §8. Plan 20, phase 2 ([plan](../plans/20-mobile-support.md)).
 Written from what the Android spike measured (`spikes/AndroidHello/README.md`, branch
 `claude/android-spike`). Where something was not measured, this note says so.
 
@@ -241,3 +242,72 @@ so the app is in `Background` and draws nothing. Audio can go on only if:
   glue for `HultUI.Platform.Android` and API for the opt-in. Both are later items.
 
 Nothing else in §2 or §3 needs to change for either feature.
+
+## 8. Built (2026-11-25)
+
+**What is in:**
+- **The API of §3:**
+  - `AppLifecycleState` and `IAppLifecycleSource` (`src/HultUI.Core/Platform/AppLifecycle.cs`)
+  - `Application.LifecycleState`, `EnteringBackground`, `EnteredForeground`, `LowMemory` and
+    `Terminating`
+  - the headless `EnterBackground`, `EnterForeground` and `SignalLowMemory`
+- **SDL (§2 items 1, 6, 8).** `SdlWindowingPlatform` implements the interface:
+  - an event watch handles the four app events synchronously when it runs on the UI thread
+  - the queue brings the rest, de-duplicated by timestamp
+  - an app handler's exception is thrown from `PumpEvents`, never across SDL's C frames
+  - `SDL3Window` turns `SDL_HINT_ANDROID_BLOCK_ON_PAUSE` off on Android
+- **The background gate (§2 item 2).** One check, `Application.InBackground`, beside the
+  minimized check:
+  - in `Window.RenderFrame`, forced or not
+  - in `RenderDirtyWindows` and `AnyWindowNeedsRender`
+  - in the GL driver-walk wait
+  - in `NextDeadline`, so a running tween does not wake the loop in the background
+- **The settle redraw (§2 item 3).** `Window.SettleRedraw` runs after
+  `EnteredForeground`, and after every resize where `Window.SurfaceLosesFirstFrame` (Android,
+  iOS). It draws the whole window, then once more in the next frame interval.
+- **Low memory (§2 item 5):**
+  - `TextPipeline.TrimCaches` (with a new `WordCache.Clear`)
+  - Skia's `PurgeUnlockedResources` on the GL and Vulkan surfaces, while the app is on screen
+  - then the app's event, then an aggressive compacting collection
+- **Media (§6 item 2).** `MediaPlayer` pauses on `EnteringBackground` and drops a pending
+  `autoPlay`.
+
+**Tests:**
+- **`AppLifecycleTests`** (headless, 9 tests):
+  - nothing drawn while posted work runs in the background
+  - a forced frame refused there
+  - the two settle frames after a return and after a resize
+  - the text caches emptied before `LowMemory` is told
+- **`MediaPlayerLifecycleTests`** (3 tests).
+- **Two negative controls** fail the tests they should: the gate off fails the two drawing
+  tests, and a one-frame settle fails the two settle tests.
+- **The suites:**
+  - Headless 1,969
+  - Core 5,322
+  - Text 324
+  - Media 96
+  - Rendering.Skia 488
+  - Platform.SDL3 92
+
+**On the emulator** (API 35, the spike with its own workarounds switched off:
+`-e rebind 0 -e ticker 0`, so the app changes nothing on return):
+
+| Check | Before | Now |
+|---|---|---|
+| Drawn samples just after returning from Home, GL | 0 | 65,047 (65,047 before Home) |
+| The same, software renderer | 0 | 65,047 |
+| Landscape frame after a rotation | 55 % black (stale) | 1 % black, the right frame |
+| Ticks run in 7.4 s in the background, Home / screen lock | 0 / not measured | 7 / 7, frames 0.0/s, no errors |
+
+**Left for later:**
+- **GPU caches in the background.** On a low-memory signal while the app is away, only the CPU
+  caches are emptied. Making the GL context current without a surface needs a device to prove
+  it safe (EGL's surfaceless contexts).
+- **Losing the GPU (§2 item 4).** Not built: no device has lost its context yet. It needs a
+  fault injection first.
+- **The render context's blob and glyph maps** are not trimmed yet. Only the text pipeline's
+  caches and Skia's GPU resources are.
+- **A minimized frame still serves video sources** (`ServiceUndrawnSources`). A player that
+  plays in the background must switch mpv to audio only first, as §7 says.
+- **`Terminating`** comes only from SDL. The headless session cannot raise it.
+- **The settle on iOS** is assumed, not measured.

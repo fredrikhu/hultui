@@ -56,6 +56,23 @@ public sealed class MediaPlayer : IDisposable
         _backend.Event += OnBackendEvent;
         _sink.FramePublished += OnFramePublished;
         _backend.Attach(_videoSink);
+        _application = HultUI.Application.Current;
+        if (_application is not null) _application.EnteringBackground += OnEnteringBackground;
+    }
+
+    // The application whose lifecycle this player follows: the one current where it was made.
+    private readonly HultUI.Application? _application;
+
+    /// <summary>
+    /// The app is leaving the screen (Home, the app switcher, the screen lock on Android): playback
+    /// pauses, and a load that was to start playing will not. Nothing resumes it on the return;
+    /// the user does. Playing on in the background is a later opt-in
+    /// (docs/design/APP-LIFECYCLE.md §6 and §7). Never happens on Windows or Linux.
+    /// </summary>
+    private void OnEnteringBackground()
+    {
+        _playWhenLoaded = false;
+        if (IsPlaying) Pause();
     }
 
     public IMediaBackend Backend => _backend;
@@ -327,6 +344,7 @@ public sealed class MediaPlayer : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        if (_application is not null) _application.EnteringBackground -= OnEnteringBackground;
         _backend.Event -= OnBackendEvent;
         _sink.FramePublished -= OnFramePublished;
         // The backend first: a GPU renderer frees its GL objects before the sink

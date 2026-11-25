@@ -242,6 +242,31 @@ called by `Application`'s constructor and `Unbind()` on disposal. Pure layout or
 reactivity unit tests that never start an application are never checked, because
 there is no UI thread for them to violate.
 
+## The app lifecycle
+
+On a phone the app leaves the screen and comes back. Home, the app switcher and the screen
+lock all send it to the background, and the system may end it there without another word.
+`Application` says so with `LifecycleState` and four events, all raised on the UI thread, at
+the moment the platform reports them (the design: `docs/design/APP-LIFECYCLE.md`):
+
+| Event | When | Do |
+|---|---|---|
+| `EnteringBackground` | The app is leaving the screen. `LifecycleState` already reads `Background`. | Save state, quickly. It is the last moment the app can count on. |
+| `EnteredForeground` | The app is back, before its first frame. | Refresh what may be stale. |
+| `LowMemory` | The system wants memory back. HultUI has already emptied its text caches (and, on screen, Skia's GPU caches); a full, compacting collection follows the handlers. On Android it comes on most trips to the background. | Drop what can be loaded again. |
+| `Terminating` | The system is ending the app, where it says so. Best effort. | Nothing to rely on: save in `EnteringBackground`. |
+
+While the app is in the background **nothing is drawn**, but **the UI thread keeps running**.
+Posted work, timers, `await` continuations and network replies run as usual and may change
+the tree; the frame waits for the return. A running tween steps only when something else wakes
+the loop, and lands where it would have. On the return every window is drawn twice, because
+Android does not show the first frame drawn into its new surface. A playing `MediaPlayer`
+pauses as the app leaves, and stays paused on the return.
+
+On Windows and Linux none of this happens: `LifecycleState` is always `Foreground`, and the
+events are never raised. A minimized desktop window is not the background; it is
+`Window.Deactivated` and the window's minimized state, and the app keeps running and playing.
+
 ## Hosting the tree yourself
 
 A custom pump that owns the element tree without an `Application` should call

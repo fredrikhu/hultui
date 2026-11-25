@@ -31,6 +31,7 @@ public class MainActivity : SDLActivity
         HelloApp.Rebind = Intent?.GetStringExtra("rebind") != "0";
         HelloApp.RedrawAfterMs = int.TryParse(Intent?.GetStringExtra("redraw"), out int ms) ? ms : 0;
         HelloApp.BlockOnPause = Intent?.GetStringExtra("block") != "0";
+        HelloApp.Ticker = Intent?.GetStringExtra("ticker") != "0";
         base.OnCreate(savedInstanceState);
         // Android 8+ draws a translucent "default focus highlight" over a focused view that is
         // not in touch mode. SDLSurface keeps focus, so after text typed as key events and Back,

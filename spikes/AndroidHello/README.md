@@ -35,7 +35,16 @@ and what breaks first?
   reports whether the UI thread ran there, whether anything was drawn, any GL errors, and the
   frame after return.
 - Intent extras for experiments: `-e renderer software`, `-e rebind 0|1`, `-e redraw <ms>`,
-  `-e block 0` (SDL's `BLOCK_ON_PAUSE` off).
+  `-e block 0` (SDL's `BLOCK_ON_PAUSE` off), `-e ticker 0` (no 1 s ticker, whose frame each
+  second would hide a lost one; with it off and no `redraw`, the app changes nothing on return).
+- **Since the lifecycle work**
+  ([`docs/design/APP-LIFECYCLE.md`](../../docs/design/APP-LIFECYCLE.md)), the framework does
+  what three of these did:
+  - it redraws after a return (`redraw`)
+  - it turns SDL's block off on Android, so `-e block 1` no longer brings the block back
+  - the GL rebind was never needed
+
+  Check the framework with `-e rebind 0` and no `redraw`, so the spike adds nothing.
 
 ## Running it
 
@@ -169,11 +178,18 @@ try in phase 2.
 
    **Fix for phase 2:** on `DID_ENTER_FOREGROUND` and `WINDOW_RESTORED`, mark the whole window
    dirty, and draw again on a later frame, rather than once at once.
+
+   **Fixed 2026-11-25** by the lifecycle work (`Window.SettleRedraw`;
+   [`docs/design/APP-LIFECYCLE.md`](../../docs/design/APP-LIFECYCLE.md) §8). With the app changing
+   nothing on return (`-e rebind 0 -e ticker 0`), the screen just after return holds 65,047
+   drawn samples, as before Home, on GL and software.
 2. **Rotation shows a stale frame.** After rotating to landscape, HultUI laid out at 914×411
    DIP correctly, but the screen showed a 1080-pixel white strip and black elsewhere
    (`f-rotation-stale-frame.png`). It was correct from the next frame (`g-landscape-next-frame.png`).
    This is the same cause as item 1: the first frame after a surface change is drawn before the
-   new surface is ready. Same fix: redraw once more after `PIXEL_SIZE_CHANGED`.
+   new surface is ready. Same fix: redraw once more after `PIXEL_SIZE_CHANGED`. **Fixed
+   2026-11-25** the same way: a resize settles on Android (`h-landscape-after-fix.png`, 1 % black
+   against 55 % before, ticker off).
 3. **The soft keyboard changes the window without telling HultUI.** With the keyboard up,
    Android moved SDL's surface below an opaque status bar and covered the bottom with the
    keyboard (`c-soft-keyboard.png`). HultUI got no resize event, so the bottom of the layout

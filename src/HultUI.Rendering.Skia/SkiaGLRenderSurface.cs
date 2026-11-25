@@ -147,6 +147,18 @@ public sealed class SkiaGLRenderSurface : IRenderSurface, ISkiaExternalSurface, 
         }
     }
 
+    /// <summary>
+    /// The system's low-memory signal (docs/design/APP-LIFECYCLE.md): the text caches always, and
+    /// with <paramref name="gpu"/> every GPU resource Skia keeps unlocked (the textures of pictures,
+    /// glyph atlases' spare pages, scratch), which come back as they are next drawn. The GL context
+    /// must be current for <paramref name="gpu"/>.
+    /// </summary>
+    internal void TrimMemory(bool gpu)
+    {
+        _text.TrimCaches();
+        if (gpu) _grContext.PurgeUnlockedResources(scratchResourcesOnly: false);
+    }
+
     public void Dispose()
     {
         _renderContext.Dispose();

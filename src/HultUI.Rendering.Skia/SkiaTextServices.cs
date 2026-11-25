@@ -59,4 +59,11 @@ public sealed class SkiaTextServices : IDisposable
     /// before still refers to them.
     /// </summary>
     public void Dispose() => Shaper.Dispose();
+
+    /// <summary>Empties the text pipeline's caches, for the system's low-memory signal
+    /// (docs/design/APP-LIFECYCLE.md). On the thread that lays text out.</summary>
+    internal void TrimCaches() => Pipeline.TrimCaches();
+
+    /// <summary>The words the pipeline holds shaped, for the tests of <see cref="TrimCaches"/>.</summary>
+    internal int CachedWordCount => Pipeline.WordCacheUse.Entries;
 }
