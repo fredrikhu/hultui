@@ -1,7 +1,10 @@
 # Pointer identity — design note
 
-**Status (2026-11-25): proposal, nothing built. §4 adds public API and needs the user's OK
-before any of it lands.** Plan 20, phase 3, first part ([plan](../plans/20-mobile-support.md)
+**Status (2026-11-25): design approved, nothing built.** The user approved §4's API as
+proposed and took every recommendation in §6:
+- other fingers go to the capture holder only
+- desktop touchscreens become touch pointers too
+- pens stay as mice for now Plan 20, phase 3, first part ([plan](../plans/20-mobile-support.md)
 §2.3). It makes touch a pointer of its own, so the next note can build gestures (tap, long
 press, pan with inertia, pinch) on it. Gestures are not designed here, but §5 checks this
 design leaves them room.
@@ -186,16 +189,17 @@ Pinch is two pointers on one capture holder, which §2 already routes. So gestur
 "claim this pointer" call, and nothing from this note changes. The wheel and its latching are
 untouched; a pan reuses the latching idea.
 
-## 6. Open questions for the user
+## 6. Decisions (2026-11-25)
 
-1. **Other fingers:** to the primary pointer's capture holder only (recommended), or hit-tested
-   and dispatched to whatever is under each, as on the web?
-2. **Desktop touchscreens become touch pointers too** (recommended), or only on Android, with
-   Windows and Linux keeping synthesized mice?
-3. **Pens:** keep them as SDL's synthesized mouse until a pen note (recommended), or add pen
-   events, pressure and hover now?
-4. **The API in §4:** these names (`PointerId`, `PointerType`, `IsPrimary`,
-   `PointerCancelEvent`, `TouchInput`, `TouchPhase`, the headless `Touch*` and `Tap`)?
+1. **Other fingers go only to the primary pointer's capture holder**, never hit-tested, so a
+   second finger never presses a button (§2).
+2. **Desktop touchscreens become touch pointers too**, on Windows and Linux. One model
+   everywhere (§5).
+3. **Pens stay SDL's synthesized mouse** until a pen note. `PointerType.Pen` is in the enum now
+   so that adding them later breaks nothing.
+4. **The API in §4, with these names**: `PointerId`, `PointerType`, `IsPrimary`,
+   `PointerCancelEvent` and `OnPointerCancel`, `TouchInput` and `TouchPhase`, the headless
+   `Touch*` and `Tap`.
 
 ## 7. Tests, and size
 
