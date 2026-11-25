@@ -766,12 +766,15 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     }
 
     /// <summary>Shows or hides the keyboard's cues, the mnemonics' underlines
-    /// (<see cref="FocusManager.MnemonicCues"/>), redrawing the window when they change.</summary>
+    /// (<see cref="FocusManager.MnemonicCues"/>), redrawing the window when they change and it shows
+    /// a mnemonic. A window that shows none draws nothing for a bare Alt, as for a bare Shift or
+    /// Ctrl: every press and release of Alt drew a frame of the same pixels in every app (plan 17
+    /// round 19). A label with a mnemonic that comes later draws its cue as it is drawn.</summary>
     private void SetMnemonicCues(bool show)
     {
         if (_focusManager.MnemonicCues == show) return;
         _focusManager.MnemonicCues = show;
-        _root?.MarkPaintDirty();
+        if (_focusManager.MnemonicsDrawn) _root?.MarkPaintDirty();
     }
 
     internal void RaiseActivated()
@@ -2463,6 +2466,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         if (!PlatformWindow.Surface.BeginFrame()) return false;
 
         var ctx = PlatformWindow.Surface.RenderContext;
+        // Set again by each label with a mnemonic this frame draws, the overlays' too (SetMnemonicCues).
+        _focusManager.MnemonicsDrawn = false;
         _perf.BeginRender();
         using (_tracer.Begin("Phase", "Render"))
         {

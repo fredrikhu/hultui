@@ -191,7 +191,8 @@ public partial class ApertureAppHostTests
 
     /// <summary>The root's key handler asks for no frame for a modifier key on its own, nor for its
     /// auto-repeats: each drew a frame of the same pixels, a held Shift about 30 a second (plan 17
-    /// round 15). Any other key still gets its frame, and a shortcut still acts.</summary>
+    /// round 15). Any other key still gets its frame, and a shortcut still acts. Alt draws nothing either:
+    /// the window redraws for its keyboard cues only when it shows a mnemonic (round 19).</summary>
     [Fact]
     public void ABareModifierDrawsNoFrame_AndAShortcutStillActs()
     {
@@ -201,7 +202,7 @@ public partial class ApertureAppHostTests
             for (int i = 0; i < 300 && session.PumpFrame(); i++) { }
             Assert.False(session.PumpFrame(), "the window did not settle");
 
-            foreach (var (key, mods) in new[] { (KeyCode.ShiftLeft, KeyModifiers.Shift), (KeyCode.CtrlLeft, KeyModifiers.Ctrl) })
+            foreach (var (key, mods) in new[] { (KeyCode.ShiftLeft, KeyModifiers.Shift), (KeyCode.CtrlLeft, KeyModifiers.Ctrl), (KeyCode.AltLeft, KeyModifiers.Alt) })
             {
                 session.Window.KeyDown(key, mods);
                 Assert.False(session.PumpFrame(), $"{key} drew a frame");

@@ -31,7 +31,7 @@ public class ModifierKeyFrameTests
         t.PutCursorOn('L', "a.txt");
         for (int i = 0; i < 10 && t.Session.PumpFrame(); i++) { }
 
-        foreach (var (key, mods) in new[] { (KeyCode.ShiftLeft, KeyModifiers.Shift), (KeyCode.CtrlLeft, KeyModifiers.Ctrl) })
+        foreach (var (key, mods) in new[] { (KeyCode.ShiftLeft, KeyModifiers.Shift), (KeyCode.CtrlLeft, KeyModifiers.Ctrl), (KeyCode.AltLeft, KeyModifiers.Alt) })
         {
             t.Session.Window.KeyDown(key, mods);
             Assert.False(t.Session.PumpFrame(), $"{key} drew a frame");

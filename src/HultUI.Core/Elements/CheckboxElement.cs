@@ -225,7 +225,7 @@ public class CheckboxElement : Element
             float textWidth = box.Width - CheckboxSize - LabelGap;
             var textBounds = new Rect(textX, box.Y, textWidth, box.Height);
             // The mnemonic underlined while Alt is held (FocusManager.MnemonicCues).
-            var spans = _useMnemonic && Parsed.Index >= 0 && FocusManager?.MnemonicCues == true
+            var spans = _useMnemonic && Parsed.Index >= 0 && Mnemonics.ShowsCue(FocusManager)
                 ? Mnemonics.Underline(Parsed.Index) : null;
             ctx.DrawText(DisplayLabel, textBounds, ResolvedInherited, TextOverflow.Ellipsis, null, spans);
         }

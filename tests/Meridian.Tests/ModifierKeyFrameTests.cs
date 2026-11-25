@@ -6,10 +6,11 @@ using Xunit;
 namespace Meridian.Tests;
 
 /// <summary>
-/// The root's key handler asks for no frame for a modifier key on its own (Shift, Ctrl) nor for
+/// The root's key handler asks for no frame for a modifier key on its own (Shift, Ctrl, Alt) nor for
 /// its auto-repeats: as an ordinary handler it drew a frame of the same pixels for each, a
 /// shortcut two frames, and a held Shift about 30 a second (plan 17 round 15). Every other key
-/// still gets its frame, and the chords still act.
+/// still gets its frame, and the chords still act. Alt draws nothing either: the window redraws
+/// for its keyboard cues only when it shows a mnemonic (plan 17 round 19).
 /// </summary>
 public class ModifierKeyFrameTests : IDisposable
 {
@@ -33,7 +34,7 @@ public class ModifierKeyFrameTests : IDisposable
             for (int i = 0; i < 300 && session.PumpFrame(); i++) { }
             Assert.False(session.PumpFrame(), "the window did not settle");
 
-            foreach (var (key, mods) in new[] { (KeyCode.ShiftLeft, KeyModifiers.Shift), (KeyCode.CtrlLeft, KeyModifiers.Ctrl) })
+            foreach (var (key, mods) in new[] { (KeyCode.ShiftLeft, KeyModifiers.Shift), (KeyCode.CtrlLeft, KeyModifiers.Ctrl), (KeyCode.AltLeft, KeyModifiers.Alt) })
             {
                 session.Window.KeyDown(key, mods);
                 Assert.False(session.PumpFrame(), $"{key} drew a frame");
