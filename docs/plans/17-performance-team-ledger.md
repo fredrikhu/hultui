@@ -5,8 +5,10 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 19
-- **Phase:** build — round 19 (the survey merged 2026-11-24; 13 steps, questions 79–81 answered (b), (b), (a)
-  on 2026-11-24). Steps 1–10 landed; step 10b (the HDR run) measured, F16 keeps 3. Step 11 landed in part (question 82 open). Build order done (step 11 (a) waits for question 82; question 83 open). Pre-suite done (afc6564b, 4e0d321f). Next: the full suite. Survey done 2026-11-24 in session e91920b9 (reports `17-reports/r19-*`; usage 33 → 40 % of the
+- **Phase:** release — round 19 (build order done: 13 steps and step 10b; step 11 (a) waits for question 82, question 83
+  open, neither blocks the release). The full suite passed 2026-11-25 at bb260df0 (Windows, Fedora, docfx; main's
+  32a108a3 merged as afc6564b). Next: merge into main and push, then CI.
+  Survey done 2026-11-24 in session e91920b9 (reports `17-reports/r19-*`; usage 33 → 40 % of the
   week, the 5-hour window 1 → 53 %).
   Round 18 RELEASED 2026-11-23: main 6366d201, CI run 45156444317 green on the first attempt. Round 19's files (the
   survey brief `brief-r19-survey.md`, `merge_r19.py`, build briefs `brief-r19b<N>.md`, `archive_r19.py`, agent ids
@@ -1592,3 +1594,14 @@ From 2026-11-22 (round 18's survey); earlier entries are in the archive ([to 202
   the body deadline) — closed. Main's CI was red once at 0891c1c1 on Junction's
   `CommitPatchTests.AnotherCommitsDetail_LetsTheShownOneGo` (its commit message says it fails the same at 7f63a51b) and
   green at 7650c857 and 32a108a3: the full suite tells flake from failure. Next: the full suite.
+- 2026-11-25: round 19 full suite (one agent) at bb260df0, main unmoved since 32a108a3: Windows `HultUI.slnx -c Release`
+  30 projects, 14,955 passed, 254 skipped, 0 failed (Core 5,312, Headless 1,960, Skia 488, Junction 1,230, Vesper 968,
+  Aperture 473, Meridian 680, Reel 53; UiTests 25 passed, 131 skipped without `HULTUI_UITESTS`); Fedora the slnf's 22
+  projects and Junction 1,230, Meridian 680, Aperture 473, Reel 53 each in a private D-Bus session, 0 failed (every new
+  test of the round ran there but the 10 `[WindowsFact]` `UiaDetachedElementTests`); docfx 0 warnings, 0 errors.
+  Junction's `CommitPatchTests.AnotherCommitsDetail_LetsTheShownOneGo` passes in Release (alone 3/3, 2-core 3/3; it
+  fails only in Debug, known); main's red CI at 0891c1c1 was Aperture's
+  `ApertureAppHostTests.AHeroIsAskedForAtTheDevicePixelsItCoversAndAgainWhenTheyOutgrowIt` (a 5 s wait after the held
+  backdrop is released, 22 s on the runner; passes here 5/5 at 2-core affinity; likely the picture encoded and decoded
+  after the hold on the thread pool, as the sheet flake e698a6de fixed): main's test, left for CI to watch. Phase →
+  release.
