@@ -238,6 +238,11 @@ public class KeptPageTests
             Keys(session, KeyCode.Escape);
             Assert.Equal(shown, app.PagesShownAgain);
             Assert.NotSame(before, View(session, ApertureView.Home));
+            // "Marked watched" stays up until its hold and its fade end on the session's clock, which a Rest
+            // moves by as many frames as its 250 ms of real time pump: 18 here, where 154 of the toast's 156
+            // frames had passed at the full build's frame below, and a frame or two more on CI's windows-2025
+            // runner, where it faded between the two frames. Its time runs out before them.
+            session.PumpUntil(() => !app.Toasts.IsShowing, TimeSpan.FromSeconds(10));
 
             // A setting every card shows, changed while Home is away: the kept page comes back with it.
             Keys(session, KeyCode.Right);
@@ -333,13 +338,16 @@ public class KeptPageTests
         Assert.Fail($"{what} draws another frame than a full build: {differ} pixels differ in x {left}–{right}, y {top}–{bottom}");
     }
 
-    /// <summary>The window's frame, with the pointer out of it: a hover look or a tooltip is the pointer's,
-    /// not the page's.</summary>
+    /// <summary>The window's frame, with the pointer out of it (a hover look or a tooltip is the pointer's,
+    /// not the page's) and no toast up: a toast's fades run on the session's clock, which a Rest moves by as
+    /// many frames as the machine pumps in its 250 ms, so two frames with one up differ on one machine and
+    /// not on another.</summary>
     private static byte[] Pixels(HeadlessSession session)
     {
         session.Window.MouseLeaveWindow();
         session.PumpFrames(2);
         session.PumpFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+        Assert.False(Descendants(Root(session)).OfType<ToastElement>().Any(), "a toast is up in the frame");
         using var image = session.Window.CapturePixels();
         using var bitmap = SkiaSharp.SKBitmap.FromImage(image);
         return bitmap.Bytes;

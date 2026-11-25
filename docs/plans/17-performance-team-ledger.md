@@ -7,7 +7,7 @@ file after every step and commits it with the step's work. Full survey reports a
 - **Round:** 19
 - **Phase:** release — round 19 (build order done: 13 steps and step 10b; step 11 (a) waits for question 82, question 83
   open, neither blocks the release). The full suite passed 2026-11-25 at bb260df0 (Windows, Fedora, docfx; main's
-  32a108a3 merged as afc6564b). Next: merge into main and push, then CI.
+  32a108a3 merged as afc6564b). Merged into main 95a592d2; CI red on a test race (fixed d5f6c01f); merging the fix.
   Survey done 2026-11-24 in session e91920b9 (reports `17-reports/r19-*`; usage 33 → 40 % of the
   week, the 5-hour window 1 → 53 %).
   Round 18 RELEASED 2026-11-23: main 6366d201, CI run 45156444317 green on the first attempt. Round 19's files (the
@@ -1605,3 +1605,19 @@ From 2026-11-22 (round 18's survey); earlier entries are in the archive ([to 202
   backdrop is released, 22 s on the runner; passes here 5/5 at 2-core affinity; likely the picture encoded and decoded
   after the hold on the thread pool, as the sheet flake e698a6de fixed): main's test, left for CI to watch. Phase →
   release.
+- 2026-11-25: round 19 merged into main 95a592d2 and pushed (gated: origin/main 32a108a3 was in the branch and unchanged
+  before the push; the tree identical to the tested bb260df0 outside docs/plans; the primary checkout fast-forwarded
+  behind the guard). Waiting for CI: runs 45548652936 (CI) and 45548651174 (Push on main).
+- 2026-11-25: CI run 45548652936 on 95a592d2: test-linux, docs, meridian-keyring and Push on main green; Windows `test`
+  red on round 19's own `KeptPageTests.APageWhoseDataChangedWhileAway_IsBuiltAgain_OrPatched` ("the patched Home draws
+  another frame than a full build: 4622 pixels differ in x 657–782, y 841–877"), identical on the re-run: deterministic
+  on the windows-2025 runner, not a flake (it passed in the full suite here and on Fedora). A fix agent (expert 6) finds
+  what differs there and why on the runner, then fixes it on the branch; the release waits. The fix (one agent, expert
+  6): the differing box is the "Marked watched" toast left from the test's first half (2.6 s on the session's virtual
+  clock, then a 0.18 s fade); `Rest()` pumps 250 ms of real time, so one more frame a Rest on the runner fades it
+  between the two compared frames (reproduced locally with Rest at 265–360 ms: the exact CI message). Step 12 has no
+  defect and fonts are not involved. d5f6c01f (test only): the kept page's frame checks wait the toast out, and
+  `Pixels()` fails if a toast is in a captured frame; the reverse edit fails; KeptPageTests 8/8 at every Rest from 150
+  to 600 ms, at 2-core affinity and a 1 ms timer; Aperture.Tests 473 on Windows, 2-core and Fedora. For the guidelines:
+  a frame comparison in a test waits out toasts and other timed overlays, which run on the session's clock while a rest
+  pumps by real time.
