@@ -169,6 +169,8 @@ public sealed partial class ApertureApp : Component, IDisposable
         if (artwork || MathF.Abs(Ui.DisplayScale - scale) >= 0.001f)
         {
             Ui.DisplayScale = scale;
+            // The page kept for Back was cut for the old scale (ApertureApp.KeptPage.cs).
+            DropKeptPage();
             Rerender();
         }
         else if (WindowFitChanged())
@@ -187,6 +189,7 @@ public sealed partial class ApertureApp : Component, IDisposable
         FocusPendingSearchField();
         FocusArrival();
         LetGoOfLeftCursorCard();
+        DropKeptPageIfStale();
         AskToPruneArtWaits();
     }
 
@@ -212,7 +215,7 @@ public sealed partial class ApertureApp : Component, IDisposable
         if (!_window.IsFullscreen) root.AddChild(PlaceTitleBar().FlexShrink(0));
 
         var body = _stage == ApertureStage.Connect ? BuildConnectView() : BuildBrowsing();
-        body.Key = "body";
+        body.Key = BodyKey;
         root.AddChild(body);
         // A ref into a view holds the whole view through its parents (REACTIVITY.md, "A ref into a
         // view keeps the whole view"): a build that shows no library grid lets go of the last one.
@@ -279,7 +282,7 @@ public sealed partial class ApertureApp : Component, IDisposable
         // A view with no cards (an item's page, Settings) walks nothing: left as it was, the arrows
         // walked the last view's cards out of sight, and Enter and Space opened and played them.
         if (!_cursorListSet) SetCursorList("", [], 1);
-        view.Key = "view-" + Current.View;
+        view.Key = ViewKey(Current.View);
         row.AddChild(view.FlexGrow(1));
         return row;
     }
@@ -616,6 +619,8 @@ public sealed partial class ApertureApp : Component, IDisposable
         _dataGeneration++;
         _gridItems.Clear();
         _gridKey = null;
+        // The page kept for Back shows the data being dropped (ApertureApp.KeptPage.cs).
+        DropKeptPage();
         // F5 is also "look for new seasons now", before the watch's first look is due — and for
         // seasons out but not in the library, with a request server connected.
         _seasonLookArmed = _library is not null;
@@ -648,6 +653,7 @@ public sealed partial class ApertureApp : Component, IDisposable
         StopProgressTimer();
         StopArrivalWatch();
         StopSeasonWatch();
+        DropKeptPage();
         _quickConnectCts?.Cancel();
         _quickConnectCts?.Dispose();
         _quickConnectCts = null;

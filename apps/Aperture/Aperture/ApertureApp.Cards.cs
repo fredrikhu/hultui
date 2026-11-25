@@ -442,7 +442,7 @@ public sealed partial class ApertureApp
     /// <summary>The picture elements waiting for their pictures, by URL: each the latest of a chain
     /// (<see cref="ArtWait.Next"/>). A wait is taken out when its picture lands, and after a frame when
     /// its element has left the window (<see cref="PruneArtWaits"/>), so this holds only what is on the
-    /// way to the window.</summary>
+    /// way to the window, or on the page kept for Back (ApertureApp.KeptPage.cs).</summary>
     private readonly Dictionary<string, ArtWait> _artWaits = new(StringComparer.Ordinal);
 
     /// <summary>The cache asked for a picture another element puts into itself when it lands
@@ -490,13 +490,16 @@ public sealed partial class ApertureApp
     /// at the live element by the patch). Each wait holds its element, and through it the page it was
     /// on: a picture whose body stalled never lands, and every page visited after it was kept (plan 17
     /// round 19: 0.33 MB a page, 41 MB after 250). A wait that stays is the newest for its element,
-    /// the one the card's kept state holds (<see cref="CardArt"/>).
+    /// the one the card's kept state holds (<see cref="CardArt"/>). The page kept for Back is out of the
+    /// window but comes back as it is, so its waits stay while it is kept, and its pictures go into it
+    /// when they land (<see cref="CanTakePicture"/>); once it is let go of, they go with the next prune.
     /// </summary>
     /// <remarks>Only after a frame, never in a build: in the app's build a kept Home shelf and the
     /// cards it hands back are out of the tree, and a card just made is out of it until its build is
     /// patched in, so a prune there took live cards' waits and they kept the glyph. After a frame an
-    /// element out of the tree never comes back: a kept element is handed back only from the window
-    /// (<c>KeptElements.TryKeep</c>), and a part whose host left is made again by its next mount.</remarks>
+    /// element out of the tree never comes back but on the page kept for Back: a kept element is handed
+    /// back only from the window (<c>KeptElements.TryKeep</c>), and a part whose host left is made again
+    /// by its next mount.</remarks>
     private void PruneArtWaits()
     {
         _artWaitsPruneAsked = false;
@@ -509,7 +512,7 @@ public sealed partial class ApertureApp
             {
                 var next = wait.Next;
                 wait.Next = null;
-                if (wait.Current is { IsHosted: true } element && element.Key == key && seen.Add(element))
+                if (wait.Current is { } element && element.Key == key && CanTakePicture(element) && seen.Add(element))
                 {
                     if (tail is null) head = wait;
                     else tail.Next = wait;
@@ -534,7 +537,8 @@ public sealed partial class ApertureApp
         _artWaitsMoved.Clear();
     }
 
-    /// <summary>For the tests: the waits held, and the elements in the window they wait in.</summary>
+    /// <summary>For the tests: the waits held, and the elements they wait in that can still take their
+    /// picture: in the window, or on the page kept for Back.</summary>
     internal (int Waits, int Elements) ArtWaitCounts
     {
         get
@@ -545,14 +549,15 @@ public sealed partial class ApertureApp
                 for (var wait = chain; wait is not null; wait = wait.Next)
                 {
                     waits++;
-                    if (wait.Current is { IsHosted: true } element && element.Key == key) elements.Add(element);
+                    if (wait.Current is { } element && element.Key == key && CanTakePicture(element)) elements.Add(element);
                 }
             return (waits, elements.Count);
         }
     }
 
     /// <summary>
-    /// A picture landed for these waits. The elements still waiting for it in the window take it,
+    /// A picture landed for these waits. The elements still waiting for it in the window (or on the page
+    /// kept for Back) take it,
     /// as a make would draw it (<see cref="PictureLook"/>). That marks their layout up to the root,
     /// and the next frame lays out the element and the boxes above it again, measuring nothing
     /// beside them: a library card's landing 9 elements and 10 measures, where the build it replaces
@@ -567,7 +572,7 @@ public sealed partial class ApertureApp
         bool build = false;
         for (var wait = waits; wait is not null; wait = wait.Next)
         {
-            if (wait.Current is not { IsHosted: true } element || element.Key != key) continue;
+            if (wait.Current is not { } element || element.Key != key || !CanTakePicture(element)) continue;
             if (picture is not null)
             {
                 ShowPicture(element, picture);

@@ -86,8 +86,12 @@ public sealed partial class ApertureApp
 
         var items = GridItems;
         // A grid opening where its visit left it shows the rows there; its first card on screen is the
-        // first of the first whole one.
-        float openAt = _gridList.Current is not { IsHosted: true } ? _gridArrivalScrollY : -1f;
+        // first of the first whole one. A grid kept for Back (ApertureApp.KeptPage.cs) is the list on
+        // screen, where it was left.
+        bool shownAgain = _gridShownAgain && _gridList.Current is { IsHosted: true };
+        _gridShownAgain = false;
+        float openAt = _gridList.Current is not { IsHosted: true } ? _gridArrivalScrollY
+            : shownAgain ? _gridList.Current.ScrollOffsetY : -1f;
         int firstOnScreen = openAt > 0 ? (int)MathF.Ceiling(openAt / rowStride - 0.01f) * perRow : 0;
         // What the arrows walk in this view, and how many fit across; Back or Forward with no cursor
         // starts it on that card.
@@ -100,6 +104,13 @@ public sealed partial class ApertureApp
         {
             _cursorIndex = Math.Min(firstOnScreen, items.Count - 1);
             _pendingCursorFocus = true;
+        }
+        if (shownAgain)
+        {
+            // As a list made to open there: the cursor is on screen or nowhere, and the builds after
+            // leave the grid where it is until a key moves it (OpenGridWhereItWasLeft).
+            _gridCursorShown = (CursorIndex, perRow, rowStride);
+            _gridArrivalScrollY = -1;
         }
 
         if (items.Count == 0)

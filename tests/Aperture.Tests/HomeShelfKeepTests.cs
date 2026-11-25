@@ -116,12 +116,13 @@ public class HomeShelfKeepTests
         });
     }
 
-    /// <summary>Another view lets Home go (plan 17 round 10). The shelves and cards Home keeps are held
-    /// weakly (KeptElements), and the scratch list of a shelf's cards is emptied once the shelves are
-    /// made: left full, it held the last shelf's cards, and through them the whole Home its build made,
-    /// behind Settings. Back on Home every shelf is there.</summary>
+    /// <summary>Another view keeps Home only as the one page Back returns to, and lets it go once another
+    /// page is kept in its place (plan 17 round 10, and round 19's kept page). The shelves and cards Home
+    /// keeps are held weakly (KeptElements), and the scratch list of a shelf's cards is emptied once the
+    /// shelves are made: left full, it held the last shelf's cards, and through them the whole Home its
+    /// build made, behind every view after it. Back on Home every shelf is there.</summary>
     [Fact]
-    public void AnotherView_LetsHomeGo()
+    public void AnotherView_KeepsHomeForBack_UntilAnotherPageIsKept()
     {
         Host((session, app, _) =>
         {
@@ -130,11 +131,20 @@ public class HomeShelfKeepTests
 
             app.Navigate(new Route(ApertureView.Settings));
             Settle(session);
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-            GC.Collect();
+            Collect();
+            Assert.Equal(ApertureView.Home, app.KeptRoute?.View);
+            Assert.All(home, shelf => Assert.True(shelf.IsAlive, "Home was not kept for Back"));
 
+            // A library opened and left: it is the page kept now, and Home goes.
+            app.Navigate(new Route(ApertureView.Library, "lib0", "Shelf 0"));
+            session.PumpUntil(() => Descendants(Root(session)).Any(e => e.AutomationId == "card-m000"), TimeSpan.FromSeconds(10));
+            Settle(session);
+            app.Navigate(new Route(ApertureView.Settings));
+            Settle(session);
+            Collect();
+            Assert.Equal(ApertureView.Library, app.KeptRoute?.View);
             Assert.All(home, shelf => Assert.False(shelf.IsAlive, "a Home shelf outlived the view"));
+
             app.Navigate(new Route(ApertureView.Home));
             Settle(session);
             Assert.Equal(6, Shelves(session).Count);
@@ -142,14 +152,22 @@ public class HomeShelfKeepTests
         });
     }
 
+    private static void Collect()
+    {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+    }
+
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private static WeakReference[] WeakShelves(HeadlessSession session) =>
         Shelves(session).Select(s => new WeakReference(s)).ToArray();
 
-    /// <summary>Another view lets Home go once a key moved the cursor (plan 17 round 11). The cursor's card
-    /// is the one card a ref holds, and through its parents it held the whole of Home behind Settings; a
-    /// build that leaves it out of the window lets it go. Back on Home the ring is on the card it was on,
-    /// and the next key moves it on and hands the keyboard over, as before.</summary>
+    /// <summary>Another view lets Home go once a key moved the cursor and the page kept for Back is let go
+    /// of, here by a refresh (plan 17 round 11). The cursor's card is the one card a ref holds, and through
+    /// its parents it held the whole of Home behind Settings; a build that leaves it out of the window lets
+    /// it go. Back on Home the ring is on the card it was on, and the next key moves it on and hands the
+    /// keyboard over, as before.</summary>
     [Fact]
     public void AnotherView_AfterTheCursorMoved_LetsHomeGo()
     {
@@ -160,9 +178,11 @@ public class HomeShelfKeepTests
 
             app.Navigate(new Route(ApertureView.Settings));
             Settle(session);
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-            GC.Collect();
+            Assert.Equal(ApertureView.Home, app.KeptRoute?.View);
+            app.Refresh();
+            Settle(session);
+            Assert.Null(app.KeptRoute);
+            Collect();
 
             Assert.False(home.IsAlive, "Home outlived the view through the cursor's card");
             app.Navigate(new Route(ApertureView.Home));

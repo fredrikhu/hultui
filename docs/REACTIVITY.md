@@ -1170,6 +1170,28 @@ for speed:
   Discovery map behind the Requests view, 8 MB at 2,000 endpoints. Now the frame that removes the scroll
   view lets go of it, as do an overlay that closes with it and a new root. An app has nothing to do; a
   retention check that wheels before it switches views measured the latch before this, not the app.
+- **The exception: one page kept for Back, bounded** (round 19, the user's choice on question 79).
+  Aperture's Back made the whole page again, Home or a library's grid of 300 films, about 290 KB and 290
+  elements, where opening an item's page was 13 to 135 KB. Now the last Home or grid left is kept out of
+  the window, and shown again on Back, Escape, the mouse's back button, Forward, a number key or the rail
+  (`ApertureApp.KeptPage.cs`). It is moved, not removed: `AddChild` under a holder no window ever shows
+  fires no lifecycle event, so the page stays mounted and its shelf parts keep their hosts (removed, each
+  part would build again as it came back). Nothing in it is hosted, since `IsHosted` walks to the
+  holder, so while it is away `KeptElements` hands nothing of it back, and the window neither draws it,
+  hit-tests it, gives it the keyboard nor reads it out (take the keyboard off it as it leaves). It goes
+  back into the window before its build, in place of the page being left, so that build is an ordinary
+  build of the page on screen: what did not change is handed back, a shelf builds only when its heading
+  or a card on its page moved, the grid keeps its rows and where it was scrolled, and what the data
+  changed while away is made again. What makes it bounded, where the holders above were not: **one
+  page**, about 0.27 MB at 300 films (another page left takes its place); **let go of** (removed from its
+  holder, so unmounted as a replaced view is) on a sign-out or sign-in, a change of display scale or
+  theme, a refresh or a played film (the data's generation moves), and when another library, sort or
+  filter replaces the grid's list; and its picture waits stay only while it is kept ("Let go of a wait
+  whose element left the window", above). Headless (JIT, 1,440×900, 300 films): Back to Home 294–298 →
+  15.8 KB, 297 → 7 elements made, 6 → 0 shelf builds; Back to the grid 287 → 35 KB, 292 → 32 elements, 6
+  → 0 rows; the first Back after cursor keys also makes the cards the ring moved between with no build
+  (47 and 43 KB). The heap after 100 open-and-Back cycles is the same back on the page (5.89–5.91 MB
+  against 5.89) and 0.27–0.28 MB more on an item's page, the kept page.
 
 To find a holder: take a weak reference to an element of the view, switch views, collect
 (`GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();`), and if it is alive, walk the app's fields
@@ -1303,8 +1325,11 @@ stalls never ending, stays at 1.36–1.86 MB (the healthy run's 1.35–1.81). **
 elements it hands back are out of the tree (`IsHosted` false), and an element just made is out of it
 until the build is patched in; a prune there took the waits of live cards, which kept their glyph.
 After a frame an element out of the window never comes back: `KeptElements` hands back only what the
-window holds, and a part whose host left is made again by its next `Mount()`. A download also has a
-deadline that covers its body (`PosterCache.Deadline`), so a stall ends as a failure.
+window holds, and a part whose host left is made again by its next `Mount()`. The one exception is the
+page Aperture keeps for Back ("A ref into a view keeps the whole view", round 19): it comes back as it
+was, so its waits stay while it is kept and its pictures go into it when they land, and they go with the
+first prune after it is let go of. A download also has a deadline that covers its body
+(`PosterCache.Deadline`), so a stall ends as a failure.
 
 ---
 

@@ -15,6 +15,9 @@ namespace Aperture;
 /// opened, ringed and with the keyboard. A page opened again from the rail starts where its last
 /// visit left it; one never visited starts at the top, its first card with the cursor and the
 /// keyboard.</para>
+///
+/// <para>The last Home or library left is kept as it was, and comes back on Back, Forward or the rail
+/// rather than being made again (ApertureApp.KeptPage.cs): Home also keeps how far it was scrolled.</para>
 /// </summary>
 public sealed partial class ApertureApp
 {
@@ -80,6 +83,7 @@ public sealed partial class ApertureApp
             _at = _history.Count - 1;
         }
         Arrive(_history[_at]);
+        ShowKeptPage(_history[_at]);
         Rerender();
     }
 
@@ -94,6 +98,7 @@ public sealed partial class ApertureApp
         Leave();
         _at--;
         Arrive(_history[_at]);
+        ShowKeptPage(_history[_at]);
         Rerender();
         return true;
     }
@@ -105,6 +110,7 @@ public sealed partial class ApertureApp
         Leave();
         _at++;
         Arrive(_history[_at]);
+        ShowKeptPage(_history[_at]);
         Rerender();
         return true;
     }
@@ -113,6 +119,7 @@ public sealed partial class ApertureApp
     /// to another server or another user.</summary>
     private void ResetHistory()
     {
+        DropKeptPage();
         _history.Clear();
         _history.Add(new Visit(new Route(ApertureView.Home)));
         _at = 0;
@@ -152,7 +159,8 @@ public sealed partial class ApertureApp
     }
 
     /// <summary>Remembers where the cursor is on the page being left, and how far its grid is
-    /// scrolled: the grid on screen is a library's, as nothing else shows one.</summary>
+    /// scrolled: the grid on screen is a library's, as nothing else shows one. Home or a library is
+    /// kept as it is for the way back (ApertureApp.KeptPage.cs).</summary>
     private void Leave()
     {
         var visit = _history[_at];
@@ -160,6 +168,7 @@ public sealed partial class ApertureApp
         visit.CursorIndex = _cursorKey.Length > 0 ? _cursorIndex : -1;
         visit.GridScrollY = visit.Route.View == ApertureView.Library && _gridList.Current is { IsHosted: true } grid
             ? grid.ScrollOffsetY : -1;
+        KeepPage(visit);
     }
 
     /// <summary>
