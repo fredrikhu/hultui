@@ -1,8 +1,9 @@
 # App lifecycle — design note
 
-**Status (2026-11-25): proposal, nothing built. §3 adds public API and needs the user's OK
-before any of it lands.** Plan 20, phase 2 ([plan](../plans/20-mobile-support.md)). Written
-from what the Android spike measured (`spikes/AndroidHello/README.md`, branch
+**Status (2026-11-25): design approved, nothing built.** The user approved §3's API as
+proposed: the names `EnteringBackground` and `EnteredForeground`, media pausing by default, and
+`LifecycleState` on every platform (§6). Plan 20, phase 2 ([plan](../plans/20-mobile-support.md)).
+Written from what the Android spike measured (`spikes/AndroidHello/README.md`, branch
 `claude/android-spike`). Where something was not measured, this note says so.
 
 A phone app is put in the background, brought back, rotated and squeezed for memory, and may be
@@ -34,6 +35,15 @@ These are SDL's events, logged by an event watch, on an API 35 emulator:
   nothing. Context loss was not seen, but EGL allows it, and devices differ.
 - **`LOW_MEMORY` arrives on every Home.** It is Android's `onTrimMemory`, which SDL forwards at
   any level, so it means "the system would like memory back", not "you are about to die".
+- **HultUI's UI thread is stopped in the background.** With `SDL_HINT_ANDROID_BLOCK_ON_PAUSE`
+  on (SDL's default), SDL parks its thread, HultUI's UI thread, until the app returns. The
+  spike's 3-second timer posts to the UI thread. The tick due 1.4 s into the background (at
+  3.16 s) ran only at the moment of return (5.12 s). Posted work, `await` continuations and
+  timers on the UI thread all wait out the background.
+- **When SDL pauses.** In the log, SDL paused (`nativePause`) when the surface was destroyed,
+  before `onStop`, not at `onPause`. SDL's activity pauses on `onPause` only on Android older
+  than 7 (multi-window). So a paused activity that keeps its surface is not "background" to
+  SDL. That is what picture-in-picture is (§7). Picture-in-picture itself was not tried.
 
 ## 2. What HultUI does, with no new API
 
@@ -80,8 +90,22 @@ Linux, where SDL sends none of these events.
    returns. Events pushed from other threads go through the queue as now.
 7. **The Android activity's part** (in the future `HultUI.Platform.Android`, plan 20 §6 item 4):
    - turn off the default focus highlight on SDL's views (spike finding 7)
-   - keep `SDL_HINT_ANDROID_BLOCK_ON_PAUSE`
    - leave the back key to its own note
+8. **SDL must not stop the UI thread: `SDL_HINT_ANDROID_BLOCK_ON_PAUSE=0`.** The background
+   gate (item 2) is what keeps HultUI off the GPU, so SDL's own block is not needed for that. The
+   block would stop the UI thread, and with it:
+   - network completions and timers, so Aperture's requests would finish only on return
+   - the media layer's events
+   - later, audio with the screen locked (§7)
+
+   An idle HultUI loop parks in `WaitForEvents` and costs nothing, so a running UI thread in the
+   background is not a battery cost by itself. **Verify in phase 2**, with the spike's timer:
+   - posted work runs in the background
+   - nothing is drawn there
+   - return still works
+
+   SDL's companion hint that pauses SDL's own audio does not matter here: mpv has its own
+   audio output.
 
 ## 3. Public API proposal (needs the user's OK)
 
@@ -112,6 +136,7 @@ public event Action? Terminating;
 ```csharp
 namespace HultUI.Core.Platform;
 
+/// <summary>Where the app is. More states may come (§7), so a switch over it needs a default.</summary>
 public enum AppLifecycleState { Foreground, Background }
 
 /// <summary>A platform that tells the application when it leaves and returns to the screen,
@@ -148,7 +173,7 @@ An app that wants to save on the desktop too saves in `Window.CloseRequested`, a
 
 - **Headless:**
   - no frame drawn or presented while in the background, even with tweens running and posted
-    work arriving
+    work arriving, while the posted work itself still runs there (§2, item 8)
   - two frames after `EnterForeground`, the whole window both times
   - event order, and handlers running on the UI thread
   - after `SignalLowMemory`, the caches empty (counters the caches already keep), then the event
@@ -164,13 +189,44 @@ An app that wants to save on the desktop too saves in `Window.CloseRequested`, a
 About a week for §2 items 1–3 and 5 with headless tests (S/M). Item 4 (context loss) takes days
 more and needs a way to provoke it. §3 is small once its shape is agreed.
 
-## 6. Open questions for the user
+## 6. Decisions (2026-11-25, the user took every recommendation)
 
-1. **The API in §3**: these names and this shape? `EnteringBackground` and `EnteredForeground`
-   say what happens on every platform. The WinUI-style alternative is `Suspending` and `Resumed`.
-2. **Media**: should `HultUI.Media` pause playback when the app enters the background, unless
-   the app opts in to background audio? That opt-in would be its own API item in phase 5.
-   Recommended: pause by default.
-3. **Should `Application.LifecycleState` be readable on the desktop** (always `Foreground`),
-   or exist only where it can change? Recommended: always there, so app code needs no platform
-   checks.
+1. **The API in §3, as written.** `EnteringBackground` and `EnteredForeground`, not WinUI's
+   `Suspending` and `Resumed`: they say what happens on every platform.
+2. **`HultUI.Media` pauses playback when the app enters the background**, unless the app opts in
+   to background audio. That opt-in is its own API item, later (§7).
+3. **`Application.LifecycleState` is there on every platform**, always `Foreground` on the
+   desktop, so app code needs no platform checks.
+
+## 7. Later: picture-in-picture and playing with the screen locked
+
+The user wants both, much later: a floating video window like YouTube's, and audio that goes on
+with the screen locked. Neither is built now. This section checks they fit what is built now.
+
+**Picture-in-picture fits the design.** Android shows a picture-in-picture activity paused but
+not stopped, and its surface lives on. By the log order in §1, SDL does not treat that as
+background. So the app stays `Foreground` and goes on drawing, now at the floating window's
+size, which is an ordinary resize with the settle redraw (§2, item 3). It needs, then:
+- `supportsPictureInPicture` in the manifest; the spike's `ConfigurationChanges` already list
+  the size changes it causes
+- a way to enter picture-in-picture
+- its playback controls (Android's remote actions)
+- probably a `PictureInPicture` member of `AppLifecycleState`, or a window property, so the
+  app shows only the video
+
+That member is why the enum says more states may come. Not tried in the spike.
+
+**Playing with the screen locked changes one thing now: SDL must not stop the UI thread**
+(§2, item 8). A locked screen stops the activity and destroys its surface, exactly like Home,
+so the app is in `Background` and draws nothing. Audio can go on only if:
+- **The UI thread runs.** That is item 8, and the reason it is in this design rather than later.
+- **mpv is told to stop video** and keep audio. libmpv's render API waits for the app to draw
+  frames, and in the background nothing draws them. On `EnteringBackground`, a player that plays
+  in the background switches to audio only (mpv's `vid=no`). On `EnteredForeground` it switches
+  video back on. Both happen inside `HultUI.Media`, in handlers of this design's events, before
+  the gate closes. That is the order §2 already gives.
+- **Android allows it.** That takes a foreground service of type `mediaPlayback` with its
+  notification, and a media session for the lock screen and headset buttons. This is platform
+  glue for `HultUI.Platform.Android` and API for the opt-in. Both are later items.
+
+Nothing else in §2 or §3 needs to change for either feature.
