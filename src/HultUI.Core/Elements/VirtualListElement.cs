@@ -928,18 +928,47 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     }
 
     /// <inheritdoc/>
-    /// <remarks>The current item's row (its cell in <see cref="ListFlow.Columns"/>) while any of it
-    /// is in view; the list's own box otherwise.</remarks>
+    /// <remarks>The row (its cell in <see cref="ListFlow.Columns"/>) of the item the keyboard is on —
+    /// <see cref="CurrentIndex"/>, else <see cref="SelectedIndex"/> — while any of it is in view; the
+    /// list's own box otherwise.</remarks>
     public override Rect ContextMenuAnchor
     {
         get
         {
-            if ((uint)CurrentIndex >= (uint)_items.Count) return base.ContextMenuAnchor;
-            var r = ItemRect(CurrentIndex);
-            var content = WindowContentBox;
-            var row = new Rect(content.X + r.X - ScrollOffsetX, content.Y + r.Y - ScrollOffsetY, r.Width, r.Height);
-            return row.IntersectsWith(content) ? row : base.ContextMenuAnchor;
+            int index = KeyboardIndex;
+            return index >= 0 && RowInView(index, out var row) ? row : base.ContextMenuAnchor;
         }
+    }
+
+    /// <summary>The realized row of the item the keyboard is on (<see cref="ContextMenuAnchor"/>'s);
+    /// when none of it is in view, scrolled in the least and realized now, where a click would find
+    /// it. Null when the list has no such item, or no room laid out to show it in.</summary>
+    internal override Element? KeyboardContextMenuRow()
+    {
+        int index = KeyboardIndex;
+        if (index < 0) return null;
+        if (!_activeElements.ContainsKey(index) || !RowInView(index, out _))
+        {
+            ScrollIndexIntoView(index);
+            UpdateContentSize();
+        }
+        return _activeElements.TryGetValue(index, out var row) ? row.Element : null;
+    }
+
+    /// <summary>The item the keyboard is on: <see cref="CurrentIndex"/>, else
+    /// <see cref="SelectedIndex"/>; -1 when neither is an item.</summary>
+    private int KeyboardIndex =>
+        (uint)_currentIndex < (uint)_items.Count ? _currentIndex
+        : (uint)_selectedIndex < (uint)_items.Count ? _selectedIndex : -1;
+
+    /// <summary>Item <paramref name="index"/>'s row in window coordinates, and whether any of it is
+    /// in view.</summary>
+    private bool RowInView(int index, out Rect row)
+    {
+        var r = ItemRect(index);
+        var content = WindowContentBox;
+        row = new Rect(content.X + r.X - ScrollOffsetX, content.Y + r.Y - ScrollOffsetY, r.Width, r.Height);
+        return row.IntersectsWith(content);
     }
 
     private Rect CellRect(int index, int rows) =>

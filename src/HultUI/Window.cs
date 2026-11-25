@@ -3232,7 +3232,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     if (_activeTextGroup is { } keyed && keyed.Version != before)
                         RepaintGroup(keyed);
                     // The Menu key and Shift+F10, when nothing took them: the context menu of the
-                    // key's target, or of its nearest ancestor that has one.
+                    // key's target, or of its nearest ancestor that has one; in a list, of the row
+                    // the keyboard is on first.
                     if (!down.StopPropagation && !down.Handled && _contextMenuElement is null
                         && IsContextMenuKey(down) && target is not null)
                         OpenContextMenu(target);
@@ -5072,14 +5073,29 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// <summary>
     /// Opens <paramref name="target"/>'s context menu (its own, or its nearest ancestor's) the
     /// way the Menu key does: against <see cref="Element.ContextMenuAnchor"/>, with the first
-    /// item highlighted and mnemonics shown. False when no menu opened.
+    /// item highlighted and mnemonics shown. A list opens the menu a right-click on the row of the
+    /// item the keyboard is on opens (its current item, else its selected one), scrolled into view
+    /// when it is off screen. False when no menu opened.
     /// </summary>
     public bool OpenContextMenu(Element target)
     {
-        var (owner, itemsProvider) = FindContextMenuOwner(target);
-        if (owner is null || itemsProvider is null) return false;
-        var items = itemsProvider();
-        if (items.Count == 0) return false;
+        // A list's row first (KeyboardContextMenuRow), then up from it, as a right-click on it looks;
+        // the list scrolls the row in to find it when it is off screen.
+        var scroll = target as ScrollViewElement;
+        float x = scroll?.ScrollOffsetX ?? 0f, y = scroll?.ScrollOffsetY ?? 0f;
+        var row = target.KeyboardContextMenuRow();
+        var (owner, itemsProvider) = FindContextMenuOwner(row ?? target);
+        var items = owner is null || itemsProvider is null ? null : itemsProvider();
+        if (items is not { Count: > 0 })
+        {
+            // Nothing opens: a list that scrolled to look goes back to where it was.
+            if (scroll is not null && (scroll.ScrollOffsetX != x || scroll.ScrollOffsetY != y))
+            {
+                scroll.ScrollOffsetX = x;
+                scroll.ScrollOffsetY = y;
+            }
+            return false;
+        }
         ShowContextMenu(items, default, onClosed: null, anchor: target.ContextMenuAnchor);
         return true;
     }

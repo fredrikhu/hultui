@@ -501,7 +501,9 @@ then Orca on Linux:
    "not checked" on a choice. A separator is skipped and not counted.
 3. Right: the next title's menu opens on its first item, said as in 1.
 4. Enter on an item runs it; Escape closes the menu and the reader goes back to the title.
-5. A right-click on a file opens its context menu; Down says the first item as in 1.
+5. A right-click on a file opens its context menu; Down says the first item as in 1. Shift+F10 or
+   the Menu key on a commit in Junction's History opens the commit's menu on its first item, said
+   as in 1; Escape says the commit again.
 6. A dropdown (the Fluent sample's "Never / When plugged in / Always"), opened with Down, Enter or
    a click: "list", then its value, "list item", as before this step.
 

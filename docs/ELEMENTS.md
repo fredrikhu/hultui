@@ -2034,8 +2034,11 @@ state is announced as a state and exposed through UIA's Toggle pattern and AT-SP
 
 **Menus from the keyboard.** The Menu key and Shift+F10 open the focused element's context menu
 (its own, or its nearest ancestor's) when no handler took the key, under
-`Element.ContextMenuAnchor` — the element's box, or a list's current row — with the first item
-highlighted. `Window.ContextMenuKeys` sets the keys (empty turns this off), and
+`Element.ContextMenuAnchor` — the element's box, or a list's keyboard row — with the first item
+highlighted. In a focused list the keyboard row comes first: the row of `CurrentIndex`, else of
+`SelectedIndex`, scrolled in when it is off screen, opens the menu a right-click on it opens (the
+row's own, never one of an element inside it), and the list scrolls back when nothing opens (see
+FOCUS.md, "Menus take keys, not focus"). `Window.ContextMenuKeys` sets the keys (empty turns this off), and
 `Window.OpenContextMenu(element)` opens a menu the same way from a command of the app's own.
 `ContextMenuItem.UseMnemonic` makes an `&` in `Label` mark its mnemonic (`"&Rename…"`, `&&` for an
 ampersand), underlined once the menu is used from the keyboard; it is opt-in because a label that
