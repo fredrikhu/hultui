@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Plan 20, phase 1: the smallest HultUI app on Android. A spike: not in the solution, not
+    packed, not built by CI. See README.md for how to build and run it and what it found.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net11.0-android</TargetFramework>
+    <!-- API 31 (Android 12): the minimum plan 20 settled on; the NDK's libicu.so starts there. -->
+    <SupportedOSPlatformVersion>31</SupportedOSPlatformVersion>
+    <RuntimeIdentifiers>android-x64;android-arm64</RuntimeIdentifiers>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationId>org.hultui.spike.androidhello</ApplicationId>
+    <ApplicationTitle>HultUI spike</ApplicationTitle>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>0.1</ApplicationDisplayVersion>
+    <!-- The default runtime (CoreCLR in .NET 11), as plan 20 decided. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\HultUI\HultUI.csproj" />
+  </ItemGroup>
+
+</Project>

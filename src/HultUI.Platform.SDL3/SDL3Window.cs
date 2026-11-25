@@ -403,9 +403,21 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         EnsureSDLInitialized();
 
         // Set OpenGL attributes for SkiaSharp compatibility
-        SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_CONTEXT_MINOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_CONTEXT_PROFILE_MASK, (int)SDL_GLProfile.SDL_GL_CONTEXT_PROFILE_CORE);
+        // SPIKE (plan 20, phase 1): Android has EGL and GL ES only. Asked for a desktop core
+        // profile, SDL looks for desktop GL and window creation fails ("Could not initialize
+        // OpenGL / GLES library"). GL ES 3.0 is what Skia's GLES backend wants.
+        if (OperatingSystem.IsAndroid())
+        {
+            SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+            SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_CONTEXT_MINOR_VERSION, 0);
+            SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_CONTEXT_PROFILE_MASK, (int)SDL_GLProfile.SDL_GL_CONTEXT_PROFILE_ES);
+        }
+        else
+        {
+            SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+            SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_CONTEXT_MINOR_VERSION, 3);
+            SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_CONTEXT_PROFILE_MASK, (int)SDL_GLProfile.SDL_GL_CONTEXT_PROFILE_CORE);
+        }
         SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_DOUBLEBUFFER, 1);
         // Skia wants a stencil (SkiaGLRenderSurface tells it 8 bits) and never a depth buffer.
         // Left alone, SDL asks for 16 bits of depth, and NVIDIA hands back 24 packed with the

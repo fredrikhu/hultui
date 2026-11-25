@@ -29,7 +29,10 @@ public sealed class SkiaGLRenderSurface : IRenderSurface, ISkiaExternalSurface, 
     /// surface does not. Null builds a fresh one, which the surface disposes with itself.</param>
     public SkiaGLRenderSurface(Func<string, IntPtr> glGetProcAddress, SkiaTextServices? text = null)
     {
-        _glInterface = GRGlInterface.CreateOpenGl(name => glGetProcAddress(name))
+        // SPIKE (plan 20, phase 1): a GL ES context needs Skia's GLES interface.
+        _glInterface = (OperatingSystem.IsAndroid()
+                ? GRGlInterface.CreateGles(name => glGetProcAddress(name))
+                : GRGlInterface.CreateOpenGl(name => glGetProcAddress(name)))
             ?? throw new InvalidOperationException("Failed to create SkiaSharp GL interface");
         _grContext = GRContext.CreateGl(_glInterface)
             ?? throw new InvalidOperationException("Failed to create SkiaSharp GR context");

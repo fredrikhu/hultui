@@ -72,7 +72,9 @@ Turning them on therefore takes **almost nothing**:
    `ResolvePackageAssets` with an empty `RuntimeIdentifier`, though, the target strips
    `libSDL3.so`. The guard is one condition on the target:
    `and '$(TargetPlatformIdentifier)' == ''`. The proof is `lib/x86_64/libSDL3.so` and
-   `libSkiaSharp.so` listed inside the APK.
+   `libSkiaSharp.so` listed inside the APK. **Checked in phase 1: the trap does not fire.**
+   Both libraries, and `libHarfBuzzSharp.so`, are in the APK for both ABIs, so no guard is
+   needed.
 3. **Rewrite the `ENVIRONMENT.md` sentence** "platforms HultUI does not run on" when mobile
    ships.
 
@@ -378,6 +380,18 @@ months, **XL** more. Each phase ends in something that runs and is tested, as th
 rounds did.
 
 ### Phase 1: Android spike (S)
+
+**Done 2026-11-25, on branch `claude/android-spike`; report in `spikes/AndroidHello/README.md`.**
+On an API 35 x86_64 emulator, HultUI draws through GL ES and through the software renderer, at
+the right density (411×914 DIP at 2.625). Taps click, and the soft keyboard opens and types.
+Release APK: 35.9 MB for both ABIs. First frame: about 1.0 s after process start, which looks
+JIT-bound. Exit criteria met except Home-and-back, whose failure is written down:
+- **Lost frames after a surface change.** The first frame drawn after returning from the
+  background, or after a rotation, never shows. One more redraw a frame later fixes it.
+- **Focus highlight.** Android's default focus highlight washes the whole app white after
+  typing and Back. The fix is to turn the highlight off on SDL's views.
+- **Corrections to this plan.** The trim-target trap (§1, item 2) does not fire. ICU already
+  loads through the private `libicuuc.so`, and the public `libicu.so` also works (§2.7).
 
 A HultUI sample that draws and takes touch on the Android emulator. Spike code only, on its own
 branch under `spikes/AndroidHello/`, as `spikes/CefOsr` and `spikes/WebView2Capture` were.
