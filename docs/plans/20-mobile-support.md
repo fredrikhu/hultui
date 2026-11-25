@@ -1,8 +1,9 @@
 # Mobile support: Android and iOS
 
 **Status (2026-11-25): scoping only. Nothing is built. Decided the same day: Android only for
-now; iOS is deferred, with no Apple devices to build or test on. The other decisions at the end
-are still open.**
+now; iOS is deferred, with no Apple devices to build or test on. The other decisions in §6 are
+settled too: the phase-1 spike runs first and decides the rest, with phone and TV as targets,
+API 31 as the minimum, CoreCLR as the runtime, and signed APKs on GitHub releases.**
 
 HultUI runs on Windows and Linux. This plan asks what it would take to run HultUI apps on
 Android and iOS: what already works on those platforms, what the framework lacks, which apps
@@ -382,7 +383,8 @@ A HultUI sample that draws and takes touch on the Android emulator. Spike code o
 branch under `spikes/AndroidHello/`, as `spikes/CefOsr` and `spikes/WebView2Capture` were.
 
 - `dotnet workload install android`, and a `net11.0-android` app (x86_64 and arm64) that
-  references `src/HultUI` and friends as `net11.0` projects
+  references `src/HultUI` and friends as `net11.0` projects. It sets
+  `SupportedOSPlatformVersion` to 31 and keeps the default CoreCLR runtime (§6)
 - an activity subclassing the bound `SDLActivity`, running a small app (a counter button, a
   long `ScrollView`, a `TextInput`) on SDL's thread
 - first pixels through the software renderer (`HULTUI_RENDERER=software`), which needs no GL
@@ -408,8 +410,8 @@ branch under `spikes/AndroidHello/`, as `spikes/CefOsr` and `spikes/WebView2Capt
 - **GL ES** as a proper path, not a spike patch.
 - **Lifecycle (§2.5).** Stop rendering, rebuild GPU state, flush saves, purge caches.
 - **Safe areas and the IME inset (§2.6, §2.4).**
-- **ICU (§2.7).** NDK `libicu.so` or bundled, decided by the minimum API level. `LineBreaker`
-  made to degrade the way `BidiAnalyzer` does.
+- **ICU (§2.7).** NDK `libicu.so`, since the minimum is API 31 (§6). `LineBreaker` made to
+  degrade the way `BidiAnalyzer` does.
 - **Smaller items.** Emoji and default fonts, the back key, and the §2.11 audit.
 - **A CI job** that builds the APK and runs the phase-1 smoke test on the emulator.
 
@@ -458,9 +460,11 @@ keyboard. Caret placement, word selection, handles and the edit menu for `TextIn
   `hwdec=mediacodec` with mpv's AImageReader GL interop where it works, else
   `mediacodec-copy`. Audio through AAudio.
 - **App changes.** The network-security config for `http://` LAN servers, the Keystore token
-  store, and phone and tablet layouts (Aperture's layouts are desktop-sized). Optionally an
-  Android TV build (§3).
-- **Distribution.** A signed APK as a GitHub release artifact (`aperture-android-vX.Y.Z`).
+  store, and phone and tablet layouts (Aperture's layouts are desktop-sized).
+- **An Android TV build** (§3, chosen in §6). It needs phase 2 and the mpv work, but no touch,
+  so it can ship ahead of phases 3–4.
+- **Distribution.** A signed APK as a GitHub release artifact (`aperture-android-vX.Y.Z`). The
+  signing key lives in CI secrets, used only on tag and dispatch runs, never on pull requests.
 
 **Exit criteria**
 
@@ -527,15 +531,21 @@ Deferred on 2026-11-25, with no Apple devices. Kept as the plan for when iOS ret
 - A mobile WebView as a native overlay (§2.10).
 - Play Store and App Store listings.
 
-## 6. Open questions for the user
+## 6. Decisions
+
+Settled on 2026-11-25: the user took the recommendation on every question. Questions 6 and 10
+are deferred with iOS.
 
 1. **Go or no-go, and when.** Against what is left of plan 17 (q82/q83 open, round 20 next) and
-   the app-team findings not yet built.
+   the app-team findings not yet built. **Decided: the phase-1 spike runs first, and its report
+   decides whether phases 2 and later go ahead.**
 2. **Android only, or iOS too? Decided 2026-11-25: Android only.** There are no Apple devices,
    so iOS waits until there is a Mac to build on.
 3. **Which form factors?** Phone, tablet, Android TV or Google TV (§3: a TV build could ship
-   before touch is done).
-4. **Public API.** Each of these needs an OK, and its shape is worth a short design note first:
+   before touch is done). **Decided: phone and TV. Tablets follow from the phone layouts.**
+4. **Public API. Decided: each item gets a short design note, and lands only after the user OKs
+   its shape. Lifecycle events and pointer identity go first, because phases 2 and 3 need
+   them.** The items:
    - pointer ID and type on pointer events, plus touch and pen input events
    - gesture events or recognizers (tap, long press, pan, pinch) and their element hooks
    - `Window.SafeArea` and a visible-area value for the soft keyboard
@@ -547,17 +557,21 @@ Deferred on 2026-11-25, with no Apple devices. Kept as the plan for when iOS ret
    - the Android Keystore credential store
 5. **Distribution.** Sideloaded APKs on GitHub releases only, or Play Store, F-Droid,
    TestFlight and App Store? Store accounts cost money (Google: one-time fee; Apple: yearly), and
-   store review shapes permissions and licensing.
+   store review shapes permissions and licensing. **Decided: signed APKs on GitHub releases
+   first, with the signing key in CI secrets. Stores later, if at all.**
 6. **Video on iOS (deferred with iOS).** mpv through GL ES to Metal sharing, which keeps one backend and is the
    riskiest technically, or AVFoundation with server-side transcoding, which means a second
    backend and needs a Jellyfin server that can transcode. Related: **LGPL libmpv in an App
    Store app**. The LGPL lets users replace the library, and how that squares with App Store
    terms is a legal question to settle before phase 8, not a technical one.
 7. **Runtime.** CoreCLR (the .NET 11 default) or NativeAOT on Android. NativeAOT is what the
-   desktop apps ship, but it is still experimental on Android.
+   desktop apps ship, but it is still experimental on Android. **Decided: CoreCLR. The spike
+   measures startup on it, and NativeAOT is looked at again once it leaves experimental.**
 8. **Minimum OS versions.** Android API 31 makes ICU free (§2.7), and .NET 11's CoreCLR needs
-   API 24 or later. The iOS minimum follows the .NET 11 workload.
-9. **Devices.** Which phone (and tablet) to test on.
+   API 24 or later. The iOS minimum follows the .NET 11 workload. **Decided: API 31 (Android
+   12). Phones on Android 11 or older are not supported.**
+9. **Devices.** Which phone (and tablet) to test on. **Decided: the emulator for phase 1. From
+   phase 2, one mid-range phone with an Adreno or Mali GPU, plus a Google TV device.**
 10. **macOS desktop (deferred with iOS: it needs a Mac too).** The Metal renderer and the iOS work give most of a macOS port. In scope
     or not?
 
