@@ -165,6 +165,14 @@ public sealed partial class HeadlessWindow
         Window.OnWindowResized();
     }
 
+    /// <summary>
+    /// Simulates the system's bars and cutouts, as on Android: <c>Window.SafeArea</c> becomes
+    /// <paramref name="insets"/> (layout units), <c>Window.SafeAreaChanged</c> is raised at once,
+    /// and the next pump lays the root out inside it unless <c>Window.LaysOutInSafeArea</c> is off
+    /// (docs/design/ANDROID-PLATFORM.md §3). Zero, the default, is the desktop.
+    /// </summary>
+    public void SetSafeArea(HultUI.Core.Primitives.Thickness insets) => _platform.SetSafeArea(insets);
+
     /// <summary>Changes the display scale (DPI), keeping the layout-unit size constant.</summary>
     public void SetScale(float scale)
     {

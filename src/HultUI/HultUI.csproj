@@ -25,6 +25,10 @@
     <!-- A media player pauses when its application enters the background (Application.Current,
          docs/design/APP-LIFECYCLE.md §6). -->
     <InternalsVisibleTo Include="HultUI.Media" />
+    <!-- The Android activity registers the platform's services: the Keystore secret store
+         (CredentialStore.UsePlatformStore) and the system's back (Application.SystemBack).
+         docs/design/ANDROID-PLATFORM.md §2. -->
+    <InternalsVisibleTo Include="HultUI.Platform.Android" />
   </ItemGroup>
 
   <ItemGroup>

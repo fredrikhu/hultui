@@ -695,6 +695,90 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// </summary>
     public event Action? Resized;
 
+    // ──── Safe area (docs/design/ANDROID-PLATFORM.md §3) ────
+
+    private Thickness _safeArea;
+    private bool _laysOutInSafeArea = true;
+
+    /// <summary>
+    /// The window's edges the system covers (the status bar, the gesture bar, a display cutout),
+    /// in layout units. Zero on the desktop. On Android, which draws apps edge to edge, it is
+    /// what keeps content clear of the bars: see <see cref="LaysOutInSafeArea"/>.
+    /// </summary>
+    public Thickness SafeArea => _safeArea;
+
+    /// <summary>Raised on the UI thread when <see cref="SafeArea"/> changes: a rotation, the bars
+    /// shown or hidden. The new layout follows in the next frame.</summary>
+    public event Action? SafeAreaChanged;
+
+    /// <summary>
+    /// Whether the root is laid out inside <see cref="SafeArea"/> (true, the default), with the
+    /// window's background behind the system's bars, or across the whole window, for an app that
+    /// draws behind the bars itself (a full-bleed video, a hero image) and pads its own controls by
+    /// <see cref="SafeArea"/>. Overlays (menus, dialogs, toasts) stay inside the safe area either
+    /// way. Makes no difference where the safe area is zero.
+    /// </summary>
+    public bool LaysOutInSafeArea
+    {
+        get => _laysOutInSafeArea;
+        set
+        {
+            if (value == _laysOutInSafeArea) return;
+            _laysOutInSafeArea = value;
+            _root?.MarkLayoutDirty();
+            _root?.MarkPaintDirty();
+        }
+    }
+
+    /// <summary>Where the root is laid out, in window space: the safe area, or the whole window.</summary>
+    internal Rect RootArea
+    {
+        get
+        {
+            float w = PlatformWindow.LayoutWidth, h = PlatformWindow.LayoutHeight;
+            if (!_laysOutInSafeArea || _safeArea == default) return new Rect(0, 0, w, h);
+            var s = _safeArea;
+            return new Rect(s.Left, s.Top, Math.Max(0, w - s.Horizontal), Math.Max(0, h - s.Vertical));
+        }
+    }
+
+    private void LayOutRoot()
+    {
+        var area = RootArea;
+        _layoutEngine.PerformLayout(_root!, area.X, area.Y, area.Width, area.Height);
+    }
+
+    private void OnPlatformSafeAreaChanged()
+    {
+        var now = ((ISafeAreaSource)PlatformWindow).SafeArea;
+        if (now == _safeArea) return;
+        _safeArea = now;
+        if (_root is not null)
+        {
+            _root.MarkLayoutDirty();
+            _root.MarkPaintDirty();
+        }
+        // The overlays are kept inside the safe area: placed again, as at a new size of the window.
+        for (int i = 0; i < _overlays.Count; i++)
+        {
+            _overlays[i].Content.MarkLayoutDirty();
+            _overlays[i].WindowResized = true;
+        }
+        SafeAreaChanged?.Invoke();
+    }
+
+    /// <summary>An overlay's place moved inside the safe area, when there is one and the overlay
+    /// fits; otherwise as given, so nothing changes on the desktop.</summary>
+    private (float X, float Y) InsideSafeArea(float x, float y, float width, float height)
+    {
+        if (_safeArea == default) return (x, y);
+        var s = _safeArea;
+        float right = PlatformWindow.LayoutWidth - s.Right, bottom = PlatformWindow.LayoutHeight - s.Bottom;
+        if (width <= right - s.Left) x = Math.Clamp(x, s.Left, right - width);
+        if (height <= bottom - s.Top) y = Math.Clamp(y, s.Top, bottom - height);
+        return (x, y);
+    }
+
     /// <summary>
     /// Sets the smallest size the user may resize the window to, in
     /// density-independent (layout) units. Pass 0 for a dimension to leave it
@@ -888,6 +972,11 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         _devTools = new DevToolsOverlay(_perf);
         _a11yObserver = new AccessibilityObserverAdapter(this);
         PlatformWindow.InputReceived += FrameLog.On ? HandleInputEventLogged : HandleInputEvent;
+        if (platformWindow is ISafeAreaSource safeArea)
+        {
+            _safeArea = safeArea.SafeArea;
+            safeArea.SafeAreaChanged += OnPlatformSafeAreaChanged;
+        }
 
         if (platformWindow.Style == WindowStyle.Borderless && _chrome is { } chrome)
         {
@@ -2316,7 +2405,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         using (_tracer.Begin("Phase", "Layout"))
         {
             if ((_root.DirtyFlags & DirtyFlags.Layout) != 0)
-                _layoutEngine.PerformLayout(_root, PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight);
+                LayOutRoot();
         }
         _perf.EndLayout();
 
@@ -2343,7 +2432,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             }
             if ((_root.DirtyFlags & DirtyFlags.Layout) != 0)
             {
-                _layoutEngine.PerformLayout(_root, PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight);
+                LayOutRoot();
                 layoutWasDirty = true;
             }
             if (_overlays.Count > 0) overlayChanges |= PrepareOverlays(theme);
@@ -3287,8 +3376,36 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     }
                 }
 
+                // Back with a context menu open closes the menu, as Escape does, before an app's
+                // handler (a page's history) could take it under the menu.
+                if (key.IsDown && key.KeyCode == KeyCode.Back && _contextMenuElement is not null)
+                {
+                    HandleMenuKey(key with { KeyCode = KeyCode.Escape, Text = null });
+                    break;
+                }
+
                 // An open context menu takes its keys (HandleMenuKey) without taking the focus.
                 if (key.IsDown && _contextMenuElement is not null && HandleMenuKey(key)) break;
+
+                // Back (docs/design/ANDROID-PLATFORM.md §4): the app's handlers first, as any key;
+                // then what Escape would do where the keyboard is (close a dialog, a popover, a
+                // dropdown, leave full screen); and when Escape found nothing to do either, the
+                // system's own back, which on Android moves the app to the background.
+                if (key.IsDown && key.KeyCode == KeyCode.Back)
+                {
+                    var backTarget = KeyTarget();
+                    var back = NewKeyDown(key, backTarget);
+                    EventDispatcher.Dispatch(back, backTarget);
+                    if (back.StopPropagation || back.Handled) break;
+
+                    int overlaysBefore = _overlays.Count;
+                    var escape = NewKeyDown(key with { KeyCode = KeyCode.Escape, ScanCode = 0, Text = null }, backTarget);
+                    EventDispatcher.Dispatch(escape, backTarget);
+                    if (escape.StopPropagation || escape.Handled || _overlays.Count < overlaysBefore) break;
+
+                    Application.SystemBack?.Invoke();
+                    break;
+                }
 
                 // Tab / Shift+Tab focus traversal. Dispatch the key to the focused
                 // element first so an app can observe or intercept Tab; a handler
@@ -4039,7 +4156,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             }
             if ((_root.DirtyFlags & DirtyFlags.Layout) != 0)
             {
-                _layoutEngine.PerformLayout(_root, PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight);
+                LayOutRoot();
                 layoutWasDirty = true;
                 UpdateCaptionHeight();
             }
@@ -4704,6 +4821,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             : entry.FlipRightEdge is { } edge && edge - width >= 0 ? edge - width
             : Math.Max(0, vw - width);
         float y = entry.WantedY + content.Layout.Height > vh ? Math.Max(0, vh - content.Layout.Height) : entry.WantedY;
+        (x, y) = InsideSafeArea(x, y, width, content.Layout.Height);
         MoveOverlay(entry, x, y);
     }
 
@@ -4714,7 +4832,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         var content = entry.Content;
         var at = entry.Place!(new Size(content.Layout.Width, content.Layout.Height),
             new Size(PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight));
-        MoveOverlay(entry, at.X, at.Y);
+        var (x, y) = InsideSafeArea(at.X, at.Y, content.Layout.Width, content.Layout.Height);
+        MoveOverlay(entry, x, y);
     }
 
     public void CloseOverlay(OverlayHandle handle)

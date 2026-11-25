@@ -1,7 +1,11 @@
 # Android platform package, safe areas and the Back key — design note
 
-**Status (2026-11-25): proposal, nothing built. Each of §2, §3 and §4 adds public API and needs
-the user's OK before it lands.** Plan 20, phase 2 ([plan](../plans/20-mobile-support.md) §5).
+**Status (2026-11-25): design approved.** The user took every recommendation in §6:
+- the package and `HultUIActivity`, with the Keystore store behind `CredentialStore.Default`
+  and no new public type
+- `Window.SafeArea`, `SafeAreaChanged` and `LaysOutInSafeArea`, on by default
+- `KeyCode.Back`, then the topmost overlay, then the system's default
+- the names as written Plan 20, phase 2 ([plan](../plans/20-mobile-support.md) §5).
 This is the part of phase 2 that adds API. The rest is built on branch `claude/android-spike`:
 - the lifecycle
 - GL ES
@@ -35,7 +39,7 @@ assembly carries SDL's Java side. An app's activity becomes:
 
 ```csharp
 [Activity(Label = "Aperture", MainLauncher = true, Exported = true,
-    Theme = HultUIActivity.Theme, ConfigurationChanges = HultUIActivity.ConfigurationChanges)]
+    Theme = HultUIActivity.DefaultTheme, ConfigurationChanges = HultUIActivity.ConfigurationChanges)]
 public sealed class MainActivity : HultUIActivity
 {
     protected override void RunApp()
@@ -58,7 +62,7 @@ public abstract class HultUIActivity : Org.Libsdl.App.SDLActivity
         keyboard, navigation, UI mode, density, font scale, locale, layout direction */;
 
     /// <summary>A theme with no action bar, drawn edge to edge (the app pads by the safe area, §3).</summary>
-    public const string Theme = "@android:style/Theme.Material.NoActionBar";
+    public const string DefaultTheme = "@android:style/Theme.Material.NoActionBar";
 
     /// <summary>Builds and runs the app, on SDL's thread, which is HultUI's UI thread for the
     /// life of the process. Returning ends the activity.</summary>
@@ -177,3 +181,71 @@ About a week and a half:
 - **§4:** about two days.
 
 A device check on the emulator goes with each, through the spike.
+
+## 8. Built (2026-11-25)
+
+On branch `claude/android-spike`, with three changes against the note, each for a reason found
+while building it:
+
+1. **`HultUIActivity.DefaultTheme`, not `Theme`.** A constant named `Theme` would hide the
+   activity's own `Theme` (Android's `Resources.Theme`) from an app's code. The compiler warned
+   (CS0108).
+2. **The safe area is the system bars and the cutout, read by the activity, not SDL's.** SDL's
+   `SDL_GetWindowSafeArea` also takes out the system-gesture zones. On a Pixel 6 those are 78 px
+   down each side for Back, and the taller gesture strips top and bottom: a portrait phone lost
+   30 DIP of 411 on each side. Android's guidance is that content clears the bars and the cutout
+   (`systemBars | displayCutout`); the gesture zones matter only for what is dragged at the very
+   edge.
+   - The activity reads those insets as Android applies them, and hands them to `SDL3Window`
+     (`SetContentInsets`).
+   - It wakes the UI thread with SDL's own safe-area event, so every window reads them again.
+   - Without the activity (another host), SDL's area is used.
+3. **The status bar's icons follow the theme.** With this theme Android draws them white, which
+   vanished over HultUI's white background. The activity sets them dark over a light theme
+   (`Application.SystemBarsFollow`, an internal hook, raised as the app starts and whenever
+   `Application.Theme` changes).
+
+**What is in:**
+- **The package** (`src/HultUI.Platform.Android`): `HultUIActivity` and the internal
+  `AndroidKeystoreCredentialStore`.
+- **In `HultUI`:**
+  - `Window.SafeArea`, `SafeAreaChanged` and `LaysOutInSafeArea` (`RootArea`, and a layout origin
+    through `LayoutEngine`'s internal overload and `LayoutAudit`)
+  - overlays kept inside the safe area
+  - `KeyCode.Back`, then Escape's work, then `Application.SystemBack`
+  - `CredentialStore.Default` with an internal `UsePlatformStore`
+- **In the SDL window:** its safe area through the internal `ISafeAreaSource`;
+  `SDL_HINT_ANDROID_TRAP_BACK_BUTTON` on Android; `SDL_SCANCODE_AC_BACK` mapped to
+  `KeyCode.Back`.
+- **In the headless window:** `HeadlessWindow.SetSafeArea`.
+- **Docs:** `docs/ANDROID.md`, an app's guide, is in the site's table of contents.
+
+**Tests:**
+- **`SafeAreaTests`** (7): the root inside the safe area and across the window; clicks where it
+  is drawn; a context menu kept above the gesture bar; a rotation; an app padding its own toolbar.
+- **`BackKeyTests`** (5): the system's back; an app keeping it; a dropdown, a context menu (before
+  the app) and a dialog closed.
+- **Negative controls:** the root ignoring the safe area fails three tests; Back without
+  Escape's step fails the two closing tests.
+- **The suites:** Headless 1,981, Core 5,328, SDL3 92, Media 96. The solution builds.
+
+**On the emulator** (API 35, Pixel 6, `spikes/AndroidHello`):
+- **The safe area:**
+  - Portrait: top 48.8 DIP (the 128 px status bar), bottom 24 DIP (the 63 px gesture bar), sides 0.
+  - Landscape: top 24, left 48.8 (the cutout), bottom 24.
+  - Content clears the bars at full width, and the icons are dark and legible
+    (`results/j-safe-area-portrait.png`, `k-safe-area-landscape.png`).
+- **Back:**
+  - With nothing open, the app's handler heard it, then the app moved to the background, with
+    the process alive and the return hot.
+  - With the dropdown open, it closed the list and the app stayed (`results/l-dropdown-before-back.png`).
+- **The Keystore store:**
+  - A round trip of a non-ASCII secret, a delete, and an entry kept across launches.
+  - The file never holds the secret in the clear.
+
+**Left for later:**
+- **The Android CI job**, which waits for pushing.
+- **A real device.**
+- **Predictive back** (Android 14's preview).
+- **Haptics.**
+- **The IME inset**, phase 4.

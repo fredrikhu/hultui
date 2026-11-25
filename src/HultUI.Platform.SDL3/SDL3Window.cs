@@ -11,7 +11,7 @@ using static SDL.SDL3;
 
 namespace HultUI.Platform.SDL3;
 
-public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeDragSource, IWin32WindowHandle
+public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeDragSource, IWin32WindowHandle, ISafeAreaSource
 {
     private static bool _sdlInitialized;
     private WindowsDropTarget? _dropTarget;
@@ -651,6 +651,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         SDL_SyncWindow(_window);
         UpdateSize();
         NoteNormalBounds();
+        _safeArea = ReadSafeArea();
 
         IsOpen = true;
         StartupTrace.Mark("platform window ready");
@@ -975,6 +976,78 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// <summary>Every open SDL window, for what the platform does to all of them at once.</summary>
     internal static IEnumerable<SDL3Window> All => _registry.Values;
 
+    // ──── Safe area (docs/design/ANDROID-PLATFORM.md §3) ────
+
+    private Thickness _safeArea;
+    private Action? _safeAreaChanged;
+
+    Thickness ISafeAreaSource.SafeArea => _safeArea;
+
+    event Action? ISafeAreaSource.SafeAreaChanged
+    {
+        add => _safeAreaChanged += value;
+        remove => _safeAreaChanged -= value;
+    }
+
+    /// <summary>
+    /// SDL's safe area (<c>SDL_GetWindowSafeArea</c>: the part of the window clear of the status
+    /// bar, the gesture bar and a cutout, in window coordinates) as insets from each edge, in
+    /// layout units. Zero where SDL reports the whole window, which is every desktop window.
+    /// </summary>
+    private Thickness ReadSafeArea()
+    {
+        if (_window == null) return default;
+        // Android, through HultUI.Platform.Android: the bars and the cutout alone. SDL's own area
+        // also takes out the system-gesture zones (78 px down each side for Back on a Pixel 6, and
+        // the taller gesture strips top and bottom), which Android keeps for edge swipes, not
+        // content: 30 DIP of a 411 DIP phone lost on each side (measured on the emulator).
+        if (ContentInsets is { } px)
+        {
+            float k = InputScale;
+            return new Thickness(px.Top * k, px.Right * k, px.Bottom * k, px.Left * k);
+        }
+        SDL_Rect r;
+        if (!SDL_GetWindowSafeArea(_window, &r) || r.w <= 0 || r.h <= 0) return default;
+        int w, h;
+        SDL_GetWindowSize(_window, &w, &h);
+        float s = InputScale;
+        return new Thickness(r.y * s, Math.Max(0, w - r.x - r.w) * s, Math.Max(0, h - r.y - r.h) * s, r.x * s);
+    }
+
+    /// <summary>Insets in window pixels, top, right, bottom, left.</summary>
+    internal sealed record PixelInsets(int Top, int Right, int Bottom, int Left);
+
+    /// <summary>The insets content should clear, from the platform rather than SDL (Android's
+    /// system bars and display cutout, read by HultUI.Platform.Android's activity); null to use
+    /// SDL's safe area. Swapped whole, so the UI thread never sees half of a change.</summary>
+    internal static PixelInsets? ContentInsets { get; private set; }
+
+    /// <summary>
+    /// Sets <see cref="ContentInsets"/> from any thread (Android's UI thread, where its insets
+    /// arrive) and has every window read its safe area again on the UI thread: an event SDL's
+    /// queue carries there, as SDL's own <c>SDL_EVENT_WINDOW_SAFE_AREA_CHANGED</c>, for window 0,
+    /// which <see cref="PollAllEvents"/> takes to mean all of them.
+    /// </summary>
+    internal static void SetContentInsets(PixelInsets insets)
+    {
+        if (insets == ContentInsets) return;
+        ContentInsets = insets;
+        if (!_sdlInitialized) return;   // the first window reads it as it is made
+        SDL_Event evt = default;
+        evt.type = (uint)SDL_EventType.SDL_EVENT_WINDOW_SAFE_AREA_CHANGED;
+        evt.window.windowID = 0;
+        SDL_PushEvent(&evt);
+    }
+
+    /// <summary>Reads the safe area again, and tells the window when it changed.</summary>
+    internal void RefreshSafeArea()
+    {
+        var now = ReadSafeArea();
+        if (now == _safeArea) return;
+        _safeArea = now;
+        _safeAreaChanged?.Invoke();
+    }
+
     /// <summary>
     /// The system's low-memory signal (docs/design/APP-LIFECYCLE.md): the text caches always, and
     /// with <paramref name="gpu"/> what Skia keeps on the GPU. Only while the app is on screen:
@@ -1130,6 +1203,19 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
                         resizeWin.UpdateSize();
                         resizeWin.ResizePending = true;
                     }
+                    // A new size can move the bars (a rotation); SDL says so too, but a scale change
+                    // alone changes the safe area's layout units with no event of its own.
+                    if (resizeWin is not null) resizeWin.RefreshSafeArea();
+                    break;
+
+                case (uint)SDL_EventType.SDL_EVENT_WINDOW_SAFE_AREA_CHANGED:
+                    if (evt.window.windowID == 0)
+                    {
+                        // SetContentInsets: the platform's insets changed, for every window.
+                        foreach (var each in _registry.Values) each.RefreshSafeArea();
+                    }
+                    else if (_registry.TryGetValue(evt.window.windowID, out var safeWin))
+                        safeWin.RefreshSafeArea();
                     break;
 
                 default:
@@ -2582,7 +2668,14 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // emulator: a 1 s ticker ran 0 times in 7.4 s away with SDL's default and 7 times with
         // this, no frame drawn, no GL error (docs/design/APP-LIFECYCLE.md §2 item 8).
         if (OperatingSystem.IsAndroid())
+        {
             SDL_SetHint(SDL_HINT_ANDROID_BLOCK_ON_PAUSE, "0");
+            // Back as a key (KeyCode.Back), so the app hears it: a menu or dialog closes, a page
+            // goes back. Untrapped, Android's own Back left the app with a menu still open. When
+            // nothing takes it, the window hands it back to the system (Application.SystemBack,
+            // set by HultUI.Platform.Android's activity). docs/design/ANDROID-PLATFORM.md §4.
+            SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
+        }
 
         if (!SDL_Init(SDL_InitFlags.SDL_INIT_VIDEO))
             throw new InvalidOperationException($"SDL_Init failed: {GetError()}");

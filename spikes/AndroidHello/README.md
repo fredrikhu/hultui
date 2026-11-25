@@ -20,10 +20,16 @@ and what breaks first?
 - `AndroidHello.csproj`: `net11.0-android`, API 31 minimum, `android-x64` and `android-arm64`,
   CoreCLR (the .NET 11 default), one `ProjectReference` to `src/HultUI`. The HultUI projects
   stay `net11.0`; package natives are chosen by the app's TFM.
-- `MainActivity.cs`: a subclass of `Org.Libsdl.App.SDLActivity` from SDL3-CS's Android
-  binding. `GetLibraries()` returns only `SDL3`; `Main()` runs the app on SDL's thread
-  (`SDLThread`), which becomes HultUI's UI thread. It also turns off Android's default focus
-  highlight on SDL's views (below).
+- `MainActivity.cs`: since 2026-11-25 a subclass of `HultUIActivity` from
+  `src/HultUI.Platform.Android` (docs/design/ANDROID-PLATFORM.md). That class does what this
+  file first did by hand:
+  - subclasses `Org.Libsdl.App.SDLActivity`, with `GetLibraries()` returning only `SDL3`
+  - runs the app from `Main()` on SDL's thread (`SDLThread`), which becomes HultUI's UI thread
+  - turns off Android's default focus highlight
+
+  What is left here is reading the experiment switches. `-e sample credentials` tests the
+  Keystore store. The app also has a dropdown, to check that Back closes an overlay, and logs
+  its safe area.
 - `HelloApp.cs`: the app. A counter button, a `TextInput`, a paragraph that must wrap (ICU's
   line breaker), and a 40-row `ScrollView`. It calls `SDL_SetMainReady()` first, since there is
   no `SDL_main`. It logs to logcat under `HultUISpike`, with `HULTUI_STARTUP` and

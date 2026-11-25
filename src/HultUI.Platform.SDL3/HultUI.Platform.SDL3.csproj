@@ -14,6 +14,9 @@
     <InternalsVisibleTo Include="HultUI.Platform.SDL3.Tests" />
     <!-- WindowStateActivationTests reads WindowsActivation.Refused. -->
     <InternalsVisibleTo Include="HultUI.UiTests" />
+    <!-- The Android activity hands SDL3Window the insets content should clear (SetContentInsets):
+         Android's bars and cutout, without the gesture zones SDL's own safe area takes out. -->
+    <InternalsVisibleTo Include="HultUI.Platform.Android" />
   </ItemGroup>
 
   <ItemGroup>

@@ -99,4 +99,13 @@ public enum KeyCode : ushort
 
     // Function keys past F12, which some keyboards have and programs can send.
     F13, F14, F15, F16, F17, F18, F19, F20, F21, F22, F23, F24,
+
+    /// <summary>
+    /// Back: Android's Back (the button, or the gesture from a screen edge), and a keyboard's
+    /// browser-back key. Handlers see it first, as any key; unhandled, it does what Escape would
+    /// (closes the topmost menu or dialog), and with nothing for Escape to do, the system's own
+    /// back runs, which on Android moves the app to the background
+    /// (docs/design/ANDROID-PLATFORM.md §4).
+    /// </summary>
+    Back,
 }

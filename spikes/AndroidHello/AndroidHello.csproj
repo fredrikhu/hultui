@@ -25,6 +25,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\HultUI\HultUI.csproj" />
+    <!-- HultUIActivity and the platform's services (docs/design/ANDROID-PLATFORM.md §2). -->
+    <ProjectReference Include="..\..\src\HultUI.Platform.Android\HultUI.Platform.Android.csproj" />
     <!-- The Fluent sample's UI (FluentApp), hosted with -e sample fluent: plan 20 phase 2's
          "the sample and the Fluent sample run on the emulator". -->
     <ProjectReference Include="..\..\samples\HultUI.Samples.Fluent\HultUI.Samples.Fluent.csproj"

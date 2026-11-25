@@ -437,12 +437,28 @@ Checked on the emulator:
   10 trips, so it falls back rather than grows in a line. The emulator reports no GPU memory,
   so a GPU leak check needs a device.
 
-Waiting for the user's OK on their API (`docs/design/ANDROID-PLATFORM.md`):
-- the platform package and activity base, with the Keystore store
-- safe areas
-- the Back key
+Built after the user's OK (`docs/design/ANDROID-PLATFORM.md` §8), and checked on the emulator:
+- `HultUI.Platform.Android` with `HultUIActivity` and the Keystore store behind
+  `CredentialStore.Default`
+- `Window.SafeArea`: the bars and the cutout, read by the activity rather than SDL, whose area
+  also takes out the gesture zones
+- `KeyCode.Back`
+- the status bar's icons following the theme
+- an app's guide, `docs/ANDROID.md`
 
 Waiting for pushing to be allowed: the CI job.
+
+**Phase 2's exit criteria:**
+- Met on the emulator:
+  - the sample and the Fluent sample run
+  - backgrounding 20 (60) times does not crash and shows no steady memory growth
+  - rotation lays out again
+  - content stays clear of the system bars
+  - headless tests cover the lifecycle
+- Open:
+  - **a real device**, which is also the only GPU-memory check
+  - content clear of the keyboard (the IME inset), which is phase 4's
+  - the CI job
 
 Not yet: a real device.
 

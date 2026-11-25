@@ -54,10 +54,11 @@ internal static class LayoutAudit
         public DirtyFlags Dirty;
     }
 
-    /// <summary>Lays <paramref name="root"/> out again from nothing, as <see cref="LayoutEngine.PerformLayout"/>
-    /// was just asked to, and writes down every box that came out different.</summary>
-    internal static void Check(IMeasureContext context, Element root, float availableWidth, float availableHeight,
-        bool forceRootFill)
+    /// <summary>Lays <paramref name="root"/> out again from nothing, as
+    /// <see cref="LayoutEngine.PerformLayout(Element, float, float, float, float, bool)"/> was just
+    /// asked to, and writes down every box that came out different.</summary>
+    internal static void Check(IMeasureContext context, Element root, float originX, float originY,
+        float availableWidth, float availableHeight, bool forceRootFill)
     {
         if (t_inReference) return;
         var kept = new List<Kept>();
@@ -71,7 +72,7 @@ internal static class LayoutAudit
         t_inReference = true;
         try
         {
-            new LayoutEngine(context).PerformLayout(root, availableWidth, availableHeight, forceRootFill);
+            new LayoutEngine(context).PerformLayout(root, originX, originY, availableWidth, availableHeight, forceRootFill);
         }
         finally
         {

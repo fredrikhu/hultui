@@ -26,6 +26,8 @@
       href: MULTI-WINDOW.md
     - name: Custom window chrome
       href: CUSTOM-CHROME.md
+    - name: Android
+      href: ANDROID.md
     - name: Icons
       href: ICONS.md
     - name: Themes

@@ -167,6 +167,22 @@ public sealed class Application : IDisposable
     /// rarely does). Best effort: do not rely on it to save; save in <see cref="EnteringBackground"/>.</summary>
     public event Action? Terminating;
 
+    /// <summary>
+    /// The system's own back, run when a <see cref="Core.Events.KeyCode.Back"/> found nothing to
+    /// do in the app (docs/design/ANDROID-PLATFORM.md §4): on Android, set by
+    /// <c>HultUI.Platform.Android</c>'s activity, it moves the app to the background. Null on the
+    /// desktop, where an unhandled Back does nothing more. Called on the UI thread.
+    /// </summary>
+    internal static Action? SystemBack { get; set; }
+
+    /// <summary>
+    /// Told the theme as an application starts and whenever <see cref="Theme"/> changes, so the
+    /// platform's own bars can match it: on Android, set by <c>HultUI.Platform.Android</c>'s
+    /// activity, the status bar's icons turn dark over a light theme, where Android's default
+    /// white icons were invisible over HultUI's white background. Null on the desktop.
+    /// </summary>
+    internal static Action<Theme>? SystemBarsFollow { get; set; }
+
     /// <summary>The background gate: nothing is drawn, presented or uploaded while it holds.</summary>
     internal bool InBackground => LifecycleState == AppLifecycleState.Background;
 
@@ -352,6 +368,7 @@ public sealed class Application : IDisposable
             _theme = value ?? throw new ArgumentNullException(nameof(value));
             foreach (var w in _windows)
                 w.MarkStyleDirty();
+            SystemBarsFollow?.Invoke(_theme);
         }
     }
 
@@ -549,6 +566,7 @@ public sealed class Application : IDisposable
             lifecycle.LowMemory += OnLowMemory;
             lifecycle.Terminating += () => Terminating?.Invoke();
         }
+        SystemBarsFollow?.Invoke(_theme);
         // Claim this thread before any window (and therefore any element) exists, so
         // the tree can never be built on one thread and driven from another.
         Switch();

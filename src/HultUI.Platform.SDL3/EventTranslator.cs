@@ -373,6 +373,9 @@ public sealed unsafe class EventTranslator
         SDL_Scancode.SDL_SCANCODE_F22 => KeyCode.F22,
         SDL_Scancode.SDL_SCANCODE_F23 => KeyCode.F23,
         SDL_Scancode.SDL_SCANCODE_F24 => KeyCode.F24,
+        // Android's Back, which SDL sends as a key while SDL_HINT_ANDROID_TRAP_BACK_BUTTON is
+        // set (SDL3Window does on Android), and a keyboard's browser-back key.
+        SDL_Scancode.SDL_SCANCODE_AC_BACK => KeyCode.Back,
         _ => KeyCode.Unknown
     };
 }

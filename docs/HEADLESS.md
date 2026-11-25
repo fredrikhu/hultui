@@ -323,6 +323,14 @@ session.PumpFrame();                                          // MonitorsChanged
   - `EnterForeground()` raises `Application.EnteredForeground`. The next two pumps each draw the whole window, as on Android, where the first frame after a return does not show.
   - `session.SignalLowMemory()` empties the text caches, then raises `Application.LowMemory`.
   - See [THREADING.md](THREADING.md#the-app-lifecycle) and `AppLifecycleTests`.
+- **Android's bars.** `window.SetSafeArea(new Thickness(Top: 24, Right: 0, Bottom: 48, Left: 0))`
+  simulates the status bar and the gesture bar:
+  - `Window.SafeAreaChanged` is raised at once.
+  - The next pump lays the root out inside the safe area (unless `Window.LaysOutInSafeArea` is
+    off), and keeps overlays inside it.
+  - `PressKey(KeyCode.Back)` is Android's Back; set the internal `Application.SystemBack` to
+    see whether it reached the system.
+  - See [ANDROID.md](ANDROID.md), `SafeAreaTests` and `BackKeyTests`.
 
 **Without golden options, do not assert pixel-exact text across OSes.** Fonts come from the system (`SKFontManager.Default`), so glyphs and text metrics differ between Windows and Linux. Assert on behavior, semantics, and your own drawing — or use golden images, below, which pin the fonts.
 

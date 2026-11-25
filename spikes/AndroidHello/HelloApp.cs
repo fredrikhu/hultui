@@ -38,6 +38,29 @@ internal static class HelloApp
     /// <summary>Which app to run: null for this one, "fluent" for the Fluent sample's UI.</summary>
     public static string? Sample;
 
+    /// <summary>
+    /// The Keystore store behind CredentialStore.Default, on the device: a round trip, a delete,
+    /// and an entry kept across launches (written on the first run, read back on the next). Each
+    /// result goes to logcat as "credentials: …"; the app then ends.
+    /// </summary>
+    private static void TestCredentials()
+    {
+        var store = HultUI.CredentialStore.Default;
+        Info($"credentials: store {store.GetType().Name}");
+        bool wrote = store.Write("spike|server", "token", "s3cret-ÅÄÖ-✓");
+        string? read = store.Read("spike|server", "token");
+        Info($"credentials: write {wrote}, read back {(read == "s3cret-ÅÄÖ-✓" ? "same" : $"DIFFERENT ({read})")}");
+        bool deleted = store.Delete("spike|server", "token");
+        Info($"credentials: delete {deleted}, read after delete {(store.Read("spike|server", "token") is null ? "null" : "STILL THERE")}");
+        string? kept = store.Read("spike|kept", "token");
+        Info($"credentials: kept from an earlier launch: {kept ?? "(none yet)"}");
+        store.Write("spike|kept", "token", "kept since " + DateTime.UtcNow.ToString("O"));
+        string files = Android.App.Application.Context.FilesDir!.AbsolutePath;
+        string stored = File.Exists(Path.Combine(files, "hultui-credentials"))
+            ? File.ReadAllText(Path.Combine(files, "hultui-credentials")) : "";
+        Info($"credentials: the file holds the secret in the clear: {stored.Contains("kept since")}");
+    }
+
     /// <summary>The Fluent sample, unchanged, as samples/HultUI.Samples.Fluent/Program.cs runs it.</summary>
     private static void RunFluent(Stopwatch clock)
     {
@@ -64,10 +87,9 @@ internal static class HelloApp
 
         try
         {
-            // SDL's Android port expects SDL_main; there is none here, so say main is ready
-            // before SDL_Init, as an app with its own entry point must.
-            SDL.SDL3.SDL_SetMainReady();
+            // SDL_SetMainReady is HultUIActivity's now, before RunApp.
             if (Sample == "fluent") RunFluent(clock);
+            else if (Sample == "credentials") TestCredentials();
             else RunApp(clock);
         }
         catch (Exception e)
@@ -111,10 +133,21 @@ internal static class HelloApp
                 .FontSize(15f).FlexShrink(0),
             Flex.Row(gap: 16).AlignItems(AlignItems.Center).FlexShrink(0).Children(button, label),
             input.FlexShrink(0),
+            // An overlay for Back to close: tapped open, its list is an overlay of the window.
+            Dropdown.New(["First choice", "Second choice", "Third choice"], 0).FlexShrink(0),
             ScrollView.New().FlexGrow(1).Children(Flex.Column().FlexShrink(0).Children(rows)));
+
+        // Logs Back without taking it, so it goes on to Escape's work and then the system's back.
+        root.OnKeyDown(e =>
+        {
+            if (e.Key == HultUI.Core.Events.KeyCode.Back) Info("back reached the app's handler");
+        });
 
         using var app = new Application("HultUI spike", 400, 800);
         app.SetRoot(root);
+        var safeWindow = app.PrimaryWindow;
+        Info($"safe area at start: {safeWindow.SafeArea}");
+        safeWindow.SafeAreaChanged += () => Info($"safe area changed: {safeWindow.SafeArea}");
         Info($"Application made at {clock.ElapsedMilliseconds} ms");
 
         // The first presented frame's time is in files/startup.txt (HULTUI_STARTUP); this
