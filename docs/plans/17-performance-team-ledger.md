@@ -6,7 +6,7 @@ file after every step and commits it with the step's work. Full survey reports a
 
 - **Round:** 19
 - **Phase:** build — round 19 (the survey merged 2026-11-24; 13 steps, questions 79–81 answered (b), (b), (a)
-  on 2026-11-24). Steps 1–10 landed. Next: step 10b (the approved HDR run on the 4K), then step 11. Survey done 2026-11-24 in session e91920b9 (reports `17-reports/r19-*`; usage 33 → 40 % of the
+  on 2026-11-24). Steps 1–10 landed; step 10b (the HDR run) measured, F16 keeps 3. Next: step 11. Survey done 2026-11-24 in session e91920b9 (reports `17-reports/r19-*`; usage 33 → 40 % of the
   week, the 5-hour window 1 → 53 %).
   Round 18 RELEASED 2026-11-23: main 6366d201, CI run 45156444317 green on the first attempt. Round 19's files (the
   survey brief `brief-r19-survey.md`, `merge_r19.py`, build briefs `brief-r19b<N>.md`, `archive_r19.py`, agent ids
@@ -411,11 +411,12 @@ Re-ranked by the next survey.
   Levers: reactivity-aperture-card-caption-in-card (the two caption labels in the card, not in a column of their own: 6
   → 5 elements, an estimated −0.66 KB a card, Back −10 %, a shelf turn −6 %; measure first, pixels byte-identical) or
   question 79.
-- **f16-two-images-hdr-run** (3, owed; question 74 (c); r18b12) — the user approved one guarded HDR drag run (an HDR
-  clip playing on the 4K, a maximized-sized window, modal-loop timer steps, stopping on any stall over 1 s) to decide 2
-  images on F16; the 4K was absent all of step 12, so F16 keeps 3. Run it when the 4K is attached (with
-  f16-held-drag-post-stall's question); the survey's one pair: maximized-sized HDR −179.9 MB (−21.3 %).
-  Round 19 (r19-3): still owed; the 4K absent at every hold.
+- **f16-two-images-drag-hang** (3, lead; round 19 step 10b) — with 2 images on the F16 swapchain,
+  `VulkanProbeTests.ADrag_OverAllocatesTheSwapchain_AndItsEndRebuildsItExact(f16-mailbox)` hung (the test killed the
+  probe after 60 s; it passes in ~940 ms at 3 images, four earlier runs), with no driver event; not repeated. Reel's own
+  timer drags at 2 images did not hang. F16 keeps 3 images; a later 2-image attempt on F16 starts by understanding this
+  hang (the probe's back-to-back drag, drag back and move). Change saved as `r19b10b\change-f16-two-images.patch` in
+  session e91920b9's scratchpad.
 - **a11y-canvas-text-notify-patch** (7, low; r19-7 Candidate 3) — `CanvasElement.NotifyTextSourceChanged` with an app's
   (non-versioned) source marks the whole a11y tree property-dirty: with a reader +52.3 KB a scroll step beside 600
   labels (O(window elements)). Route it through the per-element text patch (`_a11yTextChanged`). No app uses canvas text
@@ -508,6 +509,12 @@ Round 18 (the round round 19's survey reviews; it moves to the archive at round 
 
 From the round 19 surveys (details in `17-reports/r19-*`):
 
+- **Two images on the F16 (HDR) swapchain** (round 19 step 10b, the user's approved HDR run on the 4K, HDR on, SDR white
+  240 nits; Reel playing a BT.2020 PQ clip maximized-sized, 2 and 3 images alternated, 4 launches in 2 holds, no OLED
+  wash, 0 driver events): DXGI local 845.6 → 665.7 MB (−21 %; default size 407.4 → 373.6); playback and fades equal (0
+  acquires over 1 ms); drags at 2 images 1 of 239 frames waited over 1 ms (3 images 2 of 229; 2 at rest and 3 in the
+  drag 5 of 208); validation loaded (a deliberate fault caught) and silent over 364 frames. Declined: with 2 images the
+  probe's f16-mailbox drag test hung (Waiting f16-two-images-drag-hang). F16 keeps 3 (49fd9b1e unchanged).
 - **aperture-postercache-slot-stall as perf** (r19-8, 186 downloads on the real server): queue wait max 362 ms, 0
   waiters behind 8 slow downloads; bodies p50 0.0–0.5 ms, heroes 3–5 ms, the slowest a cold hero at 563 ms; 0 in flight
   at 22 dumps. A hero lane or a 1.5–3 s timeout changes nothing (step 2 keeps the body deadline for the leak).
@@ -1523,3 +1530,11 @@ From 2026-11-22 (round 18's survey); earlier entries are in the archive ([to 202
   f16-two-images-hdr-run runs now as step 10b (expert 3, the 4K attached): the display held awake
   (`SetThreadExecutionState` in the driver, the session's keep-awake), no display setting changed (HDR off → stop and
   report), an OLED pixel-refresh mid-run → wait for the 4K, discard and re-run once. Next: step 10b, then step 11.
+- 2026-11-25: round 19 step 10b, the user's approved HDR run on the 4K (HDR on, 00:14–00:28 UTC, 2 holds, the display
+  held awake, no OLED wash, 0 driver events, 0 foreground takes): two images on the F16 swapchain save 180 MB of DXGI
+  local at a maximized size (−21 %) with playback, fades and Reel's drags as good as three (1 of 239 drag frames waited
+  over 1 ms), but the probe's f16-mailbox drag test hung at 2 images (killed after 60 s; ~940 ms at 3), so **F16 keeps
+  3** and nothing was committed (Examined; Waiting f16-two-images-drag-hang; the old f16-two-images-hdr-run closed). For
+  the guidelines: run `ADrag_OverAllocates(f16-mailbox)` before any real-window image-count run on F16 (the probe's
+  back-to-back drag found a deadlock the app's timer drags missed); never put a 4K half-float capture inside a stall
+  watchdog's window; the probe's `--frame-counter` needs a capture path. Next: step 11.
