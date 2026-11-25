@@ -69,6 +69,52 @@ public abstract class HultUIActivity : SDLActivity
         if (Window?.DecorView is { } decor) DisableFocusHighlight(decor);
         // The safe area HultUI lays out in: the bars and the cutout, as they arrive and change.
         FindViewById(global::Android.Resource.Id.Content)?.SetOnApplyWindowInsetsListener(new ContentInsetsListener());
+        FollowPeakRefreshRate();
+    }
+
+    /// <summary>
+    /// The display's peak refresh rate, for HultUI's frame pacing, and asked of Android for SDL's
+    /// surface while it draws. SDL reads the rate an adaptive screen idles at when the app starts:
+    /// 30 Hz on a Galaxy S25 that runs at 120, so HultUI paced at 30 fps.
+    /// <c>Surface.setFrameRate</c> is a vote that counts only while the surface posts frames, so
+    /// the screen still idles low when nothing moves.
+    /// </summary>
+    private void FollowPeakRefreshRate()
+    {
+        if (Display is not { } display) return;
+        var current = display.GetMode();
+        float peak = 0f;
+        foreach (var mode in display.GetSupportedModes() ?? [])
+            if (current is null || (mode.PhysicalWidth == current.PhysicalWidth && mode.PhysicalHeight == current.PhysicalHeight))
+                peak = Math.Max(peak, mode.RefreshRate);
+        if (peak <= 0f) return;
+        global::HultUI.Platform.SDL3.SDL3Window.PlatformRefreshRate = peak;
+        if (FindSurfaceView(Window?.DecorView) is { } surfaceView)
+            surfaceView.Holder?.AddCallback(new FrameRateVote(peak));
+        Log.Info(Tag, $"display peak refresh rate {peak} Hz (SDL saw {display.RefreshRate} Hz)");
+    }
+
+    private static SurfaceView? FindSurfaceView(View? view)
+    {
+        if (view is SurfaceView surface) return surface;
+        if (view is ViewGroup group)
+            for (int i = 0; i < group.ChildCount; i++)
+                if (FindSurfaceView(group.GetChildAt(i)) is { } found) return found;
+        return null;
+    }
+
+    /// <summary>Votes for the display's peak rate each time SDL's surface is made or changes.</summary>
+    private sealed class FrameRateVote(float rate) : Java.Lang.Object, ISurfaceHolderCallback
+    {
+        public void SurfaceCreated(ISurfaceHolder holder) => Vote(holder);
+        public void SurfaceChanged(ISurfaceHolder holder, global::Android.Graphics.Format format, int width, int height) => Vote(holder);
+        public void SurfaceDestroyed(ISurfaceHolder holder) { }
+
+        private void Vote(ISurfaceHolder holder)
+        {
+            if (holder.Surface is { IsValid: true } surface)
+                surface.SetFrameRate(rate, (int)SurfaceFrameRateCompatibility.Default);
+        }
     }
 
     /// <summary>

@@ -228,6 +228,16 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// <inheritdoc />
     public float RefreshRate { get; private set; }
 
+    /// <summary>
+    /// The display's rate as the platform knows it, over SDL's: on Android the peak of the
+    /// display's modes, read by HultUI.Platform.Android's activity. SDL reads the rate the display
+    /// happens to run at when the app starts, and an adaptive screen idles low: a Galaxy S25 said
+    /// 30 Hz while it runs at up to 120 (spikes/AndroidHello, "On a real phone"), and HultUI paced
+    /// its frames at 30. The activity also asks Android for the peak while frames are drawn
+    /// (Surface.setFrameRate). Null elsewhere.
+    /// </summary>
+    internal static float? PlatformRefreshRate { get; set; }
+
     /// <inheritdoc />
     /// <remarks>SDL's video driver: one per process, so it is read once (the element asks on
     /// every layout, and the binding allocates a string per call).</remarks>
@@ -2485,7 +2495,8 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // offers first. The first time per display that took 115 ms on a 4K HDR monitor,
         // on the way to the first frame — a quarter of the app's start-up.
         var mode = SDL_GetDesktopDisplayMode(SDL_GetDisplayForWindow(_window));
-        RefreshRate = mode is not null && mode->refresh_rate > 0f ? mode->refresh_rate : 0f;
+        RefreshRate = PlatformRefreshRate is > 0f and var platformRate ? platformRate
+            : mode is not null && mode->refresh_rate > 0f ? mode->refresh_rate : 0f;
 
         if (pw == PixelWidth && ph == PixelHeight
             && density == PixelDensity && displayScale == _osDisplayScale)
