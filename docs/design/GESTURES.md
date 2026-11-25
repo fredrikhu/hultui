@@ -1,7 +1,12 @@
 # Touch gestures — design note
 
-**Status (2026-11-25): proposal, nothing built. §5 adds public API and needs the user's OK
-before any of it lands.** Plan 20, phase 3, second part ([plan](../plans/20-mobile-support.md)
+**Status (2026-11-25): design approved, nothing built.** The user approved §5's API as
+proposed and took every recommendation in §7:
+- latch at the start
+- stop at the edge
+- Android-like physics everywhere
+- long press opens the context menu, else the tooltip
+- touch scrollbars later Plan 20, phase 3, second part ([plan](../plans/20-mobile-support.md)
 §2.3). It builds on the approved [pointer identity note](POINTER-IDENTITY.md): one primary
 pointer, touch pointers with IDs, `PointerCancel`, and other fingers routed to the capture
 holder.
@@ -232,18 +237,18 @@ on that. Nothing in HultUI or its apps zooms today. Aperture's image views and a
 the candidates, so pinch is built when the first of them needs it, with its own small API item
 then. Nothing in §2–§5 needs to change for it.
 
-## 7. Open questions for the user
+## 7. Decisions (2026-11-25)
 
-1. **Nested scrollers:** latch at the start with no mid-gesture handoff, matching the wheel and
-   iOS (recommended), or Android-style handoff to the outer scroller at the inner one's edge?
-2. **At the edge:** stop dead, with no visual (recommended for now), or Android's stretch, or
-   iOS's bounce? Either effect is a paint-time transform, and can come later without changing
-   the gesture code.
-3. **Feel:** one set of physics on every platform, Android-like (recommended), or iOS-like
-   bounce and deceleration on iOS when iOS comes back?
-4. **Long press:** context menu, else tooltip, as in §4 (recommended)?
-5. **Touch scrollbars:** a separate styling item later (recommended), or part of this work?
-6. **The API in §5:** these names and shapes?
+1. **Nested scrollers latch at the start**, with no handoff mid-gesture, as the wheel does
+   (§3).
+2. **At the edge the content stops**, with no visual effect for now. A stretch or bounce can
+   come later as a paint-time effect, without changing the gesture code.
+3. **One set of physics, Android-like, on every platform.** Revisit if iOS returns.
+4. **Long press:** an `OnLongPress` handler, else the context menu, else the tooltip (§4).
+5. **Touch scrollbars are a separate styling item**, later.
+6. **The API in §5, with these names and shapes**: `OnLongPress`, `OnPan(PanAxis, …)` with
+   `PanStartEvent`, `PanUpdateEvent` and `PanEndEvent`, `IPanScrollable`, and the headless
+   `Swipe` and `LongPress`.
 
 ## 8. Tests, and size
 
