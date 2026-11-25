@@ -1219,6 +1219,26 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     public bool IsMaximized =>
         ((uint)SDL_GetWindowFlags(_window) & (uint)SDL_WindowFlags.SDL_WINDOW_MAXIMIZED) != 0;
 
+    public bool ShowWithoutActivation { get; set; }
+
+    public void SetOwner(IPlatformWindow? owner)
+    {
+        if (_window == null) return;
+        // SDL's parent of a top-level window is its owner (Windows: GWLP_HWNDPARENT): it stays
+        // above the parent and is hidden with it. An owner of another platform cannot be one.
+        if (owner is null) SDL_SetWindowParent(_window, null);
+        else if (owner is SDL3Window { _window: not null } parent) SDL_SetWindowParent(_window, parent._window);
+    }
+
+    public void SetFrameBorderColor(Color? color)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        // COLORREF is 0x00BBGGRR. Full screen takes the border away and puts this back.
+        int border = color is { } c ? c.R | c.G << 8 | c.B << 16 : unchecked((int)0xFFFFFFFF);
+        if (_customFrame is { } frame) frame.BorderColor = border;
+        else if (_plainFullscreen is { } plain) plain.BorderColor = border;
+    }
+
     /// <summary>
     /// SDL's flag, read live rather than kept from events: on Windows SDL sets and clears it
     /// inside the window procedure, so a <c>ShowWindow</c> on this thread is seen before it
@@ -2054,7 +2074,27 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     {
         if (_shown || _window == null) return;
         _shown = true;
-        SDL_ShowWindow(_window);
+        if (ShowWithoutActivation && OperatingSystem.IsWindows())
+        {
+            // The activation the show asks for is refused on this thread. Not through SDL's hint,
+            // which the environment or an override can pin to activating.
+            using var quiet = WindowsActivation.Refuse();
+            SDL_ShowWindow(_window);
+        }
+        else if (ShowWithoutActivation)
+        {
+            // SDL reads the hint as it shows a window. Only for this show: the app's own
+            // setting, if it has one, comes back after it.
+            string? before = SDL_GetHint(SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN);
+            SDL_SetHint(SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN, "0");
+            SDL_ShowWindow(_window);
+            if (before is null) SDL_ResetHint(SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN);
+            else SDL_SetHint(SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN, before);
+        }
+        else
+        {
+            SDL_ShowWindow(_window);
+        }
         if (_cloaked && OperatingSystem.IsWindows())
         {
             _cloaked = false;

@@ -125,8 +125,24 @@ internal sealed class WindowsPlainFullscreen(IntPtr hwnd)
         int corner = fullscreen ? DWMWCP_DONOTROUND : DWMWCP_DEFAULT;
         DwmSetWindowAttribute(_hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
 
-        uint border = fullscreen ? DWMWA_COLOR_NONE : DWMWA_COLOR_DEFAULT;
+        uint border = fullscreen ? DWMWA_COLOR_NONE : unchecked((uint)_borderColor);
         DwmSetWindowAttribute(_hwnd, DWMWA_BORDER_COLOR, ref border, sizeof(uint));
+    }
+
+    private int _borderColor = unchecked((int)DWMWA_COLOR_DEFAULT);
+
+    /// <summary>The border DWM draws while the window is not full screen: a COLORREF, or
+    /// <c>DWMWA_COLOR_DEFAULT</c> for the system's (<c>Window.FrameBorderColor</c>).</summary>
+    public int BorderColor
+    {
+        get => _borderColor;
+        set
+        {
+            _borderColor = value;
+            if (IsFullscreen) return;
+            uint border = unchecked((uint)value);
+            DwmSetWindowAttribute(_hwnd, DWMWA_BORDER_COLOR, ref border, sizeof(uint));
+        }
     }
 
     [StructLayout(LayoutKind.Sequential)]

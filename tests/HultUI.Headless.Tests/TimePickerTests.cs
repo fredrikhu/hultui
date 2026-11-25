@@ -234,6 +234,60 @@ public class TimePickerTests
         Assert.Equal(new TimeOnly(1, 2), picker.Value);
     }
 
+    /// <summary>A value given before the seconds segment is asked for keeps its seconds:
+    /// the order a build sets things in does not matter. They were cut as the value was set,
+    /// so <c>New(14:30:15)</c> then <c>ShowSeconds = true</c> showed 14:30:00.</summary>
+    [Fact]
+    public void SecondsGivenBeforeTheSegmentIsShown_AreKept()
+    {
+        using var session = HeadlessSession.Create();
+        var picker = Mount(session, new TimeOnly(14, 30, 15), seconds: true);
+
+        Assert.Equal(new TimeOnly(14, 30, 15), picker.Value);
+        Assert.Equal("14:30:15", picker.DisplayText);
+    }
+
+    /// <summary>
+    /// Typed seconds survive the rebuild their own change handler asks for. The build makes the
+    /// field value first and shows seconds after, and the twin it patched from had lost them,
+    /// so every typed second went back to 00.
+    /// </summary>
+    [Fact]
+    public void TypedSecondsSurviveTheRebuildTheyCause()
+    {
+        using var session = HeadlessSession.Create();
+        var form = new SecondsForm();
+        session.Window.SetRoot(form.Mount());
+        session.PumpFrame();
+        var picker = form.Picker.Current!;
+        picker.Focus();
+        picker.FocusSegment(TimePickerElement.Segment.Second);
+
+        Type(session, "4");
+        session.PumpFrame();
+        Type(session, "5");
+        session.PumpFrame();
+
+        Assert.Equal(new TimeOnly(1, 2, 45), form.Time);
+        Assert.Equal("01:02:45", form.Picker.Current!.DisplayText);
+    }
+
+    /// <summary>Holds a time and rebuilds on every change, as a form does.</summary>
+    private sealed class SecondsForm : HultUI.Core.Components.Component
+    {
+        public TimeOnly Time { get; private set; } = new(1, 2, 3);
+        public HultUI.Core.Reactivity.Ref<TimePickerElement> Picker { get; } = new();
+
+        public override Element Build()
+        {
+            var picker = TimePicker.New(Time);
+            picker.ShowSeconds = true;
+            picker.Changed(t => { if (t is { } v) Time = v; MarkDirty(); });
+            picker.WithRef(Picker);
+            return Box.New().Padding(new Thickness(40)).Children(picker);
+        }
+    }
+
     // ── Twelve-hour form ─────────────────────────────────────────────────
 
     [Fact]

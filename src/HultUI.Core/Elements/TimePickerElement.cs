@@ -70,14 +70,19 @@ public class TimePickerElement : Element
 
     // ── Model ────────────────────────────────────────────────────────────
 
-    /// <summary>The time, or null for an empty field. Setting it from code does not raise
+    /// <summary>The time, or null for an empty field: to the minute, or to the second while
+    /// <see cref="ShowSeconds"/> is on. Setting it from code does not raise
     /// <see cref="OnValueChanged"/>.</summary>
+    /// <remarks>Kept to the second whatever is shown, and cut only as it is read, so the order
+    /// a build sets things in does not matter: <c>TimePicker.New(14:30:15)</c> followed by
+    /// <c>ShowSeconds = true</c> shows 14:30:15. Cut as it was set, the seconds were gone before
+    /// the segment was asked for, and a rebuild patched every typed second back to 00.</remarks>
     public TimeOnly? Value
     {
-        get => _value;
+        get => _value is { } t ? Truncate(t) : null;
         set
         {
-            var normalized = value is { } t ? Truncate(t) : (TimeOnly?)null;
+            var normalized = value is { } t ? new TimeOnly(t.Hour, t.Minute, t.Second) : (TimeOnly?)null;
             if (_value == normalized) return;
             _value = normalized;
             ResetTyping();
@@ -95,7 +100,8 @@ public class TimePickerElement : Element
             if (_showSeconds == value) return;
             _showSeconds = value;
             _segment = Math.Min(_segment, SegmentCount - 1);
-            Value = _value;                 // re-truncate: seconds may have just been dropped
+            // The value reads differently now (see Value): the seconds come or go.
+            NotifyValueChanged();
             MarkLayoutDirty();
         }
     }
@@ -172,7 +178,7 @@ public class TimePickerElement : Element
     /// point is a guess, and midnight is the one the user can see is a starting point.</summary>
     private void Edit(Func<TimeOnly, TimeOnly> change)
     {
-        var before = _value;
+        var before = Value;
         var next = Truncate(change(_value ?? new TimeOnly(0, 0)));
         _value = next;
         NotifyValueChanged();

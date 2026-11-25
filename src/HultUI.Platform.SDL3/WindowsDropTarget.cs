@@ -184,23 +184,9 @@ internal sealed unsafe partial class WindowsDropTarget : IDisposable
 
     private static List<string> Files(nint data)
     {
-        var files = new List<string>();
-        if (!TryGet(data, CF_HDROP, out var medium)) return files;
-        try
-        {
-            uint count = DragQueryFileW(medium.Handle, 0xFFFFFFFF, null, 0);
-            for (uint i = 0; i < count; i++)
-            {
-                uint length = DragQueryFileW(medium.Handle, i, null, 0);
-                if (length == 0) continue;
-                var buffer = new char[length + 1];
-                fixed (char* p = buffer)
-                    if (DragQueryFileW(medium.Handle, i, p, length + 1) > 0)
-                        files.Add(new string(p, 0, (int)length));
-            }
-        }
+        if (!TryGet(data, CF_HDROP, out var medium)) return [];
+        try { return WindowsFileList.Read(medium.Handle); }
         finally { ReleaseStgMedium(&medium); }
-        return files;
     }
 
     private static string? Text(nint data)
@@ -349,9 +335,6 @@ internal sealed unsafe partial class WindowsDropTarget : IDisposable
 
     [LibraryImport("ole32.dll")]
     private static partial void ReleaseStgMedium(STGMEDIUM* medium);
-
-    [LibraryImport("shell32.dll")]
-    private static partial uint DragQueryFileW(nint drop, uint index, char* file, uint length);
 
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

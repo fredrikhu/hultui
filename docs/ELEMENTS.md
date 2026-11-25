@@ -2221,7 +2221,7 @@ callbacks are for the user's own gestures.
 | Element | Properties |
 |---|---|
 | `CalendarElement` | `SelectedDate`, `DisplayMonth`, `FocusedDate`, `Today`, `MinDate`, `MaxDate`, `FirstDayOfWeek`, `Culture`, `MonthFormat` (`"MMMM yyyy"`); `ShiftMonths(n)`, `SelectDate(d)`, `DateAt(row, col)` |
-| `DatePickerElement` | `Value`, `Format` (`"d"`), `Placeholder`, `Culture`, `MinDate`, `MaxDate`, `Today`, `FirstDayOfWeek`, `AllowClear`; `IsOpen`, `Calendar`, `DisplayText`, `OpenPopup()`, `ClosePopup()` |
+| `DatePickerElement` | `Value`, `Format` (`"d"`), `Placeholder`, `Culture`, `MinDate`, `MaxDate`, `Today`, `FirstDayOfWeek`, `AllowClear`, `AllowTyping`; `IsOpen`, `Calendar`, `DisplayText`, `OpenPopup()`, `ClosePopup()`; with typing `ActiveSegment`, `Step(±1)`, `MoveSegment(±1)`, `FocusSegment(s)`, `TypeDigit(n)` |
 | `TimePickerElement` | `Value`, `ShowSeconds`, `Use12Hour`, `MinuteStep`, `Culture`, `AllowClear`; `ActiveSegment`, `Step(±1)`, `MoveSegment(±1)`, `FocusSegment(s)`, `TypeDigit(n)`, `Clear()` |
 
 Both fields draw the closed face from `Theme.Dropdown`, and both take a per-field
@@ -2237,6 +2237,14 @@ Design calls that are settled:
   so the day under the pointer becomes a different day.
 - **The time picker is a segmented spinner, not a dropdown of times.** A list is either
   1,440 rows or cannot express 14:37.
+- **A date can be typed the same way, if asked for.** With `AllowTyping` the date field's
+  year, month and day are segments in the order its format puts them (the culture's short
+  date by default): a press on one puts the keyboard there, digits type and move on, Up and
+  Down step it, and the calendar opens from the chevron, Alt+Down or F4. Off by default,
+  where any press opens the calendar; a format with a month or day by name is never typed.
+- **The time picker keeps its value to the second whatever it shows**, and drops the
+  seconds only as `Value` is read: `New(14:30:15)` then `ShowSeconds = true` shows
+  14:30:15, in whichever order a build sets them.
 - **`Today` and `Culture` are properties**, not reads of the ambient clock and locale.
   That is what makes a rendered picker comparable against a baseline that does not
   expire and does not depend on the developer's country.

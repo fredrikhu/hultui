@@ -126,6 +126,16 @@ Resize handles are disabled while the window is maximized.
 
 On Windows a borderless window keeps a real native frame with the title bar hidden, so it gets the **DWM drop shadow, the Windows 11 rounded corners and accent border, Aero Snap, and snap layouts** for free, and resizing/moving is handled natively by the OS. Because the native side and bottom resize borders sit a few pixels *outside* the visible content (as with any native window), you can grab a resize just past the window edge rather than having to land exactly on it. On other platforms the same behavior is provided through SDL's hit-testing. The public API is identical either way.
 
+### Border colour
+
+Windows 11 draws a thin border around a window, in the accent colour or a grey. An app whose title bar has its own colour can match it:
+
+```csharp
+window.FrameBorderColor = new Color(52, 73, 94);   // null, the default, for the system's
+```
+
+It is `DWMWA_BORDER_COLOR`, and only Windows 11 draws it; elsewhere setting it does nothing. Full screen takes the border away, as below, and gives this colour back on the way out. It works on a window with the system's frame too.
+
 ---
 
 ## Window Management

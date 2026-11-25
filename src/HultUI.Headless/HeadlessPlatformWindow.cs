@@ -479,6 +479,19 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
 
     public void Raise() { }
 
+    // Recorded, not applied: there is no desktop to stack, activate or frame windows on. A test
+    // reads what the framework asked for.
+
+    /// <summary>The owner the framework last gave the window, or null.</summary>
+    public IPlatformWindow? Owner { get; private set; }
+    public void SetOwner(IPlatformWindow? owner) => Owner = owner;
+
+    public bool ShowWithoutActivation { get; set; }
+
+    /// <summary>The frame border colour the framework last asked for, or null for the system's.</summary>
+    public Color? FrameBorderColor { get; private set; }
+    public void SetFrameBorderColor(Color? color) => FrameBorderColor = color;
+
     public void SetMinimumSize(int layoutWidth, int layoutHeight) { }
 
     public void SetIcon(int width, int height, ReadOnlySpan<byte> rgbaPixels) { }

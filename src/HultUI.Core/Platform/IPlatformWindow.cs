@@ -1,4 +1,5 @@
 using HultUI.Core.Events;
+using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 
@@ -198,6 +199,26 @@ public interface IPlatformWindow : IDisposable
     void Restore();
     /// <summary>Bring the window to the front / request the OS's attention.</summary>
     void Raise();
+
+    /// <summary>
+    /// Makes <paramref name="owner"/> this window's owner, or none for null: the window stays
+    /// above its owner and is hidden while its owner is minimized (Windows: the window's
+    /// <c>GWLP_HWNDPARENT</c>). A platform without owned windows ignores it.
+    /// </summary>
+    void SetOwner(IPlatformWindow? owner) { }
+
+    /// <summary>
+    /// Whether the window's first show leaves the keyboard with the window that has it, rather
+    /// than taking it. Read when the window first shows. A platform that cannot show a window
+    /// without activating it ignores it.
+    /// </summary>
+    bool ShowWithoutActivation { get => false; set { } }
+
+    /// <summary>
+    /// The thin border the system draws around the window (Windows 11:
+    /// <c>DWMWA_BORDER_COLOR</c>); null for the system's own. A platform without one ignores it.
+    /// </summary>
+    void SetFrameBorderColor(Color? color) { }
 
     void SetMinimumSize(int layoutWidth, int layoutHeight);
     void SetIcon(int width, int height, ReadOnlySpan<byte> rgbaPixels);
