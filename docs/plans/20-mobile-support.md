@@ -1,6 +1,8 @@
 # Mobile support: Android and iOS
 
-**Status (2026-11-25): scoping only. Nothing is built. The decisions at the end are the user's.**
+**Status (2026-11-25): scoping only. Nothing is built. Decided the same day: Android only for
+now; iOS is deferred, with no Apple devices to build or test on. The other decisions at the end
+are still open.**
 
 HultUI runs on Windows and Linux. This plan asks what it would take to run HultUI apps on
 Android and iOS: what already works on those platforms, what the framework lacks, which apps
@@ -15,9 +17,10 @@ cache or the sources listed at the end.
   builds. .NET 11 runs on both. What is missing is HultUI's own: a GL ES path, an Android/iOS
   entry point, app lifecycle handling, touch input, the soft keyboard, safe areas, ICU loading,
   a Metal renderer for iOS, and two accessibility bridges.
-- **Android first, iOS second.** Android can be built and tested from the Windows desk and on
-  GitHub's Linux runners. iOS needs a Mac for every build, a Metal renderer HultUI does not
-  have, and a video path mpv does not offer.
+- **Android only, for now (decided 2026-11-25).** Android can be built and tested from the
+  Windows desk and on GitHub's Linux runners. iOS needs a Mac for every build, a Metal renderer
+  HultUI does not have, and a video path mpv does not offer. With no Apple devices, iOS is
+  deferred. Its findings stay in this plan for when it returns.
 - **Aperture is the app to aim at.** It is a media client, which is what people use on phones,
   tablets and TVs. Reel follows almost free once Aperture's video works. Junction, Vesper
   Commander and Meridian are desktop tools and stay there.
@@ -365,7 +368,7 @@ TalkBack and VoiceOver, mpv's mobile natives, packaging and signing. That needs 
   public-repository rules in `docs/CI.md`.
 - **The desk.** Android builds, the emulator (Hyper-V) and a USB phone all work on Windows.
   **iOS cannot be built on Windows.** Without a Mac, every iOS build goes through CI, which turns
-  a seconds-long loop into a minutes-long one. That decides how fast phases 7–8 can go.
+  a seconds-long loop into a minutes-long one. That is why iOS is deferred.
 
 ## 5. Phases
 
@@ -479,7 +482,9 @@ keyboard. Caret placement, word selection, handles and the edit menu for `TextIn
 - Tests against a fake provider host are green.
 - This is required before any Android release beyond the user's own devices.
 
-### Phase 7: iOS bring-up (XL, needs a Mac or a CI-only loop)
+### Deferred: iOS bring-up (XL, needs a Mac)
+
+Deferred on 2026-11-25, with no Apple devices. Kept as the plan for when iOS returns.
 
 - **A platform package.** `HultUI.Platform.iOS` with the `SDL_RunApp` entry point and
   lifecycle (§2.1, §2.5).
@@ -488,7 +493,7 @@ keyboard. Caret placement, word selection, handles and the edit menu for `TextIn
 - **The Keychain** credential store.
 - **The runtime choice.** NativeAOT or the CoreCLR default.
 - **A `macos-15` CI job** building and smoke-testing on the simulator.
-- **Video decision (§6, question 6), made before phase 8 starts.**
+- **Video decision (§6, question 6), made before Aperture on iOS starts.**
 
 **Exit criteria**
 
@@ -497,7 +502,7 @@ keyboard. Caret placement, word selection, handles and the edit menu for `TextIn
   trap in Debug.
 - The simulator job is green.
 
-### Phase 8: Aperture on iOS (L, more if video needs a new backend)
+### Deferred: Aperture on iOS (L, more if video needs a new backend)
 
 - **Video.** Either mpv through a GL ES context rendering into an IOSurface-backed
   `CVPixelBuffer` shared with Metal, or an AVFoundation `IMediaBackend` (the seam exists:
@@ -526,8 +531,8 @@ keyboard. Caret placement, word selection, handles and the edit menu for `TextIn
 
 1. **Go or no-go, and when.** Against what is left of plan 17 (q82/q83 open, round 20 next) and
    the app-team findings not yet built.
-2. **Android only, or iOS too?** If iOS: will there be a Mac on the desk (a Mac mini is the
-   cheap way), a cloud Mac, or CI only? This sets the pace of phases 7–8.
+2. **Android only, or iOS too? Decided 2026-11-25: Android only.** There are no Apple devices,
+   so iOS waits until there is a Mac to build on.
 3. **Which form factors?** Phone, tablet, Android TV or Google TV (§3: a TV build could ship
    before touch is done).
 4. **Public API.** Each of these needs an OK, and its shape is worth a short design note first:
@@ -537,26 +542,28 @@ keyboard. Caret placement, word selection, handles and the edit menu for `TextIn
    - lifecycle events on `Application` (suspend, resume, low memory)
    - new `TextInputKind` members and return-key hints
    - headless touch-driver methods
-   - new packages: `HultUI.Platform.Android`, `HultUI.Platform.iOS`,
-     `HultUI.Platform.Accessibility.Android` and `.iOS`
-   - the Keystore and Keychain credential stores
+   - new packages: `HultUI.Platform.Android` and `HultUI.Platform.Accessibility.Android`
+     (the iOS ones wait with iOS)
+   - the Android Keystore credential store
 5. **Distribution.** Sideloaded APKs on GitHub releases only, or Play Store, F-Droid,
    TestFlight and App Store? Store accounts cost money (Google: one-time fee; Apple: yearly), and
    store review shapes permissions and licensing.
-6. **Video on iOS.** mpv through GL ES to Metal sharing, which keeps one backend and is the
+6. **Video on iOS (deferred with iOS).** mpv through GL ES to Metal sharing, which keeps one backend and is the
    riskiest technically, or AVFoundation with server-side transcoding, which means a second
    backend and needs a Jellyfin server that can transcode. Related: **LGPL libmpv in an App
    Store app**. The LGPL lets users replace the library, and how that squares with App Store
    terms is a legal question to settle before phase 8, not a technical one.
-7. **Runtime.** CoreCLR (the .NET 11 default) or NativeAOT on iOS. NativeAOT is what the desktop
-   apps ship, but it is still experimental on Android.
+7. **Runtime.** CoreCLR (the .NET 11 default) or NativeAOT on Android. NativeAOT is what the
+   desktop apps ship, but it is still experimental on Android.
 8. **Minimum OS versions.** Android API 31 makes ICU free (§2.7), and .NET 11's CoreCLR needs
    API 24 or later. The iOS minimum follows the .NET 11 workload.
 9. **Devices.** Which phone (and tablet) to test on.
-10. **macOS desktop.** The Metal renderer and the iOS work give most of a macOS port. In scope
+10. **macOS desktop (deferred with iOS: it needs a Mac too).** The Metal renderer and the iOS work give most of a macOS port. In scope
     or not?
 
 ## 7. Biggest risks
+
+Risks 2 and 4 belong to iOS and are deferred with it. Questions 6 and 10 in §6 are deferred too.
 
 1. **Touch in a mouse-shaped core.** Single pointer, hover-driven styling, click synthesis and
    wheel latching are woven through `Window.cs` (about 6,000 lines). Adding touch without
