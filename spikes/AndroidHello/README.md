@@ -137,16 +137,16 @@ try in phase 2.
    SurfaceFlinger shows no layer above the app; `dumpsys activity top` shows `SDLSurface`
    focused. `View.DefaultFocusHighlightEnabled = false` on SDL's views fixes it (`MainActivity`).
    A platform package must do this for every app.
+8. **Android's implicit usings clash with HultUI names.** `Application` (`Android.App`) and
+   `ScrollView` (`Android.Widget`) are ambiguous in a `net*-android` project, and so would be
+   `Button` and others. An app needs aliases, as `HelloApp.cs` has. Worth a line in the docs, or
+   a platform package that does not need app code in such a project.
 9. **SDL's default block stops HultUI's UI thread in the background; turning it off is safe.**
    With `SDL_HINT_ANDROID_BLOCK_ON_PAUSE` on (the default), a 1 s ticker posting to the UI thread
    ran 0 times in 7.4 s away. With it off (`-e block 0`), it ran 7 times, through Home and
    through the screen lock. The frame log showed `frames/s=0.0 parked-ms/s=1000` while away, no
    GL or runtime errors, and a drawn screen after return (`scripts/background-check.ps1`).
    [`docs/design/APP-LIFECYCLE.md`](../../docs/design/APP-LIFECYCLE.md) §2 item 8 builds on this.
-8. **Android's implicit usings clash with HultUI names.** `Application` (`Android.App`) and
-   `ScrollView` (`Android.Widget`) are ambiguous in a `net*-android` project, and so would be
-   `Button` and others. An app needs aliases, as `HelloApp.cs` has. Worth a line in the docs, or
-   a platform package that does not need app code in such a project.
 
 ## What broke (for phase 2)
 
