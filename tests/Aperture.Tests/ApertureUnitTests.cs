@@ -482,7 +482,8 @@ public class ApertureUnitTests
     [Fact]
     public void BodiesThatStall_FailAtTheDeadline_AndThePicturesBehindThemLoad()
     {
-        using var cache = new PosterCache(() => { }, http: new HttpClient(new StalledBodyHandler("/stall/")))
+        using var landed = new SemaphoreSlim(0);
+        using var cache = new PosterCache(() => landed.Release(), http: new HttpClient(new StalledBodyHandler("/stall/")))
         {
             Deadline = TimeSpan.FromMilliseconds(300),
         };
@@ -492,7 +493,14 @@ public class ApertureUnitTests
         // Every slot is taken by a stalled body now: these wait for one to come back.
         foreach (var url in healthy) Assert.Equal(PosterCache.Status.Pending, cache.Get(url).Status);
 
-        foreach (var url in healthy) Loaded(cache, url);
+        // Wait for every download to land, failed or loaded. Each deadline runs from its own slot, so
+        // the stalled bodies fail a few milliseconds apart, and four failures free the four slots the
+        // healthy pictures need: waiting for those pictures alone saw the last stalled ones still
+        // Pending (WSL Fedora, 3 runs in 20). Without the deadline nothing lands and the wait fails.
+        int downloads = stalled.Length + healthy.Length;
+        for (int i = 0; i < downloads; i++)
+            Assert.True(landed.Wait(TimeSpan.FromSeconds(5)), $"{i} of {downloads} downloads landed");
+        Assert.All(healthy, url => Assert.True(cache.Get(url) is ({ IsLoaded: true }, PosterCache.Status.Ready), $"{url} did not load"));
         Assert.All(stalled, url => Assert.Equal(PosterCache.Status.Failed, cache.Get(url).Status));
         Assert.Equal(0, cache.PendingCount);
     }
