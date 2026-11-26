@@ -122,8 +122,9 @@ internal static class HelloApp
 
     /// <summary>
     /// Plan 20 phase 5: video through libmpv on GL ES (native/mpv/build-libmpv-android.sh),
-    /// scripts/video-check.ps1. Plays <see cref="VideoFile"/> (or mpv's test pattern) in HultUI's
-    /// player, and logs what mpv chose: the decoder, hardware or not, and the frames drawn.
+    /// scripts/video-check.ps1. Plays <see cref="VideoFile"/> in HultUI's player and logs the first
+    /// frame and the frames drawn. With no file it asks for mpv's lavfi test pattern, which the
+    /// trimmed build lacks (no libavdevice), so nothing opens.
     /// </summary>
     private static void RunVideo(Stopwatch clock)
     {
