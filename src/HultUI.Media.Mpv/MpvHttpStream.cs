@@ -61,6 +61,18 @@ internal sealed unsafe class MpvHttpStream : IDisposable
     /// <summary>What mpv is given to load for <paramref name="httpsUrl"/>.</summary>
     internal static string Wrap(string httpsUrl) => Protocol + httpsUrl["https".Length..];
 
+    /// <summary>
+    /// Whether <paramref name="url"/> is read through this stream: an https:// source that is not
+    /// an HLS playlist. A playlist is left to FFmpeg, which cannot fetch its segments without TLS,
+    /// so it fails to open and the app can offer the original file instead. Given to this stream,
+    /// mpv's own playlist parser took over when FFmpeg's could not, and played each few-second
+    /// segment as a file of its own: no length, no seeking (Aperture over https on Android).
+    /// </summary>
+    internal static bool Carries(string url) =>
+        url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+        && !(Uri.TryCreate(url, UriKind.Absolute, out var uri)
+             && uri.AbsolutePath.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase));
+
     /// <summary>The resource's length in bytes, once a response has said it.</summary>
     internal long? Size => _size;
 

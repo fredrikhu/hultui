@@ -122,6 +122,15 @@ public class MpvHttpStreamTests
         Assert.Equal(-1, stream.Read(new byte[16]));
     }
 
+    [Theory]
+    [InlineData("https://media.example/Videos/abc/stream?static=true&x=1", true)]
+    [InlineData("HTTPS://media.example/Videos/abc/stream.mkv", true)]
+    [InlineData("https://media.example/videos/abc/master.m3u8?playSessionId=1", false)]   // an HLS transcode
+    [InlineData("https://media.example/videos/abc/main.M3U8", false)]
+    [InlineData("http://media.example/Videos/abc/stream?static=true", false)]   // FFmpeg has http
+    public void AnHttpsSource_IsCarried_ButNotAnHlsPlaylist(string url, bool carried) =>
+        Assert.Equal(carried, MpvHttpStream.Carries(url));
+
     [Fact]
     public void AnHttpsUrl_IsWrappedForMpv_AndUnwrappedBack()
     {

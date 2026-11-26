@@ -231,7 +231,8 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
         // An https:// source this libmpv's FFmpeg cannot open goes through HttpClient. mpv caches
         // only what it knows to be a network stream, which a callback stream is not, so the cache
         // is asked for; queued before the load, it applies to this file.
-        bool throughClient = _httpsThroughClient && target.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+        // An HLS playlist is not: see MpvHttpStream.Carries.
+        bool throughClient = _httpsThroughClient && MpvHttpStream.Carries(target);
         if (throughClient) target = MpvHttpStream.Wrap(target);
         if (throughClient != _cacheForced)
         {
