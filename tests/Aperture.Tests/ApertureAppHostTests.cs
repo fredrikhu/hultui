@@ -687,6 +687,38 @@ public partial class ApertureAppHostTests
     }
 
     /// <summary>
+    /// A stream that never got to its resume point is reported stopped at that point, not at
+    /// 0:00, which the server takes as "watched from the start to nowhere" and clears the
+    /// resume point with. Seen on a phone: an https stream the Android libmpv could not open
+    /// took a part-watched episode off Continue watching.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]    // it would not load
+    [InlineData(false)]   // it was left before it loaded
+    public void AStreamThatNeverReachedItsResumePoint_IsReportedStoppedThere(bool fails)
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend
+        {
+            Duration = TimeSpan.FromMinutes(167),
+            FailNextOpenWith = fails ? "loading failed" : null,
+            HoldOpening = !fails,
+        };
+        Host(library, (session, app) =>
+        {
+            app.Play(library.Item("m2")!, TimeSpan.FromMinutes(58));
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+            Assert.Equal(fails ? PlaybackState.Failed : PlaybackState.Opening, app.Player!.State);
+
+            app.StopPlayback(report: true);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+
+            Assert.Equal("ReportStopped(m2, at=0:58:00)",
+                library.Calls.Last(c => c.StartsWith("Report", StringComparison.Ordinal)));
+        }, () => backend, width: 960, height: 600);
+    }
+
+    /// <summary>
     /// An episode that runs out is reported where it ended, the next one is offered, and when
     /// it starts the finished one is reported stopped at its end — the report that marks it
     /// watched — before the new stream's own started report.

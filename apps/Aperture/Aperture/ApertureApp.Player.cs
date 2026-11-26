@@ -216,6 +216,10 @@ public sealed partial class ApertureApp
         if (!keepSheet) DismissUpNext();
         var target = _playback;
         var position = _player?.Position ?? TimeSpan.Zero;
+        // A stream that never reached its resume point (it would not load, or was left before it
+        // had) is not stopped at 0:00, and telling the server so wipes the place it was left at:
+        // a failed https load on Android cleared a part-watched episode from Continue watching.
+        if (!_resumeApplied && _resumeTo > TimeSpan.Zero) position = _resumeTo;
 
         StopWatchingPlayback();
         if (_player is { } player)
