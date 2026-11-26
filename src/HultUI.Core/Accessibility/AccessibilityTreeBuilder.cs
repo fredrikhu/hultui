@@ -915,8 +915,24 @@ public static partial class AccessibilityTreeBuilder
         if (IsNameFromContentRole(ResolveRole(element)) && GetContentText(element) is { } content)
             return content;
 
-        return element.Name;
+        if (!string.IsNullOrEmpty(element.Name)) return element.Name;
+        return PlaceholderName(element) ?? element.Name;
     }
+
+    /// <summary>
+    /// A text field's placeholder ("Search", "A number"), which names it when nothing else does, as a
+    /// browser names an input by its placeholder: a field the app gave no label was read as "edit" and
+    /// nothing more ("Edit box" on TalkBack). Last, after the element's own <see cref="Element.Name"/>.
+    /// The name stays once text is typed, as a browser's does: it says what the field is for. Null for
+    /// anything but a text input, a text area or the rich text editor, and for an empty placeholder.
+    /// </summary>
+    private static string? PlaceholderName(Element element) => element switch
+    {
+        TextInputElement { Placeholder.Length: > 0 } input => input.Placeholder,
+        TextAreaElement { Placeholder.Length: > 0 } area => area.Placeholder,
+        RichTextEditorElement { Placeholder.Length: > 0 } editor => editor.Placeholder,
+        _ => null,
+    };
 
     /// <summary>
     /// The name of a control a reader knows by what is chosen in it, when the app gave it none: a
@@ -955,7 +971,8 @@ public static partial class AccessibilityTreeBuilder
             // A text matched, so there is a name, and all of it must be the texts.
             if (any) return at == name!.Length;
         }
-        return element.Name == name;
+        if (!string.IsNullOrEmpty(element.Name)) return element.Name == name;
+        return (PlaceholderName(element) ?? element.Name) == name;
     }
 
     /// <summary>Matches the texts <see cref="AppendContentText"/> joins, one space between two, against

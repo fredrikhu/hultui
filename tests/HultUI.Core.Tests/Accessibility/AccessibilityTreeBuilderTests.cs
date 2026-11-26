@@ -154,6 +154,64 @@ public class AccessibilityTreeBuilderTests
         Assert.Equal("sidebar", name);
     }
 
+    // A text field the app gave no label is named by its placeholder, as a browser names an input:
+    // it was read as "edit" and nothing more ("Edit box" on TalkBack).
+    [Fact]
+    public void ResolveName_ATextFieldWithOnlyAPlaceholder_IsNamedByIt_AndKeepsTheNameOnceTyped()
+    {
+        var input = TextInputElement.New("");
+        input.Placeholder = "A number";
+        var area = TextAreaElement.New("");
+        area.Placeholder = "Notes";
+        var editor = new RichTextEditorElement { Placeholder = "Write here" };
+
+        Assert.Equal("A number", AccessibilityTreeBuilder.ResolveName(input));
+        Assert.Equal("Notes", AccessibilityTreeBuilder.ResolveName(area));
+        Assert.Equal("Write here", AccessibilityTreeBuilder.ResolveName(editor));
+        Assert.True(AccessibilityTreeBuilder.NameIs(input, "A number"));
+
+        input.Text = "42";
+        Assert.Equal("A number", AccessibilityTreeBuilder.ResolveName(input));
+    }
+
+    [Fact]
+    public void ResolveName_AnyOtherName_WinsOverThePlaceholder()
+    {
+        var labelled = TextInputElement.New("");
+        labelled.Placeholder = "A number";
+        labelled.AccessibleName = "Age";
+        var named = TextInputElement.New("");
+        named.Placeholder = "A number";
+        named.Name = "age";
+        var bare = TextInputElement.New("");
+
+        Assert.Equal("Age", AccessibilityTreeBuilder.ResolveName(labelled));
+        Assert.Equal("age", AccessibilityTreeBuilder.ResolveName(named));
+        Assert.False(AccessibilityTreeBuilder.NameIs(named, "A number"));
+        Assert.Null(AccessibilityTreeBuilder.ResolveName(bare));
+        Assert.True(AccessibilityTreeBuilder.NameIs(bare, null));
+    }
+
+    [Fact]
+    public void APlaceholderChange_IsToldAsANameChange()
+    {
+        var input = TextInputElement.New("");
+        var area = TextAreaElement.New("");
+        var editor = new RichTextEditorElement();
+        var observer = new RecordingObserver();
+        input.AccessibilityObserver = observer;
+        area.AccessibilityObserver = observer;
+        editor.AccessibilityObserver = observer;
+
+        input.Placeholder = "A number";
+        input.Placeholder = "A number";   // the same: nothing to tell
+        area.Placeholder = "Notes";
+        editor.Placeholder = "Write here";
+
+        Assert.Equal([(input, AccessibilityProperties.Name), (area, AccessibilityProperties.Name), (editor, AccessibilityProperties.Name)],
+            observer.Changes.Select(c => (c.Element, c.Property)));
+    }
+
     [Fact]
     public void Build_CreatesTreeFromElements()
     {

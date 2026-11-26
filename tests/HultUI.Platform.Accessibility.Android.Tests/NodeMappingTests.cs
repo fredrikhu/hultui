@@ -84,6 +84,18 @@ public class NodeMappingTests
     }
 
     [Fact]
+    public void AFieldWithOnlyAPlaceholder_HasItAsItsHint()
+    {
+        // On the emulator TalkBack said "Edit box" and nothing more for the spike's number field.
+        var number = TextInput.New("").Width(200);
+        number.Placeholder = "A number";
+        using var h = Page(number);
+
+        Assert.Equal("A number", h.Node(number).HintText);
+        Assert.Null(h.Node(number).Text);
+    }
+
+    [Fact]
     public void APasswordField_SaysItIsOne_AndNeverItsText()
     {
         var password = TextInput.New("hunter2").Password().AccessibleName("Password").Width(200);

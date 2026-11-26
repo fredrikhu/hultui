@@ -134,7 +134,19 @@ public class TextInputElement : BoxElement, ITouchTextEditing
         MarkPaintDirty();
     }
 
-    public string Placeholder { get; set; } = "";
+    /// <summary>The text shown in the empty field. When the app gives the field no other name, it is
+    /// the field's accessible name too, and a change of it is told as one.</summary>
+    public string Placeholder
+    {
+        get => _placeholder;
+        set
+        {
+            if (_placeholder == value) return;
+            _placeholder = value;
+            NotifyAccessibilityPropertyChanged(Accessibility.AccessibilityProperties.Name);
+        }
+    }
+    private string _placeholder = "";
     public Color PlaceholderColor { get; set; } = new(150, 150, 150, 255);
     public Color SelectionColor { get; set; } = new(66, 135, 245, 80);
     public Color CursorColor { get; set; } = new(0, 0, 0, 255);

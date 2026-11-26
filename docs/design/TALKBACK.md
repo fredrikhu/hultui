@@ -168,8 +168,9 @@ The differ now hands a value change its previous node, which TalkBack's text-cha
   on the element, not on its current item.
 - **The phone**, by hand: no root there, so the script cannot drive it. And **Aperture's main views**,
   the plan's exit criterion.
-- **Framework-wide, not this bridge's:** a text field that has only a placeholder has no accessible
-  name on any platform, so TalkBack says "Edit box" alone. Using the placeholder as the name when
-  there is no other (as browsers do) changes the UIA and AT-SPI trees too.
+- ~~A text field that has only a placeholder has no accessible name, so TalkBack says "Edit box"
+  alone.~~ Done the same day, on the user's word, for every platform: a text field with no other
+  name is named by its placeholder, as browsers do (docs/ELEMENTS.md), so TalkBack says it as the
+  hint.
 - English role words ("Link", "Tab", "Menu item") until HultUI's spoken words are localized; TalkBack's
   own words (button, check box, collapsed) follow the phone's language already.

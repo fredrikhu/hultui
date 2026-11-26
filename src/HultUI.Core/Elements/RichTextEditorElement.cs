@@ -140,7 +140,19 @@ public partial class RichTextEditorElement : BoxElement, IScrollbarDraggable, IA
     internal override bool TakesTypedText => !ReadOnly;
     private bool _readOnly;
 
-    public string Placeholder { get; set; } = "";
+    /// <summary>The text shown in the empty field. When the app gives the field no other name, it is
+    /// the field's accessible name too, and a change of it is told as one.</summary>
+    public string Placeholder
+    {
+        get => _placeholder;
+        set
+        {
+            if (_placeholder == value) return;
+            _placeholder = value;
+            NotifyAccessibilityPropertyChanged(Accessibility.AccessibilityProperties.Name);
+        }
+    }
+    private string _placeholder = "";
 
     /// <summary>
     /// When set, the editor is as tall as its document within these bounds and scrolls only past

@@ -328,6 +328,12 @@ children builds the tree.
 
 `AccessibleName` is what a screen reader announces. `Name` is only its last-resort fallback — reach for `AccessibleName` on anything user-facing, and leave `Name` for debugging.
 
+A text field (`TextInput`, `TextArea`, the rich text editor) with neither is named by its
+`Placeholder`, as a browser names an input: an unlabelled field was read as "edit" and nothing more.
+The name stays once text is typed, and a new placeholder is told as a new name. A label beside the
+field does not name it (there is no label-for association), so a field whose placeholder is an
+example ("e.g. Ada") rather than what it is for still wants an `AccessibleName`.
+
 **A `BoxElement` with a click handler is announced as a button.** When no role is set, the
 tree builder infers one from the element type, and the last rule is "a box with an
 `OnClick` is a `Button`", named from the text inside it. That is right for a clickable
