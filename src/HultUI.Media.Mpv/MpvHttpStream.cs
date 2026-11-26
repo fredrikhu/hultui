@@ -39,6 +39,9 @@ internal sealed unsafe class MpvHttpStream : IDisposable
     /// stopped this many times before mpv is told the stream ended in an error.</summary>
     internal const int Retries = 3;
 
+    /// <summary>The most one read asks the response stream for (see <see cref="Read"/>).</summary>
+    internal const int MaxRead = 32 * 1024;
+
     /// <summary>Each request said on stderr, with mpv's own log (HULTUI_MPV_LOG).</summary>
     private static readonly bool Log = Environment.GetEnvironmentVariable("HULTUI_MPV_LOG") is { Length: > 0 };
 
@@ -92,6 +95,12 @@ internal sealed unsafe class MpvHttpStream : IDisposable
     internal long Read(Span<byte> buffer)
     {
         if (buffer.IsEmpty) return 0;
+        // At most MaxRead a call. Android's response stream is a Java one: each read makes a Java
+        // array the size of the whole buffer, copies the buffer in, reads one TLS record (~16 KB)
+        // and copies the whole buffer back. mpv asks for ~128 KB at a time, so every 16 KB of a
+        // film cost ~256 KB of copying and a 128 KB Java allocation: at 36 Mbps, 12-16 % of a core
+        // and most of the Java GC's ~10 % (the S25, plan 20).
+        if (buffer.Length > MaxRead) buffer = buffer[..MaxRead];
         for (int attempt = 0; ; attempt++)
         {
             if (_cancel.IsCancellationRequested) return -1;

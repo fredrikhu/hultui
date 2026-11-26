@@ -100,11 +100,18 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
         // distribution libmpv loaded through HULTUI_MPV_PATH, "auto" skips the whitelist and
         // may pick methods known to be broken.
         //
+        // Android: "auto-safe" lands on mediacodec-copy, which copies each decoded frame out of
+        // MediaCodec and uploads it to a texture again. Zero-copy (mediacodec, through
+        // AImageReader) is asked for first: at 4K HEVC on a Galaxy S25 the app took 30 % of a core
+        // against 50 %, and the codec service 4 % against 9 %. Where it will not start (the
+        // emulator), mpv goes on to the copy.
+        //
         // HULTUI_MPV_HWDEC overrides it with any mode mpv understands. mpv falls back to
         // software on its own if the mode it is given cannot initialise.
         mpv_set_option_string(_mpv, "hwdec",
-            Environment.GetEnvironmentVariable("HULTUI_MPV_HWDEC") is { Length: > 0 } mode
-                ? mode : "auto-safe");
+            Environment.GetEnvironmentVariable("HULTUI_MPV_HWDEC") is { Length: > 0 } mode ? mode
+            : OperatingSystem.IsAndroid() ? "mediacodec,mediacodec-copy"
+            : "auto-safe");
         // Android: AudioTrack (through JNI) first, as mpv-android has it; AAudio where it will not
         // open. mpv 0.41's AAudio output froze playback after a seek made while paused (a Galaxy
         // S25 and the emulator alike): the picture and the position stood still while the sound

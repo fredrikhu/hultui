@@ -238,8 +238,9 @@ terminal and youtube-dl hooks; a trimmed build without those options is fine, th
 set best-effort. **On NVIDIA the bundled libmpv decodes zero-copy** on Windows and Linux:
 NVDEC with CUDA interop, which keeps ten bits and never copies a frame through main memory
 (the VO line reads `cuda[p010]`). Elsewhere on Windows it decodes on the GPU and copies
-(`d3d11va-copy`), because the DirectX interops would bridge at 8 bits. `HULTUI_MPV_HWDEC`
-overrides the mode.
+(`d3d11va-copy`), because the DirectX interops would bridge at 8 bits. On Android it decodes
+zero-copy through MediaCodec and AImageReader, and copies where that will not start
+(`docs/ANDROID.md`). `HULTUI_MPV_HWDEC` overrides the mode.
 
 ## Testing
 
