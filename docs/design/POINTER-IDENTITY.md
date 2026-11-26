@@ -6,7 +6,7 @@
 - desktop touchscreens become touch pointers too
 - pens stay as mice for now
 
-Plan 20, phase 3, first part ([plan](../plans/20-mobile-support.md) §2.3). It makes touch a pointer of its own, so the next note can build gestures (tap, long
+Plan 20, phase 3, first part (`docs/plans/20-mobile-support.md` §2.3). It makes touch a pointer of its own, so the next note can build gestures (tap, long
 press, pan with inertia, pinch) on it. Gestures are not designed here, but §5 checks this
 design leaves them room.
 

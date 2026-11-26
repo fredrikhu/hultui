@@ -8,7 +8,7 @@
 - long press opens the context menu, else the tooltip
 - touch scrollbars later
 
-Plan 20, phase 3, second part ([plan](../plans/20-mobile-support.md) §2.3). It builds on the approved [pointer identity note](POINTER-IDENTITY.md): one primary
+Plan 20, phase 3, second part (`docs/plans/20-mobile-support.md` §2.3). It builds on the approved [pointer identity note](POINTER-IDENTITY.md): one primary
 pointer, touch pointers with IDs, `PointerCancel`, and other fingers routed to the capture
 holder.
 

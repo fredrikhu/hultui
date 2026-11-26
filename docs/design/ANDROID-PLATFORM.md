@@ -5,7 +5,7 @@
   and no new public type
 - `Window.SafeArea`, `SafeAreaChanged` and `LaysOutInSafeArea`, on by default
 - `KeyCode.Back`, then the topmost overlay, then the system's default
-- the names as written Plan 20, phase 2 ([plan](../plans/20-mobile-support.md) §5).
+- the names as written Plan 20, phase 2 (`docs/plans/20-mobile-support.md` §5).
 This is the part of phase 2 that adds API. The rest is built on branch `claude/android-spike`:
 - the lifecycle
 - GL ES

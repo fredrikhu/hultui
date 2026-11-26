@@ -3,7 +3,7 @@
 **Status (2026-11-25): design approved and built, on branch `claude/android-spike`.** The user
 approved §3's API as proposed: the names `EnteringBackground` and `EnteredForeground`, media
 pausing by default, and `LifecycleState` on every platform (§6). What was built, how it was
-checked, and what is left are in §8. Plan 20, phase 2 ([plan](../plans/20-mobile-support.md)).
+checked, and what is left are in §8. Plan 20, phase 2 (`docs/plans/20-mobile-support.md`).
 Written from what the Android spike measured (`spikes/AndroidHello/README.md`, branch
 `claude/android-spike`). Where something was not measured, this note says so.
 

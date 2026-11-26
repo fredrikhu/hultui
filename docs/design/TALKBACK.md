@@ -2,7 +2,7 @@
 
 **Status (2026-11-26): approved by the user, all four recommendations in §6 taken. Built the same
 day, and checked with TalkBack on the emulator; §8 and §9 say what is built, what the emulator
-showed, and what is left; §10 is the TextInput decision, taken and built.** It adds no public API. Plan 20, phase 6 ([plan](../plans/20-mobile-support.md) §2.9). Required
+showed, and what is left; §10 is the TextInput decision, taken and built.** It adds no public API. Plan 20, phase 6 (`docs/plans/20-mobile-support.md` §2.9). Required
 before any Android release beyond the user's own devices: the desktop apps hold that bar
 (`docs/ACCESSIBILITY-PLAN.md`).
 

@@ -3,7 +3,7 @@
 **Status (2026-11-26): approved by the user, all six recommendations in §6 taken. Built and
 headless-tested: §2 and §3 (§8), §4 (§9). Checked on the emulator
 (`spikes/AndroidHello/scripts/keyboard-check.ps1`); not yet on the phone.** Plan 20, phase 4
-([plan](../plans/20-mobile-support.md) §2.4). It builds on the [gestures note](GESTURES.md):
+(`docs/plans/20-mobile-support.md` §2.4). It builds on the [gestures note](GESTURES.md):
 long press, pan, and `PointerCancel`.
 
 The phone user expects three things of a text field:
