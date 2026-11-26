@@ -162,8 +162,17 @@ The differ now hands a value change its previous node, which TalkBack's text-cha
 - ~~**Lists over 2,000 items**~~ Built (§9).
 - ~~**Long press**, `ACTION_DISMISS` for dialogs and menus.~~ Built (§9).
 - ~~**A list that takes an element's focus** (`AccessibilityNode.FocusHolder`).~~ Built (§9).
-- **The phone**, by hand: no root there, so the script cannot drive it. And **Aperture's main views**,
-  the plan's exit criterion.
+- **The phone**, by hand: no root there, so the script cannot drive it.
+  - **The basics are checked on a Galaxy S25** (2026-11-27, the spike's default screen): explore,
+    swipe, click, announcement, field and keyboard, scrolling.
+  - **Two faults were found and fixed there:**
+    - The focus box was not drawn until something else redrew the window. The surface's view is
+      now invalidated as the focus moves.
+    - A drop-down's open list was swiped past. Opening it from an assistive tool focuses it, and
+      the window gives the open list the reader's focus.
+    - Plan 20, phase 6, has the details.
+  - **Not yet on the phone:** the a11y sample (§9), and **Aperture's main views**, the plan's exit
+    criterion.
 - ~~A text field that has only a placeholder has no accessible name, so TalkBack says "Edit box"
   alone.~~ Done the same day, on the user's word, for every platform: a text field with no other
   name is named by its placeholder, as browsers do (docs/ELEMENTS.md), so TalkBack says it as the

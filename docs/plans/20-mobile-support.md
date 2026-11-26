@@ -680,8 +680,8 @@ Left:
 (`docs/design/TALKBACK.md`): its own package, live regions, a desktop-tested mapper under a thin
 Android layer, the Fluent sample first. No public API.
 
-**Built (2026-11-26), checked with TalkBack on the emulator; not yet on the phone, not yet in
-Aperture.** The bridge (`HultUI.Platform.Accessibility.Android`), 46 desktop tests, and the Android
+**Built (2026-11-26), checked with TalkBack on the emulator, and its basics on a Galaxy S25
+(2026-11-27, below); not yet Aperture on the phone.** The bridge (`HultUI.Platform.Accessibility.Android`), 46 desktop tests, and the Android
 layer on SDL's surface. On the emulator (`spikes/AndroidHello/scripts/talkback-check.ps1`) TalkBack
 reads the spike and the Fluent sample by explore-by-touch and by swipe, a double tap clicks, swiping
 past a list's last row scrolls it, a two-finger drag scrolls, and an announcement is spoken from a
@@ -696,9 +696,29 @@ live region. What is left is in TALKBACK.md §8.
 
 All are checked on the emulator by `talkback-a11y-check.ps1`, 13 of 13, except dismiss, which is
 checked on the desktop only. A TextInput offers its text to readers on every platform since the
-same day, on the user's word (§10 there). Left:
-- the phone, by hand (`spikes/AndroidHello/README.md`, "TalkBack on the phone");
-- Aperture on a device, which waits for phase 5.
+same day, on the user's word (§10 there).
+
+**On the Galaxy S25, by hand (2026-11-27), the user with TalkBack on the spike's default screen:**
+- These work: explore by touch, swipes in reading order, a double tap's click and its spoken
+  announcement, a field and its keyboard, typing, swiping past a list's last row (it scrolls),
+  and two-finger scrolling.
+- Two faults, fixed and checked again on the phone:
+  - **No focus box until something else redrew the window** (the keyboard opening). Android's
+    window draws TalkBack's box, in a pass a focus move does not ask for. The surface's view is
+    invalidated as the focus moves, as ExploreByTouchHelper does it.
+  - **A drop-down's open list was swiped past.** TalkBack's double tap opens it through the
+    router's expand, which gave the drop-down no focus. Its list is an overlay at the tree's end,
+    so the next swipe went to the rows below. Opening it from an assistive tool now focuses it,
+    and the window gives the open list the reader's focus with the chosen item current, as it
+    does an open menu (`A11yDropdownReaderFocusTests`). On the desktop, UIA's Expand now puts a
+    reader's focus on the list item, as a Windows combo box does.
+- After the keyboard is closed with the system Back button, TalkBack's focus stays on Back. The
+  Settings app's search field does the same, so this is TalkBack's behaviour, not the bridge's.
+
+Left:
+- on the phone: the a11y sample (text by unit, the long press's menu, the dialog, the 3,000-item
+  list), all passing on the emulator;
+- Aperture's main views on the phone.
 
 **Exit criteria**
 

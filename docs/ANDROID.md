@@ -229,9 +229,11 @@ the scrubber over the buttons, and no volume slider, since the phone has volume 
 
 These are plan 20's later phases:
 - **No pinch** yet, and no magnifier over the text a handle moves.
-- **TalkBack is checked on the emulator only** (phase 6, docs/design/TALKBACK.md §8 and §9). It
-  reads, explores, swipes, clicks, scrolls, moves through text by unit, long-presses and hears
-  announcements. Nothing is checked on a phone yet.
+- **TalkBack on a phone is checked for the basics only** (phase 6, docs/design/TALKBACK.md §8 and
+  §9). On a Galaxy S25 it explores, swipes, clicks, scrolls, types and hears announcements, and it
+  goes into an open drop-down. These pass on the emulator but are not yet checked on a phone:
+  moving through text by unit, the long press's menu, dialogs, a 3,000-item list, and Aperture's
+  views.
 - **File dialogs** return Android's `content://` addresses, which `File.Open` cannot open.
 - **No second window.**
 - **An Android TV build** (phase 5).
