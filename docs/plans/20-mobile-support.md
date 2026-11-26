@@ -528,8 +528,7 @@ keyboard. Caret placement, word selection, handles and the edit menu for `TextIn
 them. Built and headless-tested: the input kinds and the keyboard's area (the note's §8), and
 touch text editing (§9). Checked on the emulator (`keyboard-check.ps1`, five checks), and on the
 Galaxy S25 with Samsung's keyboard: 5 of 5, and the user signed in to Aperture and searched with
-it. Left: Aperture's sign-in screen, which is wider than a phone (its Connect button half off the
-edge).
+it. The sign-in card, wider than the phone at first, now fits it (698a21f3).
 
 **Exit criteria**
 
@@ -595,7 +594,6 @@ Fixed on the way, each found on the phone:
 
 Left:
 - **CPU.** Playback takes 1.1–1.4 cores, at 1080p as at 4K and with zero-copy too. Profile it.
-- **Aperture's sign-in screen** is wider than a phone.
 - **An https HLS transcode** needs TLS in FFmpeg (a licence decision: OpenSSL or mbedTLS make the
   build LGPLv3).
 - **A tablet layout.** At 600 DIP and over, Aperture keeps its desktop layout.
