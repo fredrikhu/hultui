@@ -1,4 +1,4 @@
-using HultUI.Core.Accessibility;
+﻿using HultUI.Core.Accessibility;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Platform;
@@ -8,7 +8,7 @@ using HultUI.Core.Styling;
 
 namespace HultUI.Core.Elements;
 
-public class TextInputElement : BoxElement
+public partial class TextInputElement : BoxElement, ITouchTextEditing
 {
     private string _text = "";
     private int _cursorPos;
@@ -52,6 +52,7 @@ public class TextInputElement : BoxElement
             _cursorPos = SnapToBoundary(Math.Clamp(value, 0, _text.Length));
             _selectionStart = _cursorPos;
             _history.Seal();
+            CaretMoved();
         }
     }
 
@@ -131,10 +132,23 @@ public class TextInputElement : BoxElement
         _selectionStart = 0;
         _cursorPos = _text.Length;
         _history.Seal();
+        CaretMoved();
         MarkPaintDirty();
     }
 
-    public string Placeholder { get; set; } = "";
+    /// <summary>The text shown in the empty field. When the app gives the field no other name, it is
+    /// the field's accessible name too, and a change of it is told as one.</summary>
+    public string Placeholder
+    {
+        get => _placeholder;
+        set
+        {
+            if (_placeholder == value) return;
+            _placeholder = value;
+            NotifyAccessibilityPropertyChanged(Accessibility.AccessibilityProperties.Name);
+        }
+    }
+    private string _placeholder = "";
     public Color PlaceholderColor { get; set; } = new(150, 150, 150, 255);
     public Color SelectionColor { get; set; } = new(66, 135, 245, 80);
     public Color CursorColor { get; set; } = new(0, 0, 0, 255);
@@ -158,13 +172,31 @@ public class TextInputElement : BoxElement
             // A reveal toggle must reach a reader now, not on the next layout-driven rebuild.
             NotifyAccessibilityPropertyChanged(AccessibilityProperties.IsPassword);
             // And the platform's input method, if the field has the keyboard.
-            if (_focused) TextInputHost?.StartTextInput(InputKind);
+            if (_focused) TextInputHost?.StartTextInput(RequestedInputKind, multiline: false);
         }
     }
     private bool _masked;
 
+    /// <summary>
+    /// What this field holds, for the platform's text input: on a phone, which keyboard it shows
+    /// and whether it capitalizes and corrects (<see cref="TextInputKind"/>). <see cref="Masked"/>
+    /// wins over it, so a masked field always asks for <see cref="TextInputKind.Password"/>. The
+    /// builder is <c>.Kind(...)</c>.
+    /// </summary>
+    public TextInputKind InputKind
+    {
+        get => _inputKind;
+        set
+        {
+            if (_inputKind == value) return;
+            _inputKind = value;
+            if (_focused) TextInputHost?.StartTextInput(RequestedInputKind, multiline: false);
+        }
+    }
+    private TextInputKind _inputKind;
+
     /// <summary>What this field asks of the platform's text input when it has focus.</summary>
-    internal TextInputKind InputKind => Masked ? TextInputKind.Password : TextInputKind.Text;
+    internal TextInputKind RequestedInputKind => Masked ? TextInputKind.Password : _inputKind;
 
     /// <summary>What stands in for each character of a masked value.</summary>
     internal const char MaskGlyph = '●';
@@ -502,6 +534,20 @@ public class TextInputElement : BoxElement
         MarkPaintDirty();
     }
 
+    /// <summary>A reader's selection, from <paramref name="anchor"/> to <paramref name="caret"/>
+    /// (offsets in the value, clamped, kept off the middle of a surrogate pair), as a click there
+    /// would leave it: no edit, the current undo step ended. Nothing while an input method is
+    /// composing.</summary>
+    internal void SetSelectionFromAssistiveTool(int anchor, int caret)
+    {
+        if (_composition.IsActive) return;
+        _selectionStart = SnapToBoundary(Math.Clamp(anchor, 0, _text.Length));
+        _cursorPos = SnapToBoundary(Math.Clamp(caret, 0, _text.Length));
+        _history.Seal();
+        CaretMoved();
+        MarkPaintDirty();
+    }
+
     /// <summary>The one way the value is edited: the range [<paramref name="start"/>,
     /// <paramref name="end"/>) becomes <paramref name="inserted"/>, the caret lands collapsed
     /// after it, and the undo history hears about it. An edit that bypasses this is one Ctrl+Z
@@ -518,7 +564,7 @@ public class TextInputElement : BoxElement
     {
         if (evt.Button != 0) return;
 
-        int pos = PositionFromPoint(evt.Position);
+        int pos = PositionFromPoint(PointerToLayout(evt.Position));
 
         // The word (or the whole value) is taken on the second press, not on the release that
         // completes the double-click: the button is still down, so the drag that follows keeps
@@ -537,6 +583,7 @@ public class TextInputElement : BoxElement
 
         _history.Seal();
         _isDragging = true;
+        CaretMoved();
         MarkPaintDirty();
     }
 
@@ -562,13 +609,15 @@ public class TextInputElement : BoxElement
         _ => (pos, pos),
     };
 
+    // A pointer's point, from a move or from the window while the drag is held outside.
     private void DragTo(Point position)
     {
-        int pos = PositionFromPoint(position);
+        int pos = PositionFromPoint(PointerToLayout(position));
         if (_dragUnit == SelectionUnit.Character)
             _cursorPos = pos;
         else
             (_selectionStart, _cursorPos) = DragSelection.Extend(_dragAnchor, UnitRangeAt(pos));
+        CaretMoved();
         MarkPaintDirty();
     }
 
@@ -589,14 +638,78 @@ public class TextInputElement : BoxElement
         _isDragging = false;
     }
 
-    private int PositionFromPoint(Point screenPos)
+    // ──── Touch text editing (docs/design/SOFT-KEYBOARD.md §4) ────
+
+    /// <summary>The insertion handle is being dragged: the caret moves with no selection.</summary>
+    private bool _touchCaretOnly;
+
+    bool ITouchTextEditing.HasTouchSelection => HasSelection;
+
+    (Rect Start, Rect End)? ITouchTextEditing.TouchCaretBoxes() =>
+        _renderCtx is null ? null : (CaretBoxAt(SelectionStart), CaretBoxAt(SelectionEnd));
+
+    /// <summary>The caret's box before character <paramref name="index"/>, as the field draws it.</summary>
+    private Rect CaretBoxAt(int index)
     {
         var contentBox = Layout.AbsoluteContentBox;
-        float clickX = screenPos.X - contentBox.X + _scrollOffset;
+        var style = ResolvedInherited;
+        var shown = ShownText;
+        float x = shown.Length > 0 ? _renderCtx!.TextCaretX(shown, style, Math.Clamp(index, 0, shown.Length)) : 0;
+        float height = _renderCtx!.MeasureText("X", style).Height;
+        return new Rect(contentBox.X + x - _scrollOffset, contentBox.Y + (contentBox.Height - height) / 2, CursorWidth, height);
+    }
+
+    void ITouchTextEditing.TouchSelectWordAt(Point position)
+    {
+        int pos = PositionFromPoint(position);
+        (_selectionStart, _cursorPos) = Masked ? (0, _text.Length) : WordBoundary.RangeAt(_text, pos);
+        _history.Seal();
+        CaretMoved();
+        MarkPaintDirty();
+    }
+
+    void ITouchTextEditing.TouchBeginHandleDrag(bool movesEnd)
+    {
+        _touchCaretOnly = !HasSelection;
+        if (!_touchCaretOnly)
+        {
+            int start = SelectionStart, end = SelectionEnd;
+            (_selectionStart, _cursorPos) = movesEnd ? (start, end) : (end, start);
+        }
+        _history.Seal();
+        CaretMoved();
+    }
+
+    void ITouchTextEditing.TouchDragHandleTo(Point position)
+    {
+        int pos = PositionFromPoint(position);
+        if (pos == _cursorPos || (!_touchCaretOnly && pos == _selectionStart)) return;
+        _cursorPos = pos;
+        if (_touchCaretOnly) _selectionStart = pos;
+        CaretMoved();
+        MarkPaintDirty();
+    }
+
+    void ITouchTextEditing.TouchEndHandleDrag() => _touchCaretOnly = false;
+
+    IReadOnlyList<ContextMenuItem> ITouchTextEditing.TouchEditItems() => BuildContextMenuItems();
+
+    // A point in layout space: a pointer's goes through PointerToLayout first, as layout is
+    // unscrolled and a scroll view above the field moves it only when painting.
+    private int PositionFromPoint(Point layoutPoint)
+    {
+        var contentBox = Layout.AbsoluteContentBox;
+        float clickX = layoutPoint.X - contentBox.X + _scrollOffset;
         return SnapToBoundary(HitTestTextPosition(clickX));
     }
 
     private void MoveCursor(int delta, bool extendSelection)
+    {
+        MoveCursorBy(delta, extendSelection);
+        CaretMoved();
+    }
+
+    private void MoveCursorBy(int delta, bool extendSelection)
     {
         _history.Seal();
         if (!extendSelection && HasSelection)
@@ -633,6 +746,7 @@ public class TextInputElement : BoxElement
         _cursorPos = SnapToBoundary(Math.Clamp(pos, 0, _text.Length));
         if (!extendSelection)
             _selectionStart = _cursorPos;
+        CaretMoved();
     }
 
     private void MoveCursorWordLeft(bool extendSelection)
@@ -911,6 +1025,7 @@ public class TextInputElement : BoxElement
             // Unkeyed siblings match by position, so the live element patched here can be one
             // that was built unmasked — a username field the password field moved into.
             Masked = input.Masked;
+            InputKind = input.InputKind;
             Spans = input.Spans;
 
             // Preserve the caret and selection across a reconcile patch. The Text

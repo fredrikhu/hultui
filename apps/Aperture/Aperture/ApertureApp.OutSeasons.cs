@@ -169,7 +169,7 @@ public sealed partial class ApertureApp
     /// </summary>
     private BoxElement OutSeasonCardElement(MediaItem series, OutSeasonCard card, int cursorIndex, CardArt picture)
     {
-        const float width = Halide.PosterWidth;
+        float width = Halide.PosterWidth;
         float height = MathF.Round(width * 1.5f);
         var line = OutSeasonLine(card);
         var aired = OutSeasonAired(card);

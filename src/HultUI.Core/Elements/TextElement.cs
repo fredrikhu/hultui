@@ -312,6 +312,8 @@ public class TextElement : Element
         _selectionWired = true;
 
         // The six in one array that holds them exactly (the click one may be there already).
+        // A cancelled press ends its drag through the window (Window.DispatchRelease), not a
+        // seventh handler: 24 B on every selectable label.
         ReserveHandlers(_clickWired ? 5 : 6);
         OnOwn(PointerDownHandler);
         OnOwn(PointerMoveHandler);

@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Animation;
 using HultUI.Core.Events;
@@ -47,6 +47,7 @@ public class NumericUpDownElement : Element, IRangeValueElement
         Inherited.Cursor = CursorType.Pointer;
         OnOwn<PointerDownEvent>(OnPointerDown);
         OnOwn<PointerUpEvent>(_ => Release());
+        OnOwn<PointerCancelEvent>(_ => Release());
         OnOwn<PointerLeaveEvent>(_ => Release());
         OnOwn<FocusEvent>(_ => { _focused = true; MarkPaintDirty(); });
         OnOwn<BlurEvent>(_ => { _focused = false; Commit(); Release(); MarkPaintDirty(); });
@@ -103,6 +104,11 @@ public class NumericUpDownElement : Element, IRangeValueElement
 
     // Typed characters only arrive while the platform's text input is armed.
     protected internal override bool WantsTextInput => true;
+
+    /// <summary>Digits on a phone's keyboard; with the point and minus when the step has a
+    /// fraction or the range goes below zero.</summary>
+    internal override Platform.TextInputKind WantedInputKind =>
+        _min >= 0 && _step == Math.Floor(_step) ? Platform.TextInputKind.Number : Platform.TextInputKind.Decimal;
 
     /// <summary>What the field shows: the text being typed, or the formatted value.</summary>
     public string DisplayText => _typed ?? FormatValue(_value);

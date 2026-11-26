@@ -228,6 +228,10 @@ public sealed class SkiaRasterRenderSurface : IRenderSurface, ISkiaFrameCapture
         return buffer;
     }
 
+    /// <summary>The system's low-memory signal: the text caches; a raster surface keeps nothing on
+    /// a GPU (docs/design/APP-LIFECYCLE.md).</summary>
+    internal void TrimMemory() => _text.TrimCaches();
+
     public void Dispose()
     {
         _renderContext.Dispose();

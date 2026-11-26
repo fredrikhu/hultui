@@ -119,7 +119,7 @@ public sealed partial class ApertureApp
         hero.AddChild(horizontal);
 
         var content = Flex.Row(gap: Halide.S5)
-            .Padding(new Thickness(Halide.S5))
+            .Padding(new Thickness(Halide.Phone ? Halide.S4 : Halide.S5))
             .AlignItems(AlignItems.FlexEnd)
             .Size(Dimension.Percent(100), Dimension.Percent(100));
         content.Position.Type = PositionType.Absolute;
@@ -127,8 +127,9 @@ public sealed partial class ApertureApp
         content.Position.Bottom = Dimension.Px(0);
 
         // The poster, unless this is an episode — an episode's primary image is a still
-        // from the episode, which the backdrop behind it already is.
-        if (item.Kind != MediaKind.Episode)
+        // from the episode, which the backdrop behind it already is. Nor on a phone: beside a
+        // poster 150 wide, the title and its buttons ran off the screen; the backdrop shows the film.
+        if (item.Kind != MediaKind.Episode && !Halide.Phone)
             content.AddChild(Artwork(item, ImageKind.Primary, 150f, 225f, Halide.Radius3));
 
         content.AddChild(TitleBlock(item));
@@ -151,10 +152,12 @@ public sealed partial class ApertureApp
         if (item.Kind == MediaKind.Episode && item.SeriesName is { Length: > 0 } series)
             block.AddChild(Ui.Line(series, 13f, Halide.Accent300));
 
-        block.AddChild(Text.New(item.Name).FontSize(30f).FontWeight(FontWeight.Bold).TextColor(Halide.Text)
+        block.AddChild(Text.New(item.Name).FontSize(Halide.Phone ? 24f : 30f).FontWeight(FontWeight.Bold).TextColor(Halide.Text)
             .MaxLines(2).TextOverflow(TextOverflow.Ellipsis));
 
         var meta = Flex.Row(gap: Halide.S2).AlignItems(AlignItems.Center);
+        // On a phone the chips go on to a second line rather than off the screen.
+        if (Halide.Phone) meta.Flex.Wrap = FlexWrap.Wrap;
         if (item.Kind == MediaKind.Episode && item.SubLine.Length > 0) meta.AddChild(Ui.Chip(item.SubLine));
         if (item.ProductionYear is { } year) meta.AddChild(Ui.Chip(year.ToString()));
         if (item.RunTime is { } run) meta.AddChild(Ui.Chip(Ui.Runtime(run)));
@@ -181,6 +184,7 @@ public sealed partial class ApertureApp
     private Element ActionRow(MediaItem item)
     {
         var row = Flex.Row(gap: Halide.S2).AlignItems(AlignItems.Center);
+        if (Halide.Phone) row.Flex.Wrap = FlexWrap.Wrap;
 
         if (item.IsPlayable)
         {

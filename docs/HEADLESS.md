@@ -142,6 +142,32 @@ window.PressKey(KeyCode.Y, KeyModifiers.Ctrl, layoutKey: 'z', modifierKeys: Modi
 `PressKey` without those leaves them unknown (0, `None`, null), which is what the WinForms
 host gives; code that reads them must fall back, and a test of that code should cover both.
 
+Fingers have a driver of their own (`docs/design/POINTER-IDENTITY.md`). A finger is a number
+the test picks, from `TouchDown` to `TouchUp` or `TouchCancel`:
+
+```csharp
+window.Tap(element);                      // down and up at the element's centre, as Click aims
+window.Tap(x, y);
+window.TouchDown(0, x, y);                // the first finger down is the primary pointer
+window.TouchMove(0, x + 12, y);           // past the 8 DIP slop: the release clicks nothing
+window.TouchDown(1, x2, y2);              // a second finger: to the capture holder, or nowhere
+window.TouchUp(1);
+window.TouchCancel(0);                    // the system took it: PointerCancel, no PointerUp, no click
+```
+
+Gestures run on virtual time (`docs/design/GESTURES.md`):
+
+```csharp
+window.Swipe(from, to, TimeSpan.FromMilliseconds(50));   // 10 moves, a frame pumped before each
+session.PumpFrames(180);                                 // let the fling run out
+window.LongPress(element);                               // held 600 ms, then lifted
+```
+
+A finger follows the touch rules, not the mouse's: its release clicks only within 8 DIP of its
+press (and then the element it pressed, even if the wobble crossed onto a child or off one), a
+double tap is two taps within 300 ms and 32 DIP, hover ends at the release, and no tooltip
+opens. Time the double tap with `PumpFrame(TimeSpan)` between the taps, as for a double click.
+
 Events enter through the same single funnel as real SDL input, so hit-testing, capture, hover enter/leave, focus-on-click, drag thresholds, and click synthesis all exercise production code paths. `window.Clipboard` and `window.TextInputHost` are in-memory recorders — Ctrl+C lands in `Clipboard.Text`, and `TextInputHost.IsTextInputActive` asserts the IME was armed on focus.
 
 ## Queries
@@ -318,6 +344,27 @@ session.PumpFrame();                                          // MonitorsChanged
 - **Windows-like windows, opt-in.** `HeadlessOptions.WindowsFrame = new()` makes the windows behave as HultUI's SDL3 window does on Windows, so placement code that breaks on real monitors breaks headless too: `Placement` is the outer rectangle, and a borderless window's content (`HeadlessWindow.ContentBounds`) is inset by the invisible resize borders round its sides and bottom (`ResizeBorders`, default Windows 11's: 8 px at 100 %, 11 at 150 %); `Maximize`/`Restore` of a borderless window are posted and land on the next pump, while a placement set on a shown maximized window restores it at once and moves it (as `SDL3Window` does since 2026-11-17: the posted restore landed after the move and undid it); a move onto a monitor at another scale changes the window's scale and raises `Resized` on the next frame; `SetFullscreen` on a shown window draws its first frame at the new size inside the call, as the custom frame's `SetWindowPos` does on Windows, and the next frame raises `Resized` and draws again (since plan 17's round 16: what an app writes after the call is missing from that first frame, as on a real window); `HeadlessWindow.Moved` is raised from the pump after a move, and `HeadlessWindow.MoveByUser` stands in for the person dragging the window. See `HeadlessWindowsFrame`.
 - **The desktop's colour scheme.** `HeadlessOptions.ColorScheme` is the light or dark preference the session starts with (`NoPreference` by default), what `Application.DesktopColorScheme` reads; `session.SetColorScheme(ColorScheme.Dark)` changes it and raises `Application.DesktopSettingsChanged` from the next `PumpFrame`'s event pump, as a desktop change is. Setting the value it already has raises nothing.
 - `HeadlessMonitors.Row` stands monitors side by side, top edges aligned, the first primary (with the optional task bar); `HeadlessMonitors.Create` makes one anywhere, at any scale.
+- **The app lifecycle.** A session starts in the foreground.
+  - `session.EnterBackground()` raises `Application.EnteringBackground` at once, on the test thread, as SDL does on Android. Until `session.EnterForeground()`, `PumpFrame` draws nothing and returns false, while posted work still runs.
+  - `EnterForeground()` raises `Application.EnteredForeground`. The next two pumps each draw the whole window, as on Android, where the first frame after a return does not show.
+  - `session.SignalLowMemory()` empties the text caches, then raises `Application.LowMemory`.
+  - See [THREADING.md](THREADING.md#the-app-lifecycle) and `AppLifecycleTests`.
+- **Android's bars.** `window.SetSafeArea(new Thickness(Top: 24, Right: 0, Bottom: 48, Left: 0))`
+  simulates the status bar and the gesture bar:
+  - `Window.SafeAreaChanged` is raised at once.
+  - The next pump lays the root out inside the safe area (unless `Window.LaysOutInSafeArea` is
+    off), and keeps overlays inside it.
+  - `PressKey(KeyCode.Back)` is Android's Back; set the internal `Application.SystemBack` to
+    see whether it reached the system.
+- **Android's soft keyboard.** `window.SetKeyboardInset(120)` simulates a keyboard 120 layout units
+  high over the window's bottom edge; `SetKeyboardInset(0)` hides it:
+  - `Window.KeyboardInsetChanged` is raised at once.
+  - The next pump lays the root out above it (unless `Window.LaysOutAboveKeyboard` is off), keeps
+    overlays above it, and scrolls the focused field above it.
+  - The kind of field focused is in `window.TextInputHost.Kind`, and `Multiline` says whether it
+    asked for several lines; `StartCount` counts the starts, switches included. Focus alone shows no
+    keyboard headless: set the inset.
+  - See [ANDROID.md](ANDROID.md), `SafeAreaTests` and `BackKeyTests`.
 
 **Without golden options, do not assert pixel-exact text across OSes.** Fonts come from the system (`SKFontManager.Default`), so glyphs and text metrics differ between Windows and Linux. Assert on behavior, semantics, and your own drawing — or use golden images, below, which pin the fonts.
 

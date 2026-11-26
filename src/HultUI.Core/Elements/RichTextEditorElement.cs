@@ -1,4 +1,4 @@
-using HultUI.Core.Accessibility;
+﻿using HultUI.Core.Accessibility;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Platform;
@@ -27,7 +27,8 @@ namespace HultUI.Core.Elements;
 /// the block changes; blocks are immutable, so "changed" is a reference compare. Only the blocks
 /// on screen are drawn.</para>
 /// </remarks>
-public partial class RichTextEditorElement : BoxElement, IScrollbarDraggable, IAutoScrollable, ITextServicesClient
+public partial class RichTextEditorElement : BoxElement, IScrollbarDraggable, IAutoScrollable, IPanScrollable, ITextServicesClient,
+    ITouchTextEditing
 {
     private readonly RichEditState _state;
     private RichDocument _lastIncoming;
@@ -66,6 +67,7 @@ public partial class RichTextEditorElement : BoxElement, IScrollbarDraggable, IA
         OnOwn<PointerDownEvent>(OnPointerDown);
         OnOwn<PointerMoveEvent>(OnPointerMove);
         OnOwn<PointerUpEvent>(OnPointerUp);
+        OnOwn<PointerCancelEvent>(OnPointerCancel);
         OnOwn<ScrollEvent>(OnScroll);
     }
 
@@ -138,7 +140,19 @@ public partial class RichTextEditorElement : BoxElement, IScrollbarDraggable, IA
     internal override bool TakesTypedText => !ReadOnly;
     private bool _readOnly;
 
-    public string Placeholder { get; set; } = "";
+    /// <summary>The text shown in the empty field. When the app gives the field no other name, it is
+    /// the field's accessible name too, and a change of it is told as one.</summary>
+    public string Placeholder
+    {
+        get => _placeholder;
+        set
+        {
+            if (_placeholder == value) return;
+            _placeholder = value;
+            NotifyAccessibilityPropertyChanged(Accessibility.AccessibilityProperties.Name);
+        }
+    }
+    private string _placeholder = "";
 
     /// <summary>
     /// When set, the editor is as tall as its document within these bounds and scrolls only past

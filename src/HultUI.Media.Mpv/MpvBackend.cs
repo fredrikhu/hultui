@@ -68,6 +68,8 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
                 : "libmpv was not found. Put libmpv-2.dll / libmpv.so.2 / libmpv.2.dylib beside the application, " +
                   "on the library path, or point HULTUI_MPV_PATH at it — see HultUI.Media.Mpv's README.");
 
+        // Android: MediaCodec needs the app's Java VM in FFmpeg before anything opens.
+        PrepareForAndroid();
         _mpv = mpv_create();
         if (_mpv == 0) throw new InvalidOperationException("mpv_create failed.");
 
@@ -102,6 +104,28 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
         mpv_set_option_string(_mpv, "hwdec",
             Environment.GetEnvironmentVariable("HULTUI_MPV_HWDEC") is { Length: > 0 } mode
                 ? mode : "auto-safe");
+        // Android: AudioTrack (through JNI) first, as mpv-android has it; AAudio where it will not
+        // open. mpv 0.41's AAudio output froze playback after a seek made while paused (a Galaxy
+        // S25 and the emulator alike): the picture and the position stood still while the sound
+        // ran on. Its delay is frames written less frames presented and discarded, the discarded
+        // count is taken at start() from the timestamp before the pause, and the flush of the seek
+        // makes AAudio count the dropped buffer as presented too. AudioTrack underran as playback
+        // started and after each seek (a moment of silence) with mpv's 0.2 s buffer, and did not
+        // with 0.5 s on the S25; the delay is accounted for, so the picture stays in sync.
+        //
+        // Chroma scaled bilinearly. On a Galaxy S25 (Adreno 830, GL ES 3.2) each separable scaler
+        // tried (mpv's default lanczos, spline36, mitchell, catmull_rom, hermite) turned the two-channel
+        // chroma plane of NV12, which MediaCodec decodes to, into speckled noise, while bilinear and
+        // the polar ewa_lanczos drew it clean; three-plane I420 was clean either way. Bilinear is
+        // the cheap one of the two, and chroma is at half resolution to begin with.
+        // HULTUI_MPV_OPTIONS, applied after, still overrides it.
+        if (OperatingSystem.IsAndroid())
+        {
+            mpv_set_option_string(_mpv, "ao", "audiotrack,aaudio");
+            mpv_set_option_string(_mpv, "audio-buffer", "0.5");
+            mpv_set_option_string(_mpv, "cscale", "bilinear");
+            UseAndroidSubtitleFont();
+        }
         // No headroom: mpv signals a frame when it is due, not early with a sleep in
         // the render call to make up the difference (see Render, which also turns
         // that sleep off). The loop then wakes and draws it.
@@ -112,6 +136,12 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
             mpv_request_log_messages(_mpv, logLevel);
         ApplyExtraOptions();
         Check(mpv_initialize(_mpv));
+
+        // An FFmpeg built without TLS (Android's; Linux's unless built with GnuTLS or OpenSSL)
+        // cannot open https://; such sources are read through HttpClient instead (MpvHttpStream).
+        // A synchronous read, safe here: there is no render context yet for the core to wait on.
+        bool ffmpegHttps = (GetString(_mpv, "protocol-list") ?? "").Split(',').Contains("https");
+        _httpsThroughClient = !ffmpegHttps && MpvHttpStream.Register(_mpv, mpv_client_api_version().Value >= 0x1006A);
 
         Check(mpv_observe_property(_mpv, ObservePause, "pause", MPV_FORMAT_FLAG));
         Check(mpv_observe_property(_mpv, ObservePosition, "time-pos", MPV_FORMAT_DOUBLE));
@@ -186,8 +216,29 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
     /// as the synchronous calls' results were.</summary>
     private const ulong LoadReply = 0x100;
 
+    /// <summary>https:// sources are read through <see cref="MpvHttpStream"/>: this libmpv's FFmpeg
+    /// has no TLS.</summary>
+    private readonly bool _httpsThroughClient;
+
+    /// <summary>The cache was set to "yes" for a source read through <see cref="MpvHttpStream"/>.</summary>
+    private bool _cacheForced;
+
+    /// <summary>Whether https:// sources go through HttpClient. For tests.</summary>
+    internal bool HttpsThroughClient => _httpsThroughClient;
+
     private void Load(string target)
     {
+        // An https:// source this libmpv's FFmpeg cannot open goes through HttpClient. mpv caches
+        // only what it knows to be a network stream, which a callback stream is not, so the cache
+        // is asked for; queued before the load, it applies to this file.
+        // An HLS playlist is not: see MpvHttpStream.Carries.
+        bool throughClient = _httpsThroughClient && MpvHttpStream.Carries(target);
+        if (throughClient) target = MpvHttpStream.Wrap(target);
+        if (throughClient != _cacheForced)
+        {
+            _cacheForced = throughClient;
+            SetStringAsync(_mpv, 0, "cache", throughClient ? "yes" : "auto");
+        }
         SetFlagAsync(_mpv, 0, "pause", true);
         int error = CommandAsync(_mpv, LoadReply, "loadfile", target, "replace");
         if (error < 0) Raise(new BackendEvent.Failed(ErrorString(error)));
@@ -651,6 +702,34 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
     /// the first <c>=</c> of a pair splits, so values may contain their own. A pair mpv refuses
     /// is reported and skipped.
     /// </summary>
+    /// <summary>
+    /// Android: libass has no font provider there (Android has no fontconfig), so a subtitle drew
+    /// nothing unless its file carried its fonts ("failed to find any fallback", seen on the
+    /// emulator). It is given the system's Roboto through a folder of its own, the font linked, not
+    /// copied, and Roboto is the default subtitle and OSD font. Not the whole of /system/fonts: libass
+    /// reads every font in the folder into memory, and the CJK one alone is 32 MB. Fonts a file
+    /// embeds (most ASS subtitles in MKV) are used as on any platform. Best effort: without it,
+    /// such subtitles draw nothing, as before.
+    /// </summary>
+    private void UseAndroidSubtitleFont()
+    {
+        const string Roboto = "/system/fonts/Roboto-Regular.ttf";
+        if (!File.Exists(Roboto)) return;
+        try
+        {
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "hultui-mpv-fonts");
+            Directory.CreateDirectory(dir);
+            string link = Path.Combine(dir, "Roboto-Regular.ttf");
+            if (!File.Exists(link)) File.CreateSymbolicLink(link, Roboto);
+            mpv_set_option_string(_mpv, "sub-fonts-dir", dir);
+            mpv_set_option_string(_mpv, "osd-fonts-dir", dir);
+            mpv_set_option_string(_mpv, "sub-font-provider", "none");
+            mpv_set_option_string(_mpv, "sub-font", "Roboto");
+            mpv_set_option_string(_mpv, "osd-font", "Roboto");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    }
+
     private void ApplyExtraOptions()
     {
         if (Environment.GetEnvironmentVariable("HULTUI_MPV_OPTIONS") is not { Length: > 0 } extra) return;
@@ -749,6 +828,14 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
     {
         _getProcAddress = getProcAddress;
         _procAddressHandle = GCHandle.Alloc(getProcAddress);
+        // GL ES: a still picture is copied out of mpv's cache, and mpv's own format may not copy
+        // into the sink's texture there (GlesFboFormat). Queued ahead of anything loading.
+        if (GlesFboFormat.Choose(getProcAddress) is { } fboFormat)
+        {
+            SetStringAsync(_mpv, 0, "fbo-format", fboFormat);
+            if (Environment.GetEnvironmentVariable("HULTUI_MPV_LOG") is { Length: > 0 })
+                Console.Error.WriteLine($"[mpv] GL ES will not copy rgba16f into RGBA8: fbo-format={fboFormat}");
+        }
         var apiType = "opengl\0"u8.ToArray();
         fixed (byte* api = apiType)
         {

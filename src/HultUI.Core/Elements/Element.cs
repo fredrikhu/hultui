@@ -1,4 +1,4 @@
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
@@ -281,6 +281,20 @@ public abstract class Element
             var origin = TreeOrigin;
             return new Rect(box.X + origin.X, box.Y + origin.Y, box.Width, box.Height);
         }
+    }
+
+    /// <summary>
+    /// A point where this element's pointer events arrive (the window's space, or its overlay's)
+    /// taken back into the unscrolled layout space of <see cref="LayoutResult.AbsoluteBorderBox"/>:
+    /// the inverse of <see cref="ScreenBorderBox"/>'s shift. An editor that maps the pointer to a
+    /// place in its text from its layout box needs it, or every scroll view above it moves the
+    /// click by as far as it has scrolled.
+    /// </summary>
+    internal Point PointerToLayout(Point pointer)
+    {
+        var offset = AncestorScrollOffset;
+        var stuck = StickyShiftWithAncestors;
+        return new Point(pointer.X + offset.X - stuck.X, pointer.Y + offset.Y - stuck.Y);
     }
 
     /// <summary>Where the overlay this element is the root of sits in the window, kept by the
@@ -637,6 +651,10 @@ public abstract class Element
     /// field, area or editor, a number field, a terminal. A read-only viewer does not.
     /// </summary>
     internal virtual bool TakesTypedText => WantsTextInput;
+
+    /// <summary>What an element that <see cref="WantsTextInput"/> asks of the platform's text
+    /// input, for a phone's keyboard: a number field asks for digits.</summary>
+    internal virtual Platform.TextInputKind WantedInputKind => Platform.TextInputKind.Text;
 
     /// <summary>
     /// Content of this element that keeps its own accessibility tree — a web page's engine.

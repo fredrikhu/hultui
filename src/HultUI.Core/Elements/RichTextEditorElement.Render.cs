@@ -1,3 +1,4 @@
+using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
@@ -394,14 +395,35 @@ public partial class RichTextEditorElement
         return _scrollY != before;
     }
 
+    // A finger's scroll (IPanScrollable), vertical only, as the wheel's.
+
+    bool IPanScrollable.CanPan(PanAxis axis, int direction) =>
+        axis != PanAxis.Horizontal && (direction > 0 ? _scrollY < MaxScrollY() - 0.01f : _scrollY > 0.01f);
+
+    Point IPanScrollable.PanBy(float dx, float dy)
+    {
+        float before = _scrollY;
+        ScrollOffsetY = before + dy;
+        return new Point(0, _scrollY - before);
+    }
+
+    Point IPanScrollable.PanOffset
+    {
+        get => new(0, _scrollY);
+        set => ScrollOffsetY = value.Y;
+    }
+
     private bool _draggingScrollbar;
     private float _scrollbarGrabOffset;
 
     public bool IsDraggingScrollbar => _draggingScrollbar;
 
+    // The window's point against the bar where it is drawn (ScreenContentBox), not its layout
+    // box: layout is unscrolled, so inside a scrolled page the layout box is as far below the
+    // bar as the page has scrolled, and a press on the bar's top part missed it.
     public bool TryStartScrollbarDrag(Point position)
     {
-        var hit = _bar.HitTest(Layout.AbsoluteContentBox, _documentHeight, _scrollY, position,
+        var hit = _bar.HitTest(ScreenContentBox, _documentHeight, _scrollY, position,
             vertical: true, out float grab, out float trackOffset);
         switch (hit)
         {
@@ -419,7 +441,7 @@ public partial class RichTextEditorElement
     }
 
     public bool IsPointOverScrollbar(Point position) =>
-        _bar.Contains(Layout.AbsoluteContentBox, _documentHeight, position, vertical: true);
+        _bar.Contains(ScreenContentBox, _documentHeight, position, vertical: true);
 
     public void SetScrollbarHover(Point? position) =>
         _bar.SetHover(position is { } p && IsPointOverScrollbar(p), this);
@@ -427,7 +449,7 @@ public partial class RichTextEditorElement
     public void UpdateScrollbarDrag(Point position)
     {
         if (!_draggingScrollbar) return;
-        _scrollY = _bar.OffsetFromDrag(Layout.AbsoluteContentBox, _documentHeight, position, _scrollbarGrabOffset,
+        _scrollY = _bar.OffsetFromDrag(ScreenContentBox, _documentHeight, position, _scrollbarGrabOffset,
             vertical: true);
         MarkPaintDirty();
     }

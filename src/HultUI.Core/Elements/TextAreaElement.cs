@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
@@ -9,7 +9,7 @@ using HultUI.Core.Styling;
 
 namespace HultUI.Core.Elements;
 
-public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
+public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable, IPanScrollable, ITouchTextEditing
 {
     private string _text = "";
     private int _cursorPos;
@@ -239,7 +239,19 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     public bool HasSelection => _selectionStart != _cursorPos;
     public string SelectedText => HasSelection ? _text[SelectionStart..SelectionEnd] : "";
 
-    public string Placeholder { get; set; } = "";
+    /// <summary>The text shown in the empty field. When the app gives the field no other name, it is
+    /// the field's accessible name too, and a change of it is told as one.</summary>
+    public string Placeholder
+    {
+        get => _placeholder;
+        set
+        {
+            if (_placeholder == value) return;
+            _placeholder = value;
+            NotifyAccessibilityPropertyChanged(Accessibility.AccessibilityProperties.Name);
+        }
+    }
+    private string _placeholder = "";
     public Color PlaceholderColor { get; set; } = new(150, 150, 150, 255);
     public Color SelectionColor { get; set; } = new(66, 135, 245, 80);
     public Color CursorColor { get; set; } = new(0, 0, 0, 255);
@@ -1900,6 +1912,14 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     /// replaced as a paste over Ctrl+A would, one edit Ctrl+Z takes back, told through
     /// <see cref="TextChanged"/>. Refused when <see cref="ReadOnly"/>, as a paste is, and while
     /// an input method is composing.</summary>
+    /// <summary>A reader's selection (<see cref="Select"/>), offsets in the text the area offers a
+    /// reader, which are its own; told to the reader as a caret move.</summary>
+    internal void SetSelectionFromAssistiveTool(int anchor, int caret)
+    {
+        Select(anchor, caret);
+        CaretMoved();
+    }
+
     internal void SetValueFromAssistiveTool(string value)
     {
         if (ReadOnly || _composition.IsActive || value == _text) return;
@@ -1912,7 +1932,7 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     {
         if (evt.Button != 0) return;
 
-        int pos = PositionFromPoint(evt.Position);
+        int pos = PositionFromPoint(PointerToLayout(evt.Position));
         // The word or the line is taken on the press that completes the double or triple
         // click, so the drag that follows extends the selection in the same unit instead of
         // dropping back to characters the moment the pointer moves.
@@ -1969,9 +1989,10 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         }
     }
 
+    // A pointer's point, from a move or from the window while the drag is held outside.
     private void DragTo(Point position)
     {
-        int pos = PositionFromPoint(position);
+        int pos = PositionFromPoint(PointerToLayout(position));
         if (_dragUnit == SelectionUnit.Character)
             _cursorPos = pos;
         else
@@ -2029,6 +2050,24 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         float before = _scrollOffsetY;
         ScrollOffsetY = before + dy;
         return _scrollOffsetY != before;
+    }
+
+    // ---- Pan (IPanScrollable): a finger's scroll, vertical only, as the wheel's ----
+
+    bool IPanScrollable.CanPan(PanAxis axis, int direction) =>
+        axis != PanAxis.Horizontal && (direction > 0 ? _scrollOffsetY < MaxScrollY() - 0.01f : _scrollOffsetY > 0.01f);
+
+    Point IPanScrollable.PanBy(float dx, float dy)
+    {
+        float before = _scrollOffsetY;
+        ScrollOffsetY = before + dy;
+        return new Point(0, _scrollOffsetY - before);
+    }
+
+    Point IPanScrollable.PanOffset
+    {
+        get => new(0, _scrollOffsetY);
+        set => ScrollOffsetY = value.Y;
     }
 
     /// <summary>Largest valid vertical scroll offset (content height minus viewport).</summary>
@@ -2109,6 +2148,69 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
 
     public void EndDrag() => _isDragging = false;
 
+    // ──── Touch text editing (docs/design/SOFT-KEYBOARD.md §4) ────
+
+    /// <summary>The insertion handle is being dragged: the caret moves with no selection.</summary>
+    private bool _touchCaretOnly;
+
+    bool ITouchTextEditing.HasTouchSelection => HasSelection;
+
+    (Rect Start, Rect End)? ITouchTextEditing.TouchCaretBoxes() =>
+        _renderCtx is null ? null : (CaretBoxAt(SelectionStart), CaretBoxAt(SelectionEnd));
+
+    /// <summary>The caret's box before character <paramref name="index"/>, as the area draws it:
+    /// on its visual line, under the area's own scroll.</summary>
+    private Rect CaretBoxAt(int index)
+    {
+        var contentBox = Layout.AbsoluteContentBox;
+        var style = ResolvedInherited;
+        float wrapWidth = contentBox.Width;
+        var starts = GetLineStarts(wrapWidth, style);
+        float lh = GetLineHeight(style);
+        index = Math.Clamp(index, 0, _text.Length);
+        var (line, _) = CursorToLineCol(index, wrapWidth, style);
+        var (lineStart, lineEnd) = VisualLineRange(starts, line);
+        float x = contentBox.X + CaretXOnLine(lineStart, lineEnd, index, style);
+        return new Rect(x, contentBox.Y + line * lh - _scrollOffsetY, CursorWidth, lh);
+    }
+
+    void ITouchTextEditing.TouchSelectWordAt(Point position)
+    {
+        int pos = PositionFromPoint(position);
+        _history.Seal();
+        CaretMoved();
+        (_selectionStart, _cursorPos) = WordBoundary.RangeAt(_text, pos);
+        _needsScrollToCursor = true;
+        MarkPaintDirty();
+    }
+
+    void ITouchTextEditing.TouchBeginHandleDrag(bool movesEnd)
+    {
+        _touchCaretOnly = !HasSelection;
+        if (!_touchCaretOnly)
+        {
+            int start = SelectionStart, end = SelectionEnd;
+            (_selectionStart, _cursorPos) = movesEnd ? (start, end) : (end, start);
+        }
+        _history.Seal();
+    }
+
+    void ITouchTextEditing.TouchDragHandleTo(Point position)
+    {
+        int pos = PositionFromPoint(position);
+        if (pos == _cursorPos || (!_touchCaretOnly && pos == _selectionStart)) return;
+        CaretMoved();
+        _cursorPos = pos;
+        if (_touchCaretOnly) _selectionStart = pos;
+        // Past the area's edge the caret is on a line out of view: the area scrolls to it.
+        _needsScrollToCursor = true;
+        MarkPaintDirty();
+    }
+
+    void ITouchTextEditing.TouchEndHandleDrag() => _touchCaretOnly = false;
+
+    IReadOnlyList<ContextMenuItem> ITouchTextEditing.TouchEditItems() => BuildContextMenuItems();
+
     // ──── Scrollbar thumb drag (IScrollbarDraggable) ────
     private bool _draggingScrollbar;
     private float _scrollbarGrabOffset;   // pointer Y minus thumb top at grab time
@@ -2118,10 +2220,12 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     private float TotalContentHeight() =>
         LineCount(GetWrapWidth(), ResolvedInherited) * GetLineHeight(ResolvedInherited);
 
+    // The window's point against the bar where it is drawn (ScreenContentBox), not its layout
+    // box: layout is unscrolled, so inside a scrolled page the layout box is as far below the
+    // bar as the page has scrolled, and a press on the bar's top part missed it.
     public bool TryStartScrollbarDrag(Point position)
     {
-        var contentBox = Layout.AbsoluteContentBox;
-        var hit = _bar.HitTest(contentBox, TotalContentHeight(), _scrollOffsetY, position,
+        var hit = _bar.HitTest(ScreenContentBox, TotalContentHeight(), _scrollOffsetY, position,
             vertical: true, out float grab, out float trackOffset);
 
         switch (hit)
@@ -2140,7 +2244,7 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     }
 
     public bool IsPointOverScrollbar(Point position) =>
-        _bar.Contains(Layout.AbsoluteContentBox, TotalContentHeight(), position, vertical: true);
+        _bar.Contains(ScreenContentBox, TotalContentHeight(), position, vertical: true);
 
     /// <summary>See <see cref="IScrollbarDraggable.SetScrollbarHover"/> — the window decides this
     /// by geometry, because the bar is painted over the text it scrolls.</summary>
@@ -2151,7 +2255,7 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     {
         if (!_draggingScrollbar) return;
         _scrollOffsetY = _bar.OffsetFromDrag(
-            Layout.AbsoluteContentBox, TotalContentHeight(), position, _scrollbarGrabOffset, vertical: true);
+            ScreenContentBox, TotalContentHeight(), position, _scrollbarGrabOffset, vertical: true);
         MarkPaintDirty();
     }
 
@@ -2306,7 +2410,10 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         return w > 0 ? w : 200f; // fallback for pre-layout
     }
 
-    private int PositionFromPoint(Point screenPos)
+    // A point in layout space: a pointer's goes through PointerToLayout first, as layout is
+    // unscrolled and a scroll view above the area moves it only when painting. A page scrolled
+    // by three lines put a click three lines below where it landed.
+    private int PositionFromPoint(Point layoutPoint)
     {
         var contentBox = Layout.AbsoluteContentBox;
         var style = ResolvedInherited;
@@ -2314,10 +2421,10 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         float lh = GetLineHeight(style);
         var starts = GetLineStarts(wrapWidth, style);
 
-        float localY = screenPos.Y - contentBox.Y + _scrollOffsetY;
+        float localY = layoutPoint.Y - contentBox.Y + _scrollOffsetY;
         int line = Math.Clamp((int)(localY / lh), 0, starts.Count - 1);
 
-        float localX = screenPos.X - contentBox.X;
+        float localX = layoutPoint.X - contentBox.X;
         int lineStart = starts[line];
         int lineEnd = line + 1 < starts.Count ? starts[line + 1] : _text.Length;
         if (lineEnd > lineStart && lineEnd <= _text.Length && _text[lineEnd - 1] == '\n')

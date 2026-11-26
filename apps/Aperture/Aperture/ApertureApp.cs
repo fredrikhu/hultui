@@ -333,14 +333,19 @@ public sealed partial class ApertureApp : Component, IDisposable
             right.AddChild(Box.New().Width(Halide.S3));
         }
 
-        var controls = Flex.Row(gap: 0).AlignItems(AlignItems.Stretch);
-        controls.AddChild(WinButton(Icons.WinMinimize, "Minimize", () => _window.Minimize(), Halide.Raised));
-        // Flagged so the Windows custom frame reports HTMAXBUTTON and Windows 11 shows its
-        // Snap Layouts flyout on hover.
-        controls.AddChild(WinButton(Icons.WinMaximize, "Maximize", () => _window.ToggleMaximize(), Halide.Raised)
-            .WindowMaximizeButton());
-        controls.AddChild(WinButton(Icons.WinClose, "Close", () => _window.Close(), new Color(232, 17, 35)));
-        right.AddChild(controls);
+        // The window's own buttons, where the app has a window to minimise and close: not on
+        // Android, where the system's Home, Back and recents do it.
+        if (!OperatingSystem.IsAndroid())
+        {
+            var controls = Flex.Row(gap: 0).AlignItems(AlignItems.Stretch);
+            controls.AddChild(WinButton(Icons.WinMinimize, "Minimize", () => _window.Minimize(), Halide.Raised));
+            // Flagged so the Windows custom frame reports HTMAXBUTTON and Windows 11 shows its
+            // Snap Layouts flyout on hover.
+            controls.AddChild(WinButton(Icons.WinMaximize, "Maximize", () => _window.ToggleMaximize(), Halide.Raised)
+                .WindowMaximizeButton());
+            controls.AddChild(WinButton(Icons.WinClose, "Close", () => _window.Close(), new Color(232, 17, 35)));
+            right.AddChild(controls);
+        }
 
         bar.AddChild(right);
         return bar;
@@ -458,6 +463,8 @@ public sealed partial class ApertureApp : Component, IDisposable
         string badgeWord = "waiting")
     {
         var fg = active ? Halide.Accent : Halide.TextMuted;
+        // No digit to press on a phone or a TV's remote: neither drawn nor named.
+        if (!Ui.HasKeyboard) key = "";
         var name = key.Length > 0 ? $"{label} ({key})" : label;
         if (badge > 0) name += $", {badge} {badgeWord}";
         var b = Flex.Column(gap: 2)
@@ -628,10 +635,11 @@ public sealed partial class ApertureApp : Component, IDisposable
         Rerender();
     }
 
-    /// <summary>Says something, briefly, at the bottom of the window.</summary>
+    /// <summary>Says something, briefly, at the bottom of the window; for <paramref name="seconds"/>
+    /// when given (a long sentence), or longer when it carries an action.</summary>
     internal void Flash(string message, ToastSeverity severity = ToastSeverity.None,
-        (string Label, Action Run)? action = null) =>
-        _toasts.Flash(message, severity, action, action is null ? null : 6f);
+        (string Label, Action Run)? action = null, float? seconds = null) =>
+        _toasts.Flash(message, severity, action, seconds ?? (action is null ? null : 6f));
 
     /// <summary>The failure copy for a call that did not work, as a toast.</summary>
     internal void FlashFailure(ApertureFailure failure, string what = "That")

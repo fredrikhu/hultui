@@ -130,6 +130,81 @@ public sealed class Application : IDisposable
     /// <summary>All currently tracked windows (including closed ones not yet disposed).</summary>
     public IReadOnlyList<Window> Windows => _windows;
 
+    // ──── App lifecycle (docs/design/APP-LIFECYCLE.md) ────
+
+    /// <summary>
+    /// Whether the app is on screen. Always <see cref="AppLifecycleState.Foreground"/> on Windows
+    /// and Linux, where minimizing a window is not leaving the app; on Android it follows Home,
+    /// the app switcher and the screen lock. While it is <see cref="AppLifecycleState.Background"/>
+    /// HultUI draws nothing, and the UI thread goes on running posted work, timers and
+    /// <c>await</c> continuations.
+    /// </summary>
+    public AppLifecycleState LifecycleState =>
+        (_platform as IAppLifecycleSource)?.LifecycleState ?? AppLifecycleState.Foreground;
+
+    /// <summary>
+    /// Raised on the UI thread, synchronously, as the app leaves the screen. The last moment the
+    /// app can count on: Android may end the process later without telling it. Save state here,
+    /// quickly. <see cref="LifecycleState"/> already reads Background, and nothing is drawn
+    /// until <see cref="EnteredForeground"/>. Never raised on Windows or Linux.
+    /// </summary>
+    public event Action? EnteringBackground;
+
+    /// <summary>Raised on the UI thread when the app is back on screen, before its first frame.
+    /// Every window is drawn afresh after it. Never raised on Windows or Linux.</summary>
+    public event Action? EnteredForeground;
+
+    /// <summary>
+    /// Raised on the UI thread when the system asks for memory back, after HultUI has emptied its
+    /// own caches: the text shaping caches, and Skia's GPU caches while the app is on screen (in
+    /// the background they wait: docs/design/APP-LIFECYCLE.md). Drop what can be loaded again; a full,
+    /// compacting garbage collection follows the handlers. On Android this comes on most trips to
+    /// the background (the system's <c>onTrimMemory</c>), not only when memory is short.
+    /// </summary>
+    public event Action? LowMemory;
+
+    /// <summary>Raised on the UI thread when the system ends the app, where it says so (Android
+    /// rarely does). Best effort: do not rely on it to save; save in <see cref="EnteringBackground"/>.</summary>
+    public event Action? Terminating;
+
+    /// <summary>
+    /// The system's own back, run when a <see cref="Core.Events.KeyCode.Back"/> found nothing to
+    /// do in the app (docs/design/ANDROID-PLATFORM.md §4): on Android, set by
+    /// <c>HultUI.Platform.Android</c>'s activity, it moves the app to the background. Null on the
+    /// desktop, where an unhandled Back does nothing more. Called on the UI thread.
+    /// </summary>
+    internal static Action? SystemBack { get; set; }
+
+    /// <summary>
+    /// Told the theme as an application starts and whenever <see cref="Theme"/> changes, so the
+    /// platform's own bars can match it: on Android, set by <c>HultUI.Platform.Android</c>'s
+    /// activity, the status bar's icons turn dark over a light theme, where Android's default
+    /// white icons were invisible over HultUI's white background. Null on the desktop.
+    /// </summary>
+    internal static Action<Theme>? SystemBarsFollow { get; set; }
+
+    /// <summary>The background gate: nothing is drawn, presented or uploaded while it holds.</summary>
+    internal bool InBackground => LifecycleState == AppLifecycleState.Background;
+
+    private void OnEnteringBackground() => EnteringBackground?.Invoke();
+
+    private void OnEnteredForeground()
+    {
+        // The surface the app draws into is new (Android makes one on every return), and the
+        // first frame drawn into it does not show: each window draws everything twice.
+        foreach (var window in _windows)
+            if (window.IsOpen) window.SettleRedraw();
+        EnteredForeground?.Invoke();
+    }
+
+    private void OnLowMemory()
+    {
+        LowMemory?.Invoke();
+        // What the platform's caches and the app's handlers let go of, given back to the system.
+        System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+    }
+
     /// <summary>
     /// The desktop's monitors: bounds, work area, scale, orientation, which is primary. Empty
     /// when the platform cannot say (a hosted control, a headless session given no monitors);
@@ -293,6 +368,7 @@ public sealed class Application : IDisposable
             _theme = value ?? throw new ArgumentNullException(nameof(value));
             foreach (var w in _windows)
                 w.MarkStyleDirty();
+            SystemBarsFollow?.Invoke(_theme);
         }
     }
 
@@ -483,6 +559,14 @@ public sealed class Application : IDisposable
         _animations = s_live.Count == 1 ? AnimationManager.CurrentSet : new AnimationSet();
         if (_platform is IMonitorSource monitors) monitors.MonitorsChanged += () => MonitorsChanged?.Invoke();
         if (_platform is IDesktopSettingsSource desktop) desktop.Changed += () => DesktopSettingsChanged?.Invoke();
+        if (_platform is IAppLifecycleSource lifecycle)
+        {
+            lifecycle.EnteringBackground += OnEnteringBackground;
+            lifecycle.EnteredForeground += OnEnteredForeground;
+            lifecycle.LowMemory += OnLowMemory;
+            lifecycle.Terminating += () => Terminating?.Invoke();
+        }
+        SystemBarsFollow?.Invoke(_theme);
         // Claim this thread before any window (and therefore any element) exists, so
         // the tree can never be built on one thread and driven from another.
         Switch();
@@ -880,7 +964,15 @@ public sealed class Application : IDisposable
 
             if (RunFrameCore(elapsed, forceRender: false, allowRender: due, tick, boundFirstStep: true))
             {
-                if (tick) stepDrawn = true;
+                if (tick)
+                {
+                    stepDrawn = true;
+                    // A drawn step's next is due with the next frame. A new tween's first step is
+                    // taken whatever the others wait for, and nextTickAt still held their deadline:
+                    // its steps after the first waited for that (a swiped toast slid one frame and
+                    // stood until its cancelled hold would have ended), on 1 ms waits.
+                    nextTickAt = now;
+                }
                 // The next deadline follows the schedule, not this render: a frame that
                 // took its slack and drew a millisecond early shifts the phase, not the
                 // rate (anchored to now it read 136 fps on a 120 Hz display). A frame
@@ -969,8 +1061,11 @@ public sealed class Application : IDisposable
         long at = long.MaxValue;
         deadline = IdleDeadline.None;
         // An animation steps with the next frame it may draw: a new tween's first step, or one
-        // after a step that drew nothing, an interval on, or when the first delay is out.
-        if (AnimationManager.HasActiveAnimations)
+        // after a step that drew nothing, an interval on, or when the first delay is out. Not in
+        // the background, where a looping spinner would wake a phone 60 times a second for
+        // frames nobody sees: a tween steps there only when something else wakes the loop, by
+        // the time that has passed, and lands where it would have when the app returns.
+        if (AnimationManager.HasActiveAnimations && !InBackground)
             Earliest(ref at, ref deadline,
                 AnimationManager.HasFreshTweens ? nextRenderAt : Math.Max(nextTickAt, nextRenderAt),
                 IdleDeadline.Animation);
@@ -1024,7 +1119,9 @@ public sealed class Application : IDisposable
             || AnimationManager.HasActiveAnimations
             || !_mainThreadQueue.IsEmpty
             // A minimized window draws nothing, and the walk waits for a present: its restore.
-            || window.PlatformWindow.IsMinimized)
+            // An app in the background draws nothing either, and waits for its return.
+            || window.PlatformWindow.IsMinimized
+            || InBackground)
             return;
         _driverWalkWindow = null;
         if (window.PlatformWindow is SDL3Window sdl && sdl.StartDriverThreadWalk())
@@ -1129,9 +1226,11 @@ public sealed class Application : IDisposable
     }
 
     /// <summary>Whether a window is waiting for its next frame. A minimized one is not: it is
-    /// drawn after its restore, whose event wakes the loop (see RenderDirtyWindows).</summary>
+    /// drawn after its restore, whose event wakes the loop (see RenderDirtyWindows). Nor is any
+    /// window while the app is in the background: they are drawn after its return.</summary>
     private bool AnyWindowNeedsRender()
     {
+        if (InBackground) return false;
         foreach (var w in _windows)
             if (w.IsOpen && w.NeedsRender && !w.PlatformWindow.IsMinimized) return true;
         return false;
@@ -1327,7 +1426,9 @@ public sealed class Application : IDisposable
             // at all, and the loop retried one every display interval until the restore.
             // A frame only accessibility asked for (Window.NeedsDraw false) stops there too: it
             // builds and tells the tree and draws nothing, so it is not a frame either.
-            if (!force && (window.PlatformWindow.IsMinimized || !window.NeedsDraw))
+            // In the background every window stops there, forced or not: the surface is gone on
+            // Android, and iOS ends an app that does GPU work while it is not on screen.
+            if (InBackground || (!force && (window.PlatformWindow.IsMinimized || !window.NeedsDraw)))
             {
                 window.RenderFrame();
                 continue;

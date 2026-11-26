@@ -57,17 +57,45 @@ public static class Halide
     public const float TitleBarHeight = 40f;
     public const float RailWidth = 64f;
 
-    /// <summary>Poster tile: 2:3 artwork, the shape every film and series library uses.</summary>
-    public const float PosterWidth = 168f;
-    public const float PosterHeight = 252f;
+    /// <summary>Poster tile: 2:3 artwork, the shape every film and series library uses. Smaller on a
+    /// phone (<see cref="UsePhoneSizes"/>).</summary>
+    public static float PosterWidth { get; private set; } = 168f;
+    public static float PosterHeight { get; private set; } = 252f;
     /// <summary>The caption under a poster — title line plus a subline.</summary>
     public const float PosterCaption = 46f;
     public const float PosterGap = S4;
 
     /// <summary>Continue-watching cards are 16:9 stills, not posters: the frame you stopped
     /// on says more about where you were than the cover art does.</summary>
-    public const float StillWidth = 300f;
-    public const float StillHeight = 169f;
+    public static float StillWidth { get; private set; } = 300f;
+    public static float StillHeight { get; private set; } = 169f;
+
+    /// <summary>Whether the sizes are a phone's (<see cref="UsePhoneSizes"/>).</summary>
+    public static bool Phone { get; private set; }
+
+    /// <summary>
+    /// A phone's sizes, set once before the app is built, on a screen whose shorter side is under
+    /// 600 DIP (plan 20 phase 5): a poster 120 wide, so two go across where one 168 did at 360 to
+    /// 412 DIP, and a still 240, which fits beside the rail. A tablet keeps the desktop's.
+    /// </summary>
+    public static void UsePhoneSizes()
+    {
+        Phone = true;
+        PosterWidth = 120f;
+        PosterHeight = 180f;
+        StillWidth = 240f;
+        StillHeight = 135f;
+    }
+
+    /// <summary>Back to the desktop's sizes: for tests, which share the process.</summary>
+    internal static void UseDesktopSizes()
+    {
+        Phone = false;
+        PosterWidth = 168f;
+        PosterHeight = 252f;
+        StillWidth = 300f;
+        StillHeight = 169f;
+    }
 
     /// <summary>The wordmark's letter tracking: 0.32em.</summary>
     public static float WordmarkTracking(float fontSize) => fontSize * 0.32f;

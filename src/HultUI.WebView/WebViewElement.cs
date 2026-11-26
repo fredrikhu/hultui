@@ -44,6 +44,7 @@ public partial class WebViewElement : Element, IAccessibleContentSource, IAutoSc
         OnOwn<PointerMoveEvent>(OnPointerMove);
         OnOwn<PointerDownEvent>(OnPointerDown);
         OnOwn<PointerUpEvent>(OnPointerUp);
+        OnOwn<PointerCancelEvent>(OnPointerCancel);
         OnOwn<PointerLeaveEvent>(OnPointerLeave);
         OnOwn<ScrollEvent>(OnScroll);
         OnOwn<FocusEvent>(e => _controller?.Focus(e.Reason));
@@ -263,11 +264,17 @@ public partial class WebViewElement : Element, IAccessibleContentSource, IAutoSc
         _ => WebPointerButtons.None,
     };
 
-    private void OnPointerMove(PointerMoveEvent e) => _controller?.SendPointer(At(e, WebPointerAction.Move));
+    // A second finger reaches the capture holder too (docs/design/POINTER-IDENTITY.md §2): the
+    // page hears the first only, as a mouse, until it is given touches of its own. The same in the
+    // press, release and cancel.
+    private void OnPointerMove(PointerMoveEvent e)
+    {
+        if (e.IsPrimary) _controller?.SendPointer(At(e, WebPointerAction.Move));
+    }
 
     private void OnPointerDown(PointerDownEvent e)
     {
-        if (_controller is null) return;
+        if (_controller is null || !e.IsPrimary) return;
         // Held from press to release, so a drag-select that leaves the element keeps going.
         e.CapturePointer();
         e.StopPropagation = true;
@@ -286,8 +293,23 @@ public partial class WebViewElement : Element, IAccessibleContentSource, IAutoSc
         _controller.SendPointer(At(e, WebPointerAction.Down) with { Button = button, ClickCount = Math.Max(1, e.ClickCount) });
     }
 
+    /// <summary>The system took the press. The page saw the press, so it hears the button come
+    /// up, as a browser's page does when its window loses the pointer; a withheld middle press
+    /// was never the page's.</summary>
+    private void OnPointerCancel(PointerCancelEvent e)
+    {
+        if (!e.IsPrimary) return;
+        _withheldPress = null;
+        var button = ButtonOf(e.Button);
+        if (_controller is null || (_held & button) == 0) return;
+        _held &= ~button;
+        _controller.SendPointer(At(e, WebPointerAction.Up) with { Button = button, ClickCount = 1 });
+        e.StopPropagation = true;
+    }
+
     private void OnPointerUp(PointerUpEvent e)
     {
+        if (!e.IsPrimary) return;
         var button = ButtonOf(e.Button);
         if (button == WebPointerButtons.Middle && _withheldPress is { } press)
         {

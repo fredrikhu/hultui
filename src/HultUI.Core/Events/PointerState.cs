@@ -25,7 +25,16 @@ public sealed class PointerState(TimeProvider? timeProvider = null)
     private const double DoubleClickMaxMs = 400;
     private const float DoubleClickMaxDistance = 5f;
 
+    /// <summary>How far a finger may move between press and release and still tap, in layout
+    /// units: Android's touch slop (8 dp).</summary>
+    internal const float TouchSlop = 8f;
+    private const double DoubleTapMaxMs = 300;
+    private const float DoubleTapMaxDistance = 32f;
+
     public Element? HoveredElement => _hoveredElement;
+
+    /// <summary>The element the press in progress landed on; null with no press.</summary>
+    internal Element? PressedElement => _pressedElement;
 
     /// <summary>How many times the hover of an element its parent draws hover for (a list's tint
     /// under the row, <see cref="Element.DrawsChildHover"/>) has changed. Such an element's look
@@ -158,8 +167,11 @@ public sealed class PointerState(TimeProvider? timeProvider = null)
         if (button == PointerEvent.LeftButton)
         {
             var now = _time.GetUtcNow().UtcDateTime;
-            bool continuesRun = (now - _lastClickTime).TotalMilliseconds < DoubleClickMaxMs
-                && Distance(position, _lastClickPosition) < DoubleClickMaxDistance;
+            // A finger's double tap: Android's timing and reach (300 ms, 32 DIP) against the
+            // mouse's 400 ms and 5 units, which no finger lands twice inside.
+            bool touch = PointerContext.IsTouch;
+            bool continuesRun = (now - _lastClickTime).TotalMilliseconds < (touch ? DoubleTapMaxMs : DoubleClickMaxMs)
+                && Distance(position, _lastClickPosition) < (touch ? DoubleTapMaxDistance : DoubleClickMaxDistance);
             _clickCount = continuesRun ? _clickCount + 1 : 1;
             _lastClickTime = now;
             _lastClickPosition = position;
@@ -216,7 +228,12 @@ public sealed class PointerState(TimeProvider? timeProvider = null)
         //
         // The button is still on PointerDown and PointerUp, which is where a handler that
         // really wants the middle or right button belongs (Vesper closes a tab from there).
-        if (button == PointerEvent.LeftButton && button == _pressedButton && (sameTarget || pressedRecycled))
+        // A finger's tap is a click only within the touch slop of its press: a finger that slid
+        // was doing something else (docs/design/POINTER-IDENTITY.md §3). A cancelled press is no
+        // click at all.
+        bool withinSlop = !PointerContext.IsTouch || Distance(position, _pressedPosition) <= TouchSlop;
+        if (button == PointerEvent.LeftButton && button == _pressedButton && (sameTarget || pressedRecycled)
+            && withinSlop && !PointerContext.Cancelling)
         {
             // The count was settled by the matching press; the release only reports it, so a
             // handler that acts on the press and one that acts on the click see the same run.

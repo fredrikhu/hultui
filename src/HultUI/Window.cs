@@ -1,4 +1,4 @@
-using HultUI.Core.Accessibility;
+﻿using HultUI.Core.Accessibility;
 using HultUI.Core.Animation;
 using HultUI.Core.Builders;
 using HultUI.Core.Components;
@@ -695,6 +695,167 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// </summary>
     public event Action? Resized;
 
+    // ──── Safe area (docs/design/ANDROID-PLATFORM.md §3) ────
+
+    private Thickness _safeArea;
+    private bool _laysOutInSafeArea = true;
+
+    /// <summary>
+    /// The window's edges the system covers (the status bar, the gesture bar, a display cutout),
+    /// in layout units. Zero on the desktop. On Android, which draws apps edge to edge, it is
+    /// what keeps content clear of the bars: see <see cref="LaysOutInSafeArea"/>.
+    /// </summary>
+    public Thickness SafeArea => _safeArea;
+
+    /// <summary>Raised on the UI thread when <see cref="SafeArea"/> changes: a rotation, the bars
+    /// shown or hidden. The new layout follows in the next frame.</summary>
+    public event Action? SafeAreaChanged;
+
+    /// <summary>
+    /// Whether the root is laid out inside <see cref="SafeArea"/> (true, the default), with the
+    /// window's background behind the system's bars, or across the whole window, for an app that
+    /// draws behind the bars itself (a full-bleed video, a hero image) and pads its own controls by
+    /// <see cref="SafeArea"/>. Overlays (menus, dialogs, toasts) stay inside the safe area either
+    /// way. Makes no difference where the safe area is zero.
+    /// </summary>
+    public bool LaysOutInSafeArea
+    {
+        get => _laysOutInSafeArea;
+        set
+        {
+            if (value == _laysOutInSafeArea) return;
+            _laysOutInSafeArea = value;
+            _root?.MarkLayoutDirty();
+            _root?.MarkPaintDirty();
+        }
+    }
+
+    // ──── Soft keyboard (docs/design/SOFT-KEYBOARD.md §3) ────
+
+    private float _keyboardInset;
+    private bool _laysOutAboveKeyboard = true;
+    /// <summary>The focused field is to be scrolled above the keyboard after the next layout: the
+    /// keyboard grew, or the focus moved while it was up.</summary>
+    private bool _revealAboveKeyboard;
+
+    /// <summary>
+    /// How far up from the window's bottom edge the soft keyboard reaches, in layout units: 0 while
+    /// it is hidden, and always on the desktop. Measured from the window's edge, not the safe area's,
+    /// so it includes a navigation bar under the keyboard. See <see cref="LaysOutAboveKeyboard"/>.
+    /// </summary>
+    public float KeyboardInset => _keyboardInset;
+
+    /// <summary>Raised on the UI thread when <see cref="KeyboardInset"/> changes: the keyboard shown,
+    /// hidden, or resized. Android reports the end of its slide, not each step. The new layout
+    /// follows in the next frame.</summary>
+    public event Action? KeyboardInsetChanged;
+
+    /// <summary>
+    /// Whether the root is laid out above the soft keyboard (true, the default), so whatever
+    /// scrolls can still be scrolled to above it and the focused field is kept in view, or across
+    /// the space under it, for an app that moves its own bottom bar by <see cref="KeyboardInset"/>.
+    /// The window scrolls the focused field above the keyboard either way, and overlays (menus,
+    /// dialogs) always stay above it.
+    /// </summary>
+    public bool LaysOutAboveKeyboard
+    {
+        get => _laysOutAboveKeyboard;
+        set
+        {
+            if (value == _laysOutAboveKeyboard) return;
+            _laysOutAboveKeyboard = value;
+            _root?.MarkLayoutDirty();
+            _root?.MarkPaintDirty();
+        }
+    }
+
+    /// <summary>The height overlays are laid out and kept in: the window's, less the keyboard.</summary>
+    private float OverlayAreaHeight => Math.Max(0, PlatformWindow.LayoutHeight - _keyboardInset);
+
+    /// <summary>Where the root is laid out, in window space: the safe area, or the whole window;
+    /// above the keyboard while one is up.</summary>
+    internal Rect RootArea
+    {
+        get
+        {
+            float w = PlatformWindow.LayoutWidth, h = PlatformWindow.LayoutHeight;
+            var s = _laysOutInSafeArea ? _safeArea : default;
+            float bottom = _laysOutAboveKeyboard ? Math.Max(s.Bottom, _keyboardInset) : s.Bottom;
+            if (s == default && bottom == 0) return new Rect(0, 0, w, h);
+            return new Rect(s.Left, s.Top, Math.Max(0, w - s.Horizontal), Math.Max(0, h - s.Top - bottom));
+        }
+    }
+
+    private void LayOutRoot()
+    {
+        var area = RootArea;
+        _layoutEngine.PerformLayout(_root!, area.X, area.Y, area.Width, area.Height);
+    }
+
+    private void OnPlatformSafeAreaChanged()
+    {
+        var source = (ISafeAreaSource)PlatformWindow;
+        var now = source.SafeArea;
+        float keyboard = source.KeyboardInset;
+        bool safeAreaChanged = now != _safeArea, keyboardChanged = keyboard != _keyboardInset;
+        if (!safeAreaChanged && !keyboardChanged) return;
+        if (keyboardChanged && keyboard > _keyboardInset) _revealAboveKeyboard = true;
+        _safeArea = now;
+        _keyboardInset = keyboard;
+        if (_root is not null)
+        {
+            _root.MarkLayoutDirty();
+            _root.MarkPaintDirty();
+        }
+        // The overlays are kept inside the safe area and above the keyboard: laid out and placed
+        // again, as at a new size of the window.
+        for (int i = 0; i < _overlays.Count; i++)
+        {
+            _overlays[i].Content.MarkLayoutDirty();
+            _overlays[i].WindowResized = true;
+        }
+        if (safeAreaChanged) SafeAreaChanged?.Invoke();
+        if (keyboardChanged) KeyboardInsetChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Scrolls the focused element above the keyboard in each scroll view it is in, innermost
+    /// first, with the part of each view the keyboard covers taken out of its viewport. Where the
+    /// root is laid out above the keyboard (the default) no view reaches under it, and this is a
+    /// plain scroll into view. A field taller than what is left shows its top.
+    /// </summary>
+    private void RevealFocusAboveKeyboard()
+    {
+        if (_keyboardInset <= 0 || FocusedElement is not { Layout: var layout } focused) return;
+        float keyboardTop = PlatformWindow.LayoutHeight - _keyboardInset;
+        var box = layout.AbsoluteBorderBox;
+        // Layout is unscrolled: the inner views' offsets, as the walk passes them, are where the
+        // field sits in each outer view's content.
+        float innerOffset = 0;
+        for (var parent = focused.Parent; parent is not null; parent = parent.Parent)
+        {
+            if (parent is not ScrollViewElement view) continue;
+            var content = view.Layout.AbsoluteContentBox;
+            float hidden = Math.Max(0, view.WindowContentBox.Bottom - keyboardTop);
+            float shown = content.Height - hidden;
+            if (shown > 0)
+                view.ScrollRangeIntoView(box.Y - innerOffset - content.Y, Math.Min(box.Height, shown) + hidden);
+            innerOffset += view.ScrollOffsetY;
+        }
+    }
+
+    /// <summary>An overlay's place moved inside the safe area and above the keyboard, when there is
+    /// either and the overlay fits; otherwise as given, so nothing changes on the desktop.</summary>
+    private (float X, float Y) InsideSafeArea(float x, float y, float width, float height)
+    {
+        if (_safeArea == default && _keyboardInset == 0) return (x, y);
+        var s = _safeArea;
+        float right = PlatformWindow.LayoutWidth - s.Right, bottom = PlatformWindow.LayoutHeight - Math.Max(s.Bottom, _keyboardInset);
+        if (width <= right - s.Left) x = Math.Clamp(x, s.Left, right - width);
+        if (height <= bottom - s.Top) y = Math.Clamp(y, s.Top, bottom - height);
+        return (x, y);
+    }
+
     /// <summary>
     /// Sets the smallest size the user may resize the window to, in
     /// density-independent (layout) units. Pass 0 for a dimension to leave it
@@ -888,6 +1049,12 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         _devTools = new DevToolsOverlay(_perf);
         _a11yObserver = new AccessibilityObserverAdapter(this);
         PlatformWindow.InputReceived += FrameLog.On ? HandleInputEventLogged : HandleInputEvent;
+        if (platformWindow is ISafeAreaSource safeArea)
+        {
+            _safeArea = safeArea.SafeArea;
+            _keyboardInset = safeArea.KeyboardInset;
+            safeArea.SafeAreaChanged += OnPlatformSafeAreaChanged;
+        }
 
         if (platformWindow.Style == WindowStyle.Borderless && _chrome is { } chrome)
         {
@@ -1081,27 +1248,35 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         {
             textInput.Clipboard = Clipboard;
             textInput.TextInputHost = TextInputHost;
-            TextInputHost.StartTextInput(textInput.InputKind);
+            TextInputHost.StartTextInput(textInput.RequestedInputKind, multiline: false);
         }
         else if (element is TextAreaElement textArea)
         {
             textArea.Clipboard = Clipboard;
             textArea.TextInputHost = TextInputHost;
-            TextInputHost.StartTextInput();
+            TextInputHost.StartTextInput(TextInputKind.Text, multiline: true);
         }
         else if (element is ITextServicesClient client)
         {
             client.Clipboard = Clipboard;
             client.TextInputHost = TextInputHost;
-            TextInputHost.StartTextInput();
+            TextInputHost.StartTextInput(TextInputKind.Text, multiline: true);
         }
         else if (element is { WantsTextInput: true })
         {
-            TextInputHost.StartTextInput();
+            TextInputHost.StartTextInput(element.WantedInputKind, multiline: false);
         }
         else
         {
             TextInputHost.StopTextInput();
+        }
+
+        // Focus moved to another field while the keyboard is up (Next, a tap on a field under it):
+        // the new one is scrolled above it after the next layout.
+        if (_keyboardInset > 0 && element is not null && element.TakesTypedText)
+        {
+            _revealAboveKeyboard = true;
+            element.MarkPaintDirty();
         }
 
         if (_accessibilityBridge.IsActive)
@@ -2002,6 +2177,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // An autoscroll moves the view with no input arriving at all, so it has to ask for
         // the frames itself — otherwise holding the pointer still would stop the scroll.
         || _autoScrollTarget is not null
+        // So does a finger's fling (Window.Gestures.cs).
+        || _fling is not null
         // So does a selection held past the edge of its view.
         || SelectionEdgeScrolling
         // An accessibility action (invoke/toggle/set-value/focus) queued from an
@@ -2092,8 +2269,35 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         return false;
     }
 
+    /// <summary>Frames a settle still owes, the one being drawn included (SettleRedraw).</summary>
+    private int _settleFrames;
+
+    /// <summary>
+    /// Whether the platform's surface loses the first frame drawn after it changes, so a resize
+    /// settles (<see cref="SettleRedraw"/>). Android does: after a rotation the first frame showed
+    /// at the old size and the next was right (spikes/AndroidHello). iOS is assumed to until
+    /// measured. Settable for tests.
+    /// </summary>
+    internal static bool SurfaceLosesFirstFrame { get; set; } = OperatingSystem.IsAndroid() || OperatingSystem.IsIOS();
+
+    /// <summary>
+    /// Draws the whole window in the next frame and once more in the frame interval after it.
+    /// After the app returns from the background, or a surface change on a platform that loses
+    /// the first frame drawn into a new surface (Android: measured on the emulator, the first
+    /// frame after a return never showed, on GL and on the software renderer alike, and one drawn
+    /// 16 ms later did). Costs one frame per return or rotation; never runs on the desktop.
+    /// </summary>
+    internal void SettleRedraw()
+    {
+        _settleFrames = 2;
+        _root?.MarkPaintDirty();
+        for (int i = 0; i < _overlays.Count; i++)
+            _overlays[i].Content.MarkPaintDirty();
+    }
+
     internal void OnWindowResized()
     {
+        if (SurfaceLosesFirstFrame) SettleRedraw();
         // A move to a monitor at another scale arrives as a resize. Told before Resized, so what
         // an app's handler builds is made at the new scale either way.
         float scale = PlatformWindow.DisplayScale;
@@ -2235,6 +2439,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // rather than a frame behind it.
         TickAutoScroll();
         TickSelectionEdgeScroll();
+        TickFling();
+        CheckTouchText();
 
         // The same for a splitter, a pan or a slider following the pointer: the moves since the
         // last frame recorded where it is, and this applies the latest, once (PointerFollow).
@@ -2289,7 +2495,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         using (_tracer.Begin("Phase", "Layout"))
         {
             if ((_root.DirtyFlags & DirtyFlags.Layout) != 0)
-                _layoutEngine.PerformLayout(_root, PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight);
+                LayOutRoot();
         }
         _perf.EndLayout();
 
@@ -2300,6 +2506,14 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // The overlays next, before the accessibility phase, which reads what changed in them.
         // Outside the style and layout timers, as when the overlays were done with their drawing.
         var overlayChanges = _overlays.Count > 0 ? PrepareOverlays(theme) : OverlayChanges.None;
+
+        // The focused field above a keyboard that just came up, or after a focus move under it: now
+        // that the root and the overlays have their boxes. A scroll, which the hover step follows.
+        if (_revealAboveKeyboard)
+        {
+            _revealAboveKeyboard = false;
+            RevealFocusAboveKeyboard();
+        }
 
         // Content that scrolled under a resting pointer takes the hover in this frame, before the
         // accessibility phase and the drawing: one hit test a frame that some scroll view moved in.
@@ -2316,7 +2530,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             }
             if ((_root.DirtyFlags & DirtyFlags.Layout) != 0)
             {
-                _layoutEngine.PerformLayout(_root, PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight);
+                LayOutRoot();
                 layoutWasDirty = true;
             }
             if (_overlays.Count > 0) overlayChanges |= PrepareOverlays(theme);
@@ -2510,7 +2724,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // a video nobody could see. Everything above has run — assistive technology's actions,
         // style, layout, the accessibility tree — and the paint dirt is kept, so the first frame
         // after the restore draws it. A video still has to be served (ServiceUndrawnSources).
-        if (!evenIfMinimized && PlatformWindow.IsMinimized)
+        // An app in the background stops here too, forced or not (docs/design/APP-LIFECYCLE.md):
+        // on Android the surface is gone, and iOS ends an app that does GPU work off screen.
+        if ((!evenIfMinimized && PlatformWindow.IsMinimized) || Application.InBackground)
         {
             // A change that was only structure, style or layout has no paint dirt of its own,
             // and none of it is on screen: the root takes some for the restore. The structural
@@ -2550,6 +2766,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
         // Overlay layer (tooltips, context menus, popups)
         RenderOverlays(ctx);
+
+        // A field's touch selection handles, above everything they could fall under.
+        RenderTouchHandles(ctx);
 
         // The drag ghost follows the pointer above everything, a dialog's own drag included.
         if (_isDragging && !_isExternalDrag)
@@ -2609,6 +2828,10 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // A Vulkan surface whose swapchain is rebuilt for what this frame showed (an HDR video came
         // on screen or left it) draws the next frame on the new one, though nothing else changed.
         if (PlatformWindow.Surface is IPictureRangeSurface pictures && pictures.TakeOwedFrame())
+            _root.MarkPaintDirty();
+
+        // A settle (SettleRedraw) draws everything once more, in the next frame interval.
+        if (_settleFrames > 0 && --_settleFrames > 0)
             _root.MarkPaintDirty();
 
         // After the present, against the tree this frame drew: what it marks shows in the next.
@@ -2747,6 +2970,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         InputActivity?.Invoke();
         NotePointer(evt);
         if (TryHandleDevToolsInput(evt)) return;
+        if (_touchText is not null) HideTouchTextFor(evt);
 
         // Snapshot the state that decides whether the input needs a frame (see the tail of
         // this method). Everything the framework changes on an input marks itself dirty
@@ -2899,7 +3123,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     var (overlayHover, overlayHoverOffset) = HitTestOverlays(pos);
                     var nowUnder = overlayHover ?? HitTester.HitTest(_root, pos);
                     var (capUp, capClick, capDbl) = _pointerState.HandlePointerUp(captured, capturedPos, button.Button, button.Modifiers);
-                    EventDispatcher.Dispatch(capUp, captured);
+                    DispatchRelease(capUp, captured);
                     // A click needs the release over the element (or inside it), as it
                     // would without capture; letting go elsewhere is how a press is abandoned.
                     bool releasedOver = false;
@@ -2968,6 +3192,12 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 // Check overlays first, then main tree
                 var (overlayTarget, overlayOffset) = HitTestOverlays(pos);
                 var target = overlayTarget ?? HitTester.HitTest(_root, pos);
+                // A cancelled press goes to the element that took it, wherever the finger is now,
+                // and so does the release of a finger that stayed within the touch slop
+                // (_releaseOnPressed): its tap is the pressed element's.
+                if (!button.IsDown && (PointerContext.Cancelling || _releaseOnPressed)
+                    && _pointerState.PressedElement is { } pressed && IsShownInWindow(pressed))
+                    target = pressed;
                 if (target is null) break;
 
                 bool isOverlayHit = overlayTarget is not null;
@@ -3000,7 +3230,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     }
 
                     // Check if click is on a scrollbar — walk up from target to find a ScrollViewElement
-                    if (!isOverlayHit && button.Button == 0 && TryStartScrollbarDrag(target, pos))
+                    // Not for a finger: a finger anywhere in the view scrolls it, and the thin desktop
+                    // bar is no target for one (touch scrollbars are later, GESTURES.md §7).
+                    if (!isOverlayHit && button.Button == 0 && !PointerContext.IsTouch && TryStartScrollbarDrag(target, pos))
                         break;
 
                     // Middle button in anything that can scroll: anchor an autoscroll here.
@@ -3023,7 +3255,11 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     // a context menu opened on a TextInput must keep the underlying
                     // element's focus and selection.
                     var focusTarget = FindFocusableAncestor(target);
-                    if (!isOverlayHit || focusTarget is not null)
+                    // A finger on nothing focusable may be a scroll starting, which keeps the
+                    // focus: its tap clears it, at the release (Window.TouchText.cs).
+                    _touchTapClearsFocus = PointerContext.IsTouch && focusTarget is null && !isOverlayHit
+                        && _focusManager.FocusedElement is not null;
+                    if (!_touchTapClearsFocus && (!isOverlayHit || focusTarget is not null))
                     {
                         // What a reader hears of the move waits for the click (BeginA11yPressHold).
                         if (!ReferenceEquals(focusTarget, _focusManager.FocusedElement) && _accessibilityBridge.IsActive)
@@ -3063,12 +3299,15 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                         _activeTextGroup = null;
                     }
 
-                    // Start pointer capture for text input drag selection
-                    if (!isOverlayHit && button.Button == 0 && target is TextInputElement dragInput && dragInput.IsDragging)
+                    // Start pointer capture for text input drag selection. Not for a finger, which
+                    // would then never scroll the page it landed on: touch selection starts from a
+                    // long press (phase 4, GESTURES.md §2).
+                    bool selects = !isOverlayHit && button.Button == 0 && !PointerContext.IsTouch;
+                    if (selects && target is TextInputElement dragInput && dragInput.IsDragging)
                         _textInputDragTarget = dragInput;
-                    else if (!isOverlayHit && button.Button == 0 && target is TextAreaElement dragArea && dragArea.IsDragging)
+                    else if (selects && target is TextAreaElement dragArea && dragArea.IsDragging)
                         _textAreaDragTarget = dragArea;
-                    else if (!isOverlayHit && button.Button == 0 && target is TextElement dragLabel && dragLabel.IsDragging)
+                    else if (selects && target is TextElement dragLabel && dragLabel.IsDragging)
                     {
                         if (dragLabel.SelectionGroup is { } grp && dragLabel.SelectionIndex >= 0)
                         {
@@ -3108,7 +3347,10 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
                     // Record potential drag source if the element (or ancestor) is draggable
                     // In an overlay too (a dialog's own drag and drop: its rows, chips, tiles).
-                    if (button.Button == 0 && _textInputDragTarget is null && _textAreaDragTarget is null && _textElementDragTarget is null && _groupDragToken is null)
+                    // Not for a finger: a finger that moves scrolls, and drags only from a long press
+                    // (docs/design/GESTURES.md §4).
+                    if (button.Button == 0 && !PointerContext.IsTouch
+                        && _textInputDragTarget is null && _textAreaDragTarget is null && _textElementDragTarget is null && _groupDragToken is null)
                     {
                         var draggable = FindDraggableAncestor(target);
                         if (draggable is not null)
@@ -3127,7 +3369,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 else
                 {
                     var (upEvt, clickEvt, dblClickEvt) = _pointerState.HandlePointerUp(target, effectiveBtnPos, button.Button, button.Modifiers);
-                    EventDispatcher.Dispatch(upEvt, target);
+                    DispatchRelease(upEvt, target);
                     if (clickEvt is not null)
                         EventDispatcher.Dispatch(clickEvt, target);
                     if (dblClickEvt is not null)
@@ -3135,6 +3377,10 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 }
                 break;
             }
+
+            case InputEvent.TouchInput touch:
+                HandleTouch(touch);
+                break;
 
             case InputEvent.PointerLeftWindowInput:
             {
@@ -3152,6 +3398,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
             case InputEvent.MouseWheelInput wheel:
             {
+                _fling = null;   // the wheel takes over from a finger's throw
                 var pos = new Point(wheel.MouseX, wheel.MouseY);
                 // Overlays first, as a press does: a wheel over a dialog or a popup list is
                 // that overlay's, not the page's underneath it.
@@ -3254,8 +3501,36 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     }
                 }
 
+                // Back with a context menu open closes the menu, as Escape does, before an app's
+                // handler (a page's history) could take it under the menu.
+                if (key.IsDown && key.KeyCode == KeyCode.Back && _contextMenuElement is not null)
+                {
+                    HandleMenuKey(key with { KeyCode = KeyCode.Escape, Text = null });
+                    break;
+                }
+
                 // An open context menu takes its keys (HandleMenuKey) without taking the focus.
                 if (key.IsDown && _contextMenuElement is not null && HandleMenuKey(key)) break;
+
+                // Back (docs/design/ANDROID-PLATFORM.md §4): the app's handlers first, as any key;
+                // then what Escape would do where the keyboard is (close a dialog, a popover, a
+                // dropdown, leave full screen); and when Escape found nothing to do either, the
+                // system's own back, which on Android moves the app to the background.
+                if (key.IsDown && key.KeyCode == KeyCode.Back)
+                {
+                    var backTarget = KeyTarget();
+                    var back = NewKeyDown(key, backTarget);
+                    EventDispatcher.Dispatch(back, backTarget);
+                    if (back.StopPropagation || back.Handled) break;
+
+                    int overlaysBefore = _overlays.Count;
+                    var escape = NewKeyDown(key with { KeyCode = KeyCode.Escape, ScanCode = 0, Text = null }, backTarget);
+                    EventDispatcher.Dispatch(escape, backTarget);
+                    if (escape.StopPropagation || escape.Handled || _overlays.Count < overlaysBefore) break;
+
+                    Application.SystemBack?.Invoke();
+                    break;
+                }
 
                 // Tab / Shift+Tab focus traversal. Dispatch the key to the focused
                 // element first so an app can observe or intercept Tab; a handler
@@ -3789,12 +4064,20 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 break;
             }
         }
+        // A finger changes no cursor and widens no scrollbar: neither shows under a finger
+        // (docs/design/POINTER-IDENTITY.md §3).
+        if (PointerContext.IsTouch) return FinishHover(target, at);
         SetCursor(cursor, cursorImage);
         _hoverCursor = cursor;
         _hoverCursorImage = cursorImage;
         _cursorFollowsHover = overScrollbar is null;
         SetScrollbarHover(overScrollbar, pos);
+        return FinishHover(target, at);
+    }
 
+    /// <summary><see cref="HoverAt"/>'s tail, the mouse's and a finger's alike.</summary>
+    private (Element? Target, Point At) FinishHover(Element? target, Point at)
+    {
         // Tooltip tracking
         UpdateTooltipHover(target);
 
@@ -4006,7 +4289,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             }
             if ((_root.DirtyFlags & DirtyFlags.Layout) != 0)
             {
-                _layoutEngine.PerformLayout(_root, PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight);
+                LayOutRoot();
                 layoutWasDirty = true;
                 UpdateCaptionHeight();
             }
@@ -4614,7 +4897,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         StyleResolver.Resolve(content, theme);
         entry.StyleResolved = true;
 
-        _layoutEngine.PerformLayout(content, PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight, forceRootFill: false);
+        _layoutEngine.PerformLayout(content, PlatformWindow.LayoutWidth, OverlayAreaHeight, forceRootFill: false);
         entry.LayoutDone = true;
 
         if (entry.Place is not null)
@@ -4663,7 +4946,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     {
         var content = entry.Content;
         float vw = PlatformWindow.LayoutWidth;
-        float vh = PlatformWindow.LayoutHeight;
+        float vh = OverlayAreaHeight;
         float width = content.Layout.Width;
         // No room where it was asked for: a flyout goes to its parent's other side when it fits
         // there (FlipRightEdge), anything else in from the window's edge.
@@ -4671,6 +4954,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             : entry.FlipRightEdge is { } edge && edge - width >= 0 ? edge - width
             : Math.Max(0, vw - width);
         float y = entry.WantedY + content.Layout.Height > vh ? Math.Max(0, vh - content.Layout.Height) : entry.WantedY;
+        (x, y) = InsideSafeArea(x, y, width, content.Layout.Height);
         MoveOverlay(entry, x, y);
     }
 
@@ -4680,8 +4964,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     {
         var content = entry.Content;
         var at = entry.Place!(new Size(content.Layout.Width, content.Layout.Height),
-            new Size(PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight));
-        MoveOverlay(entry, at.X, at.Y);
+            new Size(PlatformWindow.LayoutWidth, OverlayAreaHeight));
+        var (x, y) = InsideSafeArea(at.X, at.Y, content.Layout.Width, content.Layout.Height);
+        MoveOverlay(entry, x, y);
     }
 
     public void CloseOverlay(OverlayHandle handle)
@@ -4887,7 +5172,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             if (!overlay.LayoutDone || (content.DirtyFlags & DirtyFlags.Layout) != 0)
             {
                 _layoutEngine.PerformLayout(content,
-                    PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight, forceRootFill: false);
+                    PlatformWindow.LayoutWidth, OverlayAreaHeight, forceRootFill: false);
                 overlay.LayoutDone = true;
                 changes |= OverlayChanges.Work;
                 if (seen)
@@ -4964,7 +5249,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             if (!overlay.LayoutDone || (content.DirtyFlags & DirtyFlags.Layout) != 0)
             {
                 _layoutEngine.PerformLayout(content,
-                    PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight, forceRootFill: false);
+                    PlatformWindow.LayoutWidth, OverlayAreaHeight, forceRootFill: false);
                 overlay.LayoutDone = true;
             }
 
@@ -5052,6 +5337,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
     private void UpdateTooltipHover(Element? hitTarget)
     {
+        // A finger hovers nothing: no tooltip opens for touch (a long press will show one,
+        // docs/design/GESTURES.md §4), and one showing goes.
+        if (PointerContext.IsTouch) hitTarget = null;
         var (owner, text) = FindTooltipOwner(hitTarget);
 
         // Same owner — nothing to do

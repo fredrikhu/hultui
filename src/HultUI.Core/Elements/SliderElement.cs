@@ -21,6 +21,7 @@ public class SliderElement : Element, IRangeValueElement
     private double _step = 1;
     private bool _focused;
     private bool _dragging;
+    private float _touchPressX;
     private Color _trackColor = new(90, 90, 100);
     private Color _fillColor = new(66, 135, 245);
     private Color _thumbColor = Color.White;
@@ -97,9 +98,20 @@ public class SliderElement : Element, IRangeValueElement
         // track keeps moving the thumb, as sliders do everywhere; only the release ends it.
         OnOwn<PointerDownEvent>(e =>
         {
-            if (e.Button != PointerEvent.LeftButton) return;
+            // A second finger reaches the capture holder too (docs/design/POINTER-IDENTITY.md §2):
+            // the thumb follows the first. The same in every handler below.
+            if (e.Button != PointerEvent.LeftButton || !e.IsPrimary) return;
             // What the moves before the press were to show comes first.
             _follow?.Flush();
+            // A finger is a horizontal pan here, not a capture (docs/design/GESTURES.md §2): a
+            // vertical swipe that starts on the slider scrolls the page around it, a sideways one
+            // drags the thumb (the Pan handlers below), and a tap sets the value (the release).
+            if (e.PointerType == PointerType.Touch)
+            {
+                _touchPressX = e.LocalPosition.X;
+                Focus();
+                return;
+            }
             e.CapturePointer();
             _dragging = true;
             Focus();
@@ -107,6 +119,7 @@ public class SliderElement : Element, IRangeValueElement
         });
         OnOwn<PointerMoveEvent>(e =>
         {
+            if (!e.IsPrimary) return;
             // Recorded, and applied once per frame that may be drawn (FollowPointer): a drag's
             // OnChanged and the hover's OnHoverValue rebuild their owner, a video player for the
             // scrubber's preview, and a 1,000 Hz mouse rebuilt it about sixteen times a frame
@@ -125,9 +138,41 @@ public class SliderElement : Element, IRangeValueElement
             SetHover(null);
             OnHoverValue?.Invoke(null);
         });
-        OnOwn<PointerUpEvent>(_ =>
+        OnOwn<PointerUpEvent>(e =>
         {
+            if (!e.IsPrimary) return;
+            // A finger's tap: the value under it. One that slid past the slop did something else.
+            if (e.PointerType == PointerType.Touch && !_dragging)
+            {
+                float x = e.LocalPosition.X;
+                if (Math.Abs(x - _touchPressX) <= PointerState.TouchSlop) ApplyUserValue(ValueFromLocalX(x));
+                return;
+            }
             // The drag ends exactly where the pointer did, whether or not a frame came between.
+            _follow?.Flush();
+            _dragging = false;
+        });
+        OnOwn<PanAxisQuery>(q => q.Axis ??= PanAxis.Horizontal);
+        OnOwn<PanStartEvent>(e =>
+        {
+            _dragging = true;
+            ApplyUserValue(ValueFromLocalX(e.LocalPosition.X));
+        });
+        OnOwn<PanUpdateEvent>(e =>
+        {
+            _pointerAt = ValueFromLocalX(e.LocalPosition.X);
+            (_follow ??= new PointerFollow(FollowPointer)).Request(this);
+        });
+        // Lifted or taken, the value reached stays.
+        OnOwn<PanEndEvent>(_ =>
+        {
+            _follow?.Flush();
+            _dragging = false;
+        });
+        // A press the system took ends as a release does: the value it reached stays.
+        OnOwn<PointerCancelEvent>(e =>
+        {
+            if (!e.IsPrimary) return;
             _follow?.Flush();
             _dragging = false;
         });

@@ -1,4 +1,4 @@
-using HultUI.Core.Events;
+﻿using HultUI.Core.Events;
 using HultUI.Core.Primitives;
 using HultUI.Core.RichText;
 
@@ -38,11 +38,16 @@ public partial class RichTextEditorElement
         return _blocks.Count > 0;
     }
 
-    private Point ToDocument(Point screen)
+    // A point in layout space, as the touch handles' are, into the document's.
+    private Point ToDocument(Point layout)
     {
         var content = Layout.AbsoluteContentBox;
-        return new Point(screen.X - content.X, screen.Y - content.Y + _scrollY);
+        return new Point(layout.X - content.X, layout.Y - content.Y + _scrollY);
     }
+
+    // A pointer's point into the document's. Layout is unscrolled: a scroll view above the editor
+    // moves it only when painting, so its offset is taken back first.
+    private Point PointerToDocument(Point pointer) => ToDocument(PointerToLayout(pointer));
 
     // ── Text and the input method ──
 
@@ -258,11 +263,15 @@ public partial class RichTextEditorElement
 
     private void OnPointerDown(PointerDownEvent evt)
     {
+        // A second finger reaches the capture holder too (docs/design/POINTER-IDENTITY.md §2):
+        // the selection follows the first. The same in the move, release and cancel.
+        if (!evt.IsPrimary) return;
         if (evt.Button == PointerEvent.RightButton && EnsureFreshLayout())
         {
             // The context menu that opens next is about what is under the pointer — a table's
             // rows, a picture — so a press outside the selection moves the caret there first.
-            var (p, up) = PositionAt(ToDocument(evt.Position).X, ToDocument(evt.Position).Y);
+            var press = PointerToDocument(evt.Position);
+            var (p, up) = PositionAt(press.X, press.Y);
             var s = _state.Selection;
             if (s.IsCollapsed || p < s.Start || p > s.End)
             {
@@ -273,7 +282,7 @@ public partial class RichTextEditorElement
             return;
         }
         if (evt.Button != 0 || !EnsureFreshLayout()) return;
-        var at = ToDocument(evt.Position);
+        var at = PointerToDocument(evt.Position);
 
         if (!_readOnly && TaskBoxAt(at) is int task)
         {
@@ -297,15 +306,17 @@ public partial class RichTextEditorElement
         _upstream = upstream;
         _preferredX = -1;
         _dragging = true;
-        evt.CapturePointer();
+        // A finger is not held: a press that captured it could never scroll the page or the
+        // editor (docs/design/GESTURES.md §2).
+        if (evt.PointerType != PointerType.Touch) evt.CapturePointer();
         MarkPaintDirty();
     }
 
     private void OnPointerMove(PointerMoveEvent evt)
     {
-        if (!_dragging || !EnsureFreshLayout()) return;
+        if (!_dragging || !evt.IsPrimary || !EnsureFreshLayout()) return;
         if (_pressedLink is not null && Distance(evt.Position, _pressPoint) > 4f) _pressedLink = null;
-        var at = ToDocument(evt.Position);
+        var at = PointerToDocument(evt.Position);
         var (pos, upstream) = PositionAt(at.X, at.Y);
         _upstream = upstream;
         if (_dragUnit == SelectionUnit.Character)
@@ -320,10 +331,18 @@ public partial class RichTextEditorElement
 
     private void OnPointerUp(PointerUpEvent evt)
     {
-        if (!_dragging) return;
+        if (!_dragging || !evt.IsPrimary) return;
         _dragging = false;
         if (_pressedLink is { } link && _state.Selection.IsCollapsed)
             LinkActivated?.Invoke(link);
+        _pressedLink = null;
+    }
+
+    /// <summary>The system took the press: the selection it made stays, and no link opens.</summary>
+    private void OnPointerCancel(PointerCancelEvent evt)
+    {
+        if (!evt.IsPrimary) return;
+        _dragging = false;
         _pressedLink = null;
     }
 
@@ -386,6 +405,67 @@ public partial class RichTextEditorElement
     }
 
     public void EndDrag() => _dragging = false;
+
+    // ──── Touch text editing (docs/design/SOFT-KEYBOARD.md §4) ────
+
+    /// <summary>The insertion handle is being dragged: the caret moves with no selection.</summary>
+    private bool _touchCaretOnly;
+
+    bool ITouchTextEditing.HasTouchSelection => !_state.Selection.IsCollapsed;
+
+    (Rect Start, Rect End)? ITouchTextEditing.TouchCaretBoxes()
+    {
+        if (!EnsureFreshLayout()) return null;
+        var selection = _state.Selection;
+        // The end's caret on the line it ends, where a selection ends at a soft wrap.
+        return (FromDocument(CaretRect(selection.Start, upstream: false)),
+            FromDocument(CaretRect(selection.End, upstream: !selection.IsCollapsed || _upstream)));
+    }
+
+    /// <summary>A document rect where the editor lays it out: <see cref="ToDocument"/> undone.</summary>
+    private Rect FromDocument(Rect r)
+    {
+        var content = Layout.AbsoluteContentBox;
+        return new Rect(r.X + content.X, r.Y + content.Y - _scrollY, Math.Max(r.Width, CursorWidth), r.Height);
+    }
+
+    void ITouchTextEditing.TouchSelectWordAt(Point position)
+    {
+        if (!EnsureFreshLayout()) return;
+        var at = ToDocument(position);
+        var (pos, upstream) = PositionAt(at.X, at.Y);
+        _dragUnit = SelectionUnit.Word;
+        var word = UnitRange(pos);
+        _state.Select(word.Start, word.End);
+        _upstream = upstream;
+        _preferredX = -1;
+        MarkPaintDirty();
+    }
+
+    void ITouchTextEditing.TouchBeginHandleDrag(bool movesEnd)
+    {
+        var selection = _state.Selection;
+        _touchCaretOnly = selection.IsCollapsed;
+        if (!_touchCaretOnly)
+            _state.Select(movesEnd ? selection.Start : selection.End, movesEnd ? selection.End : selection.Start);
+    }
+
+    void ITouchTextEditing.TouchDragHandleTo(Point position)
+    {
+        if (!EnsureFreshLayout()) return;
+        var at = ToDocument(position);
+        var (pos, upstream) = PositionAt(at.X, at.Y);
+        var selection = _state.Selection;
+        if (pos == selection.Focus || (!_touchCaretOnly && pos == selection.Anchor)) return;
+        _state.MoveTo(pos, extend: !_touchCaretOnly);
+        _upstream = upstream;
+        _preferredX = -1;
+        MarkPaintDirty();
+    }
+
+    void ITouchTextEditing.TouchEndHandleDrag() => _touchCaretOnly = false;
+
+    IReadOnlyList<ContextMenuItem> ITouchTextEditing.TouchEditItems() => BuildContextMenuItems();
 
     private void OnScroll(ScrollEvent evt)
     {

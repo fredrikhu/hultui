@@ -637,8 +637,12 @@ public sealed partial class ApertureApp
     /// Deliberately the library card's twin — same size, same caption — so a shelf of
     /// things you could have reads like a shelf of things you do.
     /// </summary>
-    internal Element DiscoverCard(DiscoverItem item, float width = Halide.PosterWidth, int cursorIndex = -1) =>
-        DiscoverCard(item, width, cursorIndex, ShownRequestArtwork(RequestImages.Poster, item.PosterPath, width));
+    internal Element DiscoverCard(DiscoverItem item, float width = 0f, int cursorIndex = -1)
+    {
+        // 0: the poster's width (Halide.PosterWidth, a phone's smaller).
+        if (width <= 0f) width = Halide.PosterWidth;
+        return DiscoverCard(item, width, cursorIndex, ShownRequestArtwork(RequestImages.Poster, item.PosterPath, width));
+    }
 
     /// <summary>A discovery poster drawing <paramref name="picture"/>; see <see cref="ShownRequestArtwork"/>.</summary>
     private BoxElement DiscoverCard(DiscoverItem item, float width, int cursorIndex, HultUI.Core.Rendering.IImageSource? picture)

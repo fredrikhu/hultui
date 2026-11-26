@@ -336,6 +336,11 @@ internal sealed class AtSpiAccessible
         AccessibilityNode node, bool isRoot, string parentPath, int indexInParent, float scale)
         => From(node, PathFor(node, isRoot), isRoot, parentPath, indexInParent, scale, ChildPathsOf(node));
 
+    /// <summary>Whether the object keeps the node's value: a node that offers no text, or a one-line
+    /// field's, which is short and told as its value too; not a document's, read when asked.</summary>
+    private static bool KeepsValue(AccessibilityNode node) =>
+        node.TextSource is null || node.TextVersion is { TellsValue: true };
+
     /// <summary>The paths of a node's children, in order, in an array of the exact length.</summary>
     public static string[] ChildPathsOf(AccessibilityNode node)
     {
@@ -369,7 +374,9 @@ internal sealed class AtSpiAccessible
             Description = node.Description ?? "",
             // A node that offers text is read through its source when asked: its text and value
             // are made only then (a long document's are 1.5 MB), and its changes are text changes.
-            Value = node.TextSource is null ? node.Value : null,
+            // A one-line field keeps its value, which is short and told as its value too
+            // (AccessibleTextVersion.TellsValue).
+            Value = KeepsValue(node) ? node.Value : null,
             // Its box and offscreen state, read from it; AT-SPI reports device pixels (Scale).
             Node = node,
             // A list's or a menu's item can have the reader's focus (its container's current item), as
@@ -412,7 +419,7 @@ internal sealed class AtSpiAccessible
         if (!string.Equals(_description, description)) Description = description;
         var textSource = node.TextSource;
         // The value before the range: the range's setter keeps the value it finds.
-        string? value = textSource is null ? node.Value : null;
+        string? value = KeepsValue(node) ? node.Value : null;
         if (!string.Equals(Value, value)) Value = value;
         var range = node.Range;
         if (Range != range) Range = range;

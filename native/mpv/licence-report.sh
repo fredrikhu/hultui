@@ -16,13 +16,22 @@ echo "mpv        $MPV_TAG"
 echo "FFmpeg     $FFMPEG_TAG"
 echo "libplacebo $LIBPLACEBO_TAG"
 echo "libass     ${LIBASS_TAG} (or the host package on Windows)"
-# What was installed, not only what was asked for: the two differed whenever a work
-# directory outlived a versions.env bump, and the report said the new tag regardless.
-nvinstalled=$(pkg-config --modversion ffnvcodec 2>/dev/null || echo "not found")
-echo "nv-codec-headers ${NVCODEC_TAG} (MIT) — installed: ${nvinstalled}"
 stale=0
-if [ "$nvinstalled" != "${NVCODEC_TAG#n}" ]; then
-  echo "  installed nv-codec-headers ($nvinstalled) is not the pinned ${NVCODEC_TAG#n}  <-- stale work directory"; stale=1
+if [ "${REPORT_TARGET:-}" = android ]; then
+  # build-libmpv-android.sh: no NVIDIA there; what a desktop takes from the host is built here.
+  echo "dav1d      $DAV1D_TAG (BSD-2)"
+  echo "freetype   $FREETYPE_TAG (FreeType licence)"
+  echo "fribidi    $FRIBIDI_TAG (LGPL-2.1+)"
+  echo "harfbuzz   $HARFBUZZ_TAG (MIT)"
+  echo "libc++     the NDK's, linked in (Apache-2.0 with LLVM exceptions)"
+else
+  # What was installed, not only what was asked for: the two differed whenever a work
+  # directory outlived a versions.env bump, and the report said the new tag regardless.
+  nvinstalled=$(pkg-config --modversion ffnvcodec 2>/dev/null || echo "not found")
+  echo "nv-codec-headers ${NVCODEC_TAG} (MIT) — installed: ${nvinstalled}"
+  if [ "$nvinstalled" != "${NVCODEC_TAG#n}" ]; then
+    echo "  installed nv-codec-headers ($nvinstalled) is not the pinned ${NVCODEC_TAG#n}  <-- stale work directory"; stale=1
+  fi
 fi
 echo
 
@@ -32,7 +41,8 @@ if grep -qE '^#define HAVE_GPL 1' "$SRC/mpv/build/config.h"; then
 else
   echo "  HAVE_GPL 0  (built with -Dgpl=false: LGPL-2.1+)"
 fi
-for f in HAVE_LUA HAVE_JAVASCRIPT HAVE_LIBARCHIVE HAVE_DVDNAV HAVE_CDDA HAVE_LIBBLURAY HAVE_RUBBERBAND HAVE_VULKAN HAVE_SHADERC HAVE_CUDA_HWACCEL HAVE_CUDA_INTEROP; do
+for f in HAVE_LUA HAVE_JAVASCRIPT HAVE_LIBARCHIVE HAVE_DVDNAV HAVE_CDDA HAVE_LIBBLURAY HAVE_RUBBERBAND HAVE_VULKAN HAVE_SHADERC HAVE_CUDA_HWACCEL HAVE_CUDA_INTEROP \
+    ${REPORT_TARGET:+HAVE_ANDROID_MEDIA_NDK HAVE_EGL_ANDROID HAVE_AAUDIO HAVE_AUDIOTRACK}; do
   v=$(grep -E "^#define $f " "$SRC/mpv/build/config.h" | awk '{print $3}')
   echo "  $f ${v:-?}"
 done

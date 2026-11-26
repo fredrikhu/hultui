@@ -6,7 +6,7 @@ using HultUI.Core.Rendering;
 
 namespace HultUI.Core.Elements;
 
-public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoScrollable
+public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoScrollable, IPanScrollable
 {
     protected float _scrollOffsetX;
     protected float _scrollOffsetY;
@@ -455,6 +455,50 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         }
         return moved || _scrollOffsetX != beforeX;
     }
+
+    // ──── Pan (IPanScrollable) ────
+    //
+    // A finger's scroll (docs/design/GESTURES.md §3), along an axis the view scrolls (its overflow
+    // is Scroll): a vertical list whose rows are a little too wide is not a sideways scroller for
+    // a finger. Sideways, a HorizontalPan shelf answers for its own offset; another sideways
+    // scroller can only say whether it moves at all.
+
+    bool IPanScrollable.CanPan(PanAxis axis, int direction) => axis switch
+    {
+        PanAxis.Vertical => Box.OverflowY == Overflow.Scroll
+            && Math.Abs(ClampY(_scrollOffsetY + direction) - _scrollOffsetY) > 0.01f,
+        PanAxis.Horizontal => SidewaysScroller switch
+        {
+            Builders.HorizontalPan pan => direction > 0 ? pan.Offset < pan.MaxOffset - 0.01f : pan.Offset > 0.01f,
+            { } sideways => sideways.CanScrollSideways,
+            null => Box.OverflowX == Overflow.Scroll
+                && Math.Abs(ClampX(_scrollOffsetX + direction) - _scrollOffsetX) > 0.01f,
+        },
+        _ => ((IPanScrollable)this).CanPan(PanAxis.Vertical, direction) || ((IPanScrollable)this).CanPan(PanAxis.Horizontal, direction),
+    };
+
+    Point IPanScrollable.PanBy(float dx, float dy)
+    {
+        float beforeX = SidewaysOffset, beforeY = _scrollOffsetY;
+        bool movedSideways = ScrollByUser(dx, dy) && _scrollOffsetY == beforeY;
+        float movedX = SidewaysScroller is null or Builders.HorizontalPan
+            ? SidewaysOffset - beforeX
+            : movedSideways ? dx : 0;   // a scroller that keeps its offset to itself
+        return new Point(movedX, _scrollOffsetY - beforeY);
+    }
+
+    Point IPanScrollable.PanOffset
+    {
+        get => new(SidewaysOffset, ScrollOffsetY);
+        set
+        {
+            ScrollOffsetY = value.Y;
+            if (SidewaysScroller is Builders.HorizontalPan pan) pan.PanTo(value.X);
+            else if (SidewaysScroller is null) ScrollOffsetX = value.X;
+        }
+    }
+
+    private float SidewaysOffset => SidewaysScroller is Builders.HorizontalPan pan ? pan.Offset : _scrollOffsetX;
 
     // ──── Scroll into view ────
 

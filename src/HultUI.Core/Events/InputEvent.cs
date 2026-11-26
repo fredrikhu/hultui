@@ -14,6 +14,14 @@ public abstract record InputEvent
     public record MouseWheelInput(float MouseX, float MouseY, float DeltaX, float DeltaY, KeyModifiers Modifiers) : InputEvent;
     /// <summary>The pointer left the window. No position: it is somewhere else now.</summary>
     public record PointerLeftWindowInput() : InputEvent;
+    /// <summary>A finger touching, moving on, leaving or being taken from the window
+    /// (docs/design/POINTER-IDENTITY.md).</summary>
+    /// <param name="FingerId">The platform's finger, stable from Down to Up or Cancel.</param>
+    /// <param name="Phase">What the finger did.</param>
+    /// <param name="X">In layout units from the window's top left, as the mouse records.</param>
+    /// <param name="Y">In layout units from the window's top left.</param>
+    /// <param name="Modifiers">The keyboard's modifiers.</param>
+    public record TouchInput(long FingerId, TouchPhase Phase, float X, float Y, KeyModifiers Modifiers) : InputEvent;
     /// <param name="KeyCode">The key, by its position on a US layout.</param>
     /// <param name="Modifiers">The modifiers held with it.</param>
     /// <param name="IsDown">Pressed rather than released.</param>
@@ -52,4 +60,17 @@ public abstract record InputEvent
     public record DropCompleteInput(KeyModifiers Modifiers = KeyModifiers.None, DropFeedback? Feedback = null) : InputEvent;
     /// <summary>The drag left the window, or was called off, without a drop.</summary>
     public record DropCancelInput() : InputEvent;
+}
+
+/// <summary>What a finger did (<see cref="InputEvent.TouchInput"/>).</summary>
+public enum TouchPhase
+{
+    /// <summary>It touched the window.</summary>
+    Down,
+    /// <summary>It moved.</summary>
+    Move,
+    /// <summary>It left the window: lifted.</summary>
+    Up,
+    /// <summary>The system took it: a system gesture, a call. No release follows.</summary>
+    Cancel,
 }

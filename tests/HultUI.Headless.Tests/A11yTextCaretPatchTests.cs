@@ -244,6 +244,88 @@ public sealed class A11yTextCaretPatchTests : IDisposable
         Assert.True(AccessibilityTreeDiffer.Diff(bridge.CurrentTree, session.Window.Window.BuildAccessibilityTree()).IsEmpty);
     }
 
+    // ── A text input's value as text (plan 20 phase 6, TALKBACK.md §10) ──
+
+    private static TextInputElement MountInput(HeadlessSession session, TextInputElement input)
+    {
+        session.Window.SetRoot(Flex.Column().Padding(8).Children(input.Width(300f)));
+        session.PumpFrames(2);
+        session.Window.Click(input);
+        session.PumpFrame();
+        session.PumpFrame(TimeSpan.FromMilliseconds(120));
+        session.PumpFrame(TimeSpan.FromMilliseconds(120));
+        return input;
+    }
+
+    [Fact]
+    public void ATextInput_OffersItsValueAsText_WithItsCaret()
+    {
+        using var session = HeadlessSession.Create(600, 400);
+        var bridge = session.Window.InstallAccessibilityBridge();
+        var input = MountInput(session, TextInput.New("hello"));
+        input.CursorPosition = 2;
+        session.PumpFrame();
+
+        var text = NodeOf(bridge.CurrentTree!, input).CurrentText!;
+        Assert.Equal("hello", text.Text);
+        Assert.Equal(2, text.Caret);
+        Assert.False(text.IsReadOnly);
+        Assert.Equal("hello", NodeOf(bridge.CurrentTree!, input).Value);
+    }
+
+    [Fact]
+    public void AMaskedTextInput_OffersNoText_OnlyItsBullets()
+    {
+        using var session = HeadlessSession.Create(600, 400);
+        var bridge = session.Window.InstallAccessibilityBridge();
+        var input = MountInput(session, TextInput.New("hunter2").Password());
+
+        var node = NodeOf(bridge.CurrentTree!, input);
+        Assert.Null(node.CurrentText);
+        Assert.False(node.OffersText);
+        Assert.DoesNotContain("hunter2", node.Value ?? "", StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ACaretMoveInATextInput_BuildsNoTree_AndIsTold()
+    {
+        using var session = HeadlessSession.Create(600, 400);
+        var bridge = session.Window.InstallAccessibilityBridge();
+        var input = MountInput(session, TextInput.New("hello"));
+        int trees = session.Window.AccessibilityTreesBuilt;
+        bridge.ClearDiffs();
+
+        session.Window.PressKey(KeyCode.Left);
+        session.PumpFrame();
+
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+        var change = Assert.Single(Assert.Single(bridge.Diffs).PropertyChanged);
+        Assert.Equal(AccessibilityProperties.TextSelection, change.PropertyName);
+        Assert.Equal(4, change.Node.Text!.Caret);
+        Assert.Equal(5, change.Previous!.Text!.Caret);
+    }
+
+    [Fact]
+    public void AnEditInATextInput_BuildsNoTree_AndIsToldAsItsValue_ThenItsText()
+    {
+        using var session = HeadlessSession.Create(600, 400);
+        var bridge = session.Window.InstallAccessibilityBridge();
+        var input = MountInput(session, TextInput.New("hell"));
+        int trees = session.Window.AccessibilityTreesBuilt;
+        bridge.ClearDiffs();
+
+        session.Window.TypeText("o");
+        session.PumpFrame();
+
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+        // A one-line field's value is told as a browser's <input>'s is, beside its text.
+        Assert.Equal([AccessibilityProperties.Value, AccessibilityProperties.Text, AccessibilityProperties.TextSelection],
+            bridge.Diffs.SelectMany(d => d.PropertyChanged).Select(c => c.PropertyName));
+        var node = NodeOf(bridge.CurrentTree!, input);
+        Assert.Equal(("hello", "hello", 5), (node.Value, node.Text!.Text, node.Text.Caret));
+        Assert.True(AccessibilityTreeDiffer.Diff(bridge.CurrentTree, session.Window.Window.BuildAccessibilityTree()).IsEmpty);
+    }
+
     /// <summary>The editor mounted in the same handler is new to the tree: the frame's walk builds its
     /// node, as a build would, with the caret where it is now.</summary>
     [Theory]

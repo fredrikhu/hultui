@@ -36,12 +36,22 @@
           Pack="true" PackagePath="runtimes\linux-x64\native\" />
     <None Include="$(NativesDir)linux-x64\LICENCE-REPORT.txt" Condition="Exists('$(NativesDir)linux-x64\LICENCE-REPORT.txt')"
           Pack="true" PackagePath="runtimes\linux-x64\native\" />
+    <!-- Android (native/mpv/build-libmpv-android.sh): .NET's Android build puts
+         runtimes/android-<arch>/native/*.so in the APK's lib/<abi>/. -->
+    <None Include="$(NativesDir)android-arm64\libmpv.so" Condition="Exists('$(NativesDir)android-arm64\libmpv.so')"
+          Pack="true" PackagePath="runtimes\android-arm64\native\" />
+    <None Include="$(NativesDir)android-arm64\LICENCE-REPORT.txt" Condition="Exists('$(NativesDir)android-arm64\LICENCE-REPORT.txt')"
+          Pack="true" PackagePath="runtimes\android-arm64\native\" />
+    <None Include="$(NativesDir)android-x64\libmpv.so" Condition="Exists('$(NativesDir)android-x64\libmpv.so')"
+          Pack="true" PackagePath="runtimes\android-x64\native\" />
+    <None Include="$(NativesDir)android-x64\LICENCE-REPORT.txt" Condition="Exists('$(NativesDir)android-x64\LICENCE-REPORT.txt')"
+          Pack="true" PackagePath="runtimes\android-x64\native\" />
   </ItemGroup>
 
   <Target Name="ReportNatives" BeforeTargets="GenerateNuspec">
-    <Message Importance="high" Text="HultUI.Media.Mpv.Natives: win-x64 $([System.IO.File]::Exists('$(NativesDir)win-x64\libmpv-2.dll'))  linux-x64 $([System.IO.File]::Exists('$(NativesDir)linux-x64\libmpv.so.2'))" />
-    <Error Condition="!Exists('$(NativesDir)win-x64\libmpv-2.dll') And !Exists('$(NativesDir)linux-x64\libmpv.so.2')"
-           Text="No native libmpv found under native/mpv/out/. Run native/mpv/build-libmpv.sh first." />
+    <Message Importance="high" Text="HultUI.Media.Mpv.Natives: win-x64 $([System.IO.File]::Exists('$(NativesDir)win-x64\libmpv-2.dll'))  linux-x64 $([System.IO.File]::Exists('$(NativesDir)linux-x64\libmpv.so.2'))  android-arm64 $([System.IO.File]::Exists('$(NativesDir)android-arm64\libmpv.so'))  android-x64 $([System.IO.File]::Exists('$(NativesDir)android-x64\libmpv.so'))" />
+    <Error Condition="!Exists('$(NativesDir)win-x64\libmpv-2.dll') And !Exists('$(NativesDir)linux-x64\libmpv.so.2') And !Exists('$(NativesDir)android-arm64\libmpv.so') And !Exists('$(NativesDir)android-x64\libmpv.so')"
+           Text="No native libmpv found under native/mpv/out/. Run native/mpv/build-libmpv.sh (or build-libmpv-android.sh) first." />
   </Target>
 
 </Project>

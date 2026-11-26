@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using HultUI.Core.Events;
 using HultUI.Core.DevTools;
 using HultUI.Core.Platform;
@@ -11,7 +11,7 @@ using static SDL.SDL3;
 
 namespace HultUI.Platform.SDL3;
 
-public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeDragSource, IWin32WindowHandle
+public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeDragSource, IWin32WindowHandle, ISafeAreaSource
 {
     private static bool _sdlInitialized;
     private WindowsDropTarget? _dropTarget;
@@ -167,6 +167,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     private GCHandle _gcHandle;
     private bool _textInputActive;
     private TextInputKind _textInputKind;
+    private bool _textInputMultiline;
     private SDL3Clipboard? _clipboard;
     private SDL3FileDialogs? _fileDialogs;
     private SDL3TextInputHost? _textInputHost;
@@ -227,6 +228,16 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
     /// <inheritdoc />
     public float RefreshRate { get; private set; }
+
+    /// <summary>
+    /// The display's rate as the platform knows it, over SDL's: on Android the peak of the
+    /// display's modes, read by HultUI.Platform.Android's activity. SDL reads the rate the display
+    /// happens to run at when the app starts, and an adaptive screen idles low: a Galaxy S25 said
+    /// 30 Hz while it runs at up to 120 (spikes/AndroidHello, "On a real phone"), and HultUI paced
+    /// its frames at 30. The activity also asks Android for the peak while frames are drawn
+    /// (Surface.setFrameRate). Null elsewhere.
+    /// </summary>
+    internal static float? PlatformRefreshRate { get; set; }
 
     /// <inheritdoc />
     /// <remarks>SDL's video driver: one per process, so it is read once (the element asks on
@@ -403,9 +414,23 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         EnsureSDLInitialized();
 
         // Set OpenGL attributes for SkiaSharp compatibility
-        SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_CONTEXT_MINOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_CONTEXT_PROFILE_MASK, (int)SDL_GLProfile.SDL_GL_CONTEXT_PROFILE_CORE);
+        // Android has EGL and GL ES only. Asked for a desktop core profile, SDL looks for desktop
+        // GL and window creation fails ("Could not initialize OpenGL / GLES library"), and the
+        // window falls back to the software renderer (spikes/AndroidHello). GL ES 3.0, which every
+        // Android 12 device has: the render target is GL_RGBA8, which ES 2.0 lacks.
+        // SkiaGLRenderSurface builds Skia's GLES interface to match.
+        if (OperatingSystem.IsAndroid())
+        {
+            SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+            SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_CONTEXT_MINOR_VERSION, 0);
+            SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_CONTEXT_PROFILE_MASK, (int)SDL_GLProfile.SDL_GL_CONTEXT_PROFILE_ES);
+        }
+        else
+        {
+            SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+            SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_CONTEXT_MINOR_VERSION, 3);
+            SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_CONTEXT_PROFILE_MASK, (int)SDL_GLProfile.SDL_GL_CONTEXT_PROFILE_CORE);
+        }
         SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_DOUBLEBUFFER, 1);
         // Skia wants a stencil (SkiaGLRenderSurface tells it 8 bits) and never a depth buffer.
         // Left alone, SDL asks for 16 bits of depth, and NVIDIA hands back 24 packed with the
@@ -637,6 +662,8 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         SDL_SyncWindow(_window);
         UpdateSize();
         NoteNormalBounds();
+        _safeArea = ReadSafeArea();
+        _keyboardInset = ReadKeyboardInset();
 
         IsOpen = true;
         StartupTrace.Mark("platform window ready");
@@ -953,6 +980,113 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// theme; cleared by the platform as it raises <see cref="IDesktopSettingsSource.Changed"/>.</summary>
     internal static bool DesktopSettingsChanged { get; set; }
 
+    /// <summary>The app-lifecycle events <see cref="PollAllEvents"/> took from the queue (type and
+    /// timestamp), in order; drained by the platform, which handled most already from its event
+    /// watch as they were pushed (SdlWindowingPlatform).</summary>
+    internal static List<(uint Type, ulong Timestamp)> AppEvents { get; } = [];
+
+    /// <summary>Every open SDL window, for what the platform does to all of them at once.</summary>
+    internal static IEnumerable<SDL3Window> All => _registry.Values;
+
+    // ──── Safe area (docs/design/ANDROID-PLATFORM.md §3) ────
+
+    private Thickness _safeArea;
+    private Action? _safeAreaChanged;
+
+    Thickness ISafeAreaSource.SafeArea => _safeArea;
+
+    event Action? ISafeAreaSource.SafeAreaChanged
+    {
+        add => _safeAreaChanged += value;
+        remove => _safeAreaChanged -= value;
+    }
+
+    /// <summary>
+    /// SDL's safe area (<c>SDL_GetWindowSafeArea</c>: the part of the window clear of the status
+    /// bar, the gesture bar and a cutout, in window coordinates) as insets from each edge, in
+    /// layout units. Zero where SDL reports the whole window, which is every desktop window.
+    /// </summary>
+    private Thickness ReadSafeArea()
+    {
+        if (_window == null) return default;
+        // Android, through HultUI.Platform.Android: the bars and the cutout alone. SDL's own area
+        // also takes out the system-gesture zones (78 px down each side for Back on a Pixel 6, and
+        // the taller gesture strips top and bottom), which Android keeps for edge swipes, not
+        // content: 30 DIP of a 411 DIP phone lost on each side (measured on the emulator).
+        if (ContentInsets is { } px)
+        {
+            float k = InputScale;
+            return new Thickness(px.Top * k, px.Right * k, px.Bottom * k, px.Left * k);
+        }
+        SDL_Rect r;
+        if (!SDL_GetWindowSafeArea(_window, &r) || r.w <= 0 || r.h <= 0) return default;
+        int w, h;
+        SDL_GetWindowSize(_window, &w, &h);
+        float s = InputScale;
+        return new Thickness(r.y * s, Math.Max(0, w - r.x - r.w) * s, Math.Max(0, h - r.y - r.h) * s, r.x * s);
+    }
+
+    private float _keyboardInset;
+
+    float ISafeAreaSource.KeyboardInset => _keyboardInset;
+
+    /// <summary>The soft keyboard's height over the window's bottom edge, in layout units, from
+    /// Android's <c>ime()</c> inset (docs/design/SOFT-KEYBOARD.md §3); 0 anywhere else.</summary>
+    private float ReadKeyboardInset() =>
+        _window != null && ContentInsets is { Keyboard: > 0 } px ? px.Keyboard * InputScale : 0f;
+
+    /// <summary>Insets in window pixels, top, right, bottom, left, and the soft keyboard's height
+    /// over the bottom edge.</summary>
+    internal sealed record PixelInsets(int Top, int Right, int Bottom, int Left, int Keyboard = 0);
+
+    /// <summary>The insets content should clear, from the platform rather than SDL (Android's
+    /// system bars and display cutout, read by HultUI.Platform.Android's activity); null to use
+    /// SDL's safe area. Swapped whole, so the UI thread never sees half of a change.</summary>
+    internal static PixelInsets? ContentInsets { get; private set; }
+
+    /// <summary>
+    /// Sets <see cref="ContentInsets"/> from any thread (Android's UI thread, where its insets
+    /// arrive) and has every window read its safe area again on the UI thread: an event SDL's
+    /// queue carries there, as SDL's own <c>SDL_EVENT_WINDOW_SAFE_AREA_CHANGED</c>, for window 0,
+    /// which <see cref="PollAllEvents"/> takes to mean all of them.
+    /// </summary>
+    internal static void SetContentInsets(PixelInsets insets)
+    {
+        if (insets == ContentInsets) return;
+        ContentInsets = insets;
+        if (!_sdlInitialized) return;   // the first window reads it as it is made
+        SDL_Event evt = default;
+        evt.type = (uint)SDL_EventType.SDL_EVENT_WINDOW_SAFE_AREA_CHANGED;
+        evt.window.windowID = 0;
+        SDL_PushEvent(&evt);
+    }
+
+    /// <summary>Reads the safe area and the keyboard's inset again, and tells the window when
+    /// either changed.</summary>
+    internal void RefreshSafeArea()
+    {
+        var now = ReadSafeArea();
+        float keyboard = ReadKeyboardInset();
+        if (now == _safeArea && keyboard == _keyboardInset) return;
+        _safeArea = now;
+        _keyboardInset = keyboard;
+        _safeAreaChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// The system's low-memory signal (docs/design/APP-LIFECYCLE.md): the text caches always, and
+    /// with <paramref name="gpu"/> what Skia keeps on the GPU. Only while the app is on screen:
+    /// in the background Android has taken the surface, and making the context current without
+    /// one is not proven safe on every driver, so the GPU's caches wait.
+    /// </summary>
+    internal void TrimMemory(bool gpu)
+    {
+        if (gpu && _surface is not null) MakeCurrent();
+        _surface?.TrimMemory(gpu);
+        _vulkanSurface?.TrimMemory(gpu);
+        _rasterSurface?.TrimMemory();
+    }
+
     /// <summary>SDL's reading of the desktop's light or dark preference (the portal's
     /// <c>color-scheme</c> on Linux); NoPreference before video init and when SDL cannot tell.</summary>
     internal static ColorScheme ToColorScheme(SDL_SystemTheme theme) => theme switch
@@ -1003,6 +1137,15 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
                 case (uint)SDL_EventType.SDL_EVENT_SYSTEM_THEME_CHANGED:
                     // Like a display change: the platform tells the app once the queue is drained.
                     DesktopSettingsChanged = true;
+                    break;
+
+                case (uint)SDL_EventType.SDL_EVENT_WILL_ENTER_BACKGROUND:
+                case (uint)SDL_EventType.SDL_EVENT_DID_ENTER_FOREGROUND:
+                case (uint)SDL_EventType.SDL_EVENT_LOW_MEMORY:
+                case (uint)SDL_EventType.SDL_EVENT_TERMINATING:
+                    // The platform's event watch handled it as it was pushed, when that was on
+                    // the UI thread; it handles the rest from here, once the queue is drained.
+                    AppEvents.Add((evt.type, evt.common.timestamp));
                     break;
 
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_CLOSE_REQUESTED:
@@ -1085,6 +1228,19 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
                         resizeWin.UpdateSize();
                         resizeWin.ResizePending = true;
                     }
+                    // A new size can move the bars (a rotation); SDL says so too, but a scale change
+                    // alone changes the safe area's layout units with no event of its own.
+                    if (resizeWin is not null) resizeWin.RefreshSafeArea();
+                    break;
+
+                case (uint)SDL_EventType.SDL_EVENT_WINDOW_SAFE_AREA_CHANGED:
+                    if (evt.window.windowID == 0)
+                    {
+                        // SetContentInsets: the platform's insets changed, for every window.
+                        foreach (var each in _registry.Values) each.RefreshSafeArea();
+                    }
+                    else if (_registry.TryGetValue(evt.window.windowID, out var safeWin))
+                        safeWin.RefreshSafeArea();
                     break;
 
                 default:
@@ -2244,35 +2400,127 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         }
     }
 
-    public void StartTextInput() => StartTextInput(TextInputKind.Text);
+    public void StartTextInput() => StartTextInput(TextInputKind.Text, multiline: false);
+
+    public void StartTextInput(TextInputKind kind) => StartTextInput(kind, multiline: false);
 
     /// <summary>
-    /// Text input for a field of <paramref name="kind"/>. A switch restarts it, because SDL's
-    /// Windows backend arms its input method only on a start. A password goes to SDL as
-    /// <c>TEXT_PASSWORD_HIDDEN</c>, which its Wayland backend hands the input method as the
-    /// password purpose; its Windows backend ignores the type, so <see cref="KeepInputMethodOut"/>
-    /// does what a native password box does there.
+    /// Text input for a field of <paramref name="kind"/>, as SDL's text-input properties
+    /// (docs/design/SOFT-KEYBOARD.md §2): the type, capitalization, correction and lines, which
+    /// pick a phone's keyboard, and Android's own input type where SDL has no type for the kind.
+    /// The lines are always said: SDL takes a field to be multiline unless told, and Android's
+    /// keyboard then shows a new-line key on a one-line field. A switch restarts input on the
+    /// desktop, because SDL's Windows backend arms its input method only on a start. On Android
+    /// no start reaches a keyboard already up: SDL sends the type to Java only when it shows the
+    /// keyboard, which it skips while the keyboard is shown, and a stop first does not help, as the
+    /// hide is asynchronous. So focus moved from a text field to a number field kept the letters
+    /// (measured on the emulator). There <see cref="TextInputSwitched"/> hands
+    /// HultUI.Platform.Android the new Android input type, as SDL would have made it
+    /// (<see cref="AndroidInputType"/>), to give SDL's Java and restart the keyboard's input with.
+    /// A password goes to SDL as <c>TEXT_PASSWORD_HIDDEN</c>, which its Wayland
+    /// backend hands the input method as the password purpose; its Windows backend ignores the
+    /// type, so <see cref="KeepInputMethodOut"/> does what a native password box does there.
     /// </summary>
-    public void StartTextInput(TextInputKind kind)
+    public void StartTextInput(TextInputKind kind, bool multiline)
     {
-        if (_textInputActive && _textInputKind == kind) return;
-        if (_textInputActive) SDL_StopTextInput(_window);
+        if (_textInputActive && _textInputKind == kind && _textInputMultiline == multiline) return;
+        bool switching = _textInputActive;
+        if (switching && !OperatingSystem.IsAndroid()) SDL_StopTextInput(_window);
         _textInputActive = true;
         _textInputKind = kind;
+        _textInputMultiline = multiline;
 
-        if (kind != TextInputKind.Password)
-        {
-            SDL_StartTextInput(_window);
-            return;
-        }
-
+        var (type, caps, correct, android) = TextInputProperties(kind);
         // SDL copies the properties into the window, so they are ours to destroy.
         var props = SDL_CreateProperties();
         fixed (byte* name = SDL_PROP_TEXTINPUT_TYPE_NUMBER)
-            SDL_SetNumberProperty(props, name, (long)SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT_PASSWORD_HIDDEN);
+            SDL_SetNumberProperty(props, name, (long)type);
+        fixed (byte* name = SDL_PROP_TEXTINPUT_CAPITALIZATION_NUMBER)
+            SDL_SetNumberProperty(props, name, (long)caps);
+        fixed (byte* name = SDL_PROP_TEXTINPUT_AUTOCORRECT_BOOLEAN)
+            SDL_SetBooleanProperty(props, name, correct);
+        fixed (byte* name = SDL_PROP_TEXTINPUT_MULTILINE_BOOLEAN)
+            SDL_SetBooleanProperty(props, name, multiline);
+        if (android != 0)
+            fixed (byte* name = SDL_PROP_TEXTINPUT_ANDROID_INPUTTYPE_NUMBER)
+                SDL_SetNumberProperty(props, name, android);
         SDL_StartTextInputWithProperties(_window, props);
         SDL_DestroyProperties(props);
         KeepInputMethodOut();
+        if (switching && TextInputSwitched is { } switched)
+            switched(AndroidInputType(kind, multiline), _textInputArea);
+    }
+
+    /// <summary>
+    /// Raised on the UI thread after input switched to another kind of field while it was on,
+    /// with Android's input type for the new field and the text-input area in window pixels.
+    /// HultUI.Platform.Android hands both to SDL's Java and restarts the keyboard's input there
+    /// (see <see cref="StartTextInput(TextInputKind, bool)"/>).
+    /// </summary>
+    internal static Action<int, SDL_Rect>? TextInputSwitched { get; set; }
+
+    /// <summary>The text-input area last given to SDL, in window coordinates.</summary>
+    private SDL_Rect _textInputArea;
+
+    /// <summary>
+    /// Android's <c>InputType</c> bits for a kind, as SDL's <c>Android_ShowScreenKeyboard</c> makes
+    /// them from the properties <see cref="StartTextInput(TextInputKind, bool)"/> passes: Android's
+    /// own bits where given, else the class and variation for SDL's type, the capitalization,
+    /// auto-correct and auto-complete with correction, and multi-line. A one-line text field is
+    /// <c>0x1c001</c>, as the emulator's keyboard reported.
+    /// </summary>
+    internal static int AndroidInputType(TextInputKind kind, bool multiline)
+    {
+        var (type, caps, correct, android) = TextInputProperties(kind);
+        if (android != 0) return android;
+        const int ClassText = 0x1, ClassNumber = 0x2;
+        int bits = type switch
+        {
+            SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT_NAME => ClassText | 0x60,          // PERSON_NAME
+            SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT_EMAIL => ClassText | 0x20,         // EMAIL_ADDRESS
+            SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT_PASSWORD_HIDDEN => ClassText | 0x80,   // PASSWORD
+            SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT_PASSWORD_VISIBLE => ClassText | 0x90,  // VISIBLE_PASSWORD
+            SDL_TextInputType.SDL_TEXTINPUT_TYPE_NUMBER => ClassNumber,
+            SDL_TextInputType.SDL_TEXTINPUT_TYPE_NUMBER_PASSWORD_HIDDEN => ClassNumber | 0x10,   // NUMBER_PASSWORD
+            SDL_TextInputType.SDL_TEXTINPUT_TYPE_NUMBER_PASSWORD_VISIBLE => ClassNumber,
+            _ => ClassText,   // TEXT and USERNAME: NORMAL
+        };
+        bits |= caps switch
+        {
+            SDL_Capitalization.SDL_CAPITALIZE_LETTERS => 0x1000,     // CAP_CHARACTERS
+            SDL_Capitalization.SDL_CAPITALIZE_WORDS => 0x2000,       // CAP_WORDS
+            SDL_Capitalization.SDL_CAPITALIZE_SENTENCES => 0x4000,   // CAP_SENTENCES
+            _ => 0,
+        };
+        if (correct) bits |= 0x8000 | 0x10000;   // AUTO_CORRECT, AUTO_COMPLETE
+        if (multiline) bits |= 0x20000;          // MULTI_LINE
+        return bits;
+    }
+
+    /// <summary>
+    /// SDL's type, capitalization and correction for a kind (SOFT-KEYBOARD.md §2's table), and
+    /// Android's <c>InputType</c> bits for the kinds SDL has no type for (0 for none). Android's
+    /// bits replace everything else there, so they carry no-suggestions themselves.
+    /// </summary>
+    internal static (SDL_TextInputType Type, SDL_Capitalization Caps, bool Correct, int Android) TextInputProperties(TextInputKind kind)
+    {
+        // android.text.InputType
+        const int ClassText = 0x1, ClassNumber = 0x2, ClassPhone = 0x3;
+        const int NumberSigned = 0x1000, NumberDecimal = 0x2000;
+        const int TextUri = 0x10, TextNoSuggestions = 0x80000;
+        return kind switch
+        {
+            TextInputKind.Password => (SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT_PASSWORD_HIDDEN, SDL_Capitalization.SDL_CAPITALIZE_NONE, false, 0),
+            TextInputKind.Number => (SDL_TextInputType.SDL_TEXTINPUT_TYPE_NUMBER, SDL_Capitalization.SDL_CAPITALIZE_NONE, false, ClassNumber),
+            TextInputKind.Decimal => (SDL_TextInputType.SDL_TEXTINPUT_TYPE_NUMBER, SDL_Capitalization.SDL_CAPITALIZE_NONE, false, ClassNumber | NumberDecimal | NumberSigned),
+            TextInputKind.Phone => (SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT, SDL_Capitalization.SDL_CAPITALIZE_NONE, false, ClassPhone),
+            TextInputKind.Email => (SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT_EMAIL, SDL_Capitalization.SDL_CAPITALIZE_NONE, false, 0),
+            TextInputKind.Url => (SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT, SDL_Capitalization.SDL_CAPITALIZE_NONE, false, ClassText | TextUri | TextNoSuggestions),
+            TextInputKind.Username => (SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT_USERNAME, SDL_Capitalization.SDL_CAPITALIZE_NONE, false, 0),
+            TextInputKind.Name => (SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT_NAME, SDL_Capitalization.SDL_CAPITALIZE_WORDS, false, 0),
+            TextInputKind.Search => (SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT, SDL_Capitalization.SDL_CAPITALIZE_NONE, true, 0),
+            _ => (SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT, SDL_Capitalization.SDL_CAPITALIZE_SENTENCES, true, 0),
+        };
     }
 
     /// <summary>
@@ -2305,6 +2553,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             w = Math.Max(1, (int)(caretRect.Width * toWindow)),
             h = Math.Max(1, (int)(caretRect.Height * toWindow))
         };
+        _textInputArea = rect;
         SDL_SetTextInputArea(_window, &rect, cursorOffset);
     }
 
@@ -2354,7 +2603,8 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // offers first. The first time per display that took 115 ms on a 4K HDR monitor,
         // on the way to the first frame — a quarter of the app's start-up.
         var mode = SDL_GetDesktopDisplayMode(SDL_GetDisplayForWindow(_window));
-        RefreshRate = mode is not null && mode->refresh_rate > 0f ? mode->refresh_rate : 0f;
+        RefreshRate = PlatformRefreshRate is > 0f and var platformRate ? platformRate
+            : mode is not null && mode->refresh_rate > 0f ? mode->refresh_rate : 0f;
 
         if (pw == PixelWidth && ph == PixelHeight
             && density == PixelDensity && displayScale == _osDisplayScale)
@@ -2420,6 +2670,10 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             (uint)SDL_EventType.SDL_EVENT_MOUSE_BUTTON_UP => evt->button.windowID,
             (uint)SDL_EventType.SDL_EVENT_MOUSE_MOTION => evt->motion.windowID,
             (uint)SDL_EventType.SDL_EVENT_MOUSE_WHEEL => evt->wheel.windowID,
+            (uint)SDL_EventType.SDL_EVENT_FINGER_DOWN or
+            (uint)SDL_EventType.SDL_EVENT_FINGER_UP or
+            (uint)SDL_EventType.SDL_EVENT_FINGER_MOTION or
+            (uint)SDL_EventType.SDL_EVENT_FINGER_CANCELED => evt->tfinger.windowID,
             (uint)SDL_EventType.SDL_EVENT_WINDOW_MOUSE_LEAVE => evt->window.windowID,
             (uint)SDL_EventType.SDL_EVENT_KEY_DOWN or
             (uint)SDL_EventType.SDL_EVENT_KEY_UP => evt->key.windowID,
@@ -2526,13 +2780,48 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // sends for anything else (Cmd+Q, SIGTERM, the session ending) still comes.
         SDL_SetHint(SDL_HINT_QUIT_ON_LAST_WINDOW_CLOSE, "0");
 
+        // Fingers are touch pointers, on every platform, a desktop touchscreen too
+        // (docs/design/POINTER-IDENTITY.md §5): SDL makes no mouse from a finger, and the window
+        // maps a primary finger onto the mouse's paths itself, with the touch rules. A pen stays
+        // SDL's mouse until pens get a note of their own, so it makes no finger either, nor the
+        // mouse one: each would press twice.
+        SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+        SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
+        SDL_SetHint(SDL_HINT_PEN_TOUCH_EVENTS, "0");
+
         // Windows only: no 1 ms timer resolution for the life of the process, which SDL asks for
         // by default; the frame loop's waits ask for it while frames are paced (SdlTimerResolution).
         SdlTimerResolution.AtRest();
 
+        // Android: SDL must not park its thread, which is HultUI's UI thread, while the app is in
+        // the background. Parked, nothing posted to the UI thread ran there: a network reply, a
+        // timer, the media layer's events, and later audio with the screen locked. HultUI's own
+        // background gate (Application.InBackground) keeps it off the GPU instead. Measured on the
+        // emulator: a 1 s ticker ran 0 times in 7.4 s away with SDL's default and 7 times with
+        // this, no frame drawn, no GL error (docs/design/APP-LIFECYCLE.md §2 item 8).
+        if (OperatingSystem.IsAndroid())
+        {
+            SDL_SetHint(SDL_HINT_ANDROID_BLOCK_ON_PAUSE, "0");
+            // Back as a key (KeyCode.Back), so the app hears it: a menu or dialog closes, a page
+            // goes back. Untrapped, Android's own Back left the app with a menu still open. When
+            // nothing takes it, the window hands it back to the system (Application.SystemBack,
+            // set by HultUI.Platform.Android's activity). docs/design/ANDROID-PLATFORM.md §4.
+            SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
+        }
+
         if (!SDL_Init(SDL_InitFlags.SDL_INIT_VIDEO))
             throw new InvalidOperationException($"SDL_Init failed: {GetError()}");
         StartupTrace.Mark("SDL_Init");
+
+        // Android: no poll sentinel. SDL 3.5.0 as ppy.SDL3-CS 2026.1002.1 ships it (ea7a2da) pumps on
+        // every pass of its Android wait, the pump puts a fresh sentinel in the queue, and adding
+        // an event wakes the wait it is in. SDL_WaitEventTimeout never slept: HultUI's UI thread
+        // took a whole core while the app sat idle (a Galaxy S25 and the emulator alike, the
+        // frame loop parked all the while). SDL fixed it upstream in 8dc8694 ("Don't wake up for
+        // poll sentinel events"). HultUI's event loop does not use the sentinel: SDL_PollEvent
+        // then ends a pass when the queue is empty, as in SDL 2. Drop this with that SDL.
+        if (OperatingSystem.IsAndroid())
+            SDL_SetEventEnabled((uint)SDL_EventType.SDL_EVENT_POLL_SENTINEL, false);
 
     }
 

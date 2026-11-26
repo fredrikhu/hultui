@@ -39,6 +39,10 @@ public sealed partial class ApertureApp
     private TimeSpan _resumeTo;
     private bool _resumeApplied;
 
+    /// <summary>This play's transcode would not open and its original file was tried
+    /// (<see cref="PlayOriginalFile"/>): once per play, so a file that fails too stays failed.</summary>
+    private bool _originalTried;
+
     /// <summary>When the last report went out, on the application's clock
     /// (<see cref="Application.Time"/>, which a headless test moves by hand), and what it said.
     /// Both are needed: the clock paces the heartbeat, and the state decides whether a change is
@@ -134,6 +138,7 @@ public sealed partial class ApertureApp
         _playingItem = item;
         _resumeTo = from;
         _resumeApplied = from <= TimeSpan.Zero;
+        _originalTried = false;
         Rerender();
 
         _ = StartAsync(lib, item, from);
@@ -216,6 +221,10 @@ public sealed partial class ApertureApp
         if (!keepSheet) DismissUpNext();
         var target = _playback;
         var position = _player?.Position ?? TimeSpan.Zero;
+        // A stream that never reached its resume point (it would not load, or was left before it
+        // had) is not stopped at 0:00, and telling the server so wipes the place it was left at:
+        // a failed https load on Android cleared a part-watched episode from Continue watching.
+        if (!_resumeApplied && _resumeTo > TimeSpan.Zero) position = _resumeTo;
 
         StopWatchingPlayback();
         if (_player is { } player)
@@ -315,6 +324,17 @@ public sealed partial class ApertureApp
         var state = player.State;
         if (_playback is not { } target || _library is not { } lib) return;
 
+        // A transcode that would not open is played as the original file, once. The case it is
+        // for: an HLS transcode over https on Android, whose FFmpeg has no TLS to fetch the
+        // segments with. Something playing beats a failure, and the failed stream sent no report.
+        if (state == PlaybackState.Failed && target.Transcoding && !_originalTried && _lastReportAt is null)
+        {
+            _originalTried = true;
+            // Posted: this runs inside the player's own effect, which a new stream disposes.
+            Application.InvokeOnMainThread(() => PlayOriginalFile(target, lib));
+            return;
+        }
+
         ApplyResumeSeek(player);
         PumpTrackPreference(player);
 
@@ -338,6 +358,23 @@ public sealed partial class ApertureApp
         {
             OnPlaybackEnded();
         }
+    }
+
+    /// <summary>The transcode <paramref name="transcode"/> would not open: its original file, in
+    /// the same session, from where the transcode was to start (the resume seek has not run).</summary>
+    private void PlayOriginalFile(PlaybackTarget transcode, IMediaLibrary lib)
+    {
+        // Something else started, or playback stopped, before this ran.
+        if (!ReferenceEquals(_playback, transcode)) return;
+        var original = lib.OriginalFileOf(transcode);
+        if (original.StreamUrl == transcode.StreamUrl) return;
+        _playback = original;
+        OpenStream(original);
+        // On a phone held upright this wraps to two or three lines.
+        Flash(MaxStreamingBitrateBps is null
+                ? "The transcode won't play here, so the original file is playing"
+                : "The transcode won't play here, so the original file is playing, over your streaming limit",
+            ToastSeverity.Warning, seconds: 6f);
     }
 
     /// <summary>

@@ -10,8 +10,20 @@ namespace HultUI;
 /// in an <see cref="InMemoryCredentialStore"/> and never touch the developer's machine.</summary>
 public static class CredentialStore
 {
-    public static ICredentialStore Default { get; } =
+    /// <summary>The platform's store: the Windows Credential Manager on Windows, Android's
+    /// Keystore on Android (registered by <c>HultUI.Platform.Android</c>'s activity before the app
+    /// runs), and a store that keeps nothing elsewhere.</summary>
+    public static ICredentialStore Default => s_platform ?? BuiltIn;
+
+    private static readonly ICredentialStore BuiltIn =
         OperatingSystem.IsWindows() ? new WindowsCredentialStore() : new NoCredentialStore();
+
+    private static ICredentialStore? s_platform;
+
+    /// <summary>A platform package's store, which <see cref="Default"/> returns from now on:
+    /// Android's, whose Java APIs this <c>net11.0</c> assembly cannot call itself
+    /// (docs/design/ANDROID-PLATFORM.md §2). Null goes back to the built-in one.</summary>
+    internal static void UsePlatformStore(ICredentialStore? store) => s_platform = store;
 }
 
 /// <summary>

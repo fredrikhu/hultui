@@ -103,7 +103,7 @@ public partial class ScrollViewElement
     /// </summary>
     public void SetScrollbarHover(Point? position)
     {
-        var box = Layout.AbsoluteContentBox;
+        var box = ScreenContentBox;
         bool onVertical = ShowScrollbarY && position is { } p
             && _vBar.Contains(box, _contentHeight, p, vertical: true);
         bool onHorizontal = ShowScrollbarX && position is { } q
@@ -114,6 +114,10 @@ public partial class ScrollViewElement
     }
 
     // ──── Press, drag, release ────
+    //
+    // Each takes the window's point against the bars where they are drawn (ScreenContentBox),
+    // not the layout box: layout is unscrolled, so inside a scrolled page the layout box is as far
+    // below the bars as the page has scrolled, and a press on a bar's top part missed it.
 
     /// <summary>
     /// Tests if a pointer-down at the given position should start a scrollbar drag.
@@ -121,7 +125,7 @@ public partial class ScrollViewElement
     /// </summary>
     public bool TryStartScrollbarDrag(Point position)
     {
-        var box = Layout.AbsoluteContentBox;
+        var box = ScreenContentBox;
         float beforeX = _scrollOffsetX, beforeY = _scrollOffsetY;
 
         if (ShowScrollbarY)
@@ -174,7 +178,7 @@ public partial class ScrollViewElement
     /// <summary>True when the position (screen coords) falls on a visible scrollbar track.</summary>
     public bool IsPointOverScrollbar(Point position)
     {
-        var box = Layout.AbsoluteContentBox;
+        var box = ScreenContentBox;
         return (ShowScrollbarY && _vBar.Contains(box, _contentHeight, position, vertical: true))
             || (ShowScrollbarX && _hBar.Contains(box, _contentWidth, position, vertical: false));
     }
@@ -185,7 +189,7 @@ public partial class ScrollViewElement
     public void UpdateScrollbarDrag(Point position)
     {
         if (!IsDraggingScrollbar) return;
-        var box = Layout.AbsoluteContentBox;
+        var box = ScreenContentBox;
         float beforeX = _scrollOffsetX, beforeY = _scrollOffsetY;
 
         if (_dragAxis == DragAxis.Vertical)

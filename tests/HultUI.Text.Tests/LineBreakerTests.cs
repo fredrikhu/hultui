@@ -65,4 +65,42 @@ public class LineBreakerTests
 
         Assert.Empty(failures);
     }
+
+    // ──── Without ICU (plan 20: a platform without it must wrap, not fail every layout) ────
+
+    [Theory]
+    [InlineData("pretty red table chair house keyboard pretty red table")]
+    [InlineData("short")]
+    [InlineData("two words")]
+    [InlineData("日本語のテキストを表示する")]
+    public void TheFallback_FindsWhatICUFinds_InPlainProse(string text)
+    {
+        var icu = LineBreaker.FindBreakOpportunities(text);
+
+        Assert.Equal(icu, LineBreaker.FallbackBreaks(text, []));
+    }
+
+    [Fact]
+    public void TheFallback_BreaksAfterSpacesAndHyphens_AndAlwaysAtTheEnd()
+    {
+        Assert.Equal([6, 11], LineBreaker.FallbackBreaks("hello world", []));
+        Assert.Equal([5, 10], LineBreaker.FallbackBreaks("well-known", []));   // after the hyphen
+        Assert.Equal([3, 4], LineBreaker.FallbackBreaks("a  b", []));          // after the run of spaces
+        Assert.Equal([3], LineBreaker.FallbackBreaks("   ", []));
+    }
+
+    [Fact]
+    public void WithICUMissing_TextStillBreaks()
+    {
+        bool was = LineBreaker.IcuMissingForTests;
+        try
+        {
+            LineBreaker.IcuMissingForTests = true;
+            Assert.Equal([6, 11], LineBreaker.FindBreakOpportunities("hello world"));
+        }
+        finally
+        {
+            LineBreaker.IcuMissingForTests = was;
+        }
+    }
 }

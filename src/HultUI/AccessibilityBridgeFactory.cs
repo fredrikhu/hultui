@@ -16,6 +16,14 @@ namespace HultUI;
 /// </summary>
 internal static class AccessibilityBridgeFactory
 {
+    /// <summary>
+    /// A platform's bridge where HultUI's own assemblies cannot make one: Android's TalkBack bridge,
+    /// whose package targets net11.0-android, which HultUI cannot reference. <c>HultUIActivity</c> sets
+    /// it before the app makes its window (docs/design/TALKBACK.md §4). Null everywhere else; a null
+    /// result falls through to the operating system's own choice.
+    /// </summary>
+    internal static Func<Window, IAccessibilityBridge?>? Platform;
+
     public static IAccessibilityBridge Create(Window window)
     {
         // Master opt-out, honored on every platform: skip the accessibility
@@ -29,6 +37,9 @@ internal static class AccessibilityBridgeFactory
         // exported but suppresses only the live event notifications.
         if (Environment.GetEnvironmentVariable("HULTUI_A11Y") == "0")
             return NullAccessibilityBridge.Instance;
+
+        if (Platform?.Invoke(window) is { } platform)
+            return platform;
 
         if (OperatingSystem.IsWindows())
             return CreateWindows(window);

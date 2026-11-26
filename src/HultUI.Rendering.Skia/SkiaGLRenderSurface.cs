@@ -29,7 +29,11 @@ public sealed class SkiaGLRenderSurface : IRenderSurface, ISkiaExternalSurface, 
     /// surface does not. Null builds a fresh one, which the surface disposes with itself.</param>
     public SkiaGLRenderSurface(Func<string, IntPtr> glGetProcAddress, SkiaTextServices? text = null)
     {
-        _glInterface = GRGlInterface.CreateOpenGl(name => glGetProcAddress(name))
+        // A GL ES context (Android: SDL3Window asks for ES 3.0 there) needs Skia's GLES interface,
+        // which resolves the ES entry points and knows the ES feature set.
+        _glInterface = (OperatingSystem.IsAndroid()
+                ? GRGlInterface.CreateGles(name => glGetProcAddress(name))
+                : GRGlInterface.CreateOpenGl(name => glGetProcAddress(name)))
             ?? throw new InvalidOperationException("Failed to create SkiaSharp GL interface");
         _grContext = GRContext.CreateGl(_glInterface)
             ?? throw new InvalidOperationException("Failed to create SkiaSharp GR context");
@@ -142,6 +146,18 @@ public sealed class SkiaGLRenderSurface : IRenderSurface, ISkiaExternalSurface, 
         {
             Present();
         }
+    }
+
+    /// <summary>
+    /// The system's low-memory signal (docs/design/APP-LIFECYCLE.md): the text caches always, and
+    /// with <paramref name="gpu"/> every GPU resource Skia keeps unlocked (the textures of pictures,
+    /// glyph atlases' spare pages, scratch), which come back as they are next drawn. The GL context
+    /// must be current for <paramref name="gpu"/>.
+    /// </summary>
+    internal void TrimMemory(bool gpu)
+    {
+        _text.TrimCaches();
+        if (gpu) _grContext.PurgeUnlockedResources(scratchResourcesOnly: false);
     }
 
     public void Dispose()

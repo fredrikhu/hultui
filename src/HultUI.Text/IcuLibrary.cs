@@ -40,6 +40,13 @@ internal static class IcuLibrary
 
     private static Loaded Load()
     {
+        // 0. Android: the NDK's public ICU, libicu.so (API 31 and later, HultUI's minimum there),
+        //    whose names are unversioned and stable. libicuuc.so below loads on Android too, but it
+        //    is the platform's private library, which an app may not count on. Measured on API 35:
+        //    libicu.so exports ubrk_open both unversioned and as ubrk_open_75 (spikes/AndroidHello).
+        if (OperatingSystem.IsAndroid() && NativeLibrary.TryLoad("libicu.so", out var ndk))
+            return new Loaded(ndk, "");
+
         // 1. The clean way first (Windows or well-configured Linux environments).
         if (NativeLibrary.TryLoad("icu", out var handle) || NativeLibrary.TryLoad("libicuuc.so", out handle))
             return new Loaded(handle, DetectSuffixByProbing(handle));

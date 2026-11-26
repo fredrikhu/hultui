@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Aperture on Android (plan 20 phase 5): the desktop app's ApertureApp on HultUIActivity, with
+    the Android libmpv (native/mpv/build-libmpv-android.sh). Not in HultUI.slnx: the desktop CI
+    images have no Android workload, as for the spike. Build:
+
+      dotnet build apps/Aperture/Aperture.Android -p:HultUIAndroid=true
+
+    (HultUIAndroid: HultUI.Platform.Android's TalkBack bridge, docs/ANDROID.md.)
+  -->
+  <PropertyGroup>
+    <TargetFramework>net11.0-android</TargetFramework>
+    <!-- Android 12: plan 20's minimum. -->
+    <SupportedOSPlatformVersion>31</SupportedOSPlatformVersion>
+    <RuntimeIdentifiers>android-arm64;android-x64</RuntimeIdentifiers>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>Aperture.Android</RootNamespace>
+    <ApplicationId>org.hultui.aperture</ApplicationId>
+    <ApplicationTitle>Aperture</ApplicationTitle>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>0.1</ApplicationDisplayVersion>
+    <!-- Aperture is an exe: only its assembly (ApertureApp) is used here, never its entry point. -->
+    <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Aperture\Aperture.csproj" GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained;PublishAot" />
+    <ProjectReference Include="..\..\..\src\HultUI.Platform.Android\HultUI.Platform.Android.csproj" />
+  </ItemGroup>
+
+  <!-- The app's icon, from the desktop one. -->
+  <ItemGroup>
+    <AndroidResource Include="..\Aperture\Assets\aperture.png" Link="Resources\mipmap\aperture.png" />
+  </ItemGroup>
+
+  <!-- The Android libmpv, where native/mpv/build-libmpv-android.sh leaves it, into lib/<abi>/.
+       Without it the app runs and says it cannot play, as the desktop app does without libmpv. -->
+  <ItemGroup>
+    <AndroidNativeLibrary Include="..\..\..\native\mpv\out\android-x64\libmpv.so" Abi="x86_64"
+                          Condition="Exists('..\..\..\native\mpv\out\android-x64\libmpv.so')" />
+    <AndroidNativeLibrary Include="..\..\..\native\mpv\out\android-arm64\libmpv.so" Abi="arm64-v8a"
+                          Condition="Exists('..\..\..\native\mpv\out\android-arm64\libmpv.so')" />
+  </ItemGroup>
+
+</Project>

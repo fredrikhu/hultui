@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
+using System.Runtime.InteropServices;
 using HultUI.Core.Platform;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
@@ -12,7 +15,7 @@ namespace HultUI.Platform.SDL3;
 /// The real-display windowing platform: SDL3 windows with GL-backed Skia
 /// surfaces, driven by SDL's event queue.
 /// </summary>
-public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform, IMonitorSource, IDesktopSettingsSource
+public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform, IMonitorSource, IDesktopSettingsSource, IAppLifecycleSource
 {
     // The event type Wake pushes. SDL hands types out from a counter it never
     // rewinds, so this is registered once per process and shared by every
@@ -85,8 +88,116 @@ public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform, IMonitorSo
     public TimeProvider TimeProvider => TimeProvider.System;
 
     public IPlatformWindow CreateWindow(string title, int width, int height, WindowStyle style)
-        => new SDL3Window(title, width, height, style,
+    {
+        var window = new SDL3Window(title, width, height, style,
             _text ??= SDL3Window.TakePreloadedText() ?? new SkiaTextServices());
+        // After the first window, which is what initializes SDL.
+        if (!_self.IsAllocated)
+        {
+            _self = GCHandle.Alloc(this);
+            SDL_AddEventWatch(&LifecycleWatch, GCHandle.ToIntPtr(_self));
+        }
+        return window;
+    }
+
+    // ──── App lifecycle (docs/design/APP-LIFECYCLE.md) ────
+    //
+    // SDL reports leaving and returning to the screen, and the system's low-memory and ending
+    // signals, as events. On Android it pushes them on its own thread, which is HultUI's UI
+    // thread (measured: spikes/AndroidHello); on iOS SDL's README asks for them to be handled as
+    // they are pushed, since the system may suspend the app before the queue is read. So an event
+    // watch handles them, synchronously, when it runs on the UI thread, and the queue brings the
+    // rest there; the watch records what it handled so the queue does not handle it twice.
+    // SDL never sends them on Windows or Linux, where the app stays in the foreground.
+
+    private readonly int _uiThread = Environment.CurrentManagedThreadId;
+    private GCHandle _self;
+    private readonly HashSet<(uint Type, ulong Timestamp)> _handledByWatch = [];
+    private ExceptionDispatchInfo? _watchFailure;
+    private AppLifecycleState _lifecycle = AppLifecycleState.Foreground;
+
+    /// <inheritdoc/>
+    public AppLifecycleState LifecycleState => _lifecycle;
+
+    /// <inheritdoc/>
+    public event Action? EnteringBackground;
+
+    /// <inheritdoc/>
+    public event Action? EnteredForeground;
+
+    /// <inheritdoc/>
+    public event Action? LowMemory;
+
+    /// <inheritdoc/>
+    public event Action? Terminating;
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static SDLBool LifecycleWatch(IntPtr userdata, SDL_Event* evt)
+    {
+        // Every event passes through here, mouse motion included: out at once for all but four.
+        uint type = evt->type;
+        if (type is not ((uint)SDL_EventType.SDL_EVENT_WILL_ENTER_BACKGROUND
+            or (uint)SDL_EventType.SDL_EVENT_DID_ENTER_FOREGROUND
+            or (uint)SDL_EventType.SDL_EVENT_LOW_MEMORY
+            or (uint)SDL_EventType.SDL_EVENT_TERMINATING))
+            return true;
+        SdlWindowingPlatform? platform = null;
+        try
+        {
+            platform = GCHandle.FromIntPtr(userdata).Target as SdlWindowingPlatform;
+            // Another thread pushed it: the queue brings it to the UI thread.
+            if (platform is null || Environment.CurrentManagedThreadId != platform._uiThread)
+                return true;
+            platform._handledByWatch.Add((type, evt->common.timestamp));
+            platform.HandleAppEvent(type);
+        }
+        catch (Exception e)
+        {
+            // An exception may not cross SDL's C frames: an app handler's is thrown from
+            // PumpEvents, on the same thread, once SDL has returned.
+            if (platform is not null) platform._watchFailure ??= ExceptionDispatchInfo.Capture(e);
+        }
+        return true;
+    }
+
+    /// <summary>The queue's share: what the watch did not handle as it was pushed.</summary>
+    private void DrainAppEvents()
+    {
+        var events = SDL3Window.AppEvents;
+        if (events.Count == 0) return;
+        var drained = events.ToArray();
+        events.Clear();
+        foreach (var (type, timestamp) in drained)
+            if (!_handledByWatch.Remove((type, timestamp)))
+                HandleAppEvent(type);
+    }
+
+    private void HandleAppEvent(uint type)
+    {
+        switch (type)
+        {
+            case (uint)SDL_EventType.SDL_EVENT_WILL_ENTER_BACKGROUND:
+                if (_lifecycle == AppLifecycleState.Background) return;
+                _lifecycle = AppLifecycleState.Background;
+                EnteringBackground?.Invoke();
+                break;
+            case (uint)SDL_EventType.SDL_EVENT_DID_ENTER_FOREGROUND:
+                if (_lifecycle == AppLifecycleState.Foreground) return;
+                _lifecycle = AppLifecycleState.Foreground;
+                EnteredForeground?.Invoke();
+                break;
+            case (uint)SDL_EventType.SDL_EVENT_LOW_MEMORY:
+                // The GPU's caches only on screen (SDL3Window.TrimMemory); the text caches always.
+                bool gpu = _lifecycle == AppLifecycleState.Foreground;
+                foreach (var window in SDL3Window.All.ToArray()) window.TrimMemory(gpu);
+                _text?.TrimCaches();
+                LowMemory?.Invoke();
+                break;
+            case (uint)SDL_EventType.SDL_EVENT_TERMINATING:
+                Terminating?.Invoke();
+                break;
+        }
+    }
 
     /// <remarks>
     /// <para><b>The wake flag is cleared after the poll, not before.</b> Cleared before, a
@@ -128,6 +239,12 @@ public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform, IMonitorSo
             {
                 SDL3Window.DesktopSettingsChanged = false;
                 Changed?.Invoke();
+            }
+            DrainAppEvents();
+            if (_watchFailure is { } failure)
+            {
+                _watchFailure = null;
+                failure.Throw();
             }
             return running;
         }
@@ -236,6 +353,11 @@ public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform, IMonitorSo
 
     public void Dispose()
     {
+        if (_self.IsAllocated)
+        {
+            SDL_RemoveEventWatch(&LifecycleWatch, GCHandle.ToIntPtr(_self));
+            _self.Free();
+        }
         _text?.Dispose();
         _text = null;
         SDL3Window.ShutdownSDL();

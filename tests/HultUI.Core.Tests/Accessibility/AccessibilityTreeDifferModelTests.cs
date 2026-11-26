@@ -406,8 +406,9 @@ public class AccessibilityTreeDifferModelTests(ITestOutputHelper output)
             if (prev.AutomationId != curr.AutomationId)
                 diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.AutomationId));
             // A node with text on both sides tells a change of it as its text, not its value.
+            // Since plan 20 phase 6: with the previous node, which TalkBack's text-changed event needs.
             if (!(prev.Text is not null && curr.Text is not null) && prev.Value != curr.Value)
-                diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Value));
+                diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Value, prev));
             if (prev.IsPassword != curr.IsPassword)
                 diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.IsPassword));
             if (prev.IsToggled != curr.IsToggled)
@@ -422,7 +423,10 @@ public class AccessibilityTreeDifferModelTests(ITestOutputHelper output)
                 diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.IsFocused));
             if (prev.NativeContent != curr.NativeContent)
                 diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.NativeContent));
-            if (!ReferenceEquals(prev.Text, curr.Text) && (prev.Text is not null || curr.Text is not null))
+            // Since plan 20 phase 6: not across a field's mask going on or off, which would tell the
+            // text that went (or came) as deleted (or inserted).
+            if (!ReferenceEquals(prev.Text, curr.Text) && (prev.Text is not null || curr.Text is not null)
+                && prev.IsPassword == curr.IsPassword)
             {
                 var (a, b) = (prev.Text, curr.Text);
                 if (a?.Text != b?.Text)

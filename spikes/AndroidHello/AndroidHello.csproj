@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Plan 20, phase 1: the smallest HultUI app on Android. A spike: not in the solution, not
+    packed, not built by CI. See README.md for how to build and run it and what it found.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net11.0-android</TargetFramework>
+    <!-- API 31 (Android 12): the minimum plan 20 settled on; the NDK's libicu.so starts there. -->
+    <SupportedOSPlatformVersion>31</SupportedOSPlatformVersion>
+    <RuntimeIdentifiers>android-x64;android-arm64</RuntimeIdentifiers>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- The Fluent sample is an exe; only its assembly (FluentApp) is used here, never its
+         entry point, so NETSDK1150's self-contained check does not apply. -->
+    <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationId>org.hultui.spike.androidhello</ApplicationId>
+    <ApplicationTitle>HultUI spike</ApplicationTitle>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>0.1</ApplicationDisplayVersion>
+    <!-- The default runtime (CoreCLR in .NET 11), as plan 20 decided. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\HultUI\HultUI.csproj" />
+    <!-- HultUIActivity and the platform's services (docs/design/ANDROID-PLATFORM.md §2). -->
+    <ProjectReference Include="..\..\src\HultUI.Platform.Android\HultUI.Platform.Android.csproj" />
+    <!-- The Fluent sample's UI (FluentApp), hosted with -e sample fluent: plan 20 phase 2's
+         "the sample and the Fluent sample run on the emulator". -->
+    <ProjectReference Include="..\..\samples\HultUI.Samples.Fluent\HultUI.Samples.Fluent.csproj"
+                      GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained" />
+    <!-- Plan 20 phase 5: video through libmpv (-e sample video). -->
+    <ProjectReference Include="..\..\src\HultUI.Media\HultUI.Media.csproj" />
+    <ProjectReference Include="..\..\src\HultUI.Media.Mpv\HultUI.Media.Mpv.csproj" />
+  </ItemGroup>
+
+  <!-- The Android libmpv, where native/mpv/build-libmpv-android.sh leaves it, into the APK's
+       lib/<abi>/. Absent until it is built; the video sample then says so. -->
+  <ItemGroup>
+    <AndroidNativeLibrary Include="..\..\native\mpv\out\android-x64\libmpv.so" Abi="x86_64"
+                          Condition="Exists('..\..\native\mpv\out\android-x64\libmpv.so')" />
+    <AndroidNativeLibrary Include="..\..\native\mpv\out\android-arm64\libmpv.so" Abi="arm64-v8a"
+                          Condition="Exists('..\..\native\mpv\out\android-arm64\libmpv.so')" />
+  </ItemGroup>
+
+</Project>

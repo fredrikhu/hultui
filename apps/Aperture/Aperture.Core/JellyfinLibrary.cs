@@ -428,7 +428,7 @@ public sealed class JellyfinLibrary : IMediaLibrary
 
             Uri? url = transcoding
                 ? Uri.TryCreate(Server.Address + source.TranscodingUrl, UriKind.Absolute, out var t) ? t : null
-                : DirectStreamUrl(itemId, source, playSessionId);
+                : DirectStreamUrl(itemId, source.Id, source.Container, playSessionId);
 
             if (url is null)
                 return ApertureResult<PlaybackTarget>.Fail(ApertureFailureKind.NotJellyfin,
@@ -470,15 +470,20 @@ public sealed class JellyfinLibrary : IMediaLibrary
 
     /// <summary>The original file, byte for byte: <c>static=true</c> is what makes the
     /// server stop deciding and start sending.</summary>
-    private Uri? DirectStreamUrl(string itemId, MediaSourceInfo source, string playSessionId)
+    private Uri? DirectStreamUrl(string itemId, string? sourceId, string? container, string playSessionId)
     {
         var url = $"{Server.Address}/Videos/{Uri.EscapeDataString(itemId)}/stream" +
                   $"?static=true&playSessionId={Uri.EscapeDataString(playSessionId)}" +
                   $"&api_key={Uri.EscapeDataString(User.AccessToken)}";
-        if (source.Id is { Length: > 0 } sourceId) url += $"&mediaSourceId={Uri.EscapeDataString(sourceId)}";
-        if (source.Container is { Length: > 0 } container) url += $"&container={Uri.EscapeDataString(container)}";
+        if (sourceId is { Length: > 0 }) url += $"&mediaSourceId={Uri.EscapeDataString(sourceId)}";
+        if (container is { Length: > 0 }) url += $"&container={Uri.EscapeDataString(container)}";
         return Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri : null;
     }
+
+    public PlaybackTarget OriginalFileOf(PlaybackTarget transcode) =>
+        DirectStreamUrl(transcode.ItemId, transcode.MediaSourceId, null, transcode.PlaySessionId) is { } url
+            ? transcode with { StreamUrl = url, Transcoding = false }
+            : transcode;
 
     public Task<ApertureResult<bool>> ReportStartedAsync(PlaybackTarget target, TimeSpan position, bool paused,
         CancellationToken ct = default) =>

@@ -232,7 +232,9 @@ public sealed partial class TableView<T>
         float sign = atStart ? -1f : 1f;
         grip.On<PointerDownEvent>(e =>
         {
-            if (e.Button != PointerEvent.LeftButton) return;
+            // A second finger reaches the capture holder too (docs/design/POINTER-IDENTITY.md §2):
+            // the edge follows the first.
+            if (e.Button != PointerEvent.LeftButton || !e.IsPrimary) return;
             e.CapturePointer();
             e.StopPropagation = true;
             _dragColumn = id;
@@ -241,15 +243,18 @@ public sealed partial class TableView<T>
         });
         grip.On<PointerMoveEvent>(e =>
         {
-            if (_dragColumn != id) return;
+            if (_dragColumn != id || !e.IsPrimary) return;
             SetWidth(id, _dragWidth + sign * (e.Position.X - _dragFrom), settled: false);
         });
-        grip.On<PointerUpEvent>(e =>
+        // A cancel (the system took the press) settles the width it reached, as a release does.
+        void Settle(PointerEvent e)
         {
-            if (_dragColumn != id) return;
+            if (_dragColumn != id || !e.IsPrimary) return;
             _dragColumn = null;
             SetWidth(id, _dragWidth + sign * (e.Position.X - _dragFrom), settled: true);
-        });
+        }
+        grip.On<PointerUpEvent>(Settle);
+        grip.On<PointerCancelEvent>(Settle);
         grip.On<DoubleClickEvent>(e =>
         {
             _widths.Remove(id);

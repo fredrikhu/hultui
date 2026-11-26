@@ -155,6 +155,45 @@ public sealed partial class HeadlessSession : IDisposable
     }
 
     /// <summary>
+    /// Sends the app to the background, as Home or the screen lock does on Android:
+    /// <c>Application.EnteringBackground</c> is raised at once, on this thread, and
+    /// <c>Application.LifecycleState</c> reads Background. Until <see cref="EnterForeground"/> the
+    /// pumps draw nothing, while posted work, timers and <c>await</c> continuations go on running
+    /// (docs/design/APP-LIFECYCLE.md). A no-op when the app is in the background already.
+    /// </summary>
+    public void EnterBackground()
+    {
+        ThrowIfDisposed();
+        Application.Enter();
+        _platform.EnterBackground();
+    }
+
+    /// <summary>
+    /// Brings the app back on screen: <c>Application.EnteredForeground</c> is raised at once, on
+    /// this thread, and the next pump draws every window, and the one after draws them again, as
+    /// on Android, where the first frame after a return does not show. A no-op when the app is
+    /// in the foreground already.
+    /// </summary>
+    public void EnterForeground()
+    {
+        ThrowIfDisposed();
+        Application.Enter();
+        _platform.EnterForeground();
+    }
+
+    /// <summary>
+    /// The system's low-memory signal: HultUI empties its text caches, then
+    /// <c>Application.LowMemory</c> is raised at once, on this thread, and a full collection
+    /// follows, in the foreground or the background alike.
+    /// </summary>
+    public void SignalLowMemory()
+    {
+        ThrowIfDisposed();
+        Application.Enter();
+        _platform.SignalLowMemory();
+    }
+
+    /// <summary>
     /// Makes this session's application the one the code on this thread runs for, as its pumps,
     /// input and <see cref="HeadlessWindow.SetRoot"/> already do: <c>Application.InvokeOnMainThread</c>
     /// (and the work it starts, which carries it along), <c>await</c> continuations, tweens and

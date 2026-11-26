@@ -587,6 +587,21 @@ public sealed class AccessibilityNode
     // Set as the tree is built, never after: a container with a current item, a list that takes the
     // focus of the element above it.
     private const int CurrentItemsBit = 1 << 12, TakesFocusBit = 1 << 13;
+    // Set as the tree is built, only while a bridge asks for it: a long press means something here.
+    private const int LongPressBit = 1 << 14;
+
+    /// <summary>
+    /// Whether a long press means something on the node: its element or one above it handles one, or
+    /// has a context menu, as a finger's long press finds them (Android's long-click action, which
+    /// TalkBack performs on a double tap held). A list's items have their list's. Set as the tree is
+    /// built, and only while a bridge asks for it (<see cref="AccessibilityTreeBuilder.MarksLongPress"/>):
+    /// false otherwise. No diff tells a change of it.
+    /// </summary>
+    internal bool OffersLongPress
+    {
+        get => (_flags & LongPressBit) != 0;
+        set => SetFlag(LongPressBit, value);
+    }
 
     /// <summary>Every state at once, for the differ: equal when none of them differs.</summary>
     internal int States => _flags;

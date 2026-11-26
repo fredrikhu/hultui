@@ -171,6 +171,7 @@ public static partial class AccessibilityTreeBuilder
             isPassword: element is TextInputElement { Masked: true },
             isSelected: ResolveIsSelected(element));
         node.NativeContent = element.NativeAccessibleContent;
+        if (MarksLongPress && OffersLongPress(element)) node.OffersLongPress = true;
         if (element is IRangeValueElement range)
             node.Range = AccessibleRange.Of(range);
         // A menu bar's titles are its choices: the highlighted one is its current item. A list's is
@@ -194,6 +195,23 @@ public static partial class AccessibilityTreeBuilder
             else node.Text = textSource.AccessibleText;
         }
         return node;
+    }
+
+    /// <summary>
+    /// Whether nodes say where a long press means something (<see cref="AccessibilityNode.OffersLongPress"/>):
+    /// set once, process-wide, by a bridge whose platform has the action (TalkBack's, on Android). A
+    /// walk up from each element, which no desktop build makes: the desktop readers open a context
+    /// menu from the keyboard.
+    /// </summary>
+    internal static volatile bool MarksLongPress;
+
+    /// <summary>Whether a finger's long press on <paramref name="element"/> would do something: a
+    /// long-press handler or a context menu on it or above it (Window's long press looks the same way).</summary>
+    internal static bool OffersLongPress(Element element)
+    {
+        for (var e = element; e is not null; e = e.Parent)
+            if (e.ContextMenuItems is not null || e.HasEventHandler<Events.LongPressEvent>()) return true;
+        return false;
     }
 
     /// <summary>Builds <paramref name="node"/>'s children from <paramref name="element"/>'s, on top
@@ -593,12 +611,15 @@ public static partial class AccessibilityTreeBuilder
         uint slot = AccessibleOwnerSlots.SlotOf(list.Id);
         var role = ItemRoleOf(listNode.Role);
         var items = new AccessibilityNode[count];
+        // A long press on a row finds what the list's does.
+        bool longPress = listNode.OffersLongPress;
         for (int i = 0; i < count; i++)
         {
             var box = ItemBox(source, i, content, itemHeight);
             items[i] = MakeItemNode(slot, i, role, source.GetItemLabel(i), place.Unscrolled(box), source.ItemIsToggled(i),
                 source.ItemIsExpanded(i), source.IsItemSelected(i), source.ItemIsEnabled(i),
                 !RectsIntersect(clip, place.OnScreen(box)));
+            if (longPress) items[i].OffersLongPress = true;
         }
         if (open.Element is { } row)
         {
@@ -728,6 +749,8 @@ public static partial class AccessibilityTreeBuilder
         bool sameText = current.SameText(previous), sameSelection = current.SameSelection(previous);
         if (sameText && sameSelection) return true;
         var standIn = node.TextStandIn(previous);
+        // A one-line field's value is told too, before its text, in the differ's order.
+        if (!sameText && current.TellsValue) changes.Add(new PropertyChange(node, AccessibilityProperties.Value, standIn));
         if (!sameText) changes.Add(new PropertyChange(node, AccessibilityProperties.Text, standIn));
         if (!sameSelection) changes.Add(new PropertyChange(node, AccessibilityProperties.TextSelection, standIn));
         return true;
@@ -915,8 +938,24 @@ public static partial class AccessibilityTreeBuilder
         if (IsNameFromContentRole(ResolveRole(element)) && GetContentText(element) is { } content)
             return content;
 
-        return element.Name;
+        if (!string.IsNullOrEmpty(element.Name)) return element.Name;
+        return PlaceholderName(element) ?? element.Name;
     }
+
+    /// <summary>
+    /// A text field's placeholder ("Search", "A number"), which names it when nothing else does, as a
+    /// browser names an input by its placeholder: a field the app gave no label was read as "edit" and
+    /// nothing more ("Edit box" on TalkBack). Last, after the element's own <see cref="Element.Name"/>.
+    /// The name stays once text is typed, as a browser's does: it says what the field is for. Null for
+    /// anything but a text input, a text area or the rich text editor, and for an empty placeholder.
+    /// </summary>
+    private static string? PlaceholderName(Element element) => element switch
+    {
+        TextInputElement { Placeholder.Length: > 0 } input => input.Placeholder,
+        TextAreaElement { Placeholder.Length: > 0 } area => area.Placeholder,
+        RichTextEditorElement { Placeholder.Length: > 0 } editor => editor.Placeholder,
+        _ => null,
+    };
 
     /// <summary>
     /// The name of a control a reader knows by what is chosen in it, when the app gave it none: a
@@ -955,7 +994,8 @@ public static partial class AccessibilityTreeBuilder
             // A text matched, so there is a name, and all of it must be the texts.
             if (any) return at == name!.Length;
         }
-        return element.Name == name;
+        if (!string.IsNullOrEmpty(element.Name)) return element.Name == name;
+        return (PlaceholderName(element) ?? element.Name) == name;
     }
 
     /// <summary>Matches the texts <see cref="AppendContentText"/> joins, one space between two, against

@@ -328,6 +328,12 @@ children builds the tree.
 
 `AccessibleName` is what a screen reader announces. `Name` is only its last-resort fallback — reach for `AccessibleName` on anything user-facing, and leave `Name` for debugging.
 
+A text field (`TextInput`, `TextArea`, the rich text editor) with neither is named by its
+`Placeholder`, as a browser names an input: an unlabelled field was read as "edit" and nothing more.
+The name stays once text is typed, and a new placeholder is told as a new name. A label beside the
+field does not name it (there is no label-for association), so a field whose placeholder is an
+example ("e.g. Ada") rather than what it is for still wants an `AccessibleName`.
+
 **A `BoxElement` with a click handler is announced as a button.** When no role is set, the
 tree builder infers one from the element type, and the last rule is "a box with an
 `OnClick` is a `Button`", named from the text inside it. That is right for a clickable
@@ -1493,9 +1499,19 @@ window's bottom edge and is looked through by the pointer (`Element.IsHitTestVis
 = false`), so a toast over the bottom edge never steals the clicks meant for whatever
 sits there; the pill inside it is still clickable.
 
+**Swiped away.** A finger drags the pill sideways (`OnPan`, touch only), and it fades as it
+goes. Released past 40% of its width, or flicked that way at 600 DIP/s or more, it slides
+off and is dismissed, as `Dismiss()`. Released short of that, it slides back and starts its
+time again. It does not time out while a finger holds it, and one caught as it fades out
+comes back whole. Swiping a toast that has an action does not run the action. The mouse
+cannot drag it: on a desktop a toast goes when its time runs out.
+
 **`ToastElement`** draws the pill from `Theme.Toast` (`ToastTheme`: surface fill,
 border, text, the action verb in `Primary`, and fixed success/warning accents plus
-`Danger` for errors). A severity draws a bar at the leading edge.
+`Danger` for errors). A severity draws a bar at the leading edge. A message too long for
+the window wraps, up to four lines, then ends in "…". The pill stays at least 16 DIP inside
+the window's side edges, and the verb stays whole on one line beside the message. A single
+word wider than the window, such as a long URL, is not broken and can still run past the edge.
 
 **Accessibility:** a plain toast is an **alert** named by its message. Either way the
 message is announced as the toast appears (`Element.Announce`: politely, an error

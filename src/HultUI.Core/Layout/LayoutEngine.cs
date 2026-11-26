@@ -18,6 +18,16 @@ public sealed partial class LayoutEngine
     }
 
     public void PerformLayout(Element root, float availableWidth, float availableHeight, bool forceRootFill = true)
+        => PerformLayout(root, originX: 0, originY: 0, availableWidth, availableHeight, forceRootFill);
+
+    /// <summary>
+    /// Lays <paramref name="root"/> out in an area of the window that starts at
+    /// (<paramref name="originX"/>, <paramref name="originY"/>) rather than at its corner: the
+    /// window's safe area (<c>Window.SafeArea</c>), where the system's bars cover the rest. Every
+    /// box records its window-space position, which drawing, hit-testing and accessibility read.
+    /// </summary>
+    internal void PerformLayout(Element root, float originX, float originY, float availableWidth, float availableHeight,
+        bool forceRootFill = true)
     {
         var constraint = new LayoutConstraint(availableWidth, availableHeight);
         // Only force size for auto-dimensioned roots when filling (e.g. window root).
@@ -29,7 +39,7 @@ public sealed partial class LayoutEngine
         LayoutWatch.Pass = this;
         try
         {
-            ComputeLayout(root, constraint, absoluteX: 0, absoluteY: 0, forcedWidth: fw, forcedHeight: fh);
+            ComputeLayout(root, constraint, absoluteX: originX, absoluteY: originY, forcedWidth: fw, forcedHeight: fh);
         }
         finally
         {
@@ -40,7 +50,7 @@ public sealed partial class LayoutEngine
         }
         ClearLayoutDirty(root);
         if (LayoutAudit.Enabled && _passDepth == 0)
-            LayoutAudit.Check(_measureContext, root, availableWidth, availableHeight, forceRootFill);
+            LayoutAudit.Check(_measureContext, root, originX, originY, availableWidth, availableHeight, forceRootFill);
     }
 
     private int _passDepth;

@@ -185,11 +185,15 @@ public sealed partial class ApertureApp
 
         var page = Flex.Column(gap: 0).FlexGrow(1)
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
+            .Padding(new Thickness(0, Halide.S4))
             .Background(Halide.Bg);
 
+        // 420 wide, or what the page has inside its margins where that is less (a phone held
+        // upright is 360 or so): a full-width row centres the card and lets it shrink.
+        var cardRow = Flex.Row(gap: 0).AlignSelf(AlignSelf.Stretch).JustifyContent(JustifyContent.Center);
         var card = Flex.Column(gap: Halide.S4)
-            .Width(420).FlexShrink(0)
-            .Padding(new Thickness(Halide.S6))
+            .Width(420).FlexShrink(1)
+            .Padding(new Thickness(Halide.Phone ? Halide.S4 : Halide.S6))
             .CornerRadius(Halide.Radius2)
             .Background(Halide.Surface)
             .BorderColor(Halide.Border).BorderWidth(1f)
@@ -214,7 +218,8 @@ public sealed partial class ApertureApp
         {
             card.AddChild(QuickConnectPanel());
             if (_connectFailure is { } stopped) card.AddChild(FailureNote(stopped));
-            page.AddChild(card);
+            cardRow.AddChild(card);
+            page.AddChild(cardRow);
             page.AddChild(Box.New().Height(Halide.S3));
             page.AddChild(Text.New("The code is worth nothing on its own — approving it is what signs this window in.")
                 .FontSize(11.5f).TextColor(Halide.TextFaint));
@@ -239,7 +244,8 @@ public sealed partial class ApertureApp
         actions.AddChild(connect);
         card.AddChild(actions);
 
-        page.AddChild(card);
+        cardRow.AddChild(card);
+        page.AddChild(cardRow);
 
         // The port note, under the card: this is the single most common first failure
         // against a stock install, and saying it up front costs one line.

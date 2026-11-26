@@ -90,6 +90,39 @@ Binaries move between jobs as assets of a GitHub release through
 `scripts/release-transport.sh` (shared with the CEF helper workflow) — a dispatch run fills the rolling `mpv-natives-ci`
 prerelease, a `mpv-natives-v*` tag fills its own release, `.nupkg` included.
 
+## Android (plan 20 phase 5)
+
+`build-libmpv-android.sh <abi>` cross-builds the same trimmed LGPL libmpv with the Android NDK,
+on Linux (WSL is fine; never in `/mnt/c`): one self-contained `out/android-arm64/libmpv.so` (phones)
+or `out/android-x64/libmpv.so` (the emulator), each with its `LICENCE-REPORT.txt`.
+
+```bash
+sudo dnf install meson ninja-build nasm cmake autoconf automake libtool python3-jinja2 gawk   # Fedora
+ANDROID_NDK_HOME=~/android/android-ndk-r27c ./build-libmpv-android.sh arm64-v8a
+ANDROID_NDK_HOME=~/android/android-ndk-r27c ./build-libmpv-android.sh x86_64
+```
+
+What differs from the desktop build, all in the script's header:
+- **Nothing from the host.** dav1d, freetype, fribidi, harfbuzz and libass are built from the tags
+  in `versions.env` too, and the NDK's static libc++ is linked in (libplacebo has C++). The library
+  needs only Android's own: libc, libm, libdl, libz, libandroid, libEGL, libmediandk. The build fails
+  if it needs anything else, or leaves a C++ runtime symbol to the loader.
+- **MediaCodec.** FFmpeg's MediaCodec decoders (`--enable-jni --enable-mediacodec`) and mpv's
+  AImageReader interop (`android-media-ndk`, zero-copy into GL ES). FFmpeg needs the app's Java VM;
+  `HultUI.Media.Mpv` hands it over through `av_jni_set_java_vm`, which the library exports (the
+  build checks it), from `JNI_GetCreatedJavaVMs`.
+- **Audio** through AAudio, AudioTrack the fallback.
+- **Subtitles:** libass has no font provider (no fontconfig on Android). `HultUI.Media.Mpv` gives it
+  the system's Roboto; fonts a file embeds work as anywhere.
+- **The NDK** is pinned (`ANDROID_NDK_REVISION`, r27c), and so is the lowest Android it runs on
+  (`ANDROID_API`, 31: Android 12).
+
+The natives package puts the two under `runtimes/android-arm64/native/` and
+`runtimes/android-x64/native/`, which a .NET Android build puts in the APK's `lib/<abi>/`.
+On the emulator (`spikes/AndroidHello`, `-e sample video`) H.264 and AV1 at 1080p play at their
+30 fps, through MediaCodec (`mediacodec-copy`: the emulator's GL lacks what the zero-copy interop
+needs), with AAudio, and ASS subtitles draw.
+
 ## Complete corresponding source
 
 The LGPL asks that a recipient of the binary can get its source. It is: the upstream

@@ -54,6 +54,7 @@ public sealed partial class TerminalElement : Element
         OnOwn<PointerDownEvent>(OnPointerDown);
         OnOwn<PointerMoveEvent>(OnPointerMove);
         OnOwn<PointerUpEvent>(OnPointerUp);
+        OnOwn<PointerCancelEvent>(OnPointerCancel);
         OnOwn<PointerLeaveEvent>(OnPointerLeave);
         OnOwn<ScrollEvent>(OnScroll);
         OnOwn<FocusEvent>(_ => OnFocusChanged(true));
@@ -438,7 +439,9 @@ public sealed partial class TerminalElement : Element
 
     private void OnPointerDown(PointerDownEvent e)
     {
-        if (_controller is null) return;
+        // A second finger reaches the capture holder too (docs/design/POINTER-IDENTITY.md §2):
+        // the terminal follows the first. The same in the move, release and cancel.
+        if (_controller is null || !e.IsPrimary) return;
         Focus();
         e.CapturePointer();
         e.StopPropagation = true;
@@ -475,7 +478,7 @@ public sealed partial class TerminalElement : Element
 
     private void OnPointerMove(PointerMoveEvent e)
     {
-        if (_controller is null) return;
+        if (_controller is null || !e.IsPrimary) return;
         TrackHover(e.Position);
         var (col, row) = CellAt(e.Position);
 
@@ -506,9 +509,25 @@ public sealed partial class TerminalElement : Element
             : new Selection(anchor.Start, span.End with { Column = span.End.Column - 1 }, s.Unit);
     }
 
+    /// <summary>The system took the press. A program that had the button down hears it come up,
+    /// since a terminal has no way to say "cancelled"; a selection stays as far as it got.</summary>
+    private void OnPointerCancel(PointerCancelEvent e)
+    {
+        if (_controller is null || !e.IsPrimary) return;
+        if (_mouseButton != TerminalMouseButton.None)
+        {
+            var (col, row) = CellAt(e.Position);
+            if (_controller.EncodeMouse(new TerminalMouse(TerminalMouseAction.Up, _mouseButton, col, row, e.Modifiers)) is { } bytes)
+                _controller.Send(bytes);
+            _mouseButton = TerminalMouseButton.None;
+        }
+        _selecting = false;
+        e.StopPropagation = true;
+    }
+
     private void OnPointerUp(PointerUpEvent e)
     {
-        if (_controller is null) return;
+        if (_controller is null || !e.IsPrimary) return;
         var (col, row) = CellAt(e.Position);
 
         if (_mouseButton != TerminalMouseButton.None)

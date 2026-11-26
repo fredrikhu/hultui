@@ -14,8 +14,34 @@ namespace HultUI.Headless;
 /// Deliberately does not implement <see cref="IWindowChrome"/> — the framework
 /// Window skips all native-frame wiring for chromeless platforms.
 /// </summary>
-internal sealed class HeadlessPlatformWindow : IPlatformWindow
+internal sealed class HeadlessPlatformWindow : IPlatformWindow, ISafeAreaSource
 {
+    /// <summary>The simulated system bars' insets (HeadlessWindow.SetSafeArea); zero, as on the desktop.</summary>
+    public Thickness SafeArea { get; private set; }
+
+    public event Action? SafeAreaChanged;
+
+    /// <summary>Sets the simulated safe area and tells the window at once, on this thread, as SDL's
+    /// event does from the pump on Android. The same value tells nothing.</summary>
+    public void SetSafeArea(Thickness insets)
+    {
+        if (insets == SafeArea) return;
+        SafeArea = insets;
+        SafeAreaChanged?.Invoke();
+    }
+
+    /// <summary>The simulated soft keyboard's height (HeadlessWindow.SetKeyboardInset); zero, as on the desktop.</summary>
+    public float KeyboardInset { get; private set; }
+
+    /// <summary>Sets the simulated keyboard's height and tells the window at once, as
+    /// <see cref="SetSafeArea"/> does.</summary>
+    public void SetKeyboardInset(float height)
+    {
+        if (height == KeyboardInset) return;
+        KeyboardInset = height;
+        SafeAreaChanged?.Invoke();
+    }
+
     private readonly SkiaRasterRenderSurface _raster;
     private readonly IRenderSurface _surface;
     private float _layoutWidth;

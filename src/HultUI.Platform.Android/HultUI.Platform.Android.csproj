@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    HultUI on Android: the activity an app's own activity derives from (HultUIActivity), and
+    the platform services HultUI's net11.0 assemblies cannot reach themselves, registered
+    through internal hooks: the Keystore secret store behind CredentialStore.Default, the
+    system's back, and the TalkBack bridge. docs/design/ANDROID-PLATFORM.md, TALKBACK.md.
+
+    Not in HultUI.slnx: building it needs the .NET Android workload, which the desktop CI
+    images do not have. Built with the spike (spikes/AndroidHello) until an Android CI job exists.
+  -->
+  <PropertyGroup>
+    <TargetFramework>$(HultUITargetFramework)-android</TargetFramework>
+    <!-- Android 12: the NDK's public ICU (libicu.so) starts there; plan 20's minimum. -->
+    <SupportedOSPlatformVersion>31</SupportedOSPlatformVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HultUI.Platform.Android</RootNamespace>
+    <Description>HultUI on Android: HultUIActivity, the activity an app derives from, and the platform's services (Android Keystore secrets, the Back key's system default).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HultUI\HultUI.csproj" />
+    <!-- The TalkBack bridge (docs/design/TALKBACK.md), built with its Android layer: HultUIAndroid
+         adds its net11.0-android target, which the desktop builds leave out. -->
+    <ProjectReference Include="..\HultUI.Platform.Accessibility.Android\HultUI.Platform.Accessibility.Android.csproj"
+                      AdditionalProperties="HultUIAndroid=true" />
+  </ItemGroup>
+
+</Project>

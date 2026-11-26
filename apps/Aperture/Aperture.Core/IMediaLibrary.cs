@@ -100,6 +100,14 @@ public interface IMediaLibrary : IDisposable
     Task<ApertureResult<PlaybackTarget>> StartPlaybackAsync(string itemId, TimeSpan startPosition,
         int? maxBitrateBps = null, CancellationToken ct = default);
 
+    /// <summary>
+    /// The original file of a transcode, in the same session: for a transcode the player could
+    /// not open, such as an HLS stream over https where the decoder has no TLS of its own
+    /// (Android). A ceiling the transcode was asked for no longer holds. A library with no
+    /// original to offer gives the transcode back.
+    /// </summary>
+    PlaybackTarget OriginalFileOf(PlaybackTarget transcode) => transcode;
+
     /// <summary>Tells the server playback began — this is what puts the app in "now playing".</summary>
     Task<ApertureResult<bool>> ReportStartedAsync(PlaybackTarget target, TimeSpan position, bool paused, CancellationToken ct = default);
 

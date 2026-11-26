@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The TalkBack bridge (docs/design/TALKBACK.md). Two parts in one package:
+
+    - The bridge itself, platform-neutral (net11.0): it turns HultUI's accessibility snapshots
+      into Android's model (virtual views, their class, text, states, actions and bounds, the
+      events to send) and Android's actions into HultUI's. Tested on the desktop, in
+      tests/HultUI.Platform.Accessibility.Android.Tests, and built by HultUI.slnx.
+    - A thin Android layer (Android/, net11.0-android only): an AccessibilityNodeProvider on SDL's
+      surface that makes AccessibilityNodeInfos and AccessibilityEvents from those records, and
+      explore by touch.
+
+    The Android target needs the .NET Android workload, which the desktop CI images do not have, so
+    it is built only when HultUIAndroid is true: HultUI.Platform.Android's reference sets it.
+  -->
+  <PropertyGroup>
+    <TargetFrameworks>$(HultUITargetFramework)</TargetFrameworks>
+    <TargetFrameworks Condition="'$(HultUIAndroid)' == 'true'">$(HultUITargetFramework);$(HultUITargetFramework)-android</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HultUI.Platform.Accessibility.Android</RootNamespace>
+    <Description>HultUI Android accessibility: the TalkBack bridge (virtual views on SDL's surface, explore by touch).</Description>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="$(TargetFramework.EndsWith('-android'))">
+    <!-- Android 12: plan 20's minimum. -->
+    <SupportedOSPlatformVersion>31</SupportedOSPlatformVersion>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="!$(TargetFramework.EndsWith('-android'))">
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup Condition="!$(TargetFramework.EndsWith('-android'))">
+    <Compile Remove="Android\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HultUI.Core\HultUI.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="HultUI.Platform.Accessibility.Android.Tests" />
+    <!-- The activity puts the bridge in (AndroidAccessibility.CreateBridge). -->
+    <InternalsVisibleTo Include="HultUI.Platform.Android" />
+    <!-- Aperture's views read as TalkBack reads them (ApertureAppHostTests.TalkBack.cs). -->
+    <InternalsVisibleTo Include="Aperture.Tests" />
+  </ItemGroup>
+
+</Project>

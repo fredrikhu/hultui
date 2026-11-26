@@ -15,7 +15,7 @@ setup guide is in the history: `git show d2bc157b:docs/SELF-HOSTED-RUNNERS.md`.
 |---|---|---|---|
 | `ci.yml` | push to `main`, a pull request into `main`, by hand | `test` (Windows), `test-linux`, `meridian-keyring` (Linux, macOS), `docs` | the whole solution's tests on both OSes; Meridian's secrets in the real Linux and macOS keyrings; the DocFX site with warnings as errors |
 | `<app>-installer.yml` (Junction, Vesper, Meridian, Aperture, Reel) | an `<app>-vX.Y.Z` tag, by hand | `test`, `test-linux` (Junction, Meridian), `installer` | the app's tests, a NativeAOT build, an Inno Setup installer; a GitHub release on a tag |
-| `mpv-natives.yml` | an `mpv-natives-v*` tag, by hand | `windows`, `linux`, `package` | the trimmed LGPL libmpv for both OSes, proved by the backend tests, and `HultUI.Media.Mpv.Natives` |
+| `mpv-natives.yml` | an `mpv-natives-v*` tag, by hand | `windows`, `linux`, `android`, `package` | the trimmed LGPL libmpv for both OSes, proved by the backend tests, and for Android (arm64, x86_64, checked by its build), and `HultUI.Media.Mpv.Natives` |
 | `cef-natives.yml` | a `cef-natives-v*` tag, by hand | `pack` | `HultUI.WebView.Cef.Natives.<rid>` for linux-x64 and linux-arm64, proved by the engine tests |
 | `cef-helper.yml` | a change to `native/cef-helper/**`, a `cef-helper-v*` tag, by hand | `build` | `hultui-cef-helper` for both Linux RIDs, and `HultUI.WebView.Cef` |
 
@@ -48,6 +48,7 @@ What the jobs add to the image:
 | installers | Inno Setup, when the image lacks it | the step falls back to `choco install innosetup` |
 | `mpv-natives` Windows | an MSYS2 MINGW64 toolchain and the packages `native/mpv/README.md` lists | through `msys2/setup-msys2` |
 | `mpv-natives` Linux | the apt list in `native/mpv/README.md` | |
+| `mpv-natives` Android | the build tools, gawk, and the NDK `versions.env` pins | installed with the image's `sdkmanager`; not yet run (plan 20 phase 5) |
 | `cef-natives` | `bzip2`, both `binutils` (a `strip` per RID), CEF's runtime libraries, Mesa | `native/cef/build.sh`, and the engine tests on the packed CEF |
 | `cef-helper` | `gcc-aarch64-linux-gnu` | to cross-compile the linux-arm64 helper |
 

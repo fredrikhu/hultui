@@ -53,6 +53,7 @@
     <Project Path="src/HultUI.WinForms/HultUI.WinForms.csproj" />
     <Project Path="src/HultUI.Platform.Accessibility.Windows/HultUI.Platform.Accessibility.Windows.csproj" />
     <Project Path="src/HultUI.Platform.Accessibility.Linux/HultUI.Platform.Accessibility.Linux.csproj" />
+    <Project Path="src/HultUI.Platform.Accessibility.Android/HultUI.Platform.Accessibility.Android.csproj" />
     <Project Path="src/HultUI.Rendering.Skia/HultUI.Rendering.Skia.csproj" />
     <Project Path="src/HultUI.SourceGenerators/HultUI.SourceGenerators.csproj" />
     <Project Path="src/HultUI.Text/HultUI.Text.csproj" />
@@ -94,6 +95,7 @@
     <Project Path="tests/HultUI.WebView.Engines.Tests.CefProcess/HultUI.WebView.Engines.Tests.CefProcess.csproj" />
     <Project Path="tests/HultUI.Samples.WebView.Tests/HultUI.Samples.WebView.Tests.csproj" />
     <Project Path="tests/HultUI.Platform.Accessibility.Linux.Tests/HultUI.Platform.Accessibility.Linux.Tests.csproj" />
+    <Project Path="tests/HultUI.Platform.Accessibility.Android.Tests/HultUI.Platform.Accessibility.Android.Tests.csproj" />
     <Project Path="tests/HultUI.Terminal.Tests/HultUI.Terminal.Tests.csproj" />
     <Project Path="tests/HultUI.Terminal.Pty.Tests/HultUI.Terminal.Pty.Tests.csproj" />
     <Project Path="tests/HultUI.Terminal.Pty.Tests.Child/HultUI.Terminal.Pty.Tests.Child.csproj" />

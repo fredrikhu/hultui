@@ -2,6 +2,7 @@
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
+using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
@@ -190,6 +191,10 @@ public static class ElementExtensions
     /// off the clipboard. Sets <see cref="TextInputElement.Masked"/>, under another name for the
     /// reason <see cref="Chromeless{T}"/> has one.</summary>
     public static T Password<T>(this T el, bool masked = true) where T : TextInputElement { el.Masked = masked; return el; }
+    /// <summary>What the field holds, so a phone shows the keyboard for it: digits for
+    /// <see cref="TextInputKind.Number"/>, <c>@</c> for <see cref="TextInputKind.Email"/>. Sets
+    /// <see cref="TextInputElement.InputKind"/>; <see cref="Password{T}"/> wins over it.</summary>
+    public static T Kind<T>(this T el, TextInputKind kind) where T : TextInputElement { el.InputKind = kind; return el; }
     /// <summary>A reusable look for this field, layered over the theme's; see <see cref="TextInputStyle"/>.</summary>
     public static T Style<T>(this T el, TextInputStyle? style) where T : TextInputElement { el.Style = style; return el; }
 
@@ -284,6 +289,31 @@ public static class ElementExtensions
     public static T OnClick<T>(this T el, Action<ClickEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnPointerDown<T>(this T el, Action<PointerDownEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnPointerUp<T>(this T el, Action<PointerUpEvent> handler) where T : Element { el.On(handler); return el; }
+    /// <summary>The press ended without a release (the system took the touch, or a gesture
+    /// claimed it): undo what the press started. No PointerUp or Click follows.</summary>
+    public static T OnPointerCancel<T>(this T el, Action<PointerCancelEvent> handler) where T : Element { el.On(handler); return el; }
+
+    /// <summary>A finger held still on this element, or inside it, for the long-press time. No
+    /// click follows, and the window opens no context menu and shows no tooltip for it: the
+    /// handler is the long press's meaning (docs/design/GESTURES.md §4).</summary>
+    public static T OnLongPress<T>(this T el, Action<LongPressEvent> handler) where T : Element { el.On(handler); return el; }
+
+    /// <summary>
+    /// Lets a finger that lands on this element, or inside it, drag it along <paramref name="axis"/>:
+    /// once the finger moves past the touch slop mostly along that axis, and no element inside this
+    /// one took it first, the press is cancelled and the finger's moves come here as
+    /// <paramref name="update"/>s until it lifts (<paramref name="end"/>, with the velocity). For
+    /// swipe-to-dismiss, a carousel, pull-to-refresh. The mouse is unaffected.
+    /// </summary>
+    public static T OnPan<T>(this T el, PanAxis axis,
+        Action<PanStartEvent>? start, Action<PanUpdateEvent> update, Action<PanEndEvent>? end) where T : Element
+    {
+        el.On<PanAxisQuery>(q => q.Axis ??= axis);
+        if (start is not null) el.On(start);
+        el.On(update);
+        if (end is not null) el.On(end);
+        return el;
+    }
     public static T OnPointerEnter<T>(this T el, Action<PointerEnterEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnPointerLeave<T>(this T el, Action<PointerLeaveEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnScroll<T>(this T el, Action<ScrollEvent> handler) where T : Element { el.On(handler); return el; }

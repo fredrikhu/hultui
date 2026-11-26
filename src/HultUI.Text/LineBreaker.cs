@@ -19,12 +19,28 @@ internal static class LineBreaker
     // finalizer closes it once its thread is gone.
     [ThreadStatic] private static Iterator? t_iterator;
 
+    // Set once ICU turned out to be missing: every later call takes the fallback at once.
+    private static volatile bool s_icuMissing;
+
     public static unsafe List<int> FindBreakOpportunities(string text)
     {
         var breaks = new List<int>();
         if (string.IsNullOrEmpty(text)) return breaks;
+        if (s_icuMissing) return FallbackBreaks(text, breaks);
 
-        var iterator = t_iterator ??= Iterator.Open();
+        Iterator? iterator;
+        try
+        {
+            iterator = t_iterator ??= Iterator.Open();
+        }
+        catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException)
+        {
+            // No ICU (or one without the break iterator): wrap on spaces rather than fail every
+            // layout, as BidiAnalyzer degrades rather than fails.
+            s_icuMissing = true;
+            Console.Error.WriteLine($"[HultUI] ICU's line breaker is unavailable ({e.Message}); lines break at spaces only.");
+            return FallbackBreaks(text, breaks);
+        }
         if (iterator is null) return breaks;
 
         fixed (char* pText = text)
@@ -68,6 +84,40 @@ internal static class LineBreaker
         }
 
         ~Iterator() => _close!(Handle);
+    }
+
+    /// <summary>
+    /// UAX #14 in miniature, for the path where ICU is unavailable: a line may start after a run
+    /// of spaces or tabs, after a hyphen between letters, and before and after each CJK ideograph
+    /// or kana (which break anywhere); the text's end is the last opportunity, as ICU reports it.
+    /// A degraded path: its answer only has to be better than never wrapping.
+    /// </summary>
+    internal static List<int> FallbackBreaks(string text, List<int> breaks)
+    {
+        for (int i = 1; i < text.Length; i++)
+        {
+            char before = text[i - 1], at = text[i];
+            bool afterSpace = before is ' ' or '\t' && at is not (' ' or '\t');
+            bool afterHyphen = before == '-' && char.IsLetter(at) && i >= 2 && char.IsLetter(text[i - 2]);
+            bool ideographic = IsIdeographic(at) || IsIdeographic(before);
+            if ((afterSpace || afterHyphen || ideographic) && !char.IsLowSurrogate(at))
+                breaks.Add(i);
+        }
+        breaks.Add(text.Length);
+        return breaks;
+    }
+
+    private static bool IsIdeographic(char c) =>
+        c is >= '぀' and <= 'ヿ'      // hiragana, katakana
+            or >= '㐀' and <= '䶿'    // CJK extension A
+            or >= '一' and <= '鿿'    // CJK unified ideographs
+            or >= '豈' and <= '﫿';   // CJK compatibility ideographs
+
+    /// <summary>Takes the fallback from now on, as if ICU were missing; for the tests.</summary>
+    internal static bool IcuMissingForTests
+    {
+        get => s_icuMissing;
+        set => s_icuMissing = value;
     }
 
     private unsafe delegate IntPtr ubrk_open_delegate(int type, string locale, char* text, int textLen, ref int status);
