@@ -3,8 +3,8 @@
   <!--
     HultUI on Android: the activity an app's own activity derives from (HultUIActivity), and
     the platform services HultUI's net11.0 assemblies cannot reach themselves, registered
-    through internal hooks: the Keystore secret store behind CredentialStore.Default and the
-    system's back. docs/design/ANDROID-PLATFORM.md.
+    through internal hooks: the Keystore secret store behind CredentialStore.Default, the
+    system's back, and the TalkBack bridge. docs/design/ANDROID-PLATFORM.md, TALKBACK.md.
 
     Not in HultUI.slnx: building it needs the .NET Android workload, which the desktop CI
     images do not have. Built with the spike (spikes/AndroidHello) until an Android CI job exists.
@@ -21,6 +21,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\HultUI\HultUI.csproj" />
+    <!-- The TalkBack bridge (docs/design/TALKBACK.md), built with its Android layer: HultUIAndroid
+         adds its net11.0-android target, which the desktop builds leave out. -->
+    <ProjectReference Include="..\HultUI.Platform.Accessibility.Android\HultUI.Platform.Accessibility.Android.csproj"
+                      AdditionalProperties="HultUIAndroid=true" />
   </ItemGroup>
 
 </Project>

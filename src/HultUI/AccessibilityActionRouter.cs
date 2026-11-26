@@ -19,7 +19,7 @@ namespace HultUI;
 /// through <see cref="IAccessibilityActionHost"/> without duplicating the
 /// element-lookup, dispatch, and marshalling code.
 /// </remarks>
-internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAccessibilityGeometryHost
+internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAccessibilityGeometryHost, IAccessibilityEditActions
 {
     private readonly Window _window;
     private readonly ConcurrentQueue<Action> _pendingActions = new();
@@ -241,6 +241,13 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
             case TextAreaElement area: area.SetValueFromAssistiveTool(value); break;
             case RichTextEditorElement editor: editor.SetValueFromAssistiveTool(value); break;
         }
+    });
+
+    /// <summary>A reader's scroll (Android's scroll actions): what the element scrolls moves as a
+    /// finger would move it, clamped to its content.</summary>
+    public void ScrollBy(ElementId id, float dx, float dy) => Enqueue(() =>
+    {
+        if (FindElement(id) is IPanScrollable scrollable) scrollable.PanBy(dx, dy);
     });
 
     public void FocusElement(ElementId id) => RequestFocus(id);

@@ -558,7 +558,14 @@ phone, and Aperture's login and search by touch.
 
 **Status (2026-11-26): note approved, all four recommendations taken**
 (`docs/design/TALKBACK.md`): its own package, live regions, a desktop-tested mapper under a thin
-Android layer, the Fluent sample first. No public API. Not started.
+Android layer, the Fluent sample first. No public API.
+
+**Built (2026-11-26), checked with TalkBack on the emulator; not yet on the phone, not yet in
+Aperture.** The bridge (`HultUI.Platform.Accessibility.Android`), 46 desktop tests, and the Android
+layer on SDL's surface. On the emulator (`spikes/AndroidHello/scripts/talkback-check.ps1`) TalkBack
+reads the spike and the Fluent sample by explore-by-touch and by swipe, a double tap clicks, swiping
+past a list's last row scrolls it, a two-finger drag scrolls, and an announcement is spoken from a
+live region. What is left is in TALKBACK.md §8.
 
 **Exit criteria**
 

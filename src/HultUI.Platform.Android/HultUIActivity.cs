@@ -194,6 +194,14 @@ public abstract class HultUIActivity : SDLActivity
         // inside an activity, Application is Android's (Activity.Application).
         global::HultUI.Application.SystemBack = () => RunOnUiThread(() => MoveTaskToBack(true));
         global::HultUI.Application.SystemBarsFollow = FollowTheme;
+        // TalkBack (docs/design/TALKBACK.md): each window's tree as virtual views on SDL's surface,
+        // its actions through the window's router onto the UI thread.
+        global::HultUI.AccessibilityBridgeFactory.Platform = window =>
+        {
+            var router = new global::HultUI.AccessibilityActionRouter(window);
+            window.SetActionRouter(router);
+            return global::HultUI.Platform.Accessibility.Android.AndroidAccessibility.Attach(this, router);
+        };
     }
 
     private static void DisableFocusHighlight(View view)

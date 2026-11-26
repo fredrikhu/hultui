@@ -1,7 +1,8 @@
 # TalkBack bridge — design note
 
-**Status (2026-11-26): approved by the user, all four recommendations in §6 taken; nothing
-built yet.** It adds no public API. Plan 20, phase 6 ([plan](../plans/20-mobile-support.md) §2.9). Required
+**Status (2026-11-26): approved by the user, all four recommendations in §6 taken. Built the same
+day, and checked with TalkBack on the emulator; §8 says what is built, what the emulator showed, and
+what is left.** It adds no public API. Plan 20, phase 6 ([plan](../plans/20-mobile-support.md) §2.9). Required
 before any Android release beyond the user's own devices: the desktop apps hold that bar
 (`docs/ACCESSIBILITY-PLAN.md`).
 
@@ -104,3 +105,71 @@ L, about four to six weeks:
 - the mapper and its tests: about two weeks
 - the Android layer, explore by touch, actions and events: about two weeks
 - the Fluent sample and Aperture on a device with TalkBack, and fixes: the rest
+
+## 8. Built (2026-11-26)
+
+**The package.** `HultUI.Platform.Accessibility.Android` always targets net11.0: the bridge
+(`AndroidAccessibilityBridge`) and the mapper (`AndroidNodeMapper`), in HultUI.slnx and tested by
+`tests/HultUI.Platform.Accessibility.Android.Tests` (46 tests, each rule also checked by a negative
+control). With `HultUIAndroid=true` it targets net11.0-android too and adds the Android layer
+(`Android/`): the node provider, explore by touch and the events. `HultUI.Platform.Android`'s reference
+asks for that target, but a restore does not see a reference's properties, so an Android build passes
+`-p:HultUIAndroid=true` itself (docs/ANDROID.md).
+
+**How it plugs in, all internal.** `AccessibilityBridgeFactory.Platform`, which `HultUIActivity` sets:
+each window gets a router and a bridge on SDL's surface. `IAccessibilityEditActions` in Core carries
+what `IAccessibilityActionHost` does not (a field's value, a reader's scroll); the router implements it.
+The differ now hands a value change its previous node, which TalkBack's text-changed event needs.
+
+**Built as §2 and §3 say, with these differences:**
+- **The window's root is the host's one child**, not the host itself: a root scroll view keeps its
+  scroll actions.
+- **What is left out**, as Android leaves out what is not important for accessibility: a scrollbar
+  standing on its own, an image with no name, and what is inside a control that has a name, unless it
+  is a control itself (ARIA's presentational children). A hidden node's shown descendants take its
+  place.
+- **Focusable only for controls**, and never the host: TalkBack makes a focusable node one stop and
+  reads every label inside it as part of it.
+- **Expanded state** is said by TalkBack from the expand or collapse action before Android 16
+  (`setExpandedState` from 16).
+- **The announcer** is a node of its own (id 0) that is in no node's children, with the last
+  announcement as its text, a live region, over the announcing node.
+- **The provider's map from element to node** is made on Android's main thread the first time it asks
+  after a tree came, never on the UI thread, whose share is the diff's events.
+
+**On the emulator** (`spikes/AndroidHello/scripts/talkback-check.ps1`), with TalkBack 15:
+- §2's check holds: the surface's hover listener gets explore-by-touch before SDL.
+- A finger on a control says it ("Tap me. Button", "alpha bravo charlie. Edit box", "collapsed. First
+  choice. Drop down list"). Swipes go in reading order. A double tap clicks through the router.
+  Swiping past a list's last visible row makes TalkBack call ShowOnScreen and then ScrollForward. A
+  two-finger drag reaches HultUI as a pan, with its fling. A double tap on a field gives it the focus
+  and the keyboard. An announcement is spoken ("Counted 1").
+- The Fluent sample reads cleanly once the three fixes below were in: "collapsed. File. Menu item. In
+  Menu bar", "Minimize. Button", "Edit box. Find a setting", "selected. Home".
+- **Found and fixed:** SDL's surface is focusable, so TalkBack read the whole window as one item from
+  a finger on a heading; named buttons were read with their icon and label after the name ("Home.
+  Unlabelled. Image. Home"); the expanded state was said twice ("collapsed. Collapsed.").
+- **Testing traps.** `adb shell input` injects past TalkBack's touch explorer (a tap is a plain click),
+  and the emulator console's `event send` drops the positions. Touches written to the touchscreen
+  device work (adb root, a google_apis image), with a pressure set (the device has no BTN_TOUCH, and
+  pressure 0 is a hover), each press as one write: a `sendevent` per event is too slow for a double
+  tap. Such a write leaves Gboard in its hardware-keyboard mode until a reboot, so the keyboard check
+  runs first. TalkBack's verbose log, set in its preferences while it is stopped, puts what it says
+  in logcat. On the emulator the touch, keyboard and TalkBack checks all pass with the bridge in.
+
+**Left:**
+- **Text by character, word and line.** TalkBack moves through a field with the granularity actions
+  and `ACTION_SET_SELECTION`, which need a way to set a field's selection from a reader (an internal
+  method on TextInput, TextArea and the rich text editor).
+- **Lists over 2,000 items** (served on demand) show their count and scroll, but no items: the items on
+  screen should become virtual views.
+- **Long press** (`ACTION_LONG_CLICK` to the context menu), `ACTION_DISMISS` for dialogs and menus.
+- **A list that takes an element's focus** (`AccessibilityNode.FocusHolder`): the input focus is told
+  on the element, not on its current item.
+- **The phone**, by hand: no root there, so the script cannot drive it. And **Aperture's main views**,
+  the plan's exit criterion.
+- **Framework-wide, not this bridge's:** a text field that has only a placeholder has no accessible
+  name on any platform, so TalkBack says "Edit box" alone. Using the placeholder as the name when
+  there is no other (as browsers do) changes the UIA and AT-SPI trees too.
+- English role words ("Link", "Tab", "Menu item") until HultUI's spoken words are localized; TalkBack's
+  own words (button, check box, collapsed) follow the phone's language already.

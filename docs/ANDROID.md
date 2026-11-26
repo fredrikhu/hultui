@@ -158,6 +158,11 @@ dotnet build MyApp.Android.csproj -c Release -p:AndroidSdkDirectory=<sdk> -p:Jav
 adb install -r bin/Release/net11.0-android/<application id>-Signed.apk
 ```
 
+An app built against HultUI's source (project references, as the spike is) also passes
+`-p:HultUIAndroid=true`: it adds the TalkBack bridge's Android target
+(`HultUI.Platform.Accessibility.Android`), which the desktop builds leave out because they have no
+Android workload. A build without it fails in the restore with NETSDK1005.
+
 A Debug build installed with `adb install` needs `-p:EmbedAssembliesIntoApk=true`. Debug builds
 otherwise expect fast deployment (`dotnet build -t:Install`), and the app aborts at start with
 "Failed to load System.Private.CoreLib.dll".
@@ -169,7 +174,10 @@ HultUI's own messages go to logcat under `DOTNET` (what a desktop app writes to 
 
 These are plan 20's later phases:
 - **No pinch** yet, and no magnifier over the text a handle moves.
-- **No TalkBack** until its bridge (phase 6).
+- **TalkBack is partial** (phase 6, docs/design/TALKBACK.md §8): it reads, explores, swipes,
+  clicks, scrolls and hears announcements, but text fields cannot yet be moved through by
+  character or word, a list over 2,000 items shows none of them, and nothing is checked on a
+  phone yet.
 - **File dialogs** return Android's `content://` addresses, which `File.Open` cannot open.
 - **No second window.**
 - **Video** needs a libmpv build for Android (phase 5).

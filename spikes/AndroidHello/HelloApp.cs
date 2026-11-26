@@ -113,6 +113,8 @@ internal static class HelloApp
             count++;
             label.Content = $"Tapped {count} time{(count == 1 ? "" : "s")}";
             Info($"click {count}");
+            // Plan 20 phase 6: an announcement, which TalkBack speaks from a live region.
+            button.Announce($"Counted {count}");
         });
         // Phase 3's check (scripts/touch-check.ps1): a long press, and where a press lands.
         button.OnLongPress(e => Info($"long press ({e.PointerType})"));

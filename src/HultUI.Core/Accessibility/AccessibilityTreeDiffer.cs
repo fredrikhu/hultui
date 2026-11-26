@@ -164,8 +164,10 @@ public static class AccessibilityTreeDiffer
         // field; ax_object.cc), and on Linux accessible-value only for a range value
         // (ax_platform_node_auralinux.cc, OnValueChanged). A reader still reads the value on
         // request. A text input with no text pattern keeps its value change, as an <input> does.
+        // With the previous node: TalkBack's text-changed event says what went and came, and a text
+        // field with no text pattern (TextInput) tells its edits as its value.
         if (rare && !(prev.OffersText && curr.OffersText) && prev.Value != curr.Value)
-            changes.Add(new PropertyChange(curr, AccessibilityProperties.Value));
+            changes.Add(new PropertyChange(curr, AccessibilityProperties.Value, prev));
         // A slider, a progress bar or a number field moved, or its bounds or steps changed: the
         // bridge tells which (UIA RangeValue.Value, Minimum, Maximum; AT-SPI accessible-value).
         if (rare && prev.Range != curr.Range)

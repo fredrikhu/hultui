@@ -79,10 +79,12 @@ and usable"). It runs headless:
 
 Build and install. **A Debug build must embed its assemblies to be installed with
 `adb install`**; without it the app aborts with "Failed to load System.Private.CoreLib.dll",
-because Debug builds expect fast deployment through `dotnet build -t:Install`:
+because Debug builds expect fast deployment through `dotnet build -t:Install`. And
+`-p:HultUIAndroid=true` builds the TalkBack bridge's Android part (docs/design/TALKBACK.md); without it
+the restore leaves that target out and the build fails with NETSDK1005:
 
 ```powershell
-dotnet build spikes/AndroidHello -c Debug -p:EmbedAssembliesIntoApk=true -p:AndroidSdkDirectory=$env:LOCALAPPDATA\Android\Sdk -p:JavaSdkDirectory=$env:LOCALAPPDATA\Android\jdk
+dotnet build spikes/AndroidHello -c Debug -p:HultUIAndroid=true -p:EmbedAssembliesIntoApk=true -p:AndroidSdkDirectory=$env:LOCALAPPDATA\Android\Sdk -p:JavaSdkDirectory=$env:LOCALAPPDATA\Android\jdk
 adb install -r spikes/AndroidHello/bin/Debug/net11.0-android/org.hultui.spike.androidhello-Signed.apk
 adb shell am start -W -n org.hultui.spike.androidhello/crc64ea9bba10985cac6f.MainActivity
 adb logcat -s HultUISpike:* DOTNET:* SDL:*
