@@ -19,6 +19,11 @@ public class MainActivity : HultUIActivity
 #if DEBUG
         // `adb shell am start -n org.hultui.aperture/... -e demo 1`: a made-up library, no server.
         ApertureAndroid.Demo = Intent?.GetStringExtra("demo") == "1";
+        // `-e env "K=V;K=V"`: environment variables for the run, as the spike takes them, for the
+        // diagnostics HultUI reads there (HULTUI_MPV_LOG, HULTUI_FRAMELOG). CoreCLR on Android reads
+        // no debug.mono.env. Quote the value for the device's shell, or its `;` ends the command.
+        foreach (var pair in (Intent?.GetStringExtra("env") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))
+            if (pair.Split('=', 2) is [var key, var value]) Environment.SetEnvironmentVariable(key, value);
 #endif
         base.OnCreate(savedInstanceState);
     }
