@@ -17,8 +17,8 @@ namespace HultUI.Media.Mpv;
 /// <see cref="HttpClient"/> uses the platform's TLS and its trusted certificates.</para>
 ///
 /// <para>What it does not reach: a stream FFmpeg fetches more of by itself, such as the segments of
-/// an HLS transcode, still needs TLS in FFmpeg. A direct stream, Aperture's usual source, is one
-/// request.</para>
+/// an HLS transcode. Those go through <see cref="MpvLoopbackProxy"/>. A direct stream, Aperture's
+/// usual source, is one request.</para>
 ///
 /// <para>Every call but <see cref="Cancel"/> comes from mpv's stream thread, one at a time;
 /// <see cref="Cancel"/> comes from another, to end a read that waits on the network.</para>
@@ -28,8 +28,12 @@ internal sealed unsafe class MpvHttpStream : IDisposable
     /// <summary>The protocol registered with mpv for https:// sources.</summary>
     internal const string Protocol = "hultui-https";
 
-    // Shared, as HttpClient is meant to be: one connection pool for every stream of the process.
+    // Shared, as HttpClient is meant to be: one connection pool for every stream of the process,
+    // and for MpvLoopbackProxy's requests.
     private static readonly Lazy<HttpClient> s_client = new(() => new HttpClient { Timeout = Timeout.InfiniteTimeSpan });
+
+    /// <summary>The process's client for sources this libmpv's FFmpeg cannot open itself.</summary>
+    internal static HttpClient SharedClient => s_client.Value;
 
     /// <summary>A read that fails (a dropped connection, a reset) is tried again from where it
     /// stopped this many times before mpv is told the stream ended in an error.</summary>
@@ -63,8 +67,8 @@ internal sealed unsafe class MpvHttpStream : IDisposable
 
     /// <summary>
     /// Whether <paramref name="url"/> is read through this stream: an https:// source that is not
-    /// an HLS playlist. A playlist is left to FFmpeg, which cannot fetch its segments without TLS,
-    /// so it fails to open and the app can offer the original file instead. Given to this stream,
+    /// an HLS playlist. A playlist goes through <see cref="MpvLoopbackProxy"/>, where FFmpeg fetches
+    /// it and its segments itself, in plain http to this process. Given to this stream,
     /// mpv's own playlist parser took over when FFmpeg's could not, and played each few-second
     /// segment as a file of its own: no length, no seeking (Aperture over https on Android).
     /// </summary>

@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
 using HultUI.Core.DevTools;
@@ -231,9 +232,17 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
         // An https:// source this libmpv's FFmpeg cannot open goes through HttpClient. mpv caches
         // only what it knows to be a network stream, which a callback stream is not, so the cache
         // is asked for; queued before the load, it applies to this file.
-        // An HLS playlist is not: see MpvHttpStream.Carries.
+        // An HLS playlist is not: FFmpeg fetches it and its segments from MpvLoopbackProxy, in plain
+        // http, and the proxy asks the server over https.
         bool throughClient = _httpsThroughClient && MpvHttpStream.Carries(target);
         if (throughClient) target = MpvHttpStream.Wrap(target);
+        else if (_httpsThroughClient && MpvLoopbackProxy.Carries(target))
+        {
+            try { target = MpvLoopbackProxy.Shared.Wrap(target); }
+            // No loopback listener: FFmpeg is given the playlist, fails to open it, and the app
+            // hears so as from any source that will not open.
+            catch (Exception e) when (e is SocketException or InvalidOperationException) { }
+        }
         if (throughClient != _cacheForced)
         {
             _cacheForced = throughClient;

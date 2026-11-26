@@ -609,6 +609,13 @@ Fixed on the way, each found on the phone:
     delay took its first step at once, but its later steps waited for the other's deadline. For
     the swipe, that was the toast's cancelled hold. Meanwhile the loop spun on 1 ms waits. A
     drawn step now makes the next one due with the next frame (`Application.RunUntil`).
+- An https HLS transcode (Aperture with a streaming limit) could not play, because FFmpeg has no
+  TLS and the user declined the LGPLv3 that OpenSSL or mbedTLS would bring. Aperture played the
+  original file instead. FFmpeg now fetches the playlist and its segments from a loopback proxy
+  in plain http (`MpvLoopbackProxy`), and the proxy asks the server over https through
+  `HttpClient`. That was chosen over a progressive transcode through `MpvHttpStream`, which cannot
+  seek by range: each seek would restart the transcode, and the player would need the time offset.
+  On the S25, a 4K film at a 4 Mbps limit transcodes and plays.
 
 Left:
 - **SDL with 8dc8694**, when a ppy.SDL3-CS carries it; then the Android workaround goes.
@@ -618,9 +625,6 @@ Left:
 - **TalkBack's explore check** on the emulator: TalkBack now adds the window's name to the first
   button it reads, "Tap me. Button. Window HultUI spike". It does so with or without 96e88cb0;
   the check, or TalkBack's settings, wants a look.
-- **An https HLS transcode** cannot play (no TLS in FFmpeg; the user declined LGPLv3, which
-  OpenSSL or mbedTLS would bring). Aperture plays the original file instead and says so
-  (7641a456); a progressive transcode through `MpvHttpStream` would be the way to transcode.
 - **A tablet layout.** At 600 DIP and over, Aperture keeps its desktop layout.
 - **Android TV.**
 - **Distribution.** It needs a signing key the user makes.

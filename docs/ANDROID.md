@@ -197,9 +197,13 @@ What differs from the desktop:
   the picture after a seek made while paused; AudioTrack underran with mpv's 0.2 s buffer.
 - **https.** The Android libmpv's FFmpeg has no TLS. An https:// source is read through
   `HttpClient` instead (the platform's TLS and trusted certificates), by range requests mpv can
-  seek with. An HLS playlist is not: FFmpeg fetches its segments itself, which needs TLS in
-  FFmpeg (and would make the libmpv build LGPLv3), so an https HLS transcode fails to open.
-  Aperture then plays the original file and says so.
+  seek with. An HLS playlist (a Jellyfin transcode) cannot go that way, because FFmpeg fetches its
+  segments itself. FFmpeg fetches it from a proxy on the loopback address instead, in plain http,
+  and the proxy asks the server over https through `HttpClient` (`MpvLoopbackProxy`). Seeking and
+  the duration work as on the desktop, and FFmpeg needs no TLS, which would make the libmpv build
+  LGPLv3. The proxy forwards only requests that carry the process's random secret, and only to a
+  server the app gave it. If a transcode still fails to open, Aperture plays the original file and
+  says so.
 - **Subtitles.** ASS fonts a file embeds are used as on the desktop. Otherwise libass gets the
   system's Roboto, so subtitles without embedded fonts in scripts Roboto lacks (CJK) draw nothing.
 - **Still pictures on GL ES.** A paused picture is copied out of mpv's cache, and some GL ES drivers
