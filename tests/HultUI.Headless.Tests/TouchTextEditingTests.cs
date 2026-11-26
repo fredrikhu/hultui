@@ -22,7 +22,9 @@ public sealed class TouchTextEditingTests
         var session = HeadlessSession.Create(width: 400, height: 300);
         var field = TextInput.New(Words).Width(320);
         var other = Button.New("Elsewhere");
-        session.Window.SetRoot(Flex.Column(gap: 40).Padding(20).Children(field, other));
+        // The button well below the field: the edit bar opens under a field this near the top,
+        // and a tap on the button must not land on it.
+        session.Window.SetRoot(Flex.Column(gap: 120).Padding(20).Children(field, other));
         session.PumpFrame();
         return (session, field, other);
     }
@@ -365,6 +367,12 @@ public sealed class TouchTextEditingTests
         using var _s = session;
         SelectBravo(session, field);
 
+        // The tap has to miss the bar, which opens below a field this near the top. With the
+        // button just under it, a font a little wider (Linux's) put the bar's Select all where the
+        // tap went, and the handles came back for the whole text.
+        var bar = W(session).TouchEditBar!.WindowBorderBox;
+        var tap = Centre(other.WindowBorderBox);
+        Assert.False(bar.Contains(tap), $"the tap at {tap} is on the bar {bar}");
         session.Window.Tap(other);
         session.PumpFrame();
 
