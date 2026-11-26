@@ -82,6 +82,42 @@ public partial class ApertureAppHostTests
         finally { Halide.UseDesktopSizes(); }
     }
 
+    /// <summary>Settings at a Galaxy S25's 360 DIP: Sign out and the request server's Connect ran
+    /// off the right edge, a path's long file name ran past the card, and the quality chip read
+    /// "10 Mb…". Everything stays on the screen, the chip whole. Also at 320, a small phone: the
+    /// test's fonts are narrower than a phone's Roboto, so at 360 two of the three faults fit.</summary>
+    [Theory]
+    [InlineData(360)]
+    [InlineData(320)]
+    public void AtAPhonesSize_Settings_StaysOnTheScreen(int width)
+    {
+        Halide.UsePhoneSizes();
+        try
+        {
+            Host(Library(), (session, app) =>
+            {
+                PumpUntilShown(session, "Films");
+                app.SetMaxStreamingKbps(10_000);
+                session.Window.FindByAutomationId("rail-settings")!.Click();
+                for (int i = 0; i < 6; i++) session.PumpFrame();
+
+                foreach (var id in new[] { "settings-refresh", "settings-signout", "settings-requests-connect", "settings-quality" })
+                {
+                    var box = session.Window.FindByAutomationId(id)?.Node.BoundingRect
+                        ?? throw new Xunit.Sdk.XunitException($"no {id}: {session.Window.DumpAccessibilityTree()}");
+                    Assert.True(box.Right <= width, $"{id} spans {box.X}..{box.Right} on a screen {width} wide");
+                }
+                // The longest value on the page: the season baseline's file, one unbroken name.
+                var path = Walk(session.Window.AccessibilityTree).First(n => n.Name?.Contains("watch-", StringComparison.Ordinal) == true);
+                Assert.True(path.BoundingRect.Right <= width, $"the path spans {path.BoundingRect.X}..{path.BoundingRect.Right}");
+                // The chip is as wide as "10 Mbps" needs, not what a 130-wide label left it.
+                var chip = session.Window.FindByAutomationId("settings-quality")!.Node.BoundingRect;
+                Assert.True(chip.Width >= 60, $"the quality chip is {chip.Width} wide");
+            }, width: width, height: 780);
+        }
+        finally { Halide.UseDesktopSizes(); }
+    }
+
     [Fact]
     public void AtAPhonesSize_TheLibrarysChips_AreAStripOfTheirOwn()
     {

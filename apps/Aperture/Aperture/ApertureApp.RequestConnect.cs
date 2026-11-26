@@ -193,7 +193,10 @@ public sealed partial class ApertureApp
         if (busy) card.AddChild(BusyLine(_requestResume.IsLoading ? "Reconnecting…" : "Connecting…"));
         if (_requestConnectFailure is { } failure) card.AddChild(RequestFailureNote(failure));
 
+        // Wraps: on a phone "Use an API key instead" and Connect do not fit on one line.
         var row = Flex.Row(gap: Halide.S2).AlignItems(AlignItems.Center);
+        row.Flex.Wrap = FlexWrap.Wrap;
+        row.Gap(Halide.S2);
         // A stored session that did not resume (the server was off at launch) can simply
         // be tried again — no password needed for that.
         if (stored is not null && _library is { } paired && _settings.RequestSecretFor(paired.Server.Id) is not null)

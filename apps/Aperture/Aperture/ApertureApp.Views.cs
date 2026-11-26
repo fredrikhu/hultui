@@ -230,7 +230,8 @@ public sealed partial class ApertureApp
     private Element BuildSettingsView()
     {
         var scroll = ScrollView.Vertical().FlexGrow(1);
-        var page = Flex.Column(gap: Halide.S5).Padding(new Thickness(Halide.S5)).MaxWidth(Dimension.Px(720));
+        var page = Flex.Column(gap: Halide.S5).Padding(new Thickness(Halide.Phone ? Halide.S4 : Halide.S5))
+            .MaxWidth(Dimension.Px(720));
 
         page.AddChild(Text.New("Settings").FontSize(20f).FontWeight(FontWeight.SemiBold).TextColor(Halide.Text));
 
@@ -244,7 +245,10 @@ public sealed partial class ApertureApp
             server.AddChild(Row("This device", _settings.Device.DeviceName));
             page.AddChild(server);
 
+            // Wraps: on a phone the two buttons do not fit side by side.
             var session = Flex.Row(gap: Halide.S2).AlignItems(AlignItems.Center);
+            session.Flex.Wrap = FlexWrap.Wrap;
+            session.Gap(Halide.S2);
             session.AddChild(Ui.Button(ButtonVariant.Secondary, "Refresh everything", Refresh,
                 "settings-refresh", Icons.Refresh));
             session.AddChild(Ui.Button(ButtonVariant.Danger, "Sign out", () => SignOut(keepAccount: false),
@@ -257,9 +261,7 @@ public sealed partial class ApertureApp
 
         var storage = Card("Where things are kept");
         storage.AddChild(Row("Settings", ApertureSettings.DefaultPath));
-        storage.AddChild(Row("Access token", OperatingSystem.IsWindows()
-            ? "Windows Credential Manager"
-            : "not stored on this platform — you sign in each launch"));
+        storage.AddChild(Row("Access token", TokenStore()));
         storage.AddChild(Row("Artwork", $"in memory, {_posters.PendingCount} loading"));
         if (_library is { } signedIn)
             storage.AddChild(Row("Seasons seen", new SeasonBaselineStore(_settings.Folder, signedIn.Server.Id,
@@ -295,10 +297,13 @@ public sealed partial class ApertureApp
     /// something to read.</summary>
     private static Element SettingRow(string label, Element control)
     {
-        var row = Flex.Row(gap: Halide.S4).AlignItems(AlignItems.Center);
-        row.AddChild(Text.New(label).FontSize(12f).TextColor(Halide.TextMuted).Width(Dimension.Px(130)));
-        row.AddChild(control);
-        return row;
+        if (!Halide.Phone) return LabelledRow(label, control);
+        // On a phone the control keeps its own width under the label: stretched, a chip would
+        // span the card.
+        var column = Flex.Column(gap: 4).AlignItems(AlignItems.FlexStart);
+        column.AddChild(Text.New(label).FontSize(12f).TextColor(Halide.TextMuted));
+        column.AddChild(control);
+        return column;
     }
 
     /// <summary>The streaming ceilings worth offering, coarsest first. Kilobits, because
@@ -351,11 +356,33 @@ public sealed partial class ApertureApp
         return items;
     }
 
-    private static Element Row(string label, string value)
+    private static Element Row(string label, string value) =>
+        // A minimum width of 0: a value with a long unbroken word (a path's file name) shrinks
+        // with the row and is cut by character, instead of holding the row at that word's width
+        // and running past the card's edge.
+        LabelledRow(label, Ui.Mono(value, 12f, Halide.TextDim).FlexShrink(1).MinWidth(Dimension.Px(0)));
+
+    /// <summary>A label and what it labels: side by side, the label 130 wide; on a phone the label
+    /// over it, since 130 beside it leaves the value about 80 DIP.</summary>
+    private static Element LabelledRow(string label, Element content)
     {
+        var name = Text.New(label).FontSize(12f).TextColor(Halide.TextMuted);
+        if (Halide.Phone)
+        {
+            var column = Flex.Column(gap: 2).AlignItems(AlignItems.FlexStart);
+            column.AddChild(name);
+            column.AddChild(content.AlignSelf(AlignSelf.Stretch));
+            return column;
+        }
         var row = Flex.Row(gap: Halide.S4).AlignItems(AlignItems.Center);
-        row.AddChild(Text.New(label).FontSize(12f).TextColor(Halide.TextMuted).Width(Dimension.Px(130)));
-        row.AddChild(Ui.Mono(value, 12f, Halide.TextDim).FlexShrink(1));
+        row.AddChild(name.Width(Dimension.Px(130)));
+        row.AddChild(content);
         return row;
     }
+
+    /// <summary>Where this platform keeps the access token: what CredentialStore.Default is.</summary>
+    private static string TokenStore() =>
+        OperatingSystem.IsWindows() ? "Windows Credential Manager"
+        : OperatingSystem.IsAndroid() ? "the Android Keystore"
+        : "not stored on this platform — you sign in each launch";
 }
