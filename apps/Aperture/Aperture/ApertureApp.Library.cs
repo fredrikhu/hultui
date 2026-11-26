@@ -247,26 +247,43 @@ public sealed partial class ApertureApp
 
         bar.AddChild(Box.New().FlexGrow(1));
 
+        // On a phone the chips are a strip of their own under the title, swiped sideways: in the
+        // bar beside it they ran off the screen, and the count was squeezed to two lines.
+        var chips = Halide.Phone ? Flex.Row(gap: Halide.S3).AlignItems(AlignItems.Center).FlexShrink(0) : bar;
+
         if (GridHasFilters)
-            bar.AddChild(Ui.IconButton(Icons.WinClose, "Clear filters", ClearGridFilters, 12f,
+            chips.AddChild(Ui.IconButton(Icons.WinClose, "Clear filters", ClearGridFilters, 12f,
                 Halide.TextMuted, "filter-clear"));
 
-        bar.AddChild(GenreChip());
-        bar.AddChild(FilterChip("Unwatched", GridPlayedFilter == false,
+        chips.AddChild(GenreChip());
+        chips.AddChild(FilterChip("Unwatched", GridPlayedFilter == false,
             () => SetGridPlayedFilter(GridPlayedFilter == false ? null : false), "filter-unwatched"));
-        bar.AddChild(FilterChip("Favourites", GridFavouritesOnly,
+        chips.AddChild(FilterChip("Favourites", GridFavouritesOnly,
             () => SetGridFavouritesOnly(!GridFavouritesOnly), "filter-favourites"));
 
-        bar.AddChild(Box.New().Width(Halide.S2));
-        bar.AddChild(SortChip("A–Z", ItemSort.Name, false, "sort-name"));
-        bar.AddChild(SortChip("Newest", ItemSort.DateAdded, true, "sort-added"));
-        bar.AddChild(SortChip("Year", ItemSort.PremiereDate, true, "sort-year"));
-        bar.AddChild(SortChip("Rating", ItemSort.CommunityRating, true, "sort-rating"));
+        chips.AddChild(Box.New().Width(Halide.S2));
+        chips.AddChild(SortChip("A–Z", ItemSort.Name, false, "sort-name"));
+        chips.AddChild(SortChip("Newest", ItemSort.DateAdded, true, "sort-added"));
+        chips.AddChild(SortChip("Year", ItemSort.PremiereDate, true, "sort-year"));
+        chips.AddChild(SortChip("Rating", ItemSort.CommunityRating, true, "sort-rating"));
 
-        bar.AddChild(Box.New().Width(Halide.S2));
-        bar.AddChild(ViewChip());
-        bar.AddChild(Ui.IconButton(Icons.Refresh, "Refresh (F5)", Refresh, 15f, Halide.TextMuted, "library-refresh"));
-        return bar;
+        chips.AddChild(Box.New().Width(Halide.S2));
+        chips.AddChild(ViewChip());
+        var refresh = Ui.IconButton(Icons.Refresh, "Refresh (F5)", Refresh, 15f, Halide.TextMuted, "library-refresh");
+        if (!Halide.Phone)
+        {
+            bar.AddChild(refresh);
+            return bar;
+        }
+
+        bar.AddChild(refresh);
+        bar.Padding(new Thickness(0, Halide.S4, 0, Halide.S4)).BorderWidth(0f);
+        var strip = ScrollView.Horizontal().FlexShrink(0).Height(44)
+            .Padding(new Thickness(0, Halide.S4, 0, Halide.S4))
+            .Children(chips);
+        return Flex.Column(gap: 0).FlexShrink(0)
+            .BorderColor(Halide.Border).BorderWidth(new Thickness(0, 0, 1, 0))
+            .Children(bar, strip);
     }
 
     /// <summary>

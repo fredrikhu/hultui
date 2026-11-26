@@ -20,8 +20,12 @@ namespace Aperture;
 public sealed partial class ApertureApp
 {
     /// <summary>A poster tile: artwork, title, subline. Clicking opens the item.</summary>
-    internal Element PosterCard(MediaItem item, float width = Halide.PosterWidth, int cursorIndex = -1) =>
-        PosterCard(item, width, cursorIndex, ShownPicture(item, ImageKind.Primary, width, MathF.Round(width * 1.5f)));
+    internal Element PosterCard(MediaItem item, float width = 0f, int cursorIndex = -1)
+    {
+        // 0: the poster's width (Halide.PosterWidth, a phone's smaller).
+        if (width <= 0f) width = Halide.PosterWidth;
+        return PosterCard(item, width, cursorIndex, ShownPicture(item, ImageKind.Primary, width, MathF.Round(width * 1.5f)));
+    }
 
     /// <summary>A poster tile drawing <paramref name="picture"/>; see <see cref="ShownPicture"/>.</summary>
     private BoxElement PosterCard(MediaItem item, float width, int cursorIndex, CardArt picture)
@@ -945,7 +949,9 @@ public sealed partial class ApertureApp
         heading.AddChild(Box.New().FlexGrow(1));
         if (pages > 1)
         {
-            heading.AddChild(Ui.Mono($"{page + 1}/{pages}", 11f, Halide.TextFaint));
+            // Not on a phone, where the title wrapped for it ("Latest in / Films"): the arrows say
+            // there is more.
+            if (!Halide.Phone) heading.AddChild(Ui.Mono($"{page + 1}/{pages}", 11f, Halide.TextFaint));
             heading.AddChild(PageButton(Icons.Previous, "Previous", automationId, page - 1, page > 0));
             heading.AddChild(PageButton(Icons.Next, "Next", automationId, page + 1, page < pages - 1));
         }

@@ -98,9 +98,27 @@ public static class Ui
     }
 
     /// <summary>A bare icon button — the title bar's controls, a card's overflow.</summary>
+    /// <summary>
+    /// Whether keys are what the app can be driven by: not on Android (a phone, a TV's remote), where
+    /// a shortcut named in a tooltip or a button's name ("Back (Esc)", the rail's digits) is a key
+    /// nobody can press, and TalkBack read it out as part of the name.
+    /// </summary>
+    public static bool HasKeyboard => !OperatingSystem.IsAndroid();
+
+    /// <summary>A control's words without the key in brackets at their end where there is no keyboard
+    /// (<see cref="HasKeyboard"/>): "Back (Esc)" is "Back" on a phone. By this app's habit, a hint in
+    /// brackets at the end is the key's.</summary>
+    public static string WithoutKeyHint(string label)
+    {
+        if (HasKeyboard || !label.EndsWith(')')) return label;
+        int at = label.LastIndexOf(" (", StringComparison.Ordinal);
+        return at > 0 ? label[..at] : label;
+    }
+
     public static BoxElement IconButton(string glyph, string tooltip, Action onClick, float size = 16f,
         Color? color = null, string? automationId = null)
     {
+        tooltip = WithoutKeyHint(tooltip);
         var b = Flex.Row(gap: 0).Width(32).Height(32)
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
             .CornerRadius(Halide.Radius1)

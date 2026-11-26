@@ -385,7 +385,7 @@ public sealed partial class ApertureApp
     /// </summary>
     private BoxElement NewSeasonCard(MediaItem item, SeasonNotice notice, int cursorIndex, CardArt picture)
     {
-        const float width = Halide.PosterWidth;
+        float width = Halide.PosterWidth;
         float height = MathF.Round(width * 1.5f);
         var line = NewSeasonLine(notice);
         var added = NewSeasonAdded(notice);
