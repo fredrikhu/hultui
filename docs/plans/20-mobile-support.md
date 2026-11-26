@@ -567,6 +567,19 @@ reads the spike and the Fluent sample by explore-by-touch and by swipe, a double
 past a list's last row scrolls it, a two-finger drag scrolls, and an announcement is spoken from a
 live region. What is left is in TALKBACK.md §8.
 
+**The rest, built the same day (TALKBACK.md §9).**
+- Lists over 2,000 items show their items on screen.
+- A pane's list says its cursor.
+- Text is read by character, word, line and paragraph, and a field's caret moves with it.
+- A double tap held opens a context menu, and TalkBack's focus goes into it.
+- Dialogs and menus can be dismissed.
+
+All are checked on the emulator by `talkback-a11y-check.ps1`, 10 of 10, except dismiss, which is
+checked on the desktop only. Left:
+- a TextInput's text for a reader (the user's call, §10 there);
+- the phone, by hand;
+- Aperture on a device, which waits for phase 5.
+
 **Exit criteria**
 
 - TalkBack reads, navigates by swipe and explore-by-touch, and activates every control in the

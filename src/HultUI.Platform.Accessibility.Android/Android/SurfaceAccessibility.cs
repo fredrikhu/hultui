@@ -135,6 +135,8 @@ internal sealed class SurfaceAccessibility : Java.Lang.Object, View.IOnHoverList
         info.Editable = node.Has(AndroidNodeFlags.Editable);
         info.MultiLine = node.Has(AndroidNodeFlags.MultiLine);
         info.Scrollable = node.Has(AndroidNodeFlags.Scrollable);
+        info.LongClickable = node.Can(AndroidActions.LongClick);
+        info.Dismissable = node.Can(AndroidActions.Dismiss);
 
         foreach (var (ours, theirs) in ActionTable)
             if (node.Can(ours)) info.AddAction(theirs);
@@ -153,6 +155,7 @@ internal sealed class SurfaceAccessibility : Java.Lang.Object, View.IOnHoverList
         if (node.CollectionItem is { } item)
             info.SetCollectionItemInfo(AccessibilityNodeInfo.CollectionItemInfo.Obtain(item.Row, 1, item.Column, 1, item.Heading, item.Selected));
         if (node.SelectionStart >= 0) info.SetTextSelection(node.SelectionStart, node.SelectionEnd);
+        if (node.Granularities != AndroidGranularity.None) info.MovementGranularities = (MovementGranularity)(int)node.Granularities;
         info.LiveRegion = node.LiveRegion switch
         {
             AndroidLiveRegion.Polite => AccessibilityLiveRegion.Polite,
@@ -183,6 +186,11 @@ internal sealed class SurfaceAccessibility : Java.Lang.Object, View.IOnHoverList
         (AndroidActions.SetProgress, AccessibilityAction.ActionSetProgress!),
         (AndroidActions.SetText, AccessibilityAction.ActionSetText!),
         (AndroidActions.ShowOnScreen, AccessibilityAction.ActionShowOnScreen!),
+        (AndroidActions.NextAtGranularity, AccessibilityAction.ActionNextAtMovementGranularity!),
+        (AndroidActions.PreviousAtGranularity, AccessibilityAction.ActionPreviousAtMovementGranularity!),
+        (AndroidActions.SetSelection, AccessibilityAction.ActionSetSelection!),
+        (AndroidActions.LongClick, AccessibilityAction.ActionLongClick!),
+        (AndroidActions.Dismiss, AccessibilityAction.ActionDismiss!),
     ];
 
     private static readonly Dictionary<int, AndroidActions> ActionsById = ActionTable.ToDictionary(a => a.Theirs.Id, a => a.Ours);
@@ -191,14 +199,26 @@ internal sealed class SurfaceAccessibility : Java.Lang.Object, View.IOnHoverList
     {
         // The surface's own actions are the view's, as ExploreByTouchHelper leaves them.
         if (id == AndroidIds.Host) return _host.PerformAccessibilityAction(action, arguments);
-        if (!ActionsById.TryGetValue((int)action, out var ours)) return false;
+        if (!ActionsById.TryGetValue((int)action, out var ours))
+        {
+            Log.Debug(Tag, $"TalkBack: action {(int)action} on {id}: not offered");
+            return false;
+        }
         float? progress = arguments?.ContainsKey(AccessibilityNodeInfo.ActionArgumentProgressValue) == true
             ? arguments.GetFloat(AccessibilityNodeInfo.ActionArgumentProgressValue) : null;
         string? text = arguments?.GetCharSequence(AccessibilityNodeInfo.ActionArgumentSetTextCharsequence);
-        bool done = _bridge.Perform(id, ours, new AndroidActionArgs(progress, text));
+        var unit = (AndroidGranularity)(arguments?.GetInt(AccessibilityNodeInfo.ActionArgumentMovementGranularityInt) ?? 0);
+        bool extend = arguments?.GetBoolean(AccessibilityNodeInfo.ActionArgumentExtendSelectionBoolean) ?? false;
+        int start = arguments?.ContainsKey(AccessibilityNodeInfo.ActionArgumentSelectionStartInt) == true
+            ? arguments.GetInt(AccessibilityNodeInfo.ActionArgumentSelectionStartInt) : -1;
+        int end = arguments?.ContainsKey(AccessibilityNodeInfo.ActionArgumentSelectionEndInt) == true
+            ? arguments.GetInt(AccessibilityNodeInfo.ActionArgumentSelectionEndInt) : -1;
+        bool done = _bridge.Perform(id, ours, new AndroidActionArgs(progress, text, unit, extend, start, end));
         // At a person's pace, so always (Log.isLoggable says no to debug for an app's tag by default).
         var node = _bridge.Node(id);
-        Log.Debug(Tag, $"TalkBack: {ours} on {id} ({node?.ClassName} \"{node?.Text ?? node?.ContentDescription}\" " +
+        string how = unit != AndroidGranularity.None ? $" by {unit}{(extend ? ", extending" : "")}"
+            : start >= 0 ? $" {start}..{end}" : "";
+        Log.Debug(Tag, $"TalkBack: {ours}{how} on {id} ({node?.ClassName} \"{node?.Text ?? node?.ContentDescription}\" " +
             $"{node?.BoundsInScreen} visible {node?.Has(AndroidNodeFlags.VisibleToUser)}): {(done ? "done" : "refused")}");
         return done;
     }
@@ -262,6 +282,19 @@ internal sealed class SurfaceAccessibility : Java.Lang.Object, View.IOnHoverList
                 ev.ToIndex = e.ToIndex;
                 ev.ItemCount = e.ItemCount;
                 break;
+            case AndroidEventType.ViewTextTraversed:
+                // The text moved through, which TalkBack reads the unit from, as a TextView sends it.
+                ev.Text?.Clear();
+                if (e.Text is { } traversed) ev.Text?.Add(new Java.Lang.String(traversed));
+                ev.FromIndex = e.FromIndex;
+                ev.ToIndex = e.ToIndex;
+                ev.MovementGranularity = (MovementGranularity)(int)e.Granularity;
+                // The binding types the event's action as a GlobalAction; it holds the node action's id.
+                ev.Action = (global::Android.AccessibilityServices.GlobalAction)(int)(e.Forward
+                    ? global::Android.Views.Accessibility.Action.NextAtMovementGranularity
+                    : global::Android.Views.Accessibility.Action.PreviousAtMovementGranularity);
+                Log.Debug(Tag, $"TalkBack: traversed {e.Granularity} {(e.Forward ? "forward" : "back")} {e.FromIndex}..{e.ToIndex} on {e.Source}");
+                break;
             case AndroidEventType.ViewScrolled:
                 ev.ScrollX = e.ScrollX;
                 ev.ScrollY = e.ScrollY;
@@ -286,6 +319,7 @@ internal sealed class SurfaceAccessibility : Java.Lang.Object, View.IOnHoverList
         AndroidEventType.ViewAccessibilityFocused => EventTypes.ViewAccessibilityFocused,
         AndroidEventType.ViewAccessibilityFocusCleared => EventTypes.ViewAccessibilityFocusCleared,
         AndroidEventType.WindowStateChanged => EventTypes.WindowStateChanged,
+        AndroidEventType.ViewTextTraversed => EventTypes.ViewTextTraversedAtMovementGranularity,
         _ => EventTypes.WindowContentChanged,
     };
 

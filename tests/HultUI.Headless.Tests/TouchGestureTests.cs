@@ -336,6 +336,26 @@ public sealed class TouchGestureTests
         Assert.Contains(session.Window.OverlayContents, o => o is ContextMenuElement);
     }
 
+    [Theory]
+    [InlineData(false, -1)]   // nothing highlighted under a finger
+    [InlineData(true, 0)]     // a reader's focus goes to the first item
+    public void ALongPressMenu_HasItsFirstItemCurrent_OnlyWithAReaderOn(bool reader, int current)
+    {
+        var (list, rows, _) = List();
+        rows[2].ContextMenu([new ContextMenuItem { Label = "Rename" }, new ContextMenuItem { Label = "Delete" }]);
+        using var session = Mount(list);
+        var was = HultUI.Core.Accessibility.AccessibilityClients.Force;
+        HultUI.Core.Accessibility.AccessibilityClients.Force = reader;
+        try
+        {
+            session.Window.LongPress(rows[2]);
+            session.PumpFrame();
+            var menu = Assert.Single(session.Window.OverlayContents.OfType<ContextMenuElement>());
+            Assert.Equal(current, ((HultUI.Core.Accessibility.IAccessibleItemSource)menu).CurrentIndex);
+        }
+        finally { HultUI.Core.Accessibility.AccessibilityClients.Force = was; }
+    }
+
     [Fact]
     public void ALongPress_WithNoMenu_ShowsTheTooltip_WhileTheFingerStaysDown()
     {

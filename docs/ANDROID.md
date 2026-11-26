@@ -174,10 +174,9 @@ HultUI's own messages go to logcat under `DOTNET` (what a desktop app writes to 
 
 These are plan 20's later phases:
 - **No pinch** yet, and no magnifier over the text a handle moves.
-- **TalkBack is partial** (phase 6, docs/design/TALKBACK.md §8): it reads, explores, swipes,
-  clicks, scrolls and hears announcements, but text fields cannot yet be moved through by
-  character or word, a list over 2,000 items shows none of them, and nothing is checked on a
-  phone yet.
+- **TalkBack is checked on the emulator only** (phase 6, docs/design/TALKBACK.md §8 and §9). It
+  reads, explores, swipes, clicks, scrolls, moves through text by unit, long-presses and hears
+  announcements. A TextInput (one line) cannot be moved through by character yet; a TextArea can.
 - **File dialogs** return Android's `content://` addresses, which `File.Open` cannot open.
 - **No second window.**
 - **Video** needs a libmpv build for Android (phase 5).

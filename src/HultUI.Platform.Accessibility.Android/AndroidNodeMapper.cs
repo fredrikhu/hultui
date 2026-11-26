@@ -73,6 +73,9 @@ internal static class AndroidNodeMapper
         if (node.IsSelected == true) flags |= AndroidNodeFlags.Selected;
         bool clickable = enabled && IsClickable(node);
         if (clickable) flags |= AndroidNodeFlags.Clickable;
+        // A long press where one means something (a handler, a context menu), on a stop of TalkBack's
+        // own: a label inside a button is read as the button's.
+        bool longClickable = enabled && node.OffersLongPress && IsExposed(node);
         if (IsCheckable(node))
         {
             flags |= AndroidNodeFlags.Checkable;
@@ -82,6 +85,9 @@ internal static class AndroidNodeMapper
         var actions = (accessibilityFocused ? AndroidActions.ClearAccessibilityFocus : AndroidActions.AccessibilityFocus)
             | AndroidActions.ShowOnScreen;
         if (clickable) actions |= AndroidActions.Click;
+        if (longClickable) actions |= AndroidActions.LongClick;
+        // A dialog or a menu closes, as Back or Escape closes it.
+        if (role is AccessibilityRole.Dialog or AccessibilityRole.Menu) actions |= AndroidActions.Dismiss;
         if (enabled && focusable) actions |= node.IsFocused ? AndroidActions.ClearFocus : AndroidActions.Focus;
         if (enabled && node.Expanded is { } expanded) actions |= expanded ? AndroidActions.Collapse : AndroidActions.Expand;
         if (enabled && node.IsSelected == false && role is AccessibilityRole.ListItem or AccessibilityRole.Tab
@@ -120,7 +126,8 @@ internal static class AndroidNodeMapper
         if (role == AccessibilityRole.TextInput)
         {
             var current = node.CurrentText;
-            if (enabled && !(current?.IsReadOnly ?? false))
+            bool editable = enabled && !(current?.IsReadOnly ?? false);
+            if (editable)
             {
                 flags |= AndroidNodeFlags.Editable;
                 actions |= AndroidActions.SetText;
@@ -131,8 +138,14 @@ internal static class AndroidNodeMapper
                 (selectionStart, selectionEnd) = current.HasSelection
                     ? (current.SelectionStart, current.SelectionEnd)
                     : (current.Caret, current.Caret);
+                // A field that offers its text (a text area, the rich text editor) has its caret here.
+                if (editable && !node.IsPassword) actions |= AndroidActions.SetSelection;
             }
         }
+
+        var granularities = GranularitiesOf(node, text);
+        if (granularities != AndroidGranularity.None)
+            actions |= AndroidActions.NextAtGranularity | AndroidActions.PreviousAtGranularity;
 
         return new AndroidNode
         {
@@ -156,6 +169,7 @@ internal static class AndroidNodeMapper
             CollectionItem = servedIndex >= 0
                 ? new AndroidCollectionItem(servedIndex, 0, false, node.IsSelected == true)
                 : CollectionItemOf(node),
+            Granularities = granularities,
             SelectionStart = selectionStart,
             SelectionEnd = selectionEnd,
             LiveRegion = role == AccessibilityRole.Alert ? AndroidLiveRegion.Assertive : AndroidLiveRegion.None,
@@ -235,6 +249,32 @@ internal static class AndroidNodeMapper
             default:
                 return (name ?? value, null, description, null, null);
         }
+    }
+
+    /// <summary>
+    /// The units TalkBack may move through the node's text by, as a TextView offers them: a field
+    /// that offers its text (a text area, the rich text editor) by character, word, line and
+    /// paragraph, its caret moving as TalkBack reads; any other node whose words are its text (a
+    /// label, a button) by character, word and paragraph, the lines it draws not being known. None
+    /// for a password, a field that offers no text of its own (a text input: its caret is not in
+    /// the tree), or a node with no text.
+    /// </summary>
+    public static AndroidGranularity GranularitiesOf(AccessibilityNode node, string? text)
+    {
+        if (node.IsPassword || string.IsNullOrEmpty(text)) return AndroidGranularity.None;
+        if (node.Role == AccessibilityRole.TextInput)
+            return node.CurrentText is null ? AndroidGranularity.None
+                : AndroidGranularity.Character | AndroidGranularity.Word | AndroidGranularity.Line | AndroidGranularity.Paragraph;
+        return AndroidGranularity.Character | AndroidGranularity.Word | AndroidGranularity.Paragraph;
+    }
+
+    /// <summary>The text TalkBack moves through by a unit, or null when it moves through none: a field's
+    /// own, else what the node says as its text.</summary>
+    public static AccessibleText? TraversableText(AccessibilityNode node)
+    {
+        string? text = Words(node).Text;
+        if (GranularitiesOf(node, text) == AndroidGranularity.None) return null;
+        return node.Role == AccessibilityRole.TextInput ? node.CurrentText : new AccessibleText(text!);
     }
 
     private static string? Nonempty(string? s) => string.IsNullOrEmpty(s) ? null : s;

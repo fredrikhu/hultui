@@ -1,8 +1,8 @@
 # TalkBack bridge — design note
 
 **Status (2026-11-26): approved by the user, all four recommendations in §6 taken. Built the same
-day, and checked with TalkBack on the emulator; §8 says what is built, what the emulator showed, and
-what is left.** It adds no public API. Plan 20, phase 6 ([plan](../plans/20-mobile-support.md) §2.9). Required
+day, and checked with TalkBack on the emulator; §8 and §9 say what is built, what the emulator
+showed, and what is left; §10 has a decision for the user.** It adds no public API. Plan 20, phase 6 ([plan](../plans/20-mobile-support.md) §2.9). Required
 before any Android release beyond the user's own devices: the desktop apps hold that bar
 (`docs/ACCESSIBILITY-PLAN.md`).
 
@@ -157,15 +157,11 @@ The differ now hands a value change its previous node, which TalkBack's text-cha
   runs first. TalkBack's verbose log, set in its preferences while it is stopped, puts what it says
   in logcat. On the emulator the touch, keyboard and TalkBack checks all pass with the bridge in.
 
-**Left:**
-- **Text by character, word and line.** TalkBack moves through a field with the granularity actions
-  and `ACTION_SET_SELECTION`, which need a way to set a field's selection from a reader (an internal
-  method on TextInput, TextArea and the rich text editor).
-- **Lists over 2,000 items** (served on demand) show their count and scroll, but no items: the items on
-  screen should become virtual views.
-- **Long press** (`ACTION_LONG_CLICK` to the context menu), `ACTION_DISMISS` for dialogs and menus.
-- **A list that takes an element's focus** (`AccessibilityNode.FocusHolder`): the input focus is told
-  on the element, not on its current item.
+**Left** (all but the last two built the same day: §9):
+- ~~**Text by character, word and line.**~~ Built (§9), but for a TextInput.
+- ~~**Lists over 2,000 items**~~ Built (§9).
+- ~~**Long press**, `ACTION_DISMISS` for dialogs and menus.~~ Built (§9).
+- ~~**A list that takes an element's focus** (`AccessibilityNode.FocusHolder`).~~ Built (§9).
 - **The phone**, by hand: no root there, so the script cannot drive it. And **Aperture's main views**,
   the plan's exit criterion.
 - ~~A text field that has only a placeholder has no accessible name, so TalkBack says "Edit box"
@@ -174,3 +170,88 @@ The differ now hands a value change its previous node, which TalkBack's text-cha
   hint.
 - English role words ("Link", "Tab", "Menu item") until HultUI's spoken words are localized; TalkBack's
   own words (button, check box, collapsed) follow the phone's language already.
+
+## 9. The rest of phase 6 (2026-11-26)
+
+All internal; no public API. Each part has its desktop tests, each checked by breaking the part, and
+`spikes/AndroidHello/scripts/talkback-a11y-check.ps1` checks them with TalkBack on the emulator
+(the spike's `-e sample a11y`; 10 of 10 pass, and `talkback-check.ps1` still 8 of 8).
+
+**Lists over 2,000 items.** The items on screen are the list's virtual children, as a RecyclerView's
+are: each a node made when TalkBack asks, from the list's node (where the item is, whether it is
+selected) and the list (its label, and whether it is a choice that is on, opens something or can be
+used), as UI Automation and AT-SPI read an item served on demand. A binary search finds the first
+item on screen. A finger finds an item and a double tap runs it through the router. Their ids go
+with the list or with the list's end. TalkBack says "Item 2. 3 of 3000. In list. 3000 items", and
+swiping past the last item on screen scrolls the list and reads on.
+
+**A list that holds its pane's focus** (`AccessibilityNode.FocusHolder`, Vesper's pane and its file
+list). TalkBack is told the focus is on the list's cursor, and told again when the cursor moves. The
+bridge finds the list in the holder's subtree, when the focus moves and then once a frame while
+that holder has the focus.
+
+**Text by character, word, line and paragraph.**
+- **Which units.** A label or a button offers characters, words and paragraphs (its drawn lines are
+  not in the tree). A field that offers its text (TextArea, the rich text editor) offers lines too,
+  plus `ACTION_SET_SELECTION`.
+- **The cursor.** The bridge keeps where TalkBack is in the text, as a TextView keeps its
+  accessibility cursor. Each move is told as a traversal event, which TalkBack speaks.
+- **In a field, the caret goes too,** through the router's new internal `SetSelection` (Core
+  `IAccessibilityEditActions`). The three editors got an internal `SetSelectionFromAssistiveTool`.
+  The rich text editor turns offsets in its reader's text (a `'\n'` between blocks, a picture as its
+  words) back into document positions.
+- **A caret moved elsewhere** (typed, tapped) starts the moves from there. So does a change of the
+  text.
+- **Found on the emulator:** TalkBack 15 moves through a field it is only reading by itself ("handled
+  by Talkback") and leaves the caret. It calls the field's actions once the field has the input
+  focus, as Android's EditText has it.
+- **Not a TextInput:** its caret is not in the tree. It offers no text pattern on any platform: its
+  node has a value and no text. It needs the same text a TextArea offers a reader, which changes what
+  UI Automation and AT-SPI see too. That is the user's call (§10).
+
+**Long press.** A finger's long press means something where a long-press handler or a context menu
+is on the element or above it.
+- **The node bit, Android only.** The tree marks such nodes (`AccessibilityNode.OffersLongPress`),
+  and a list's items take their list's. Only while a bridge asks for it: the TalkBack bridge turns
+  `AccessibilityTreeBuilder.MarksLongPress` on, process-wide, so no desktop build walks up for it.
+- **TalkBack's hint.** The node offers `ACTION_LONG_CLICK`, so TalkBack adds "Double-tap and hold to
+  long press".
+- **Found on the emulator:** TalkBack does not use that action for its double tap held. Android
+  passes the held press on to the app, at TalkBack's focus, and HultUI's own touch long press handles
+  it (phase 3).
+- **So a touch long press with a reader on** opens the menu with its first item current, as from the
+  keyboard. TalkBack's focus goes into the menu: "Rename. Menu item. 1 of 2. In Menu. 2 items". The
+  menu is an overlay at the tree's end, and was reached before only by swiping past the rest of the
+  page.
+- **The action itself** (from TalkBack's actions menu) goes through the router: the handler on the
+  way up, else the context menu from the keyboard's place.
+
+**Dismiss.** A dialog or a menu offers `ACTION_DISMISS` (and is dismissable). The router's `Dismiss`
+closes an open context menu, or sends Escape where the keyboard is, as Back's second step does.
+Checked on the desktop only: TalkBack calls it from its actions menu, which the script cannot open.
+
+**Aperture's main views,** read through the bridge on the desktop
+(`tests/Aperture.Tests/ApertureAppHostTests.TalkBack.cs`). The bridge is installed as the window's
+own, over the tests' fake library. Home, a library's grid, a detail page and search each read with
+every stop saying something, for example "Resume Solaris, 1972, part-watched, 1 h 49 m left" and
+"Play Stalker". What the reading shows for Aperture's phone build (phase 5's app changes):
+- **A separator dot** between the server's name and the app's name ("·") is a stop of its own.
+- **The window's caption buttons** (Minimize, Maximize, Close) are read; a phone has none.
+- **Keyboard shortcuts are part of the names:** "Home (1)", "Search (/)", "Back (Esc)", "Refresh (F5)".
+- **A sort button says its state in its name** ("A–Z (on)"), not as a toggled state.
+
+**Seen and left:**
+- **Said twice:** the last character of a field was spoken twice once ("e. e"): the traversal, then,
+  likely, the selection change it caused.
+- **No diff tells a change of the long-press bit.** A context menu added to an element that is
+  already shown takes a new tree to reach TalkBack.
+- **The phone, by hand,** and **Aperture's main views on a device**, which wait for Aperture's
+  Android build (phase 5).
+
+## 10. For the user
+
+**A TextInput's text for a reader.** Today a TextInput's node carries its text as a value only, on
+every platform. So TalkBack cannot read it by character, nor know where its caret is, and a desktop
+reader gets no text pattern for it either. Giving it a text source, as TextArea has, would fix all
+three. But NVDA, Narrator and Orca would then read a single-line field through the text pattern.
+That is how native edit controls work, but it is a change on the desktop.

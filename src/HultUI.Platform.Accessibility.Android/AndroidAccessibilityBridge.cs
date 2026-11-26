@@ -88,6 +88,9 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
         _host = host;
         _edits = host as IAccessibilityEditActions;
         _geometry = host as IAccessibilityGeometryHost;
+        // TalkBack performs a long press: the trees say where one means something. Process-wide, and
+        // only ever turned on: an Android app's windows all have this bridge.
+        AccessibilityTreeBuilder.MarksLongPress = true;
     }
 
     /// <summary>Device pixels per layout unit.</summary>
@@ -597,6 +600,8 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
             isEnabled: enabled, isToggled: toggled, expanded: expanded, isSelected: list.Served.IsSelected(index))
         {
             IsOffscreen = offscreen,
+            // A long press on a row finds what the list's does.
+            OffersLongPress = list.OffersLongPress,
         };
     }
 
@@ -810,6 +815,7 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
                 if (before == id) return false;
                 if (id != AndroidIds.Host && Lookup(id, out _) is null) return false;
                 _accessibilityFocused = id;
+                _traversal = null;   // a move through text starts again on the node TalkBack is on now
                 var events = new List<AndroidEvent>(2);
                 if (before != AndroidIds.None) events.Add(new AndroidEvent(AndroidEventType.ViewAccessibilityFocusCleared, before));
                 events.Add(new AndroidEvent(AndroidEventType.ViewAccessibilityFocused, id));
@@ -862,10 +868,190 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
             case AndroidActions.ScrollLeft:
             case AndroidActions.ScrollRight:
                 return Page(node, action);
+            case AndroidActions.NextAtGranularity:
+            case AndroidActions.PreviousAtGranularity:
+                return Traverse(id, node, args.Granularity, action == AndroidActions.NextAtGranularity, args.ExtendSelection);
+            case AndroidActions.SetSelection:
+                return SetSelection(id, node, args);
+            case AndroidActions.LongClick:
+                if (_edits is null) return false;
+                _edits.LongPress(element);
+                return true;
+            case AndroidActions.Dismiss:
+                if (_edits is null) return false;
+                _edits.Dismiss(element);
+                return true;
             default:
                 return false;
         }
     }
+
+    // ──── Moving through text by a unit (Android's main thread) ────
+
+    /// <summary>Where TalkBack is in a node's text as it moves through it by a unit: as a TextView's
+    /// accessibility cursor. For a field, the field's caret is moved there too, and the cursor is
+    /// taken from the field again when its caret is somewhere else than the tree had it at the last
+    /// move and than that move put it (typed, tapped), or its text changed.</summary>
+    private sealed class Traversal
+    {
+        public int Id;
+        public string Text = "";
+        /// <summary>-1 before the first move in a text that has no caret: forward from its start,
+        /// back from its end.</summary>
+        public int Cursor = -1;
+        public int Anchor = -1;
+        /// <summary>The field's caret as the tree had it at the last move, and where that move put it.</summary>
+        public int SeenCaret = -1, AskedCaret = -1;
+    }
+
+    private Traversal? _traversal;
+
+    /// <summary>
+    /// The next or the previous character, word, line or paragraph of the node's text from where
+    /// TalkBack is in it (<see cref="Traversal"/>), told as a traversal, which TalkBack speaks. In a
+    /// field the caret moves after the unit going forward and before it going back, or the selection
+    /// grows to there (<paramref name="extend"/>), as Android's EditText moves it. False past either
+    /// end, and for a unit the node does not offer.
+    /// </summary>
+    private bool Traverse(int id, AccessibilityNode node, AndroidGranularity unit, bool forward, bool extend)
+    {
+        if (AndroidNodeMapper.TraversableText(node) is not { } text) return false;
+        if ((AndroidNodeMapper.GranularitiesOf(node, text.Text) & unit) == 0 || !IsOneUnit(unit)) return false;
+        bool field = node.Role == AccessibilityRole.TextInput;
+        int caret = field ? text.Caret : -1;
+        var t = _traversal;
+        if (t is null || t.Id != id || !string.Equals(t.Text, text.Text, StringComparison.Ordinal)
+            || (field && caret != t.SeenCaret && caret != t.AskedCaret))
+        {
+            t = new Traversal { Id = id, Text = text.Text, SeenCaret = caret, AskedCaret = caret };
+            if (field && caret >= 0)
+            {
+                t.Cursor = caret;
+                t.Anchor = !text.HasSelection ? caret : caret == text.SelectionStart ? text.SelectionEnd : text.SelectionStart;
+            }
+        }
+        int from = t.Cursor >= 0 ? t.Cursor : forward ? 0 : text.Length;
+        if (!Unit(text, unit, forward, from, out int start, out int end)) return false;
+        int cursor = forward ? end : start;
+        if (field && _edits is not null)
+        {
+            int anchor = extend ? (t.Anchor >= 0 ? t.Anchor : from) : cursor;
+            _edits.SetSelection(node.ElementId, anchor, cursor);
+            t.Anchor = anchor;
+        }
+        t.Cursor = cursor;
+        t.SeenCaret = caret;
+        t.AskedCaret = cursor;
+        _traversal = t;
+        Send([new AndroidEvent(AndroidEventType.ViewTextTraversed, id)
+        {
+            Text = text.Text, FromIndex = start, ToIndex = end, Granularity = unit, Forward = forward,
+        }]);
+        return true;
+    }
+
+    private static bool IsOneUnit(AndroidGranularity unit) => unit is AndroidGranularity.Character or AndroidGranularity.Word
+        or AndroidGranularity.Line or AndroidGranularity.Paragraph;
+
+    /// <summary>TalkBack sets a field's selection, or its caret: moved through the router, and where
+    /// a move by a unit goes on from.</summary>
+    private bool SetSelection(int id, AccessibilityNode node, AndroidActionArgs args)
+    {
+        if (_edits is null || node.CurrentText is not { } text || args.SelectionStart < 0) return false;
+        int start = Math.Min(args.SelectionStart, text.Length);
+        int end = args.SelectionEnd < 0 ? start : Math.Min(args.SelectionEnd, text.Length);
+        _edits.SetSelection(node.ElementId, start, end);
+        _traversal = new Traversal { Id = id, Text = text.Text, Cursor = end, Anchor = start, SeenCaret = text.Caret, AskedCaret = end };
+        return true;
+    }
+
+    /// <summary>
+    /// The unit of <paramref name="text"/> after (<paramref name="forward"/>) or before
+    /// <paramref name="from"/>, as Android's text segment iterators find it: a character; a word,
+    /// from <paramref name="from"/> when it is inside one, its trailing blanks left out; a line or a
+    /// paragraph, its <c>'\n'</c> left out, from <paramref name="from"/> when it is inside one. False
+    /// when there is none that way.
+    /// </summary>
+    internal static bool Unit(AccessibleText text, AndroidGranularity unit, bool forward, int from, out int start, out int end)
+    {
+        string s = text.Text;
+        int length = s.Length;
+        start = end = from = Math.Clamp(from, 0, length);
+        switch (unit)
+        {
+            case AndroidGranularity.Character:
+                if (forward ? from >= length : from <= 0) return false;
+                (start, end) = forward ? (from, text.NextCharacter(from)) : (text.PreviousCharacter(from), from);
+                return true;
+            case AndroidGranularity.Word:
+                if (forward)
+                {
+                    int at = from;
+                    while (at < length && WordBoundary.IsBlank(s[at])) at++;
+                    if (at >= length) return false;
+                    var (wordStart, wordEnd) = text.WordRange(at);
+                    start = Math.Max(wordStart, at);
+                    end = TrimBlanks(s, start, wordEnd);
+                }
+                else
+                {
+                    int at = from;
+                    while (at > 0 && WordBoundary.IsBlank(s[at - 1])) at--;
+                    if (at <= 0) return false;
+                    start = text.PreviousWordStart(at);
+                    end = at;
+                }
+                return end > start;
+            case AndroidGranularity.Line:
+            {
+                int line = text.LineAt(from);
+                if (forward)
+                {
+                    if (from >= length) return false;
+                    if (from >= text.LineEnd(line) && ++line >= text.LineCount) return false;
+                    (start, end) = (Math.Max(text.LineStart(line), from), text.LineEnd(line));
+                }
+                else
+                {
+                    if (from <= 0) return false;
+                    if (from <= text.LineStart(line) && --line < 0) return false;
+                    (start, end) = (text.LineStart(line), Math.Min(text.LineEnd(line), from));
+                }
+                return true;
+            }
+            case AndroidGranularity.Paragraph:
+            {
+                var (paraStart, paraEnd) = text.ParagraphRange(from);
+                if (forward)
+                {
+                    if (from >= length) return false;
+                    if (from >= TrimNewline(s, paraStart, paraEnd))
+                    {
+                        if (paraEnd >= length) return false;
+                        (paraStart, paraEnd) = text.ParagraphRange(paraEnd);
+                    }
+                    (start, end) = (Math.Max(paraStart, from), TrimNewline(s, paraStart, paraEnd));
+                }
+                else
+                {
+                    if (from <= 0) return false;
+                    if (from <= paraStart) (paraStart, paraEnd) = text.ParagraphRange(paraStart - 1);
+                    (start, end) = (paraStart, Math.Min(TrimNewline(s, paraStart, paraEnd), from));
+                }
+                return true;
+            }
+            default:
+                return false;
+        }
+    }
+
+    private static int TrimBlanks(string s, int start, int end)
+    {
+        while (end > start && WordBoundary.IsBlank(s[end - 1])) end--;
+        return end;
+    }
+
+    private static int TrimNewline(string s, int start, int end) => end > start && s[end - 1] == '\n' ? end - 1 : end;
 
     /// <summary>A double tap: a check box or a switch toggles, a radio button is chosen, a dropdown
     /// opens or closes, anything else is invoked.</summary>

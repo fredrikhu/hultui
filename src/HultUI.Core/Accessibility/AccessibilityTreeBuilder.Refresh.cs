@@ -616,6 +616,7 @@ public static partial class AccessibilityTreeBuilder
             {
                 if (holdsRow) return refresh.Fail("a node with children changed");
                 var made = MakeItemNode(slot, i, role, label, unscrolled, toggled, expanded, selected, enabled, offscreen);
+                if (listNode.OffersLongPress) made.OffersLongPress = true;
                 AccessibilityTreeDiffer.CompareNodes(refresh.Changes, node, made, prevAbove, currAbove);
                 refresh.Remade.Add((listNode, i, made));
                 continue;
@@ -640,6 +641,7 @@ public static partial class AccessibilityTreeBuilder
             var item = MakeItemNode(slot, i, role, source.GetItemLabel(i), place.Unscrolled(box), source.ItemIsToggled(i),
                 source.ItemIsExpanded(i), source.IsItemSelected(i), source.ItemIsEnabled(i),
                 !RectsIntersect(clip, place.OnScreen(box)));
+            if (listNode.OffersLongPress) item.OffersLongPress = true;
             if (i == open.Item)
             {
                 int row = pending.Count;
@@ -692,6 +694,7 @@ public static partial class AccessibilityTreeBuilder
     private static Sameness Compare(Element element, AccessibilityNode node, FocusManager? focusManager)
     {
         if (node.IsFocusable != element.IsFocusable) return Sameness.Untellable;
+        if (MarksLongPress && node.OffersLongPress != OffersLongPress(element)) return Sameness.Untellable;
         // Whose focus a list's current item stands for: no diff tells it, and a bridge reads it from
         // the node.
         if (node.ItemSource is { } source && node.FocusHolder != FocusHolderIdOf(element, source))

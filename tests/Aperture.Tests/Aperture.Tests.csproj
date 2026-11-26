@@ -23,6 +23,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\apps\Aperture\Aperture\Aperture.csproj" />
     <ProjectReference Include="..\..\src\HultUI.Headless\HultUI.Headless.csproj" />
+    <!-- The TalkBack bridge's platform-neutral part, to read Aperture's views as TalkBack would. -->
+    <ProjectReference Include="..\..\src\HultUI.Platform.Accessibility.Android\HultUI.Platform.Accessibility.Android.csproj" />
   </ItemGroup>
 
   <ItemGroup>

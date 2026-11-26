@@ -1,4 +1,5 @@
 ﻿using HultUI.Core.Animation;
+using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Primitives;
@@ -285,6 +286,73 @@ public sealed partial class Window
 
     // ──── Long press ────
 
+    /// <summary>
+    /// A reader's long press (TalkBack's double tap held; the router's <c>LongPress</c>) on the element
+    /// <paramref name="id"/> names, or on a list's item: what a finger's long press does there, but
+    /// the parts for the eyes. A long-press handler on the way up runs; else the context menu opens
+    /// from the keyboard's place, its first item highlighted, which the reader's focus goes to. A
+    /// finger's long press would select a word of text, or show a tooltip: neither is for a reader.
+    /// An item is found where its row is drawn: a reader's focus is on an item on screen.
+    /// </summary>
+    internal void LongPressFromAssistiveTool(ElementId id)
+    {
+        if (_root is null) return;
+        Element? target;
+        Point at;
+        if (VirtualItemId.TryDecode(id, out var listId, out int index))
+        {
+            if (FindElement(listId) is not ScrollViewElement list || list is not Core.Accessibility.IAccessibleItemSource source
+                || index < 0 || index >= source.ItemCount)
+                return;
+            var content = list.WindowContentBox;
+            var cell = source.ItemRect(index) is { } r ? r
+                : source.ItemBounds(index) is { } rows ? new Rect(0, rows.Top, content.Width, rows.Height)
+                : new Rect(0, index * source.ItemHeight, content.Width, source.ItemHeight);
+            at = new Point(content.X + cell.X - list.ScrollOffsetX + cell.Width / 2,
+                content.Y + cell.Y - list.ScrollOffsetY + cell.Height / 2);
+            var (overlay, _) = HitTestOverlays(at);
+            target = overlay ?? HitTester.HitTest(_root, at);
+        }
+        else
+        {
+            target = FindElement(id);
+            if (target is null) return;
+            var box = target.WindowBorderBox;
+            at = new Point(box.X + box.Width / 2, box.Y + box.Height / 2);
+        }
+        if (target is not { IsEnabledForAccessibility: true }) return;
+
+        for (var e = target; e is not null; e = e.Parent)
+        {
+            if (!e.HasEventHandler<LongPressEvent>()) continue;
+            EventDispatcher.Dispatch(new LongPressEvent { Position = at, Button = PointerEvent.LeftButton }, target);
+            _root.MarkPaintDirty();
+            return;
+        }
+        var (owner, itemsProvider) = FindContextMenuOwner(target);
+        if (owner is null || itemsProvider is null) return;
+        var items = itemsProvider();
+        if (items.Count == 0) return;
+        ShowContextMenu(items, default, onClosed: null, anchor: target.ContextMenuAnchor);
+    }
+
+    /// <summary>
+    /// A reader's dismiss (Android's dismiss action; the router's <c>Dismiss</c>) of a dialog or a menu:
+    /// an open context menu closes; anything else hears Escape where the keyboard is, as Back's second
+    /// step has it, which closes a dialog, a popover, a dropdown's list.
+    /// </summary>
+    internal void DismissFromAssistiveTool(ElementId id)
+    {
+        if (_contextMenuElement is { } menu && (menu.Id == id || FindInTree(menu, id) is not null))
+        {
+            CloseContextMenu(MenuCloseReason.Dismissed);
+            return;
+        }
+        if (FindElement(id) is null) return;
+        var target = KeyTarget();
+        EventDispatcher.Dispatch(new KeyDownEvent { Key = KeyCode.Escape, TargetTakesText = target is { TakesTypedText: true } }, target);
+    }
+
     private void FireLongPress(TouchGesture g)
     {
         g.LongPressTimer = null;
@@ -320,6 +388,11 @@ public sealed partial class Window
         if (FindContextMenuOwner(target).owner is not null)
         {
             TryShowContextMenu(target, g.LastAt);
+            // With a reader on, its focus goes into the menu: its first item is the current one, as a
+            // menu opened from the keyboard has it. TalkBack's double tap held arrives here, as a press
+            // Android passes on at TalkBack's focus; the menu, an overlay at the tree's end, was swiped
+            // to only past the rest of the page.
+            if (Core.Accessibility.AccessibilityClients.Active) _contextMenuElement?.MoveToEdge(first: true);
             return;
         }
         // 3. The tooltip, while the finger stays down: how Android names an icon button.

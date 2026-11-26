@@ -532,6 +532,19 @@ public class TextInputElement : BoxElement, ITouchTextEditing
         MarkPaintDirty();
     }
 
+    /// <summary>A reader's selection, from <paramref name="anchor"/> to <paramref name="caret"/>
+    /// (offsets in the value, clamped, kept off the middle of a surrogate pair), as a click there
+    /// would leave it: no edit, the current undo step ended. Nothing while an input method is
+    /// composing.</summary>
+    internal void SetSelectionFromAssistiveTool(int anchor, int caret)
+    {
+        if (_composition.IsActive) return;
+        _selectionStart = SnapToBoundary(Math.Clamp(anchor, 0, _text.Length));
+        _cursorPos = SnapToBoundary(Math.Clamp(caret, 0, _text.Length));
+        _history.Seal();
+        MarkPaintDirty();
+    }
+
     /// <summary>The one way the value is edited: the range [<paramref name="start"/>,
     /// <paramref name="end"/>) becomes <paramref name="inserted"/>, the caret lands collapsed
     /// after it, and the undo history hears about it. An edit that bypasses this is one Ctrl+Z

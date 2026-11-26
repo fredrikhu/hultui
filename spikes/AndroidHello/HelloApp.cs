@@ -62,6 +62,58 @@ internal static class HelloApp
     }
 
     /// <summary>The Fluent sample, unchanged, as samples/HultUI.Samples.Fluent/Program.cs runs it.</summary>
+    /// <summary>
+    /// Plan 20 phase 6's second check (scripts/talkback-check.ps1 -Sample a11y): a text area to read by
+    /// character, word and line; a button whose long press opens a context menu and a dialog to dismiss;
+    /// and a list of 3,000 items, which the tree serves on demand.
+    /// </summary>
+    private static void RunA11y(Stopwatch clock)
+    {
+        using var app = new Application("HultUI a11y", 400, 800);
+        var window = app.PrimaryWindow;
+        var area = TextArea.New("alpha bravo charlie\nsecond line here").Height(96f).FlexShrink(0);
+        area.AccessibleName = "Notes";
+        area.Select(0, 0);
+        var menuButton = Box.New().Padding(new Thickness(12, 20, 12, 20)).Background(Color.FromHex("#4F46E5"))
+            .CornerRadius(10f).TextColor(Color.White).FlexShrink(0).Children(Text.New("Options").FontSize(18f));
+        menuButton.Role = HultUI.Core.Accessibility.AccessibilityRole.Button;
+        HultUI.Core.Elements.ContextMenuItem[] menu =
+        [
+            new() { Label = "Rename", Action = () => Info("menu: rename") },
+            new() { Label = "Delete", Action = () => Info("menu: delete") },
+        ];
+        menuButton.ContextMenu(() =>
+        {
+            Info("menu: opening");
+            return menu;
+        });
+        menuButton.OnClick(e =>
+        {
+            Info("dialog: open");
+            _ = HultUI.Core.Dialogs.Dialog.Confirm(window, "Delete the file?", "It cannot be undone.")
+                .ContinueWith(t => Info($"dialog: closed {t.Result}"), TaskScheduler.FromCurrentSynchronizationContext());
+        });
+        var items = Enumerable.Range(0, 3000).Select(i => $"Item {i}").ToList();
+        var list = HultUI.Core.Elements.VirtualListElement<string>.New().ItemHeight(48f).FlexGrow(1)
+            .RenderWith(t => Flex.Row().Padding(new Thickness(12, 16, 12, 16)).Children(Text.New(t).FontSize(16f).TextColor(Color.White)))
+            .Items(items);
+        list.OnItemActivate = item => Info($"activated {item}");
+        var root = Flex.Column(gap: 12).Padding(16).Children(
+            Text.New("Accessibility check").FontSize(24f).FontWeight(FontWeight.Bold).FlexShrink(0),
+            area, menuButton, list);
+        // Where touches land: TalkBack passes a double tap held through as a press at its focus.
+        root.OnPointerDown(e => Info($"press {e.PointerType} at {e.Position.X:0},{e.Position.Y:0}"));
+        menuButton.OnPointerDown(_ => Info("press on Options"));
+        app.SetRoot(root);
+        using var report = new Timer(_ => Application.InvokeOnMainThread(() =>
+            Info($"geometry area {Dims(area.WindowBorderBox)} button {Dims(menuButton.WindowBorderBox)} list {Dims(list.WindowBorderBox)}")),
+            null, 2000, Timeout.Infinite);
+        using var caret = new Timer(_ => Application.InvokeOnMainThread(() =>
+            Info($"caret {area.CursorPosition} selection {area.SelectionStart}..{area.SelectionEnd}")), null, 3000, 1000);
+        Info($"a11y sample made at {clock.ElapsedMilliseconds} ms");
+        app.Run();
+    }
+
     private static void RunFluent(Stopwatch clock)
     {
         using var app = new Application("Fluent Sample", 1280, 860, HultUI.Core.Styling.WindowStyle.Borderless);
@@ -89,6 +141,7 @@ internal static class HelloApp
         {
             // SDL_SetMainReady is HultUIActivity's now, before RunApp.
             if (Sample == "fluent") RunFluent(clock);
+            else if (Sample == "a11y") RunA11y(clock);
             else if (Sample == "credentials") TestCredentials();
             else RunApp(clock);
         }

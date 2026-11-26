@@ -62,6 +62,10 @@ internal sealed class AndroidNode
     public AndroidCollection? Collection { get; init; }
     public AndroidCollectionItem? CollectionItem { get; init; }
 
+    /// <summary>The units TalkBack may move through the node's text by
+    /// (<see cref="AndroidActions.NextAtGranularity"/>): <c>setMovementGranularities</c>.</summary>
+    public AndroidGranularity Granularities { get; init; }
+
     /// <summary>The text's selection, or the caret at both ends; -1 for none.</summary>
     public int SelectionStart { get; init; } = -1;
     public int SelectionEnd { get; init; } = -1;
@@ -135,10 +139,35 @@ internal enum AndroidActions : long
     SetProgress = 1L << 14,
     SetText = 1L << 15,
     ShowOnScreen = 1L << 16,
+    /// <summary>The next character, word, line or paragraph (<see cref="AndroidActionArgs.Granularity"/>):
+    /// what TalkBack reads by when its reading control is set to one.</summary>
+    NextAtGranularity = 1L << 17,
+    PreviousAtGranularity = 1L << 18,
+    /// <summary>A field's selection, or its caret (<see cref="AndroidActionArgs.SelectionStart"/>).</summary>
+    SetSelection = 1L << 19,
+    /// <summary>A long press: TalkBack's double tap held.</summary>
+    LongClick = 1L << 20,
+    /// <summary>Closes a dialog or a menu (<c>setDismissable</c>).</summary>
+    Dismiss = 1L << 21,
 }
 
-/// <summary>What an action carries (<c>ACTION_ARGUMENT_*</c>): a slider's value, a field's text.</summary>
-internal readonly record struct AndroidActionArgs(float? Progress = null, string? Text = null);
+/// <summary>The units TalkBack moves through a node's text by: Android's
+/// <c>MOVEMENT_GRANULARITY_*</c>, whose values these are.</summary>
+[Flags]
+internal enum AndroidGranularity
+{
+    None = 0,
+    Character = 1,
+    Word = 2,
+    Line = 4,
+    Paragraph = 8,
+}
+
+/// <summary>What an action carries (<c>ACTION_ARGUMENT_*</c>): a slider's value, a field's text, the
+/// unit to move by and whether the move extends the selection, a selection's ends.</summary>
+internal readonly record struct AndroidActionArgs(float? Progress = null, string? Text = null,
+    AndroidGranularity Granularity = AndroidGranularity.None, bool ExtendSelection = false,
+    int SelectionStart = -1, int SelectionEnd = -1);
 
 internal enum AndroidLiveRegion { None, Polite, Assertive }
 
@@ -173,6 +202,10 @@ internal enum AndroidEventType
     ViewAccessibilityFocusCleared,
     WindowContentChanged,
     WindowStateChanged,
+    /// <summary>A move through the node's text by a unit (<c>TYPE_VIEW_TEXT_TRAVERSED_AT_MOVEMENT_GRANULARITY</c>):
+    /// TalkBack speaks <see cref="AndroidEvent.Text"/> from <see cref="AndroidEvent.FromIndex"/> to
+    /// <see cref="AndroidEvent.ToIndex"/>.</summary>
+    ViewTextTraversed,
 }
 
 /// <summary>What changed, for a content or a window-state change (<c>CONTENT_CHANGE_TYPE_*</c>).</summary>
@@ -211,6 +244,12 @@ internal readonly record struct AndroidEvent(AndroidEventType Type, int Source)
     public int AddedCount { get; init; } = -1;
     public int RemovedCount { get; init; } = -1;
     public int ItemCount { get; init; } = -1;
+
+    /// <summary>A move through text: the text moved through (the event's text, which TalkBack reads
+    /// from), the unit, and whether it went forward (<c>setAction</c>: the next or the previous).</summary>
+    public string? Text { get; init; }
+    public AndroidGranularity Granularity { get; init; }
+    public bool Forward { get; init; }
 
     /// <summary>A scroll's position, its end, and how far it moved, in device pixels.</summary>
     public int ScrollX { get; init; }

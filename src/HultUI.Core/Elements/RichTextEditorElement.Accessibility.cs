@@ -493,4 +493,34 @@ public partial class RichTextEditorElement
         if (_readOnly) return;
         _state.ReplaceDocument(RichDocument.FromPlainText(value));
     }
+
+    /// <summary>
+    /// A reader's selection, from <paramref name="anchor"/> to <paramref name="caret"/>: offsets in
+    /// the text the editor offers a reader (<see cref="BuildAccessibleText(RichDocument, bool)"/>: the
+    /// blocks one after another, a <c>'\n'</c> between two, a picture as its words), made positions in
+    /// the document. An offset in a picture's words is the picture. As a click there would leave it:
+    /// no edit; told to the reader as a caret move.
+    /// </summary>
+    internal void SetSelectionFromAssistiveTool(int anchor, int caret)
+    {
+        var doc = _state.Document;
+        _state.Select(PositionAtReaderOffset(doc, anchor), PositionAtReaderOffset(doc, caret));
+    }
+
+    /// <summary>The document position at <paramref name="offset"/> in the reader's text.</summary>
+    private RichPosition PositionAtReaderOffset(RichDocument doc, int offset)
+    {
+        int at = 0;
+        for (int i = 0; i < doc.BlockCount; i++)
+        {
+            var block = doc[i];
+            bool picture = block.Kind == BlockKind.Image;
+            int length = picture ? PictureWords(block.Image).Length : block.Text.Length;
+            // An offset on the '\n' after a block is the block's end.
+            if (offset <= at + length || i == doc.BlockCount - 1)
+                return new RichPosition(i, picture ? 0 : Math.Clamp(offset - at, 0, block.Text.Length));
+            at += length + 1;
+        }
+        return doc.Start;
+    }
 }

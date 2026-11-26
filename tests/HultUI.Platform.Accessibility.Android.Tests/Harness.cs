@@ -24,6 +24,9 @@ internal sealed class FakeHost : IAccessibilityActionHost, IAccessibilityGeometr
     public void ActiveChanged() => ActiveChanges++;
     public void SetValue(ElementId id, string value) => Calls.Add($"value {id.Value} {value}");
     public void ScrollBy(ElementId id, float dx, float dy) => Calls.Add($"scroll {id.Value} {dx} {dy}");
+    public void SetSelection(ElementId id, int anchor, int caret) => Calls.Add($"selection {id.Value} {anchor} {caret}");
+    public void LongPress(ElementId id) => Calls.Add($"long press {id.Value}");
+    public void Dismiss(ElementId id) => Calls.Add($"dismiss {id.Value}");
 }
 
 /// <summary>The events the bridge sends, in order.</summary>
@@ -48,6 +51,8 @@ internal sealed class Harness : IDisposable
 
     public Harness(Element root, int width = 400, int height = 800, float scale = 1f, bool enabled = true)
     {
+        // As the bridge sets it, before the first tree is built here.
+        AccessibilityTreeBuilder.MarksLongPress = true;
         Session = HeadlessSession.Create(width, height);
         Session.Window.SetRoot(root);
         Session.PumpFrame();

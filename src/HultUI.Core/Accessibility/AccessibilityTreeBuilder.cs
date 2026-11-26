@@ -171,6 +171,7 @@ public static partial class AccessibilityTreeBuilder
             isPassword: element is TextInputElement { Masked: true },
             isSelected: ResolveIsSelected(element));
         node.NativeContent = element.NativeAccessibleContent;
+        if (MarksLongPress && OffersLongPress(element)) node.OffersLongPress = true;
         if (element is IRangeValueElement range)
             node.Range = AccessibleRange.Of(range);
         // A menu bar's titles are its choices: the highlighted one is its current item. A list's is
@@ -194,6 +195,23 @@ public static partial class AccessibilityTreeBuilder
             else node.Text = textSource.AccessibleText;
         }
         return node;
+    }
+
+    /// <summary>
+    /// Whether nodes say where a long press means something (<see cref="AccessibilityNode.OffersLongPress"/>):
+    /// set once, process-wide, by a bridge whose platform has the action (TalkBack's, on Android). A
+    /// walk up from each element, which no desktop build makes: the desktop readers open a context
+    /// menu from the keyboard.
+    /// </summary>
+    internal static volatile bool MarksLongPress;
+
+    /// <summary>Whether a finger's long press on <paramref name="element"/> would do something: a
+    /// long-press handler or a context menu on it or above it (Window's long press looks the same way).</summary>
+    internal static bool OffersLongPress(Element element)
+    {
+        for (var e = element; e is not null; e = e.Parent)
+            if (e.ContextMenuItems is not null || e.HasEventHandler<Events.LongPressEvent>()) return true;
+        return false;
     }
 
     /// <summary>Builds <paramref name="node"/>'s children from <paramref name="element"/>'s, on top
@@ -593,12 +611,15 @@ public static partial class AccessibilityTreeBuilder
         uint slot = AccessibleOwnerSlots.SlotOf(list.Id);
         var role = ItemRoleOf(listNode.Role);
         var items = new AccessibilityNode[count];
+        // A long press on a row finds what the list's does.
+        bool longPress = listNode.OffersLongPress;
         for (int i = 0; i < count; i++)
         {
             var box = ItemBox(source, i, content, itemHeight);
             items[i] = MakeItemNode(slot, i, role, source.GetItemLabel(i), place.Unscrolled(box), source.ItemIsToggled(i),
                 source.ItemIsExpanded(i), source.IsItemSelected(i), source.ItemIsEnabled(i),
                 !RectsIntersect(clip, place.OnScreen(box)));
+            if (longPress) items[i].OffersLongPress = true;
         }
         if (open.Element is { } row)
         {

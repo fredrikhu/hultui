@@ -44,6 +44,8 @@
     <InternalsVisibleTo Include="HultUI.Platform.Accessibility.Android.Tests" />
     <!-- The activity puts the bridge in (AndroidAccessibility.CreateBridge). -->
     <InternalsVisibleTo Include="HultUI.Platform.Android" />
+    <!-- Aperture's views read as TalkBack reads them (ApertureAppHostTests.TalkBack.cs). -->
+    <InternalsVisibleTo Include="Aperture.Tests" />
   </ItemGroup>
 
 </Project>

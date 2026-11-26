@@ -1912,6 +1912,14 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     /// replaced as a paste over Ctrl+A would, one edit Ctrl+Z takes back, told through
     /// <see cref="TextChanged"/>. Refused when <see cref="ReadOnly"/>, as a paste is, and while
     /// an input method is composing.</summary>
+    /// <summary>A reader's selection (<see cref="Select"/>), offsets in the text the area offers a
+    /// reader, which are its own; told to the reader as a caret move.</summary>
+    internal void SetSelectionFromAssistiveTool(int anchor, int caret)
+    {
+        Select(anchor, caret);
+        CaretMoved();
+    }
+
     internal void SetValueFromAssistiveTool(string value)
     {
         if (ReadOnly || _composition.IsActive || value == _text) return;

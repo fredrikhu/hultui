@@ -243,6 +243,22 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
         }
     });
 
+    /// <summary>A reader's selection in a field (Android's set-selection, its moves by character and
+    /// word): offsets in the text the field offers a reader.</summary>
+    public void SetSelection(ElementId id, int anchor, int caret) => Enqueue(() =>
+    {
+        switch (EnabledElement(id))
+        {
+            case TextInputElement input: input.SetSelectionFromAssistiveTool(anchor, caret); break;
+            case TextAreaElement area: area.SetSelectionFromAssistiveTool(anchor, caret); break;
+            case RichTextEditorElement editor: editor.SetSelectionFromAssistiveTool(anchor, caret); break;
+        }
+    });
+
+    public void LongPress(ElementId id) => Enqueue(() => _window.LongPressFromAssistiveTool(id));
+
+    public void Dismiss(ElementId id) => Enqueue(() => _window.DismissFromAssistiveTool(id));
+
     /// <summary>A reader's scroll (Android's scroll actions): what the element scrolls moves as a
     /// finger would move it, clamped to its content.</summary>
     public void ScrollBy(ElementId id, float dx, float dy) => Enqueue(() =>
