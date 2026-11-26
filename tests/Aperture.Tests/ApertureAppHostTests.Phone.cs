@@ -51,6 +51,37 @@ public partial class ApertureAppHostTests
         });
     }
 
+    /// <summary>The sign-in card at a Galaxy S25's 360 DIP and a Pixel's 411: it was 420 wide, and
+    /// its Connect button half off the screen's edge.</summary>
+    [Theory]
+    [InlineData(360)]
+    [InlineData(411)]
+    public void AtAPhonesSize_TheSignInCard_FitsTheScreen(int width)
+    {
+        Halide.UsePhoneSizes();
+        try
+        {
+            Host(Library(), (session, app) =>
+            {
+                PumpUntilShown(session, "Films");
+                app.SignOut(keepAccount: false);
+                for (int i = 0; i < 6; i++) session.PumpFrame();
+
+                Assert.True(Shows(session, "Sign in to your Jellyfin server."), session.Window.DumpAccessibilityTree());
+                foreach (var id in new[] { "connect-address", "connect-password", "connect-submit" })
+                {
+                    var box = session.Window.FindByAutomationId(id)?.Node.BoundingRect
+                        ?? throw new Xunit.Sdk.XunitException($"no {id}: {session.Window.DumpAccessibilityTree()}");
+                    // Inside the card's padding, inside the page's margin: the card itself is not
+                    // against the screen's edges (16 + 16).
+                    Assert.True(box.X >= 2 * Halide.S4 - 0.5f && box.Right <= width - 2 * Halide.S4 + 0.5f,
+                        $"{id} spans {box.X}..{box.Right} on a screen {width} wide");
+                }
+            }, width: width, height: 780);
+        }
+        finally { Halide.UseDesktopSizes(); }
+    }
+
     [Fact]
     public void AtAPhonesSize_TheLibrarysChips_AreAStripOfTheirOwn()
     {
