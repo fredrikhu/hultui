@@ -2813,6 +2813,16 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             throw new InvalidOperationException($"SDL_Init failed: {GetError()}");
         StartupTrace.Mark("SDL_Init");
 
+        // Android: no poll sentinel. SDL 3.5.0 as ppy.SDL3-CS 2026.1002.1 ships it (ea7a2da) pumps on
+        // every pass of its Android wait, the pump puts a fresh sentinel in the queue, and adding
+        // an event wakes the wait it is in. SDL_WaitEventTimeout never slept: HultUI's UI thread
+        // took a whole core while the app sat idle (a Galaxy S25 and the emulator alike, the
+        // frame loop parked all the while). SDL fixed it upstream in 8dc8694 ("Don't wake up for
+        // poll sentinel events"). HultUI's event loop does not use the sentinel: SDL_PollEvent
+        // then ends a pass when the queue is empty, as in SDL 2. Drop this with that SDL.
+        if (OperatingSystem.IsAndroid())
+            SDL_SetEventEnabled((uint)SDL_EventType.SDL_EVENT_POLL_SENTINEL, false);
+
     }
 
     public static void ShutdownSDL()
