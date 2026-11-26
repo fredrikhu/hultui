@@ -229,6 +229,148 @@ public class ToastTests
         Assert.True(Texts(toast)[0].Layout.AbsoluteBorderBox.Height > verb.Height + 1, "the message should wrap beside the verb");
     }
 
+    // ── Swiped away (plan 20) ──
+
+    private const string Middling = "The transcode won't play here, so this is the original";
+
+    /// <summary>A finger on the toast's centre drags it <paramref name="by"/> sideways in steps of
+    /// 10, a frame of 50 ms between (200 DIP a second: no flick), and stays down.</summary>
+    private static void Pull(HeadlessSession session, ToastElement toast, float by)
+    {
+        var box = toast.Layout.AbsoluteBorderBox;
+        float x = box.X + box.Width / 2, y = box.Y + box.Height / 2;
+        session.Window.TouchDown(0, x, y);
+        int steps = (int)MathF.Ceiling(Math.Abs(by) / 10f);
+        for (int i = 1; i <= steps; i++)
+        {
+            session.PumpFrame(TimeSpan.FromMilliseconds(50));
+            session.Window.TouchMove(0, x + by * i / steps, y);
+        }
+        session.PumpFrame();
+    }
+
+    private static float PulledBy(ToastElement toast) => toast.Transform?.TranslateX ?? 0f;
+
+    /// <summary>A plain toast had no way to go before its time, and on a phone it lies over what
+    /// is at the window's bottom (the player's buttons) for that long; and it still takes the taps
+    /// that land on it. A finger pulls it sideways, it fades as it goes, and let go past
+    /// <c>SwipeFraction</c> of its width it slides the rest of the way and is gone.</summary>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(-1)]
+    public void ASwipe_PullsTheToastSideways_AndFarEnough_SendsItAway(int direction)
+    {
+        var (session, page) = Mount(width: 360, height: 640);
+        using var _ = session;
+        page.Toasts.Flash(Middling);
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        var toast = page.Shown()!;
+        float width = toast.Layout.AbsoluteBorderBox.Width;
+
+        Pull(session, toast, direction * width * 0.25f);
+        Assert.Equal(direction * width * 0.25f, PulledBy(page.Shown()!), 1);
+        Assert.InRange(page.Shown()!.Opacity, 0.7f, 0.8f);
+
+        session.Window.TouchMove(0, toast.Layout.AbsoluteBorderBox.X + width / 2 + direction * width * 0.5f, toast.Layout.AbsoluteBorderBox.Y + 5);
+        session.PumpFrame(TimeSpan.FromMilliseconds(50));
+        session.Window.TouchUp(0);
+        session.PumpFrame(TimeSpan.FromMilliseconds(100));
+        Assert.True(Math.Abs(PulledBy(page.Shown()!)) > width * 0.5f, $"sliding away: at {PulledBy(page.Shown()!)}");
+        session.PumpFrame(TimeSpan.FromMilliseconds(100));
+        session.PumpFrame();
+        Assert.False(page.Toasts.IsShowing);
+        Assert.Null(session.Window.FindByRole(AccessibilityRole.Alert, Middling));
+    }
+
+    /// <summary>Let go short of that, it slides back; and it does not time out while the finger
+    /// holds it, then has its whole time again from the release.</summary>
+    [Fact]
+    public void AShortSwipe_SlidesBack_AndTheToastHasItsWholeTimeAgain()
+    {
+        var (session, page) = Mount(width: 360, height: 640);
+        using var _ = session;
+        page.Toasts.Flash(Middling);
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        var toast = page.Shown()!;
+        float width = toast.Layout.AbsoluteBorderBox.Width;
+
+        Pull(session, toast, width * 0.2f);
+        session.PumpFrame(TimeSpan.FromSeconds(2));     // past a plain toast's 1.7 s, held
+        Assert.True(page.Toasts.IsShowing);
+        Assert.Equal(1f, page.Toasts.Opacity);
+
+        session.Window.TouchUp(0);
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        Assert.Equal(0f, PulledBy(page.Shown()!));
+        Assert.Equal(1f, page.Shown()!.Opacity);
+        session.PumpFrame(TimeSpan.FromMilliseconds(1400));   // ≈1.6 s from the release
+        Assert.True(page.Toasts.IsShowing);
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));    // its time ran out, the fade began
+        session.PumpFrame(TimeSpan.FromMilliseconds(300));
+        session.PumpFrame();
+        Assert.False(page.Toasts.IsShowing);
+    }
+
+    /// <summary>Caught as it fades out, it comes back whole while the finger holds it.</summary>
+    [Fact]
+    public void AToastCaughtAsItFadesOut_ComesBackWhole()
+    {
+        var (session, page) = Mount(width: 360, height: 640);
+        using var _ = session;
+        page.Toasts.Flash(Middling);
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        session.PumpFrame(TimeSpan.FromMilliseconds(1400));
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));    // the hold ran out, the fade began
+        session.PumpFrame(TimeSpan.FromMilliseconds(90));     // mid-fade
+        Assert.InRange(page.Toasts.Opacity, 0.05f, 0.95f);
+
+        // Down and past the slop at once, before the fade can finish.
+        var box = page.Shown()!.Layout.AbsoluteBorderBox;
+        session.Window.TouchDown(0, box.X + box.Width / 2, box.Y + box.Height / 2);
+        session.Window.TouchMove(0, box.X + box.Width / 2 + 20, box.Y + box.Height / 2);
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        session.PumpFrame(TimeSpan.FromSeconds(2));
+        Assert.True(page.Toasts.IsShowing);
+        Assert.Equal(1f, page.Toasts.Opacity);
+        session.Window.TouchUp(0);
+    }
+
+    /// <summary>A flick sends it away from well short of the distance a slow pull needs.</summary>
+    [Fact]
+    public void AFlick_SendsItAway()
+    {
+        var (session, page) = Mount(width: 360, height: 640);
+        using var _ = session;
+        page.Toasts.Flash(Middling);
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        var box = page.Shown()!.Layout.AbsoluteBorderBox;
+        var from = new Point(box.X + box.Width / 2, box.Y + box.Height / 2);
+
+        session.Window.Swipe(from, new Point(from.X + box.Width * 0.25f, from.Y), TimeSpan.FromMilliseconds(60), steps: 4);
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        session.PumpFrame();
+        Assert.False(page.Toasts.IsShowing);
+    }
+
+    /// <summary>With a verb, swiping it away is not choosing the verb.</summary>
+    [Fact]
+    public void ASwipedToastWithAnAction_DoesNotRunIt()
+    {
+        var (session, page) = Mount(width: 360, height: 640);
+        using var _ = session;
+        int ran = 0;
+        page.Toasts.Flash("Pushed main", action: ("Create merge request", () => ran++));
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        var toast = page.Shown()!;
+
+        Pull(session, toast, toast.Layout.AbsoluteBorderBox.Width * 0.6f);
+        session.Window.TouchUp(0);
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        session.PumpFrame();
+        Assert.False(page.Toasts.IsShowing);
+        Assert.Equal(0, ran);
+    }
+
     // ── The fades are drawn on the toast, not built (plan 17, round 3, step 12) ──
 
     /// <summary>The fades called <c>onChanged</c> on every step, and every app hands it the

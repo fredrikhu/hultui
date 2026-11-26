@@ -601,6 +601,14 @@ Fixed on the way, each found on the phone:
 - Toasts were one line, so a long one was cut off at a phone's edges. `ToastElement` now wraps
   the message, up to four lines. `ToastHost` keeps the pill 16 DIP from the window's sides, and
   the action verb stays whole. This holds in every app, not only on Android.
+- A toast lay over the player's buttons for its whole time and took the taps that landed on it,
+  with no way to send it away. A finger now swipes it off sideways (`ToastHost`, through `OnPan`).
+  It does not time out while held.
+  - On the emulator the swiped toast slid one frame and then stood for seconds. That was a bug in
+    the frame loop on every platform, not only Android. A tween started while another waited out a
+    delay took its first step at once, but its later steps waited for the other's deadline. For
+    the swipe, that was the toast's cancelled hold. Meanwhile the loop spun on 1 ms waits. A
+    drawn step now makes the next one due with the next frame (`Application.RunUntil`).
 
 Left:
 - **SDL with 8dc8694**, when a ppy.SDL3-CS carries it; then the Android workaround goes.
