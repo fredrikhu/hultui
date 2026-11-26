@@ -635,10 +635,11 @@ public sealed partial class ApertureApp : Component, IDisposable
         Rerender();
     }
 
-    /// <summary>Says something, briefly, at the bottom of the window.</summary>
+    /// <summary>Says something, briefly, at the bottom of the window; for <paramref name="seconds"/>
+    /// when given (a long sentence), or longer when it carries an action.</summary>
     internal void Flash(string message, ToastSeverity severity = ToastSeverity.None,
-        (string Label, Action Run)? action = null) =>
-        _toasts.Flash(message, severity, action, action is null ? null : 6f);
+        (string Label, Action Run)? action = null, float? seconds = null) =>
+        _toasts.Flash(message, severity, action, seconds ?? (action is null ? null : 6f));
 
     /// <summary>The failure copy for a call that did not work, as a toast.</summary>
     internal void FlashFailure(ApertureFailure failure, string what = "That")

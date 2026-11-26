@@ -687,6 +687,60 @@ public partial class ApertureAppHostTests
     }
 
     /// <summary>
+    /// A transcode that will not open (an HLS stream over https on Android, whose FFmpeg has no
+    /// TLS) is played as the original file: once, from the resume point, reported as a direct
+    /// stream, and said in a toast.
+    /// </summary>
+    [Fact]
+    public void ATranscodeThatWillNotOpen_IsPlayedAsTheOriginalFile_FromWhereItWasLeft()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(167), FailNextOpenWith = "loading failed" };
+        Host(library, (session, app) =>
+        {
+            app.SetMaxStreamingKbps(4000);   // a ceiling: the fake library hands out a transcode
+            app.Play(library.Item("m2")!, TimeSpan.FromMinutes(58));
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            Assert.Contains("OriginalFileOf(m2)", library.Calls);
+            Assert.False(app.Playback!.Transcoding);
+            Assert.Equal(2, backend.Calls.Count(c => c.StartsWith("Open(", StringComparison.Ordinal)));
+            Assert.Equal(TimeSpan.FromMinutes(58), app.Player!.Position);
+            Assert.Equal("ReportStarted(m2, at=0:58:00)",
+                library.Calls.First(c => c.StartsWith("Report", StringComparison.Ordinal)));
+            Assert.True(Shows(session, "Transcode won't play here: original, over your limit"),
+                session.Window.DumpAccessibilityTree());
+        }, () => backend, width: 960, height: 600);
+    }
+
+    /// <summary>The original file is tried once: one that fails too stays failed, and a file that
+    /// was the original to begin with is not tried again.</summary>
+    [Theory]
+    [InlineData(true, 2)]    // a transcode, then its original: two opens, not a third
+    [InlineData(false, 1)]   // the file itself
+    public void AnOriginalFileThatWillNotOpen_IsNotTriedAgain(bool capped, int opens)
+    {
+        var library = Library();
+        // Every player's backend fails its open.
+        var backends = new List<FakeMediaBackend>();
+        Host(library, (session, app) =>
+        {
+            if (capped) app.SetMaxStreamingKbps(4000);
+            app.Play(library.Item("m2")!, TimeSpan.FromMinutes(58));
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            Assert.Equal(opens, backends.Count(b => b.Calls.Any(c => c.StartsWith("Open(", StringComparison.Ordinal))));
+            Assert.Equal(capped ? 1 : 0, library.Calls.Count(c => c.StartsWith("OriginalFileOf", StringComparison.Ordinal)));
+            Assert.Equal(PlaybackState.Failed, app.Player!.State);
+        }, () =>
+        {
+            var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(167), FailNextOpenWith = "loading failed" };
+            backends.Add(backend);
+            return backend;
+        }, width: 960, height: 600);
+    }
+
+    /// <summary>
     /// A stream that never got to its resume point is reported stopped at that point, not at
     /// 0:00, which the server takes as "watched from the start to nowhere" and clears the
     /// resume point with. Seen on a phone: an https stream the Android libmpv could not open

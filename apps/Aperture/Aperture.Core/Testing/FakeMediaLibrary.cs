@@ -337,11 +337,25 @@ public sealed class FakeMediaLibrary : IMediaLibrary
         if (FailWith is { } f) { FailWith = null; return Task.FromResult(ApertureResult<PlaybackTarget>.Fail(f)); }
         if (!_items.TryGetValue(itemId, out var item))
             return Task.FromResult(ApertureResult<PlaybackTarget>.Fail(ApertureFailureKind.NotFound, "No such item"));
+        // A ceiling is what makes a server transcode, so a capped start reports one, at the HLS
+        // playlist a Jellyfin server hands out for it.
+        bool transcoding = maxBitrateBps is > 0;
         return Task.FromResult(ApertureResult<PlaybackTarget>.Success(new PlaybackTarget(
-            new Uri($"{Server.Address}/Videos/{itemId}/stream?static=true"),
+            new Uri(transcoding
+                ? $"{Server.Address}/videos/{itemId}/master.m3u8?playSessionId=play-session-{itemId}"
+                : $"{Server.Address}/Videos/{itemId}/stream?static=true"),
             itemId, "play-session-" + itemId, "source-" + itemId,
-            // A ceiling is what makes a server transcode, so a capped start reports one.
-            Transcoding: maxBitrateBps is > 0, startPosition, item.RunTime)));
+            transcoding, startPosition, item.RunTime)));
+    }
+
+    public PlaybackTarget OriginalFileOf(PlaybackTarget transcode)
+    {
+        Calls.Add($"OriginalFileOf({transcode.ItemId})");
+        return transcode with
+        {
+            StreamUrl = new Uri($"{Server.Address}/Videos/{transcode.ItemId}/stream?static=true"),
+            Transcoding = false,
+        };
     }
 
     public Task<ApertureResult<bool>> ReportStartedAsync(PlaybackTarget target, TimeSpan position, bool paused,
