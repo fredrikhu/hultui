@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -128,6 +129,8 @@ internal sealed class MpvLoopbackProxy : IDisposable
 
             using var request = new HttpRequestMessage(method == "HEAD" ? HttpMethod.Head : HttpMethod.Get, url);
             if (range is not null) request.Headers.TryAddWithoutValidation("Range", range);
+            long asked = Stopwatch.GetTimestamp();
+            if (Log) Console.Error.WriteLine($"[mpv] proxy: {method} {url.AbsolutePath} range {range ?? "none"}");
             HttpResponseMessage response;
             try
             {
@@ -142,15 +145,24 @@ internal sealed class MpvLoopbackProxy : IDisposable
             }
             using (response)
             {
+                // How long the server took to answer: for a segment of a transcode, how long it took
+                // to make it.
                 if (Log)
-                    Console.Error.WriteLine($"[mpv] proxy: {method} {url.AbsolutePath} range {range ?? "none"}: {(int)response.StatusCode}");
+                    Console.Error.WriteLine($"[mpv] proxy: {url.AbsolutePath}: {(int)response.StatusCode} after " +
+                        $"{Stopwatch.GetElapsedTime(asked).TotalMilliseconds:F0} ms, length {response.Content.Headers.ContentLength?.ToString() ?? "unknown"}");
                 await WriteHeadAsync(net, $"{(int)response.StatusCode} {response.ReasonPhrase}", response,
                     cancel.Token).ConfigureAwait(false);
                 if (method == "HEAD") return;
                 // FFmpeg closing the connection (a seek, a stop) ends the copy with an IOException,
                 // and the request to the server with it.
                 await using var body = await response.Content.ReadAsStreamAsync(cancel.Token).ConfigureAwait(false);
-                await body.CopyToAsync(net, 64 * 1024, cancel.Token).ConfigureAwait(false);
+                var buffer = new byte[64 * 1024];
+                long sent = 0;
+                for (int got; (got = await body.ReadAsync(buffer, cancel.Token).ConfigureAwait(false)) > 0; sent += got)
+                    await net.WriteAsync(buffer.AsMemory(0, got), cancel.Token).ConfigureAwait(false);
+                if (Log)
+                    Console.Error.WriteLine($"[mpv] proxy: {url.AbsolutePath}: {sent} bytes, done after " +
+                        $"{Stopwatch.GetElapsedTime(asked).TotalMilliseconds:F0} ms");
             }
         }
         catch (Exception e) when (e is IOException or SocketException or ObjectDisposedException or OperationCanceledException)
