@@ -1196,6 +1196,7 @@ ToggleSwitch.New(true, "Wi-Fi")       // On, with a label to the right
 |---|---|---|---|
 | `IsOn` | -- | `bool` | `false` |
 | `OnChanged` | `.OnToggled(handler)` | `Action<bool>?` | `null` |
+| `IsEnabled` | `.Enabled(bool)` | `bool` | `true` |
 | `Label` | -- | `string?` | `null` |
 | `TrackWidth` / `TrackHeight` / `KnobSize` | -- | `float` | `40` / `20` / `14` |
 | `TransitionSeconds` | -- | `float` | `0.15` (zero snaps) |
@@ -1206,6 +1207,11 @@ Colours (`OnTrackColor`, `OffTrackColor`, `OffBorderColor`, `OnKnobColor`,
 which derives from the palette: the on track is `Primary`, the off state is an
 outlined `SurfaceVariant`. Override per app with
 `Theme.Dark.With(new ToggleSwitchTheme { TrackWidth = 48f })`.
+
+A disabled switch (`.Enabled(false)`) is drawn at `ToggleSwitchTheme.DisabledOpacity`,
+leaves the Tab ring, and ignores its click, Space and a reader's toggle, as a disabled
+button does. Its click stops at the switch, so a row behind it is not clicked; it stays
+under the pointer, so a tooltip can say why. `IsOn` can still be set from code.
 
 The knob position is a single number the element owns. Setting `IsOn` on a mounted
 element tweens it; on an unmounted one (the incoming twin of a rebuild, or an

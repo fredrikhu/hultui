@@ -14,6 +14,11 @@ namespace HultUI.Core.Elements;
 /// <see cref="OnChanged"/> reports the new state — with the knob animated across the
 /// track rather than snapping, and the <see cref="AccessibilityRole.Switch"/> role so a
 /// reader says "switch, on" rather than "check box, checked".
+///
+/// <para>A disabled switch is drawn at <see cref="ToggleSwitchTheme.DisabledOpacity"/>, leaves
+/// the Tab ring, and ignores its click, Space and a reader's toggle, as a disabled
+/// <see cref="ButtonElement"/> does: its click stops there, so a row behind it is not clicked
+/// either, and it stays under the pointer, so a tooltip can still say why.</para>
 /// </summary>
 /// <remarks>
 /// Every app had grown its own: one moved the knob with padding, one with
@@ -30,6 +35,8 @@ public class ToggleSwitchElement : Element
     private float _knob;
     private TweenHandle _knobTween;
     private Color _focusRingColor;
+    private bool _enabled = true;
+    private float _disabledOpacity = 0.45f;
 
     public bool IsOn
     {
@@ -41,6 +48,25 @@ public class ToggleSwitchElement : Element
             MoveKnob(value ? 1f : 0f);
             MarkPaintDirty();
             NotifyAccessibilityPropertyChanged(AccessibilityProperties.IsToggled);
+        }
+    }
+
+    /// <summary>
+    /// Off: dimmed, out of the Tab ring, and neither a click, Space nor a reader's toggle
+    /// changes it; <see cref="IsOn"/> can still be set from code. A change is told: UIA's
+    /// IsEnabled, AT-SPI's enabled and sensitive states.
+    /// </summary>
+    public bool IsEnabled
+    {
+        get => _enabled;
+        set
+        {
+            if (_enabled == value) return;
+            _enabled = value;
+            IsFocusable = value;
+            Inherited.Cursor = value ? CursorType.Pointer : CursorType.Default;
+            MarkPaintDirty();
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.IsEnabled);
         }
     }
 
@@ -115,6 +141,7 @@ public class ToggleSwitchElement : Element
         OnKnobColor = t.OnKnob ?? theme.PrimaryText;
         OffKnobColor = t.OffKnob ?? theme.Secondary;
         TransitionSeconds = t.TransitionSeconds;
+        _disabledOpacity = t.DisabledOpacity;
         _focusRingColor = theme.FocusRing;
     }
 
@@ -122,12 +149,22 @@ public class ToggleSwitchElement : Element
     {
         IsFocusable = true;
         Inherited.Cursor = CursorType.Pointer;
-        OnOwn<ClickEvent>(_ => Toggle());
+        // Registered before any app handler, so a disabled switch's click stops here, as a
+        // disabled button's does: nothing behind it sees the click either.
+        OnOwn<ClickEvent>(evt =>
+        {
+            if (!_enabled)
+            {
+                evt.StopPropagation = true;
+                return;
+            }
+            Toggle();
+        });
         OnOwn<FocusEvent>(_ => { _focused = true; MarkPaintDirty(); });
         OnOwn<BlurEvent>(_ => { _focused = false; MarkPaintDirty(); });
         OnOwn<KeyDownEvent>(evt =>
         {
-            if (!_focused) return;
+            if (!_focused || !_enabled) return;
             if (evt.Key == KeyCode.Space)
             {
                 Toggle();
@@ -188,6 +225,10 @@ public class ToggleSwitchElement : Element
         string.IsNullOrEmpty(Label)
             ? null
             : ContentTop + ctx.MeasureFirstBaseline(Label, ResolvedInherited, float.PositiveInfinity, null, TextOverflow.Ellipsis);
+
+    internal override float RenderOpacity => _enabled ? base.RenderOpacity : base.RenderOpacity * _disabledOpacity;
+
+    internal override bool IsEnabledForAccessibility => _enabled && base.IsEnabledForAccessibility;
 
     /// <summary>Unbounded: the focus ring stands 3 past the track, and a label squeezed into a
     /// short box runs out of it.</summary>
@@ -253,6 +294,7 @@ public class ToggleSwitchElement : Element
             OffKnobColor = ts.OffKnobColor;
             TransitionSeconds = ts.TransitionSeconds;
             OnChanged = ts.OnChanged;
+            IsEnabled = ts.IsEnabled;
             // Through the property, so a state change from a rebuild slides the knob
             // from where it is instead of copying the twin's snapped position.
             IsOn = ts.IsOn;

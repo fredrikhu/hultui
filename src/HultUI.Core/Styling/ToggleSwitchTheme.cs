@@ -30,5 +30,9 @@ public sealed class ToggleSwitchTheme : IThemeExtension<ToggleSwitchTheme>
     /// <summary>How long the knob takes to slide across. Zero snaps.</summary>
     public float TransitionSeconds { get; init; } = 0.15f;
 
+    /// <summary>How much of its opacity a disabled switch keeps, as a disabled button does
+    /// (<see cref="ButtonTheme.DisabledOpacity"/>).</summary>
+    public float DisabledOpacity { get; init; } = 0.45f;
+
     public static ToggleSwitchTheme CreateDefault(Theme theme) => new();
 }

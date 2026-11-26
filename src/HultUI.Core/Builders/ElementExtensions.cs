@@ -212,6 +212,8 @@ public static class ElementExtensions
 
     // ──── ToggleSwitch properties ────
     public static T OnToggled<T>(this T el, Action<bool> handler) where T : ToggleSwitchElement { el.OnChanged = handler; return el; }
+    /// <summary>Off: dimmed, unfocusable, and neither a click, Space nor a reader toggles it — but its tooltip still shows.</summary>
+    public static ToggleSwitchElement Enabled(this ToggleSwitchElement el, bool enabled = true) { el.IsEnabled = enabled; return el; }
 
     // ──── ProgressBar properties ────
     public static ProgressBarElement Value(this ProgressBarElement el, double value) { el.Value = value; return el; }

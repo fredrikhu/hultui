@@ -97,6 +97,29 @@ public class AccessibleEnabledTests
         Assert.Equal((0, 0, 0, "before"), (toggles, selects, expands, input.Text));
     }
 
+    /// <summary>A switch the app disabled reads as not enabled, and a reader's toggle leaves it
+    /// as it was; enabled again, the toggle turns it.</summary>
+    [Fact]
+    public void ADisabledSwitch_ReadsAsNotEnabled_AndAReaderCannotToggleIt()
+    {
+        int toggles = 0;
+        var s = ToggleSwitch.New(false, "Wi-Fi").OnToggled(_ => toggles++).Enabled(false);
+        var (session, router) = Mount(Box.New().Children(s));
+        using var _ = session;
+
+        Assert.False(session.Window.FindByRole(AccessibilityRole.Switch, "Wi-Fi")!.Node.IsEnabled);
+        router.ToggleElement(s.Id);
+        session.PumpFrame();
+        Assert.Equal((false, 0), (s.IsOn, toggles));
+
+        s.IsEnabled = true;
+        session.PumpFrame();
+        Assert.True(session.Window.FindByRole(AccessibilityRole.Switch, "Wi-Fi")!.Node.IsEnabled);
+        router.ToggleElement(s.Id);
+        session.PumpFrame();
+        Assert.Equal((true, 1), (s.IsOn, toggles));
+    }
+
     /// <summary>A button the app disabled stays disabled to a reader, whatever the box mark says;
     /// marking a button unavailable makes it read so though its own state is enabled.</summary>
     [Fact]
