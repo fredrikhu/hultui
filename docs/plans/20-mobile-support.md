@@ -616,6 +616,12 @@ Fixed on the way, each found on the phone:
   `HttpClient`. That was chosen over a progressive transcode through `MpvHttpStream`, which cannot
   seek by range: each seek would restart the transcode, and the player would need the time offset.
   On the S25, a 4K film at a 4 Mbps limit transcodes and plays.
+  - A seek in it took ~13 s, nearly all of it the server's. The proxy's timings showed this
+    (Aperture's Debug build sends stderr to logcat when started with `-e env`). With a software
+    transcode of 4K HEVC, Jellyfin took 7.5 s to restart and deliver the first segment, and
+    2.4–3 s for each 3 s segment after that. With the server's Intel iGPU passed into its
+    container (QuickSync), the first segment takes 1.0 s, each later one ~0.2 s, and a seek
+    ~2 s. The proxy adds ~20 ms a request.
 
 Left:
 - **SDL with 8dc8694**, when a ppy.SDL3-CS carries it; then the Android workaround goes.
