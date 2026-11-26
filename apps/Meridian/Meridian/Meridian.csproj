@@ -35,6 +35,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Meridian.Core\Meridian.Core.csproj" />
     <ProjectReference Include="..\..\..\src\HultUI\HultUI.csproj" />
+    <ProjectReference Include="..\..\..\src\HultUI.Syntax\HultUI.Syntax.csproj" />
     <ProjectReference Include="..\..\..\src\HultUI.Icons\HultUI.Icons.csproj" />
     <!-- The response pane's web preview: WebView2 on Windows, the system's CEF on Linux
          (Fedora's cef package). No bundled CEF: where there is none the preview says so. -->

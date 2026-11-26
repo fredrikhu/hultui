@@ -16,7 +16,7 @@ namespace HultUI.Icons;
 /// <c>SkiaFontCollection</c> does not have — it resolves by family name only — and it
 /// would put icon rendering back on the text pipeline, where size, colour and crispness
 /// are the font's business rather than the caller's. Path data needs no framework
-/// change and reuses the same cache the file-type glyphs use.</para>
+/// change, and is how the file-type glyphs in HultUI.Icons.Files are drawn too.</para>
 ///
 /// <para>Names are Phosphor's own, kebab-case: <c>git-branch</c>, <c>arrows-clockwise</c>.
 /// Unknown names render nothing rather than throwing, so a typo costs an icon and not

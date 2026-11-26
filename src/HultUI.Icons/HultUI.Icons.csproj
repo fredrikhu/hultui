@@ -1,14 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    Icon artwork shared by the HultUI apps: file-type glyphs (FileIcons) and the
-    Phosphor set the Junction design calls for (Phosphor). Both rasterize SVG path
-    data through the same cache.
+    The Phosphor set the Junction design calls for, rasterized from SVG path data.
 
-    Which glyph a *file* gets is decided by HultUI.Syntax: if the highlighter can
-    colour it, it is code. That is the point of sharing it — a per-app list of
-    "code" extensions drifts from the grammar set, and two apps' lists drift from
-    each other.
+    No HultUI.Syntax here: an app that wants only these icons should not ship a
+    TextMate grammar engine and a native regex library. PhosphorTests'
+    PhosphorAloneBringsNoSyntaxHighlighter keeps it that way. The file-type glyphs,
+    which ask the highlighter what is code, are HultUI.Icons.Files.
   -->
   <PropertyGroup>
     <TargetFramework>$(HultUITargetFramework)</TargetFramework>
@@ -16,17 +14,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>HultUI.Icons</RootNamespace>
     <IsAotCompatible>true</IsAotCompatible>
-    <Description>HultUI icon library: cached, palette-tinted vector glyph rasterization (Phosphor set and file-type icons).</Description>
+    <Description>HultUI icon library: cached, palette-tinted vector glyph rasterization (the Phosphor set).</Description>
   </PropertyGroup>
-
-  <ItemGroup>
-    <InternalsVisibleTo Include="VesperCommander.Tests" />
-  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\HultUI.Core\HultUI.Core.csproj" />
     <ProjectReference Include="..\HultUI.Rendering.Skia\HultUI.Rendering.Skia.csproj" />
-    <ProjectReference Include="..\HultUI.Syntax\HultUI.Syntax.csproj" />
   </ItemGroup>
 
   <!-- Phosphor.Paths.g.cs is upstream artwork, MIT-licensed by Phosphor Icons; MIT asks

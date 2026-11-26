@@ -1,4 +1,4 @@
-using HultUI.Icons;
+using HultUI.Icons.Files;
 using HultUI.Syntax;
 using Xunit;
 

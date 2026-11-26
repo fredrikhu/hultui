@@ -48,6 +48,7 @@
     <Project Path="src/HultUI.Syntax/HultUI.Syntax.csproj" />
     <Project Path="src/HultUI.RichText.Markdown/HultUI.RichText.Markdown.csproj" />
     <Project Path="src/HultUI.Icons/HultUI.Icons.csproj" />
+    <Project Path="src/HultUI.Icons.Files/HultUI.Icons.Files.csproj" />
     <Project Path="src/HultUI.Platform.SDL3/HultUI.Platform.SDL3.csproj" />
     <Project Path="src/HultUI.WinForms/HultUI.WinForms.csproj" />
     <Project Path="src/HultUI.Platform.Accessibility.Windows/HultUI.Platform.Accessibility.Windows.csproj" />

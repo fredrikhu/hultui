@@ -11,6 +11,7 @@ using HultUI.Core.Reactivity;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using HultUI.Icons;
+using HultUI.Icons.Files;
 
 namespace PerfSuite;
 

@@ -6,7 +6,7 @@ using HultUI.Rendering.Skia;
 using HultUI.Syntax;
 using SkiaSharp;
 
-namespace HultUI.Icons;
+namespace HultUI.Icons.Files;
 
 /// <summary>What kind of thing a row represents, and therefore which glyph it gets.</summary>
 public enum FileIconKind { Folder, Parent, File, Code, Image, Archive, Solution, Project }

@@ -19,16 +19,19 @@ They look free and cost you four things:
 
 ## What's in the box
 
-`HultUI.Icons` is a satellite project — apps reference it, the framework does not. Two sets live there:
+Two satellite projects — apps reference them, the framework does not:
 
-| Type | What it draws |
-|---|---|
-| `Phosphor` | [Phosphor Icons](https://phosphoricons.com) (MIT), 82 bundled: regular weight, plus `minus-bold` / `square-bold` / `x-bold` for window controls |
-| `FileIcons` | File-list glyphs — folder, page, code, image, archive — plus the Visual Studio solution and project marks |
+| Project | Type | What it draws |
+|---|---|---|
+| `HultUI.Icons` | `Phosphor` | [Phosphor Icons](https://phosphoricons.com) (MIT), 82 bundled: regular weight, plus `minus-bold` / `square-bold` / `x-bold` for window controls |
+| `HultUI.Icons.Files` | `FileIcons` | File-list glyphs — folder, page, code, image, archive — plus the Visual Studio solution and project marks |
 
 ```csharp
-using HultUI.Icons;
+using HultUI.Icons;         // Phosphor
+using HultUI.Icons.Files;   // FileIcons
 ```
+
+They are two projects because of one reference. `FileIcons` asks `HultUI.Syntax` what is code, and Syntax brings TextMateSharp, its grammars and Onigwrap, a native regex library. An app that wants only Phosphor references `HultUI.Icons`, whose closure is `HultUI.Core`, `HultUI.Text` and `HultUI.Rendering.Skia` with SkiaSharp and HarfBuzzSharp; `PhosphorAloneBringsNoSyntaxHighlighter` fails if Syntax comes back into it.
 
 ### Phosphor
 
@@ -146,6 +149,7 @@ Guards worth copying. The library's own live in `tests/HultUI.Icons.Tests`; the 
 | `EveryIconConstantNamesABundledIcon` | A typo or a rename in the generated set |
 | `IconNamesAreNeverRenderedAsText` | Both directions of the icon/text mix-up (below) |
 | `RastersAreCutAtDeviceResolution` | Losing the scale parameter at a call site |
+| `PhosphorAloneBringsNoSyntaxHighlighter` | `HultUI.Syntax`, TextMateSharp or Onigwrap back in `HultUI.Icons`' dependency graph |
 | `HairlineIconsStaySolidAtWindowControlSize` | Sub-pixel strokes rendering as a ghost |
 | `TheVisualStudioMarkHasBothNotchesCutOut` | The fill-rule trap above |
 

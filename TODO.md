@@ -977,11 +977,9 @@
   Onigwrap 1.0.11 (`libonigwrap.so`, a native build of Oniguruma). Oniguruma's upstream ended on
   2025-04-24, so the engine that runs grammar regexes over arbitrary file content gets no more security
   fixes. Until it is replaced, callers keep highlighting to files under a size cap, with a per-file
-  time budget, off the UI thread. The ways out, cheapest first: (1) `HultUI.Icons` references
-  `HultUI.Syntax` only for its code-file classification (`FileIcons` calls
-  `SyntaxHighlighter.CanHighlight`) — moving that extension table
-  into Icons drops Syntax, TextMateSharp and Onigwrap from every app that needs icons but no
-  highlighting; (2) follow TextMateSharp if it moves to a maintained engine (ask upstream; its public API
+  time budget, off the UI thread. The ways out, cheapest first: (1) done: `FileIcons`, which calls
+  `SyntaxHighlighter.CanHighlight`, moved to `HultUI.Icons.Files`, so an app that needs only the
+  Phosphor set (`HultUI.Icons`) no longer carries Syntax, TextMateSharp or Onigwrap; (2) follow TextMateSharp if it moves to a maintained engine (ask upstream; its public API
   shows `IOnigCaptureIndex` and `IOnigNextMatchResult` but no way to plug an engine in); (3) a maintained
   Oniguruma fork, rebuilt and shipped as HultUI's own native, which then needs the same glibc floor
   checks as the other natives; (4) a tokenizer that does not run TextMate regexes (tree-sitter, or a

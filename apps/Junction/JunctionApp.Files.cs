@@ -13,7 +13,7 @@ using HultUI.Core.Styling;
 using Junction.Git;
 using Junction.Theme;
 
-using HultUI.Icons;
+using HultUI.Icons.Files;
 
 namespace Junction;
 

@@ -21,6 +21,7 @@
             "src/HultUI.Terminal.Pty/HultUI.Terminal.Pty.csproj",
             "src/HultUI.Terminal.Ssh/HultUI.Terminal.Ssh.csproj",
             "src/HultUI.Icons/HultUI.Icons.csproj",
+            "src/HultUI.Icons.Files/HultUI.Icons.Files.csproj",
             "src/HultUI.Syntax/HultUI.Syntax.csproj"
           ]
         }

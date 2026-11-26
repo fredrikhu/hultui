@@ -83,12 +83,13 @@ HultUI.Platform.SDL3        SDL3 windowing, OpenGL context, input translation.
 HultUI.SourceGenerators      [Reactive] source generator (Roslyn incremental).
 HultUI                      Meta-package. Application class ties everything together.
 
-HultUI.Icons                Optional. SVG icons: the Phosphor set and file-type glyphs.
+HultUI.Icons                Optional. SVG icons: the Phosphor set.
+HultUI.Icons.Files          Optional. File-type glyphs; code is what HultUI.Syntax can colour.
 HultUI.Syntax               Optional. TextMate syntax highlighting for code views.
 ```
 
-The last two are satellites an app references directly; nothing in the framework depends on
-them, so an app that needs neither pays for neither.
+The last three are satellites an app references directly; nothing in the framework depends on
+them, so an app pays only for the ones it references.
 
 ### Dependency Graph
 

@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using HultUI.Core.Primitives;
 using HultUI.Icons;
 using Xunit;
@@ -102,6 +103,24 @@ public class PhosphorTests
 
         Assert.NotEmpty(manifest);
         Assert.Equal(manifest, Phosphor.Names.OrderBy(n => n, StringComparer.Ordinal).ToArray());
+    }
+
+    [Fact]
+    public void PhosphorAloneBringsNoSyntaxHighlighter()
+    {
+        // An app that wants only these icons should not ship a TextMate grammar engine and a
+        // native regex library. Restore writes HultUI.Icons' whole closure, projects and
+        // packages, into its assets file. FileIcons, which asks HultUI.Syntax what is code,
+        // lives in HultUI.Icons.Files for this reason.
+        using var assets = JsonDocument.Parse(File.ReadAllText(FindRepoFile("src/HultUI.Icons/obj/project.assets.json")));
+        var closure = assets.RootElement.GetProperty("libraries").EnumerateObject()
+            .Select(l => l.Name.Split('/')[0])
+            .ToArray();
+
+        Assert.Contains("HultUI.Rendering.Skia", closure);   // it is the graph, not an empty file
+        Assert.Empty(closure.Where(n => n.Equals("HultUI.Syntax", StringComparison.OrdinalIgnoreCase)
+                                        || n.StartsWith("TextMateSharp", StringComparison.OrdinalIgnoreCase)
+                                        || n.StartsWith("Onigwrap", StringComparison.OrdinalIgnoreCase)));
     }
 
     /// <summary>Walks up from the test binary to the repo root. Tests run from bin/.</summary>

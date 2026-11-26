@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using HultUI.Icons;
+using HultUI.Icons.Files;
 using SkiaSharp;
 using Xunit;
 

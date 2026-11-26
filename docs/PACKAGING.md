@@ -31,7 +31,7 @@ produces nineteen packages plus symbol packages (snupkg):
 | `HultUI.Terminal` | A terminal emulator as an element, with no natives: `TerminalController` (the emulator, the connection and the reader and writer threads between them, signals for the title, state and scrollback), `TerminalElement`, `StreamConnection` over any two streams, and a fake connection for tests. Brings `HultUI.Terminal.XTermNet`. A local shell needs a pseudoconsole: `HultUI.Terminal.Pty` (`docs/design/TERMINAL.md`). |
 | `HultUI.Terminal.Pty` | A local program under a pseudoterminal as a terminal connection: `PtyConnection` and `PtyLaunch` (the program found on `PATH`, the default shell). ConPTY on Windows, forkpty on Linux and macOS, through Porta.Pty (MIT), which brings Microsoft's out-of-band ConPTY (`conpty.dll` and both `OpenConsole.exe` hosts, which an x64 app on ARM64 needs) and its fork/exec shims. NativeAOT-compatible. |
 | `HultUI.Terminal.XTermNet` | The terminal emulator engine behind `HultUI.Terminal`: XTerm.NET (MIT) built from `external/XTerm.NET`, upstream at a pinned commit plus HultUI's patches (`docs/design/TERMINAL.md`). Its own assembly name, so it never collides with the stock `XTerm.NET.dll`; carries upstream's licence under `licenses/XTerm.NET/`. |
-| `HultUI.Icons`, `HultUI.Syntax`, `HultUI.Themes` | Satellite libraries. |
+| `HultUI.Icons`, `HultUI.Icons.Files`, `HultUI.Syntax`, `HultUI.Themes` | Satellite libraries. `HultUI.Icons` (the Phosphor set) brings no `HultUI.Syntax`; `HultUI.Icons.Files` (file-type glyphs) does, with TextMateSharp and Onigwrap (`docs/ICONS.md`). |
 | `HultUI.SourceGenerators` | The generator/analyzers standalone, for Core-only projects. Development dependency; no lib output, no symbols package. |
 
 ## Verifying a pack

@@ -59,7 +59,7 @@ public static class Ui
     public static void InvalidateIconCache()
     {
         Phosphor.InvalidateCache();
-        HultUI.Icons.FileIcons.InvalidateCache();
+        HultUI.Icons.Files.FileIcons.InvalidateCache();
     }
 
     /// <summary>

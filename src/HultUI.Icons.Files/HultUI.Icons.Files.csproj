@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    File-type glyphs (FileIcons) for the HultUI apps' file lists.
+
+    Which glyph a *file* gets is decided by HultUI.Syntax: if the highlighter can
+    colour it, it is code. That is the point of sharing it — a per-app list of
+    "code" extensions drifts from the grammar set, and two apps' lists drift from
+    each other.
+
+    Kept apart from HultUI.Icons for that reference: HultUI.Syntax brings TextMateSharp
+    and its native regex engine, which an app that wants only the Phosphor set should
+    not ship.
+  -->
+  <PropertyGroup>
+    <TargetFramework>$(HultUITargetFramework)</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HultUI.Icons.Files</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>HultUI file-type icons: cached, palette-tinted file-list glyphs, with code files recognised by HultUI.Syntax.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="VesperCommander.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HultUI.Core\HultUI.Core.csproj" />
+    <ProjectReference Include="..\HultUI.Rendering.Skia\HultUI.Rendering.Skia.csproj" />
+    <ProjectReference Include="..\HultUI.Syntax\HultUI.Syntax.csproj" />
+  </ItemGroup>
+
+</Project>

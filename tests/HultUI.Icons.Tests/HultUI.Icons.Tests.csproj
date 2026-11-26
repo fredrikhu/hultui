@@ -22,6 +22,7 @@
          "no icon name is rendered as text" — live with the app that owns the constants
          (Junction.Tests, VesperCommander.Tests), so this project stays a library test. -->
     <ProjectReference Include="..\..\src\HultUI.Icons\HultUI.Icons.csproj" />
+    <ProjectReference Include="..\..\src\HultUI.Icons.Files\HultUI.Icons.Files.csproj" />
   </ItemGroup>
 
 </Project>
