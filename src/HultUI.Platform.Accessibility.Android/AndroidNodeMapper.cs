@@ -48,8 +48,10 @@ internal static class AndroidNodeMapper
     /// <param name="children">Its exposed children's ids, in order.</param>
     /// <param name="bounds">Its box on screen in device pixels, clipped; empty when none of it shows.</param>
     /// <param name="accessibilityFocused">Whether TalkBack's focus is on it.</param>
+    /// <param name="servedIndex">For an item of a list served on demand, made with no parent: its
+    /// index, its row in the list. -1 for any other node, whose place its parent's children say.</param>
     public static AndroidNode Map(AccessibilityNode node, int id, int parentId, int[] children, PixelBox bounds,
-        bool accessibilityFocused)
+        bool accessibilityFocused, int servedIndex = -1)
     {
         var role = node.Role;
         bool enabled = node.IsEnabled;
@@ -151,7 +153,9 @@ internal static class AndroidNodeMapper
             Actions = actions,
             Range = range,
             Collection = CollectionOf(node),
-            CollectionItem = CollectionItemOf(node),
+            CollectionItem = servedIndex >= 0
+                ? new AndroidCollectionItem(servedIndex, 0, false, node.IsSelected == true)
+                : CollectionItemOf(node),
             SelectionStart = selectionStart,
             SelectionEnd = selectionEnd,
             LiveRegion = role == AccessibilityRole.Alert ? AndroidLiveRegion.Assertive : AndroidLiveRegion.None,

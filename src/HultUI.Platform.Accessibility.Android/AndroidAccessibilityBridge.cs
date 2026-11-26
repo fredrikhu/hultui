@@ -60,9 +60,14 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
     private int _accessibilityFocused = AndroidIds.None;
     private int _hovered = AndroidIds.None;
 
+    // The items of lists served on demand that TalkBack has been shown, by list: index → the item's
+    // element id, so they are let go with their list or the list's end.
+    private readonly ConcurrentDictionary<ElementId, ConcurrentDictionary<int, ElementId>> _served = new();
+
     // UI thread: the node that holds the focus, as the window told it, and the one TalkBack was told.
+    // A holder has a follower when a list inside it stands for its focus (AccessibilityNode.FocusHolder).
     private ElementId _holderId;
-    private bool _hasHolder, _holderTracksItems, _retellFocus;
+    private bool _hasHolder, _holderTracksItems, _holderHasFollower, _retellFocus;
     private ElementId _toldFocus;
     private bool _hasToldFocus;
     private volatile int _inputFocused = AndroidIds.None;
@@ -146,15 +151,41 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
         _hasHolder = focused is not null;
         _holderId = focused?.ElementId ?? default;
         _holderTracksItems = focused?.TracksCurrentItem ?? false;
-        TellFocus(focused);
+        var follower = focused is null ? null : FollowerOf(focused);
+        _holderHasFollower = follower is not null;
+        TellFocus(focused, follower);
     }
 
     public void NotifyChangesApplied(AccessibilityNode root)
     {
-        // A list's or a menu's current item moves the reader's focus with no focus change.
-        if (!_hasHolder || !(_holderTracksItems || _retellFocus)) return;
+        // A list's or a menu's current item moves the reader's focus with no focus change, and so
+        // does the cursor of a list that stands for its pane's focus.
+        if (!_hasHolder || !(_holderTracksItems || _holderHasFollower || _retellFocus)) return;
         _retellFocus = false;
-        if (Find(root, _holderId) is { } holder) TellFocus(holder);
+        if (Find(root, _holderId) is { } holder) TellFocus(holder, _holderHasFollower ? FollowerOf(holder) : null);
+    }
+
+    /// <summary>
+    /// The list inside <paramref name="holder"/> whose current item stands for its focus
+    /// (<see cref="AccessibilityNode.FocusHolder"/>: Vesper's pane and its file list), or null. A walk
+    /// of the holder's subtree, made when the focus moves and, while such a holder has it, once a frame
+    /// that applied something: the list's node is a new one in each tree.
+    /// </summary>
+    private static AccessibilityNode? FollowerOf(AccessibilityNode holder)
+    {
+        var children = holder.Children;
+        for (int i = 0; i < children.Count; i++)
+            if (FollowerOf(children[i], holder.ElementId) is { } found) return found;
+        return null;
+    }
+
+    private static AccessibilityNode? FollowerOf(AccessibilityNode node, ElementId holder)
+    {
+        if (node.FocusHolder == holder) return node;
+        var children = node.Children;
+        for (int i = 0; i < children.Count; i++)
+            if (FollowerOf(children[i], holder) is { } found) return found;
+        return null;
     }
 
     public void NotifyWindowActivated()
@@ -183,11 +214,30 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
         Interlocked.Increment(ref _generation);
     }
 
-    /// <summary>Lets go of the ids of nodes the diff removed. An id is never given again.</summary>
+    /// <summary>Lets go of the ids of nodes the diff removed, and of the items a removed list served.
+    /// An id is never given again.</summary>
     private void Forget(TreeDiff diff)
     {
         foreach (var removed in diff.Removed)
-            if (_ids.TryRemove(removed.Node.ElementId, out int id)) _elements.TryRemove(id, out _);
+        {
+            Forget(removed.Node.ElementId);
+            if (removed.Node.IsVirtualItemContainer) ForgetServed(removed.Node.ElementId, from: 0);
+        }
+    }
+
+    private void Forget(ElementId element)
+    {
+        if (_ids.TryRemove(element, out int id)) _elements.TryRemove(id, out _);
+    }
+
+    /// <summary>Lets go of the ids of a served list's items from <paramref name="from"/> on: gone with
+    /// the list, or with its end.</summary>
+    private void ForgetServed(ElementId list, int from)
+    {
+        if (!_served.TryGetValue(list, out var items)) return;
+        foreach (var (index, item) in items)
+            if (index >= from && items.TryRemove(index, out _)) Forget(item);
+        if (from == 0) _served.TryRemove(list, out _);
     }
 
     private void Begin()
@@ -296,6 +346,10 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
                 if (id == Volatile.Read(ref _accessibilityFocused)) Content(id, AndroidContentChange.Undefined);
                 break;
             case AccessibilityProperties.ItemCount:
+                // A served list's items past its end are gone.
+                if (node.IsVirtualItemContainer) ForgetServed(node.ElementId, from: node.Served.Count);
+                Content(id, AndroidContentChange.Subtree);
+                break;
             case AccessibilityProperties.ItemSelection:
             case AccessibilityProperties.NativeContent:
                 Content(id, AndroidContentChange.Subtree);
@@ -387,8 +441,9 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
     }
 
     /// <summary>Tells TalkBack where the input focus is: on the reader's focus target of the node that
-    /// holds it (a list's current item, <see cref="AccessibilityFocus"/>).</summary>
-    private void TellFocus(AccessibilityNode? holder)
+    /// holds it (a list's current item, or the cursor of a list that stands for it:
+    /// <see cref="AccessibilityFocus"/>).</summary>
+    private void TellFocus(AccessibilityNode? holder, AccessibilityNode? follower)
     {
         if (holder is null)
         {
@@ -396,11 +451,12 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
             _hasToldFocus = false;
             return;
         }
-        var target = AccessibilityFocus.TargetOf(holder, follower: null);
+        var target = AccessibilityFocus.TargetOf(holder, follower);
         if (_hasToldFocus && target == _toldFocus) return;
         _toldFocus = target;
         _hasToldFocus = true;
-        int id = IdOf(target);
+        // An item a list serves on demand is kept with its list's, to be let go with them.
+        int id = ServedListOf(holder, follower, target) is { } list ? ItemIdOf(list.ElementId, list.CurrentItem, target) : IdOf(target);
         _inputFocused = id;
         if (_enabled) Send([new AndroidEvent(AndroidEventType.ViewFocused, id)]);
     }
@@ -426,6 +482,27 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
     /// <summary>The element's virtual id, or <see cref="AndroidIds.None"/> when TalkBack has not been
     /// shown it.</summary>
     internal int KnownId(ElementId element) => _ids.TryGetValue(element, out int id) ? id : AndroidIds.None;
+
+    /// <summary>The virtual id of item <paramref name="index"/> of a list served on demand, whose
+    /// element id is <paramref name="item"/>, given now if it has none, and kept with its list's.</summary>
+    private int ItemIdOf(ElementId list, int index, ElementId item)
+    {
+        _served.GetOrAdd(list, static _ => new ConcurrentDictionary<int, ElementId>()).TryAdd(index, item);
+        return IdOf(item);
+    }
+
+    private int ItemIdOf(AccessibilityNode list, int index) => ItemIdOf(list.ElementId, index, VirtualItemId.For(list.ElementId, index));
+
+    /// <summary>The list served on demand whose current item <paramref name="target"/> is, when the
+    /// focus target is one: the holder's own items, or its follower's.</summary>
+    private static AccessibilityNode? ServedListOf(AccessibilityNode holder, AccessibilityNode? follower, ElementId target)
+    {
+        if (!VirtualItemId.IsItem(target)) return null;
+        foreach (var list in (ReadOnlySpan<AccessibilityNode?>)[holder, follower])
+            if (list is { IsVirtualItemContainer: true, CurrentItem: >= 0 } && AccessibilityFocus.CurrentItemId(list) == target)
+                return list;
+        return null;
+    }
 
     // ──── The provider's side (Android's main thread) ────
 
@@ -466,12 +543,61 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
         foreach (var child in node.Children) AddAll(child, nodes);
     }
 
-    private AccessibilityNode? Lookup(int id, out Index? index)
+    private AccessibilityNode? Lookup(int id, out Index? index) => Lookup(id, out index, out _);
+
+    /// <summary>
+    /// The node of virtual view <paramref name="id"/> in the tree last applied, or null for one that is
+    /// gone. An item a list serves on demand (over 2,000 items) has no node in the tree: one is made for
+    /// it now, from the list's node and the list, and <paramref name="served"/> says whose item it is.
+    /// </summary>
+    private AccessibilityNode? Lookup(int id, out Index? index, out ServedItem? served)
     {
+        served = null;
         index = IndexNow();
         if (index is null) return null;
         if (id == AndroidIds.Host) return index.Root;   // the host's record is made from the root's
-        return _elements.TryGetValue(id, out var element) && index.Nodes.TryGetValue(element, out var node) ? node : null;
+        if (!_elements.TryGetValue(id, out var element)) return null;
+        if (index.Nodes.TryGetValue(element, out var node)) return node;
+        if (!VirtualItemId.IsItem(element) || !VirtualItemId.TryDecode(element, out var listId, out int item)) return null;
+        if (!index.Nodes.TryGetValue(listId, out var list) || !list.IsVirtualItemContainer) return null;
+        if (ServedNode(list, item, element) is not { } made) return null;
+        served = new ServedItem(list, item);
+        return made;
+    }
+
+    /// <summary>An item of a list served on demand, as a node made when TalkBack asks.</summary>
+    private readonly record struct ServedItem(AccessibilityNode List, int Index);
+
+    /// <summary>
+    /// Item <paramref name="index"/> of <paramref name="list"/> as the node the tree would have had for
+    /// it (<see cref="AccessibilityTreeBuilder"/>'s item nodes): its name, whether it is a choice that
+    /// is on, opens something or can be used, read from the list now, as UI Automation and AT-SPI read
+    /// an item served on demand; selected as the list's node carries it; its box on screen. No parent:
+    /// its box is on screen already. Null past the list's end.
+    /// </summary>
+    private static AccessibilityNode? ServedNode(AccessibilityNode list, int index, ElementId element)
+    {
+        if ((uint)index >= (uint)list.Served.Count || !list.TryGetServedItemBox(index, out var box, out bool offscreen))
+            return null;
+        string? label = null;
+        bool? toggled = null, expanded = null;
+        bool enabled = true;
+        try
+        {
+            if (list.ItemSource is { } source)
+            {
+                label = source.GetItemLabel(index);
+                toggled = source.ItemIsToggled(index);
+                expanded = source.ItemIsExpanded(index);
+                enabled = source.ItemIsEnabled(index);
+            }
+        }
+        catch { /* the live list, read on Android's thread */ }
+        return new AccessibilityNode(element, AccessibilityTreeBuilder.ItemRoleOf(list.Role), label, description: null, box,
+            isEnabled: enabled, isToggled: toggled, expanded: expanded, isSelected: list.Served.IsSelected(index))
+        {
+            IsOffscreen = offscreen,
+        };
     }
 
     /// <summary>
@@ -482,8 +608,14 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
     public AndroidNode? Node(int id, int originX = 0, int originY = 0)
     {
         if (id == AndroidIds.Announcer) return AnnouncerNode(originX, originY);
-        var node = Lookup(id, out var index);
+        var node = Lookup(id, out var index, out var served);
         if (node is null || index is null) return null;
+        if (served is { } item)
+        {
+            var box = ServedVisibleBox(item.List, node.BoundingRect);
+            return AndroidNodeMapper.Map(node, id, ShownSelfOrAncestor(item.List) is { } shown ? IdOf(shown.ElementId) : AndroidIds.Host,
+                [], Pixels(box, originX, originY), id == AccessibilityFocusedId, servedIndex: item.Index);
+        }
         var bounds = ScreenBounds(node, originX, originY);
         if (id == AndroidIds.Host)
             return new AndroidNode { Id = AndroidIds.Host, ParentId = AndroidIds.None, Children = [IdOf(node.ElementId)], BoundsInScreen = bounds };
@@ -494,6 +626,9 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
     /// the host for the root.</summary>
     private int ParentIdOf(AccessibilityNode node) =>
         ShownAncestor(node) is { } parent ? IdOf(parent.ElementId) : AndroidIds.Host;
+
+    private static AccessibilityNode? ShownSelfOrAncestor(AccessibilityNode node) =>
+        AndroidNodeMapper.IsExposed(node) ? node : ShownAncestor(node);
 
     /// <summary>The nearest node above <paramref name="node"/> that is a virtual view; null above the root.</summary>
     private static AccessibilityNode? ShownAncestor(AccessibilityNode node)
@@ -507,7 +642,7 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
     /// its place.</summary>
     private int[] ChildIds(AccessibilityNode node)
     {
-        if (node.Children.Count == 0) return [];
+        if (node.Children.Count == 0 && !node.IsVirtualItemContainer) return [];
         var ids = new List<int>(node.Children.Count);
         AddShown(node, ids);
         return [.. ids];
@@ -515,11 +650,66 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
 
     private void AddShown(AccessibilityNode node, List<int> ids)
     {
+        // A list served on demand: the items on screen, as a RecyclerView's are its children. TalkBack
+        // scrolls the list (ScrollForward) when a swipe goes past the last of them, and reads them again.
+        if (node.IsVirtualItemContainer)
+        {
+            var (first, end) = ShownServed(node);
+            for (int i = first; i < end; i++)
+                if (node.TryGetServedItemBox(i, out _, out bool offscreen) && !offscreen) ids.Add(ItemIdOf(node, i));
+        }
         foreach (var child in node.Children)
         {
             if (AndroidNodeMapper.IsExposed(child)) ids.Add(IdOf(child.ElementId));
             else AddShown(child, ids);
         }
+    }
+
+    /// <summary>The most items of a served list shown at once: a guard against a list of thousands of
+    /// rows of no height.</summary>
+    internal const int MaxShownItems = 256;
+
+    /// <summary>
+    /// The items of a list served on demand that reach into its viewport, as [first, end): a binary
+    /// search for the first whose box ends below the viewport's top (items go down in index order,
+    /// rows of a list in columns too), then each after it until one starts below the viewport.
+    /// </summary>
+    private static (int First, int End) ShownServed(AccessibilityNode list)
+    {
+        int count = list.Served.Count;
+        if (count == 0 || list.ScrollExtent is not { } extent) return (0, 0);
+        float top = extent.Viewport.Y, bottom = extent.Viewport.Bottom;
+        int lo = 0, hi = count;
+        while (lo < hi)
+        {
+            int mid = lo + (hi - lo) / 2;
+            if (list.TryGetServedItemBox(mid, out var box, out _) && box.Bottom <= top) lo = mid + 1;
+            else hi = mid;
+        }
+        int end = lo;
+        while (end < count && end - lo < MaxShownItems && list.TryGetServedItemBox(end, out var box, out _) && box.Y < bottom)
+            end++;
+        return (lo, end);
+    }
+
+    /// <summary>A served item's box clipped to its list's viewport and to what shows of the list.</summary>
+    private static Rect ServedVisibleBox(AccessibilityNode list, Rect box)
+    {
+        if (list.ScrollExtent is { } extent) box = box.Intersect(extent.Viewport);
+        if (box.Width <= 0f || box.Height <= 0f) return Rect.Zero;
+        box = box.Intersect(VisibleBox(list));
+        return box.Width > 0f && box.Height > 0f ? box : Rect.Zero;
+    }
+
+    /// <summary>The served item of <paramref name="list"/> under <paramref name="point"/> (layout
+    /// units), or <see cref="AndroidIds.None"/>.</summary>
+    private int ServedAt(AccessibilityNode list, Point point)
+    {
+        var (first, end) = ShownServed(list);
+        for (int i = first; i < end; i++)
+            if (list.TryGetServedItemBox(i, out var box, out _) && ServedVisibleBox(list, box).Contains(point))
+                return ItemIdOf(list, i);
+        return AndroidIds.None;
     }
 
     /// <summary>
@@ -538,9 +728,11 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
         return box.Width > 0f && box.Height > 0f ? box : Rect.Zero;
     }
 
-    private PixelBox ScreenBounds(AccessibilityNode node, int originX, int originY)
+    private PixelBox ScreenBounds(AccessibilityNode node, int originX, int originY) => Pixels(VisibleBox(node), originX, originY);
+
+    /// <summary>A box in layout units, on screen in device pixels: times the scale, plus the surface's place.</summary>
+    private PixelBox Pixels(Rect box, int originX, int originY)
     {
-        var box = VisibleBox(node);
         if (box.Width <= 0f || box.Height <= 0f) return default;
         float scale = Scale;
         return new PixelBox(
@@ -564,6 +756,8 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
         var point = new Point(x / scale, y / scale);
         var root = index.Root;
         var hit = Deepest(root, point) ?? (VisibleBox(root).Contains(point) ? root : null);
+        // A list served on demand: the item under the finger, which has no node.
+        if (hit is { IsVirtualItemContainer: true } && ServedAt(hit, point) is var item && item != AndroidIds.None) return item;
         // A hidden node (a named button's label) is found as the shown node above it.
         if (hit is not null && !AndroidNodeMapper.IsExposed(hit)) hit = ShownAncestor(hit);
         return hit is null ? AndroidIds.None : IdOf(hit.ElementId);
