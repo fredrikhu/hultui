@@ -2,7 +2,7 @@
 
 **Status (2026-11-26): approved by the user, all four recommendations in §6 taken. Built the same
 day, and checked with TalkBack on the emulator; §8 and §9 say what is built, what the emulator
-showed, and what is left; §10 has a decision for the user.** It adds no public API. Plan 20, phase 6 ([plan](../plans/20-mobile-support.md) §2.9). Required
+showed, and what is left; §10 is the TextInput decision, taken and built.** It adds no public API. Plan 20, phase 6 ([plan](../plans/20-mobile-support.md) §2.9). Required
 before any Android release beyond the user's own devices: the desktop apps hold that bar
 (`docs/ACCESSIBILITY-PLAN.md`).
 
@@ -175,7 +175,7 @@ The differ now hands a value change its previous node, which TalkBack's text-cha
 
 All internal; no public API. Each part has its desktop tests, each checked by breaking the part, and
 `spikes/AndroidHello/scripts/talkback-a11y-check.ps1` checks them with TalkBack on the emulator
-(the spike's `-e sample a11y`; 10 of 10 pass, and `talkback-check.ps1` still 8 of 8).
+(the spike's `-e sample a11y`; 13 of 13 pass, and `talkback-check.ps1` still 8 of 8).
 
 **Lists over 2,000 items.** The items on screen are the list's virtual children, as a RecyclerView's
 are: each a node made when TalkBack asks, from the list's node (where the item is, whether it is
@@ -205,9 +205,10 @@ that holder has the focus.
 - **Found on the emulator:** TalkBack 15 moves through a field it is only reading by itself ("handled
   by Talkback") and leaves the caret. It calls the field's actions once the field has the input
   focus, as Android's EditText has it.
-- **Not a TextInput:** its caret is not in the tree. It offers no text pattern on any platform: its
-  node has a value and no text. It needs the same text a TextArea offers a reader, which changes what
-  UI Automation and AT-SPI see too. That is the user's call (§10).
+- **A TextInput too,** since the user's OK the same day (§10): it offers its text on every platform.
+- **Each move said once.** A move was spoken twice ("e. e"): the traversal, then the caret-moved event
+  the move caused a frame later. The bridge now leaves a caret where TalkBack's own move put it
+  untold, and tells one the app or the user moved.
 
 **Long press.** A finger's long press means something where a long-press handler or a context menu
 is on the element or above it.
@@ -230,6 +231,12 @@ is on the element or above it.
 closes an open context menu, or sends Escape where the keyboard is, as Back's second step does.
 Checked on the desktop only: TalkBack calls it from its actions menu, which the script cannot open.
 
+**A dialog's title.** Found on the emulator: as a dialog opened, the window put the focus on its
+Cancel button, and TalkBack said only "Cancel. Button". The pane title told as the pane appeared
+was never spoken. The dialog's node now has its name as its container title too (Android 14 and
+later). TalkBack says it as its focus goes in, "Cancel. Button. In Delete the file?", and "Out of
+Delete the file?" as the dialog closes. The dialog's message is a label to swipe to.
+
 **Aperture's main views,** read through the bridge on the desktop
 (`tests/Aperture.Tests/ApertureAppHostTests.TalkBack.cs`). The bridge is installed as the window's
 own, over the tests' fake library. Home, a library's grid, a detail page and search each read with
@@ -241,17 +248,36 @@ every stop saying something, for example "Resume Solaris, 1972, part-watched, 1 
 - **A sort button says its state in its name** ("A–Z (on)"), not as a toggled state.
 
 **Seen and left:**
-- **Said twice:** the last character of a field was spoken twice once ("e. e"): the traversal, then,
-  likely, the selection change it caused.
 - **No diff tells a change of the long-press bit.** A context menu added to an element that is
   already shown takes a new tree to reach TalkBack.
 - **The phone, by hand,** and **Aperture's main views on a device**, which wait for Aperture's
   Android build (phase 5).
 
-## 10. For the user
+## 10. A TextInput's text for a reader (decided and built 2026-11-26)
 
-**A TextInput's text for a reader.** Today a TextInput's node carries its text as a value only, on
-every platform. So TalkBack cannot read it by character, nor know where its caret is, and a desktop
-reader gets no text pattern for it either. Giving it a text source, as TextArea has, would fix all
-three. But NVDA, Narrator and Orca would then read a single-line field through the text pattern.
-That is how native edit controls work, but it is a change on the desktop.
+**The question.** A TextInput's node carried its text as a value only, on every platform. So
+TalkBack could not read it by character, nor know where its caret was, and a desktop reader got no
+text pattern for it either. A text source, as TextArea has, would fix all three. But NVDA, Narrator
+and Orca would then read a single-line field through the text pattern too, as they read a native
+edit control. **The user said yes.**
+
+**Built** (`TextInputElement.Accessibility.cs`):
+- **A versioned text source**, as the text area's: the tree takes a version (the string, the caret,
+  the anchor), and the differ and the window's patch for a keystroke or a caret move compare
+  versions. No tree is built for either.
+- **Caret moves are told where they are made:** keys, the pointer and its drag, the touch handles,
+  a word chosen by touch, a reader's selection, `CursorPosition`, `SelectAll`.
+- **The value is told as well as the text** (`AccessibleTextVersion.TellsValue`), as a browser tells
+  an `<input>`'s value: a one-line value is short. Each keystroke now has:
+  - **UI Automation:** a ValueValue change, TextChanged and TextSelectionChanged.
+  - **AT-SPI:** accessible-value, text-changed and text-caret-moved. The object keeps its value.
+- **A masked field offers no text,** as before: its value is bullets. The mask going on or off tells
+  no text change, which would have told the secret as deleted or inserted.
+
+**Checked:**
+- **Desktop:** in the headless tests for UI Automation, AT-SPI and the window's patch, each part
+  failing its test without it.
+- **Emulator:** TalkBack reads a one-line field by character, and its caret moves
+  (`talkback-a11y-check.ps1`, 13 of 13).
+- **Not checked:** a real desktop reader (NVDA, Narrator, Orca). The UI Automation and AT-SPI events
+  are what a native edit raises, but no one has listened yet.

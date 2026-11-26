@@ -242,6 +242,48 @@ Two findings, both fixed in `HultUIActivity`, each checked by taking the fix out
   letters. On such a switch HultUI hands SDL's `showTextInput` the type SDL would have made and
   restarts the keyboard's input.
 
+## TalkBack on the emulator (phase 6, 2026-11-26)
+
+Two scripts, emulator only (adb root, raw touches; `scripts/talkback-lib.ps1` says why). Run
+`keyboard-check.ps1` before them, or cold-boot after: the raw touches leave Gboard in its
+hardware-keyboard mode.
+- `scripts/talkback-check.ps1`, the main sample: 8 of 8. Explore by touch, a double tap clicks,
+  an announcement, swipes in order, swiping past a list's end scrolls it, two fingers scroll.
+- `scripts/talkback-a11y-check.ps1`, `-e sample a11y`: 13 of 13. A text area and a one-line field
+  read by character with the caret moving, a held double tap opening a context menu with TalkBack's
+  focus in it, Back closing it, a dialog whose title is said and that Back closes, a list of 3,000
+  items.
+
+## TalkBack on the phone, by hand (not done yet)
+
+The phone has no root, so nothing can drive TalkBack there. To check by hand, after installing the
+spike's current build (`adb install -r`, once the user OKs it; it replaces the spike already there):
+1. Turn TalkBack on: Settings → Accessibility → TalkBack, or hold both volume keys if the shortcut
+   is on.
+2. Start the a11y sample: `adb shell am start -n
+   org.hultui.spike.androidhello/crc64ea9bba10985cac6f.MainActivity -e sample a11y`.
+
+Then:
+
+| Do | Hear (or see) |
+|---|---|
+| Rest a finger on "Options" | "Options. Button", then "Double-tap and hold to long press" |
+| Double tap anywhere | A confirm dialog: "Cancel. Button. In Delete the file?" |
+| Back (the button bar's) | The dialog closes |
+| Double tap and hold, on "Options" focused | A menu: "Rename. Menu item. 1 of 2" |
+| Swipe right | "Delete" |
+| Back | The menu closes |
+| Rest on the notes field, double tap it, then swipe up | The keyboard; "e", the field's last character, and its caret moves one back |
+| Swipe up again | "r" |
+| The same on the "Title" field | "o", from "delta echo" |
+| Rest on "Item 2" | "Item 2. 3 of 3000. In list. 3000 items" |
+| Double tap | `activated Item 2` in logcat |
+| Swipe right past the last item on screen | The list scrolls; "Item 13. 14 of 3000", and on |
+| The main sample (no extra), "Tap me", double tap | "Counted 1", the announcement |
+
+Watch for anything said twice, a stop that says nothing, or a highlight drawn where the element is
+not (the S25 is scale 3.0, the emulator 2.625).
+
 ## What broke (for phase 2)
 
 1. **Black after returning from the background.** The app survives Home and return (no crash,

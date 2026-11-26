@@ -304,8 +304,10 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
                 break;
             case AccessibilityProperties.Value:
                 Content(id, NameChange(node));
-                // A field with no text pattern (TextInput) tells its edits as its value.
-                if (node.Role == AccessibilityRole.TextInput && !node.IsPassword) TextChanged(id, change.Previous, node);
+                // A field that offers no text (a masked one) tells its edits as its value; one that
+                // offers it, by its text change (a one-line field tells both).
+                if (node.Role == AccessibilityRole.TextInput && !node.IsPassword && !node.OffersText)
+                    TextChanged(id, change.Previous, node);
                 break;
             case AccessibilityProperties.Content:
                 Content(id, NameChange(node));
@@ -318,6 +320,9 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
                 if (node.Text is { } text)
                 {
                     (int from, int to) = text.HasSelection ? (text.SelectionStart, text.SelectionEnd) : (text.Caret, text.Caret);
+                    // The caret where TalkBack's own move put it: the move was told and spoken already,
+                    // and told again it was spoken twice ("e. e", seen on the emulator).
+                    if (from == to && IsOwnCaretMove(id, from)) break;
                     _events.Add(new AndroidEvent(AndroidEventType.ViewTextSelectionChanged, id)
                     { FromIndex = from, ToIndex = to, ItemCount = text.Length });
                 }
@@ -906,6 +911,23 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
 
     private Traversal? _traversal;
 
+    // The caret a move of TalkBack's last put in a field (its virtual id and the offset, packed), for
+    // the UI thread to leave the move untold; none at long.MinValue.
+    private long _ownCaretMove = long.MinValue;
+
+    private static long PackCaret(int id, int caret) => ((long)id << 32) | (uint)caret;
+
+    private void NoteOwnCaretMove(int id, int caret) => Interlocked.Exchange(ref _ownCaretMove, PackCaret(id, caret));
+
+    /// <summary>UI thread: whether the caret at <paramref name="caret"/> in virtual view
+    /// <paramref name="id"/> is where TalkBack's last move put it; that move is then taken.</summary>
+    private bool IsOwnCaretMove(int id, int caret)
+    {
+        long own = PackCaret(id, caret);
+        return Interlocked.Read(ref _ownCaretMove) == own
+            && Interlocked.CompareExchange(ref _ownCaretMove, long.MinValue, own) == own;
+    }
+
     /// <summary>
     /// The next or the previous character, word, line or paragraph of the node's text from where
     /// TalkBack is in it (<see cref="Traversal"/>), told as a traversal, which TalkBack speaks. In a
@@ -936,6 +958,8 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
         if (field && _edits is not null)
         {
             int anchor = extend ? (t.Anchor >= 0 ? t.Anchor : from) : cursor;
+            // A caret placed is told by the traversal; a selection grown is told as one too.
+            if (anchor == cursor) NoteOwnCaretMove(id, cursor);
             _edits.SetSelection(node.ElementId, anchor, cursor);
             t.Anchor = anchor;
         }

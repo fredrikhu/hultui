@@ -44,8 +44,21 @@ try {
     SwipeUp
     Start-Sleep -Seconds 1
     $got = Heard
-    Check 'by character: the one before, and the caret moved' ([bool]($got -match '^said: r$') -and [bool]($got -match '^app: caret 34 selection 34\.\.34$')) ($got -join ' | ')
+    Check 'by character: the one before, and the caret moved' ([bool]($got -match '^said: r$') -and [bool]($got -match '^app: caret 34 selection 34\.\.34 ')) ($got -join ' | ')
     Adb shell input keyevent KEYCODE_BACK   # the keyboard down
+    Start-Sleep -Seconds 2
+
+    # 2b. The same in a one-line field (a TextInput, "delta echo"): its text is a reader's too.
+    Read-Tree
+    $field = Find 'delta echo' 'android.widget.EditText'
+    Hold $field.X $field.Y
+    DoubleTap $field.X $field.Y
+    Adb logcat -c
+    SwipeUp
+    Start-Sleep -Seconds 1
+    $got = Heard
+    Check 'a one-line field by character, its caret moved' ([bool]($got -match '^bridge: traversed Character back 9\.\.10$') -and [bool]($got -match '^said: o$') -and [bool]($got -match 'field caret 9$')) ($got -join ' | ')
+    Adb shell input keyevent KEYCODE_BACK
     Start-Sleep -Seconds 2
 
     # 3. A long press on the button (a double tap held, which Android passes on as a press at
@@ -64,6 +77,18 @@ try {
     Start-Sleep -Seconds 2
     Read-Tree
     Check 'Back closes the menu' ($dump -notmatch 'text="Rename"') ''
+
+    # 4b. A double tap on the button opens its dialog, whose title TalkBack says; Back closes it.
+    Hold $options.X $options.Y
+    Adb logcat -c
+    DoubleTap $options.X $options.Y
+    $got = Heard
+    Check 'a dialog opens and its title is said' ([bool]($got -match '^app: dialog: open$') -and [bool]($got -match 'Delete the file\?')) ($got -join ' | ')
+    Adb logcat -c
+    Adb shell input keyevent KEYCODE_BACK
+    Start-Sleep -Seconds 2
+    $got = Heard
+    Check 'Back closes the dialog' ([bool]($got -match '^app: dialog: closed False$')) ($got -join ' | ')
 
     # 5. The list of 3,000: a finger on an item says it, a double tap runs it.
     $item = Find 'Item 2' 'android.view.View'

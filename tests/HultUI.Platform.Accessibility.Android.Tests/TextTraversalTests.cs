@@ -47,10 +47,11 @@ public class TextTraversalTests
         Assert.Equal(all | AndroidGranularity.Line, h.Node(area).Granularities);
         Assert.True(h.Node(area).Can(AndroidActions.SetSelection));
 
-        // A text input's caret is not in the tree; a password is never read out.
-        Assert.Equal(AndroidGranularity.None, h.Node(input).Granularities);
-        Assert.False(h.Node(input).Can(AndroidActions.NextAtGranularity));
+        // A text input offers its text and its caret, as a text area does; a password is never read out.
+        Assert.Equal(all | AndroidGranularity.Line, h.Node(input).Granularities);
+        Assert.True(h.Node(input).Can(AndroidActions.SetSelection));
         Assert.Equal(AndroidGranularity.None, h.Node(secret).Granularities);
+        Assert.False(h.Node(secret).Can(AndroidActions.SetSelection));
     }
 
     [Fact]
@@ -107,6 +108,43 @@ public class TextTraversalTests
         Assert.Equal((1, 2, true), Moved(h, id, AndroidGranularity.Character));
         Assert.Equal((1, 2, false), Moved(h, id, AndroidGranularity.Character, forward: false, extend: true));
         Assert.Equal([$"selection {element} 1 1", $"selection {element} 2 2", $"selection {element} 2 1"], h.Host.Calls);
+    }
+
+    [Fact]
+    public void InATextInput_WordsAreRead_AndTheCaretGoesWithThem()
+    {
+        var input = TextInput.New("hello big world").Width(300);
+        input.CursorPosition = 0;
+        using var h = Page(input);
+        int id = h.Id(input);
+        Assert.Equal((0, 0), (h.Node(input).SelectionStart, h.Node(input).SelectionEnd));
+
+        Assert.Equal((0, 5, true), Moved(h, id, AndroidGranularity.Word));
+        Assert.Equal((6, 9, true), Moved(h, id, AndroidGranularity.Word));
+        Assert.Equal("big", Said(h));
+        Assert.Equal([$"selection {input.Id.Value} 5 5", $"selection {input.Id.Value} 9 9"], h.Host.Calls);
+    }
+
+    [Fact]
+    public void TheCaretWhereTalkBacksMovePutIt_IsNotToldAgain_ButOneMovedElsewhereIs()
+    {
+        var area = TextArea.New("abc").Width(300).Height(100);
+        area.Select(0, 0);
+        using var h = Page(area);
+        int id = h.Id(area);
+        Moved(h, id, AndroidGranularity.Character);
+
+        // The router is a fake: the move lands as the window would land it, a frame later.
+        h.Sink.Clear();
+        area.Select(1, 1);
+        h.Apply();
+        Assert.DoesNotContain(h.Sink.Events, e => e.Type == AndroidEventType.ViewTextSelectionChanged);
+
+        // A caret the app moved is told.
+        area.Select(3, 3);
+        h.Apply();
+        var told = Assert.Single(h.Sink.Events, e => e.Type == AndroidEventType.ViewTextSelectionChanged);
+        Assert.Equal((3, 3), (told.FromIndex, told.ToIndex));
     }
 
     [Fact]

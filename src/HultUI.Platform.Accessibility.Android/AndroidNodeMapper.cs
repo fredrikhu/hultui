@@ -241,7 +241,11 @@ internal static class AndroidNodeMapper
                     ? (name, null, description, null, null)
                     : (value, null, Join(name, description), null, null);
             case AccessibilityRole.Dialog:
-                return (null, null, description, name, null);
+                // Its pane title, spoken as it opens, and its container title, spoken as TalkBack's
+                // focus enters it: the window moves the focus into an opened dialog at once (its
+                // Cancel button), and TalkBack said only "Cancel. Button", never the title (seen on
+                // the emulator).
+                return (null, null, description, name, name);
             case AccessibilityRole.List or AccessibilityRole.Tree or AccessibilityRole.Menu or AccessibilityRole.MenuBar
                 or AccessibilityRole.TabList or AccessibilityRole.TabPanel or AccessibilityRole.Group
                 or AccessibilityRole.ScrollView or AccessibilityRole.Document or AccessibilityRole.Application:

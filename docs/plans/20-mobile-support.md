@@ -574,10 +574,10 @@ live region. What is left is in TALKBACK.md §8.
 - A double tap held opens a context menu, and TalkBack's focus goes into it.
 - Dialogs and menus can be dismissed.
 
-All are checked on the emulator by `talkback-a11y-check.ps1`, 10 of 10, except dismiss, which is
-checked on the desktop only. Left:
-- a TextInput's text for a reader (the user's call, §10 there);
-- the phone, by hand;
+All are checked on the emulator by `talkback-a11y-check.ps1`, 13 of 13, except dismiss, which is
+checked on the desktop only. A TextInput offers its text to readers on every platform since the
+same day, on the user's word (§10 there). Left:
+- the phone, by hand (`spikes/AndroidHello/README.md`, "TalkBack on the phone");
 - Aperture on a device, which waits for phase 5.
 
 **Exit criteria**

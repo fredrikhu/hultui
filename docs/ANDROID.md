@@ -176,7 +176,7 @@ These are plan 20's later phases:
 - **No pinch** yet, and no magnifier over the text a handle moves.
 - **TalkBack is checked on the emulator only** (phase 6, docs/design/TALKBACK.md §8 and §9). It
   reads, explores, swipes, clicks, scrolls, moves through text by unit, long-presses and hears
-  announcements. A TextInput (one line) cannot be moved through by character yet; a TextArea can.
+  announcements. Nothing is checked on a phone yet.
 - **File dialogs** return Android's `content://` addresses, which `File.Open` cannot open.
 - **No second window.**
 - **Video** needs a libmpv build for Android (phase 5).

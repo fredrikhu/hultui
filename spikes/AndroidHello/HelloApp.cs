@@ -74,6 +74,9 @@ internal static class HelloApp
         var area = TextArea.New("alpha bravo charlie\nsecond line here").Height(96f).FlexShrink(0);
         area.AccessibleName = "Notes";
         area.Select(0, 0);
+        // A one-line field, which offers its text to a reader too (TALKBACK.md §10).
+        var field = TextInput.New("delta echo").FlexShrink(0);
+        field.AccessibleName = "Title";
         var menuButton = Box.New().Padding(new Thickness(12, 20, 12, 20)).Background(Color.FromHex("#4F46E5"))
             .CornerRadius(10f).TextColor(Color.White).FlexShrink(0).Children(Text.New("Options").FontSize(18f));
         menuButton.Role = HultUI.Core.Accessibility.AccessibilityRole.Button;
@@ -100,7 +103,7 @@ internal static class HelloApp
         list.OnItemActivate = item => Info($"activated {item}");
         var root = Flex.Column(gap: 12).Padding(16).Children(
             Text.New("Accessibility check").FontSize(24f).FontWeight(FontWeight.Bold).FlexShrink(0),
-            area, menuButton, list);
+            area, field, menuButton, list);
         // Where touches land: TalkBack passes a double tap held through as a press at its focus.
         root.OnPointerDown(e => Info($"press {e.PointerType} at {e.Position.X:0},{e.Position.Y:0}"));
         menuButton.OnPointerDown(_ => Info("press on Options"));
@@ -109,7 +112,7 @@ internal static class HelloApp
             Info($"geometry area {Dims(area.WindowBorderBox)} button {Dims(menuButton.WindowBorderBox)} list {Dims(list.WindowBorderBox)}")),
             null, 2000, Timeout.Infinite);
         using var caret = new Timer(_ => Application.InvokeOnMainThread(() =>
-            Info($"caret {area.CursorPosition} selection {area.SelectionStart}..{area.SelectionEnd}")), null, 3000, 1000);
+            Info($"caret {area.CursorPosition} selection {area.SelectionStart}..{area.SelectionEnd} field caret {field.CursorPosition}")), null, 3000, 1000);
         Info($"a11y sample made at {clock.ElapsedMilliseconds} ms");
         app.Run();
     }

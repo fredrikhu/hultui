@@ -105,6 +105,9 @@ public class EventTests
         Assert.Equal(AndroidContentChange.PaneAppeared, appeared.Changes);
         Assert.Equal(h.Id(dialog), appeared.Source);
         Assert.Equal("Delete the file?", h.Bridge.Node(appeared.Source)!.PaneTitle);
+        // And as its container's title, which TalkBack says as its focus goes in: the window puts
+        // the focus on the dialog's button at once, and TalkBack said only the button.
+        Assert.Equal("Delete the file?", h.Bridge.Node(appeared.Source)!.ContainerTitle);
     }
 
     [Fact]
