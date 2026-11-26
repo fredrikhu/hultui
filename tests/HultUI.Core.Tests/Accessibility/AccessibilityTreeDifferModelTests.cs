@@ -423,7 +423,10 @@ public class AccessibilityTreeDifferModelTests(ITestOutputHelper output)
                 diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.IsFocused));
             if (prev.NativeContent != curr.NativeContent)
                 diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.NativeContent));
-            if (!ReferenceEquals(prev.Text, curr.Text) && (prev.Text is not null || curr.Text is not null))
+            // Since plan 20 phase 6: not across a field's mask going on or off, which would tell the
+            // text that went (or came) as deleted (or inserted).
+            if (!ReferenceEquals(prev.Text, curr.Text) && (prev.Text is not null || curr.Text is not null)
+                && prev.IsPassword == curr.IsPassword)
             {
                 var (a, b) = (prev.Text, curr.Text);
                 if (a?.Text != b?.Text)

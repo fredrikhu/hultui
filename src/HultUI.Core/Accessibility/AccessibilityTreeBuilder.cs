@@ -749,6 +749,8 @@ public static partial class AccessibilityTreeBuilder
         bool sameText = current.SameText(previous), sameSelection = current.SameSelection(previous);
         if (sameText && sameSelection) return true;
         var standIn = node.TextStandIn(previous);
+        // A one-line field's value is told too, before its text, in the differ's order.
+        if (!sameText && current.TellsValue) changes.Add(new PropertyChange(node, AccessibilityProperties.Value, standIn));
         if (!sameText) changes.Add(new PropertyChange(node, AccessibilityProperties.Text, standIn));
         if (!sameSelection) changes.Add(new PropertyChange(node, AccessibilityProperties.TextSelection, standIn));
         return true;

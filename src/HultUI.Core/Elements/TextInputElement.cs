@@ -8,7 +8,7 @@ using HultUI.Core.Styling;
 
 namespace HultUI.Core.Elements;
 
-public class TextInputElement : BoxElement, ITouchTextEditing
+public partial class TextInputElement : BoxElement, ITouchTextEditing
 {
     private string _text = "";
     private int _cursorPos;
@@ -52,6 +52,7 @@ public class TextInputElement : BoxElement, ITouchTextEditing
             _cursorPos = SnapToBoundary(Math.Clamp(value, 0, _text.Length));
             _selectionStart = _cursorPos;
             _history.Seal();
+            CaretMoved();
         }
     }
 
@@ -131,6 +132,7 @@ public class TextInputElement : BoxElement, ITouchTextEditing
         _selectionStart = 0;
         _cursorPos = _text.Length;
         _history.Seal();
+        CaretMoved();
         MarkPaintDirty();
     }
 
@@ -542,6 +544,7 @@ public class TextInputElement : BoxElement, ITouchTextEditing
         _selectionStart = SnapToBoundary(Math.Clamp(anchor, 0, _text.Length));
         _cursorPos = SnapToBoundary(Math.Clamp(caret, 0, _text.Length));
         _history.Seal();
+        CaretMoved();
         MarkPaintDirty();
     }
 
@@ -580,6 +583,7 @@ public class TextInputElement : BoxElement, ITouchTextEditing
 
         _history.Seal();
         _isDragging = true;
+        CaretMoved();
         MarkPaintDirty();
     }
 
@@ -613,6 +617,7 @@ public class TextInputElement : BoxElement, ITouchTextEditing
             _cursorPos = pos;
         else
             (_selectionStart, _cursorPos) = DragSelection.Extend(_dragAnchor, UnitRangeAt(pos));
+        CaretMoved();
         MarkPaintDirty();
     }
 
@@ -659,6 +664,7 @@ public class TextInputElement : BoxElement, ITouchTextEditing
         int pos = PositionFromPoint(position);
         (_selectionStart, _cursorPos) = Masked ? (0, _text.Length) : WordBoundary.RangeAt(_text, pos);
         _history.Seal();
+        CaretMoved();
         MarkPaintDirty();
     }
 
@@ -671,6 +677,7 @@ public class TextInputElement : BoxElement, ITouchTextEditing
             (_selectionStart, _cursorPos) = movesEnd ? (start, end) : (end, start);
         }
         _history.Seal();
+        CaretMoved();
     }
 
     void ITouchTextEditing.TouchDragHandleTo(Point position)
@@ -679,6 +686,7 @@ public class TextInputElement : BoxElement, ITouchTextEditing
         if (pos == _cursorPos || (!_touchCaretOnly && pos == _selectionStart)) return;
         _cursorPos = pos;
         if (_touchCaretOnly) _selectionStart = pos;
+        CaretMoved();
         MarkPaintDirty();
     }
 
@@ -696,6 +704,12 @@ public class TextInputElement : BoxElement, ITouchTextEditing
     }
 
     private void MoveCursor(int delta, bool extendSelection)
+    {
+        MoveCursorBy(delta, extendSelection);
+        CaretMoved();
+    }
+
+    private void MoveCursorBy(int delta, bool extendSelection)
     {
         _history.Seal();
         if (!extendSelection && HasSelection)
@@ -732,6 +746,7 @@ public class TextInputElement : BoxElement, ITouchTextEditing
         _cursorPos = SnapToBoundary(Math.Clamp(pos, 0, _text.Length));
         if (!extendSelection)
             _selectionStart = _cursorPos;
+        CaretMoved();
     }
 
     private void MoveCursorWordLeft(bool extendSelection)

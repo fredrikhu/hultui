@@ -333,6 +333,13 @@ internal abstract class AccessibleTextVersion
 
     /// <summary>The element's value with this text (UIA's ValueValue), made on first ask; any thread.</summary>
     public abstract string? Value { get; }
+
+    /// <summary>
+    /// Whether a change of the value is told as well as the change of the text: a one-line field's
+    /// (TextInputElement), whose value is short, as a browser tells an &lt;input&gt;'s. False for the
+    /// rest, whose value is the whole text (a document's), told as a text change only.
+    /// </summary>
+    public virtual bool TellsValue => false;
 }
 
 /// <summary>

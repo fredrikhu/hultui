@@ -275,6 +275,90 @@ public sealed class TextAreaTextPatternTests : IDisposable
         ], signals.Lines);
     }
 
+    // ── A text input: its value as text too (plan 20 phase 6, TALKBACK.md §10) ──
+
+    private static TextInputElement MountInput(HeadlessSession session, string text)
+    {
+        var input = TextInput.New(text).Width(200);
+        session.Window.SetRoot(Flex.Column(gap: 8).Padding(8).Children(TextB.New("status"), input));
+        session.PumpFrames(2);
+        session.Window.Click(input);
+        session.PumpFrame();
+        input.CursorPosition = 0;
+        session.PumpFrame();
+        session.PumpFrame(TimeSpan.FromMilliseconds(120));
+        session.PumpFrame(TimeSpan.FromMilliseconds(120));
+        return input;
+    }
+
+    /// <summary>A one-line field offers the text pattern beside its value, as a native edit control
+    /// does; a keystroke raises its value's change, as a browser's &lt;input&gt; does, and the text's.</summary>
+    [WindowsFact]
+    [SupportedOSPlatform("windows")]
+    public void UIA_ATextInput_OffersTheTextPattern_AndAKeystrokeRaisesItsValueAndItsText()
+    {
+        using var rig = new UiaRig();
+        var input = MountInput(rig.Session, "hello");
+        Assert.True(rig.HasTextPattern(input));
+        Assert.Equal(("hello", "hello"), rig.Value(input));
+        rig.Raised.Clear();
+
+        rig.Session.Window.TypeText("x");
+        rig.Session.PumpFrame();
+        Assert.Equal(
+        [
+            new UiaRaised(UiaRaisedKind.Property, UiaInterop.UIA_ValueValuePropertyId, input.Id),
+            new UiaRaised(UiaRaisedKind.Event, UiaInterop.UIA_Text_TextChangedEventId, input.Id),
+            new UiaRaised(UiaRaisedKind.Event, UiaInterop.UIA_Text_TextSelectionChangedEventId, input.Id),
+        ], rig.Raised);
+        Assert.Equal(("xhello", "xhello"), rig.Value(input));
+
+        rig.Raised.Clear();
+        rig.Session.Window.PressKey(KeyCode.Right);
+        rig.Session.PumpFrame();
+        Assert.Equal([new UiaRaised(UiaRaisedKind.Event, UiaInterop.UIA_Text_TextSelectionChangedEventId, input.Id)], rig.Raised);
+        Assert.Equal(2, OtherThread.Run(() => rig.Bridge.GetText(input.Id)!.Caret));
+    }
+
+    [WindowsFact]
+    [SupportedOSPlatform("windows")]
+    public void UIA_APasswordField_OffersNoTextPattern()
+    {
+        using var rig = new UiaRig();
+        var input = MountInput(rig.Session, "");
+        input.Masked = true;
+        rig.Session.PumpFrame();
+        Assert.False(rig.HasTextPattern(input));
+    }
+
+    [Fact]
+    public void ATSPI_ATextInput_IsText_AKeystrokeIsTextChanged_ACaretMoveIsCaretMoved()
+    {
+        using var session = HeadlessSession.Create(600, 400);
+        var signals = new Signals();
+        using var bridge = new LinuxAccessibilityBridge(signals);
+        session.Window.InstallAccessibilityBridge(new Active(bridge));
+        var input = MountInput(session, "hello");
+        var obj = ((IAtSpiTree)bridge).Find(AtSpiConstants.AccessiblePathPrefix + input.Id.Value)!;
+        Assert.Contains(AtSpiConstants.TextInterface, obj.Interfaces);
+        Assert.Equal("hello", obj.Value);
+        signals.Lines.Clear();
+
+        session.Window.TypeText("ab");
+        session.PumpFrame();
+        session.Window.PressKey(KeyCode.Right);
+        session.PumpFrame();
+
+        ulong id = input.Id.Value;
+        Assert.Equal(
+        [
+            $"property-change:accessible-value {id} 7",
+            $"text-changed:insert {id} 0 ab",
+            $"text-caret-moved {id} 2",
+            $"text-caret-moved {id} 3",
+        ], signals.Lines);
+    }
+
     [Fact]
     public void ATSPI_AKeystrokeInALongArea_DoesNotMakeItsText()
     {

@@ -166,7 +166,9 @@ public static class AccessibilityTreeDiffer
         // request. A text input with no text pattern keeps its value change, as an <input> does.
         // With the previous node: TalkBack's text-changed event says what went and came, and a text
         // field with no text pattern (TextInput) tells its edits as its value.
-        if (rare && !(prev.OffersText && curr.OffersText) && prev.Value != curr.Value)
+        // A text input offers text and keeps its value change too (AccessibleTextVersion.TellsValue).
+        if (rare && (!(prev.OffersText && curr.OffersText) || curr.TextVersion is { TellsValue: true })
+            && prev.Value != curr.Value)
             changes.Add(new PropertyChange(curr, AccessibilityProperties.Value, prev));
         // A slider, a progress bar or a number field moved, or its bounds or steps changed: the
         // bridge tells which (UIA RangeValue.Value, Minimum, Maximum; AT-SPI accessible-value).
@@ -199,7 +201,9 @@ public static class AccessibilityTreeDiffer
             if (!cv.SameSelection(pv))
                 changes.Add(new PropertyChange(curr, AccessibilityProperties.TextSelection, prev));
         }
-        else if (rare && (prev.OffersText || curr.OffersText)
+        // Not across a field's mask going on or off: a masked field offers no text, and the text that
+        // went (or came) would be told as deleted (or inserted), which a reader may speak.
+        else if (rare && (prev.OffersText || curr.OffersText) && prev.IsPassword == curr.IsPassword
             && !ReferenceEquals(prev.Text, curr.Text) && (prev.Text is not null || curr.Text is not null))
         {
             var (a, b) = (prev.Text, curr.Text);

@@ -37,7 +37,9 @@ macOS (NSAccessibility) is deferred.
    their value through `IValueProvider`. **Built 2026-10-04** as the terminal's seam
    A1 (below, *Text and announcements*): any element can offer text a reader moves
    through by character, word and line. `TextArea` offers it since 2026-10-24 (plan 17
-   round 4); single-line text inputs do not yet.
+   round 4). Single-line text inputs offer it since 2026-11-26 (plan 20 phase 6, on the
+   user's word; docs/design/TALKBACK.md §10). They keep their value pattern and their value
+   changes, as a browser's `<input>` does. A masked field offers no text.
 3. **Project layout:** separate per-platform projects
    (`HultUI.Platform.Accessibility.Windows`, `.Linux`), matching the existing
    `HultUI.Platform.SDL3` pattern. No `#if` shared project.
@@ -1286,7 +1288,8 @@ its own; headless runs never show it. Junction's palette closed with 13–14 in 
 
 ## Out of scope (follow-ups)
 
-- `EditableText` for AT-SPI; the text pattern on single-line text inputs.
+- `EditableText` for AT-SPI. (~~The text pattern on single-line text inputs~~: done
+  2026-11-26, plan 20 phase 6.)
 - macOS `NSAccessibility`.
 - UIA `LiveRegion` (`Element.Announce` covers what live regions were wanted for).
 - ~~Accessibility for overlays, tooltips, context menus.~~ **Done 2026-09-22.** The

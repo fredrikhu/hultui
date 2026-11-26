@@ -255,9 +255,11 @@ public class AccessibilityTreeDifferTests
 
         var diff = AccessibilityTreeDiffer.Diff(before, after);
 
-        var change = Assert.Single(diff.PropertyChanged);
-        Assert.Equal(AccessibilityProperties.Value, change.PropertyName);
-        Assert.Equal("new", change.Node.Value);
+        // A one-line field offers its text and keeps its value change, as a browser's <input>: the
+        // value first, then the text.
+        Assert.Equal([AccessibilityProperties.Value, AccessibilityProperties.Text], diff.PropertyChanged.Select(c => c.PropertyName));
+        Assert.All(diff.PropertyChanged, c => Assert.Equal("new", c.Node.Value));
+        Assert.Equal("new", diff.PropertyChanged[1].Node.CurrentText?.Text);
     }
 
     [Fact]
