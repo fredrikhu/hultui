@@ -356,6 +356,14 @@ session.PumpFrame();                                          // MonitorsChanged
     off), and keeps overlays inside it.
   - `PressKey(KeyCode.Back)` is Android's Back; set the internal `Application.SystemBack` to
     see whether it reached the system.
+- **Android's soft keyboard.** `window.SetKeyboardInset(120)` simulates a keyboard 120 layout units
+  high over the window's bottom edge; `SetKeyboardInset(0)` hides it:
+  - `Window.KeyboardInsetChanged` is raised at once.
+  - The next pump lays the root out above it (unless `Window.LaysOutAboveKeyboard` is off), keeps
+    overlays above it, and scrolls the focused field above it.
+  - The kind of field focused is in `window.TextInputHost.Kind`, and `Multiline` says whether it
+    asked for several lines; `StartCount` counts the starts, switches included. Focus alone shows no
+    keyboard headless: set the inset.
   - See [ANDROID.md](ANDROID.md), `SafeAreaTests` and `BackKeyTests`.
 
 **Without golden options, do not assert pixel-exact text across OSes.** Fonts come from the system (`SKFontManager.Default`), so glyphs and text metrics differ between Windows and Linux. Assert on behavior, semantics, and your own drawing — or use golden images, below, which pin the fonts.

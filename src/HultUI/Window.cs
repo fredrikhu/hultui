@@ -1,4 +1,4 @@
-using HultUI.Core.Accessibility;
+﻿using HultUI.Core.Accessibility;
 using HultUI.Core.Animation;
 using HultUI.Core.Builders;
 using HultUI.Core.Components;
@@ -730,15 +730,59 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         }
     }
 
-    /// <summary>Where the root is laid out, in window space: the safe area, or the whole window.</summary>
+    // ──── Soft keyboard (docs/design/SOFT-KEYBOARD.md §3) ────
+
+    private float _keyboardInset;
+    private bool _laysOutAboveKeyboard = true;
+    /// <summary>The focused field is to be scrolled above the keyboard after the next layout: the
+    /// keyboard grew, or the focus moved while it was up.</summary>
+    private bool _revealAboveKeyboard;
+
+    /// <summary>
+    /// How far up from the window's bottom edge the soft keyboard reaches, in layout units: 0 while
+    /// it is hidden, and always on the desktop. Measured from the window's edge, not the safe area's,
+    /// so it includes a navigation bar under the keyboard. See <see cref="LaysOutAboveKeyboard"/>.
+    /// </summary>
+    public float KeyboardInset => _keyboardInset;
+
+    /// <summary>Raised on the UI thread when <see cref="KeyboardInset"/> changes: the keyboard shown,
+    /// hidden, or resized. Android reports the end of its slide, not each step. The new layout
+    /// follows in the next frame.</summary>
+    public event Action? KeyboardInsetChanged;
+
+    /// <summary>
+    /// Whether the root is laid out above the soft keyboard (true, the default), so whatever
+    /// scrolls can still be scrolled to above it and the focused field is kept in view, or across
+    /// the space under it, for an app that moves its own bottom bar by <see cref="KeyboardInset"/>.
+    /// The window scrolls the focused field above the keyboard either way, and overlays (menus,
+    /// dialogs) always stay above it.
+    /// </summary>
+    public bool LaysOutAboveKeyboard
+    {
+        get => _laysOutAboveKeyboard;
+        set
+        {
+            if (value == _laysOutAboveKeyboard) return;
+            _laysOutAboveKeyboard = value;
+            _root?.MarkLayoutDirty();
+            _root?.MarkPaintDirty();
+        }
+    }
+
+    /// <summary>The height overlays are laid out and kept in: the window's, less the keyboard.</summary>
+    private float OverlayAreaHeight => Math.Max(0, PlatformWindow.LayoutHeight - _keyboardInset);
+
+    /// <summary>Where the root is laid out, in window space: the safe area, or the whole window;
+    /// above the keyboard while one is up.</summary>
     internal Rect RootArea
     {
         get
         {
             float w = PlatformWindow.LayoutWidth, h = PlatformWindow.LayoutHeight;
-            if (!_laysOutInSafeArea || _safeArea == default) return new Rect(0, 0, w, h);
-            var s = _safeArea;
-            return new Rect(s.Left, s.Top, Math.Max(0, w - s.Horizontal), Math.Max(0, h - s.Vertical));
+            var s = _laysOutInSafeArea ? _safeArea : default;
+            float bottom = _laysOutAboveKeyboard ? Math.Max(s.Bottom, _keyboardInset) : s.Bottom;
+            if (s == default && bottom == 0) return new Rect(0, 0, w, h);
+            return new Rect(s.Left, s.Top, Math.Max(0, w - s.Horizontal), Math.Max(0, h - s.Top - bottom));
         }
     }
 
@@ -750,30 +794,63 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
     private void OnPlatformSafeAreaChanged()
     {
-        var now = ((ISafeAreaSource)PlatformWindow).SafeArea;
-        if (now == _safeArea) return;
+        var source = (ISafeAreaSource)PlatformWindow;
+        var now = source.SafeArea;
+        float keyboard = source.KeyboardInset;
+        bool safeAreaChanged = now != _safeArea, keyboardChanged = keyboard != _keyboardInset;
+        if (!safeAreaChanged && !keyboardChanged) return;
+        if (keyboardChanged && keyboard > _keyboardInset) _revealAboveKeyboard = true;
         _safeArea = now;
+        _keyboardInset = keyboard;
         if (_root is not null)
         {
             _root.MarkLayoutDirty();
             _root.MarkPaintDirty();
         }
-        // The overlays are kept inside the safe area: placed again, as at a new size of the window.
+        // The overlays are kept inside the safe area and above the keyboard: laid out and placed
+        // again, as at a new size of the window.
         for (int i = 0; i < _overlays.Count; i++)
         {
             _overlays[i].Content.MarkLayoutDirty();
             _overlays[i].WindowResized = true;
         }
-        SafeAreaChanged?.Invoke();
+        if (safeAreaChanged) SafeAreaChanged?.Invoke();
+        if (keyboardChanged) KeyboardInsetChanged?.Invoke();
     }
 
-    /// <summary>An overlay's place moved inside the safe area, when there is one and the overlay
-    /// fits; otherwise as given, so nothing changes on the desktop.</summary>
+    /// <summary>
+    /// Scrolls the focused element above the keyboard in each scroll view it is in, innermost
+    /// first, with the part of each view the keyboard covers taken out of its viewport. Where the
+    /// root is laid out above the keyboard (the default) no view reaches under it, and this is a
+    /// plain scroll into view. A field taller than what is left shows its top.
+    /// </summary>
+    private void RevealFocusAboveKeyboard()
+    {
+        if (_keyboardInset <= 0 || FocusedElement is not { Layout: var layout } focused) return;
+        float keyboardTop = PlatformWindow.LayoutHeight - _keyboardInset;
+        var box = layout.AbsoluteBorderBox;
+        // Layout is unscrolled: the inner views' offsets, as the walk passes them, are where the
+        // field sits in each outer view's content.
+        float innerOffset = 0;
+        for (var parent = focused.Parent; parent is not null; parent = parent.Parent)
+        {
+            if (parent is not ScrollViewElement view) continue;
+            var content = view.Layout.AbsoluteContentBox;
+            float hidden = Math.Max(0, view.WindowContentBox.Bottom - keyboardTop);
+            float shown = content.Height - hidden;
+            if (shown > 0)
+                view.ScrollRangeIntoView(box.Y - innerOffset - content.Y, Math.Min(box.Height, shown) + hidden);
+            innerOffset += view.ScrollOffsetY;
+        }
+    }
+
+    /// <summary>An overlay's place moved inside the safe area and above the keyboard, when there is
+    /// either and the overlay fits; otherwise as given, so nothing changes on the desktop.</summary>
     private (float X, float Y) InsideSafeArea(float x, float y, float width, float height)
     {
-        if (_safeArea == default) return (x, y);
+        if (_safeArea == default && _keyboardInset == 0) return (x, y);
         var s = _safeArea;
-        float right = PlatformWindow.LayoutWidth - s.Right, bottom = PlatformWindow.LayoutHeight - s.Bottom;
+        float right = PlatformWindow.LayoutWidth - s.Right, bottom = PlatformWindow.LayoutHeight - Math.Max(s.Bottom, _keyboardInset);
         if (width <= right - s.Left) x = Math.Clamp(x, s.Left, right - width);
         if (height <= bottom - s.Top) y = Math.Clamp(y, s.Top, bottom - height);
         return (x, y);
@@ -975,6 +1052,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         if (platformWindow is ISafeAreaSource safeArea)
         {
             _safeArea = safeArea.SafeArea;
+            _keyboardInset = safeArea.KeyboardInset;
             safeArea.SafeAreaChanged += OnPlatformSafeAreaChanged;
         }
 
@@ -1170,27 +1248,35 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         {
             textInput.Clipboard = Clipboard;
             textInput.TextInputHost = TextInputHost;
-            TextInputHost.StartTextInput(textInput.InputKind);
+            TextInputHost.StartTextInput(textInput.RequestedInputKind, multiline: false);
         }
         else if (element is TextAreaElement textArea)
         {
             textArea.Clipboard = Clipboard;
             textArea.TextInputHost = TextInputHost;
-            TextInputHost.StartTextInput();
+            TextInputHost.StartTextInput(TextInputKind.Text, multiline: true);
         }
         else if (element is ITextServicesClient client)
         {
             client.Clipboard = Clipboard;
             client.TextInputHost = TextInputHost;
-            TextInputHost.StartTextInput();
+            TextInputHost.StartTextInput(TextInputKind.Text, multiline: true);
         }
         else if (element is { WantsTextInput: true })
         {
-            TextInputHost.StartTextInput();
+            TextInputHost.StartTextInput(element.WantedInputKind, multiline: false);
         }
         else
         {
             TextInputHost.StopTextInput();
+        }
+
+        // Focus moved to another field while the keyboard is up (Next, a tap on a field under it):
+        // the new one is scrolled above it after the next layout.
+        if (_keyboardInset > 0 && element is not null && element.TakesTypedText)
+        {
+            _revealAboveKeyboard = true;
+            element.MarkPaintDirty();
         }
 
         if (_accessibilityBridge.IsActive)
@@ -2419,6 +2505,14 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // The overlays next, before the accessibility phase, which reads what changed in them.
         // Outside the style and layout timers, as when the overlays were done with their drawing.
         var overlayChanges = _overlays.Count > 0 ? PrepareOverlays(theme) : OverlayChanges.None;
+
+        // The focused field above a keyboard that just came up, or after a focus move under it: now
+        // that the root and the overlays have their boxes. A scroll, which the hover step follows.
+        if (_revealAboveKeyboard)
+        {
+            _revealAboveKeyboard = false;
+            RevealFocusAboveKeyboard();
+        }
 
         // Content that scrolled under a resting pointer takes the hover in this frame, before the
         // accessibility phase and the drawing: one hit test a frame that some scroll view moved in.
@@ -4794,7 +4888,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         StyleResolver.Resolve(content, theme);
         entry.StyleResolved = true;
 
-        _layoutEngine.PerformLayout(content, PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight, forceRootFill: false);
+        _layoutEngine.PerformLayout(content, PlatformWindow.LayoutWidth, OverlayAreaHeight, forceRootFill: false);
         entry.LayoutDone = true;
 
         if (entry.Place is not null)
@@ -4843,7 +4937,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     {
         var content = entry.Content;
         float vw = PlatformWindow.LayoutWidth;
-        float vh = PlatformWindow.LayoutHeight;
+        float vh = OverlayAreaHeight;
         float width = content.Layout.Width;
         // No room where it was asked for: a flyout goes to its parent's other side when it fits
         // there (FlipRightEdge), anything else in from the window's edge.
@@ -4861,7 +4955,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     {
         var content = entry.Content;
         var at = entry.Place!(new Size(content.Layout.Width, content.Layout.Height),
-            new Size(PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight));
+            new Size(PlatformWindow.LayoutWidth, OverlayAreaHeight));
         var (x, y) = InsideSafeArea(at.X, at.Y, content.Layout.Width, content.Layout.Height);
         MoveOverlay(entry, x, y);
     }
@@ -5069,7 +5163,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             if (!overlay.LayoutDone || (content.DirtyFlags & DirtyFlags.Layout) != 0)
             {
                 _layoutEngine.PerformLayout(content,
-                    PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight, forceRootFill: false);
+                    PlatformWindow.LayoutWidth, OverlayAreaHeight, forceRootFill: false);
                 overlay.LayoutDone = true;
                 changes |= OverlayChanges.Work;
                 if (seen)
@@ -5146,7 +5240,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             if (!overlay.LayoutDone || (content.DirtyFlags & DirtyFlags.Layout) != 0)
             {
                 _layoutEngine.PerformLayout(content,
-                    PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight, forceRootFill: false);
+                    PlatformWindow.LayoutWidth, OverlayAreaHeight, forceRootFill: false);
                 overlay.LayoutDone = true;
             }
 

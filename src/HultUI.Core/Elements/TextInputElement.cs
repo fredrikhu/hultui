@@ -1,4 +1,4 @@
-using HultUI.Core.Accessibility;
+﻿using HultUI.Core.Accessibility;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Platform;
@@ -158,13 +158,31 @@ public class TextInputElement : BoxElement
             // A reveal toggle must reach a reader now, not on the next layout-driven rebuild.
             NotifyAccessibilityPropertyChanged(AccessibilityProperties.IsPassword);
             // And the platform's input method, if the field has the keyboard.
-            if (_focused) TextInputHost?.StartTextInput(InputKind);
+            if (_focused) TextInputHost?.StartTextInput(RequestedInputKind, multiline: false);
         }
     }
     private bool _masked;
 
+    /// <summary>
+    /// What this field holds, for the platform's text input: on a phone, which keyboard it shows
+    /// and whether it capitalizes and corrects (<see cref="TextInputKind"/>). <see cref="Masked"/>
+    /// wins over it, so a masked field always asks for <see cref="TextInputKind.Password"/>. The
+    /// builder is <c>.Kind(...)</c>.
+    /// </summary>
+    public TextInputKind InputKind
+    {
+        get => _inputKind;
+        set
+        {
+            if (_inputKind == value) return;
+            _inputKind = value;
+            if (_focused) TextInputHost?.StartTextInput(RequestedInputKind, multiline: false);
+        }
+    }
+    private TextInputKind _inputKind;
+
     /// <summary>What this field asks of the platform's text input when it has focus.</summary>
-    internal TextInputKind InputKind => Masked ? TextInputKind.Password : TextInputKind.Text;
+    internal TextInputKind RequestedInputKind => Masked ? TextInputKind.Password : _inputKind;
 
     /// <summary>What stands in for each character of a masked value.</summary>
     internal const char MaskGlyph = '●';
@@ -911,6 +929,7 @@ public class TextInputElement : BoxElement
             // Unkeyed siblings match by position, so the live element patched here can be one
             // that was built unmasked — a username field the password field moved into.
             Masked = input.Masked;
+            InputKind = input.InputKind;
             Spans = input.Spans;
 
             // Preserve the caret and selection across a reconcile patch. The Text

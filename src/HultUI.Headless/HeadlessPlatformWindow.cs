@@ -30,6 +30,18 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow, ISafeAreaSource
         SafeAreaChanged?.Invoke();
     }
 
+    /// <summary>The simulated soft keyboard's height (HeadlessWindow.SetKeyboardInset); zero, as on the desktop.</summary>
+    public float KeyboardInset { get; private set; }
+
+    /// <summary>Sets the simulated keyboard's height and tells the window at once, as
+    /// <see cref="SetSafeArea"/> does.</summary>
+    public void SetKeyboardInset(float height)
+    {
+        if (height == KeyboardInset) return;
+        KeyboardInset = height;
+        SafeAreaChanged?.Invoke();
+    }
+
     private readonly SkiaRasterRenderSurface _raster;
     private readonly IRenderSurface _surface;
     private float _layoutWidth;

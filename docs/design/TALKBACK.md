@@ -1,7 +1,7 @@
 # TalkBack bridge — design note
 
-**Status (2026-11-26): proposal, nothing built.** Needs the user's OK on the decisions in §6;
-it adds no public API. Plan 20, phase 6 ([plan](../plans/20-mobile-support.md) §2.9). Required
+**Status (2026-11-26): approved by the user, all four recommendations in §6 taken; nothing
+built yet.** It adds no public API. Plan 20, phase 6 ([plan](../plans/20-mobile-support.md) §2.9). Required
 before any Android release beyond the user's own devices: the desktop apps hold that bar
 (`docs/ACCESSIBILITY-PLAN.md`).
 

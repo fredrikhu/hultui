@@ -517,9 +517,10 @@ New `TextInputKind` members and return-key hints. The focused field scrolls into
 keyboard. Caret placement, word selection, handles and the edit menu for `TextInput`,
 `TextArea` and the rich text editor.
 
-**Status (2026-11-26): design note written, awaiting the user's OK**
-(`docs/design/SOFT-KEYBOARD.md`, six decisions in §6). It recommends leaving return-key labels
-out: SDL 3 has no property for them.
+**Status (2026-11-26): note approved, all six recommendations taken**
+(`docs/design/SOFT-KEYBOARD.md`). Return-key labels are left out: SDL 3 has no property for
+them. The input kinds and the keyboard's area are built and headless-tested (the note's §8);
+touch text editing is next.
 
 **Exit criteria**
 
@@ -554,8 +555,9 @@ out: SDL 3 has no property for them.
 
 `HultUI.Platform.Accessibility.Android` (§2.9).
 
-**Status (2026-11-26): design note written, awaiting the user's OK** (`docs/design/TALKBACK.md`,
-four decisions in §6). No public API.
+**Status (2026-11-26): note approved, all four recommendations taken**
+(`docs/design/TALKBACK.md`): its own package, live regions, a desktop-tested mapper under a thin
+Android layer, the Fluent sample first. No public API. Not started.
 
 **Exit criteria**
 

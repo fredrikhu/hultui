@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using HultUI.Core.Events;
 using HultUI.Core.DevTools;
 using HultUI.Core.Platform;
@@ -167,6 +167,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     private GCHandle _gcHandle;
     private bool _textInputActive;
     private TextInputKind _textInputKind;
+    private bool _textInputMultiline;
     private SDL3Clipboard? _clipboard;
     private SDL3FileDialogs? _fileDialogs;
     private SDL3TextInputHost? _textInputHost;
@@ -662,6 +663,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         UpdateSize();
         NoteNormalBounds();
         _safeArea = ReadSafeArea();
+        _keyboardInset = ReadKeyboardInset();
 
         IsOpen = true;
         StartupTrace.Mark("platform window ready");
@@ -1024,8 +1026,18 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         return new Thickness(r.y * s, Math.Max(0, w - r.x - r.w) * s, Math.Max(0, h - r.y - r.h) * s, r.x * s);
     }
 
-    /// <summary>Insets in window pixels, top, right, bottom, left.</summary>
-    internal sealed record PixelInsets(int Top, int Right, int Bottom, int Left);
+    private float _keyboardInset;
+
+    float ISafeAreaSource.KeyboardInset => _keyboardInset;
+
+    /// <summary>The soft keyboard's height over the window's bottom edge, in layout units, from
+    /// Android's <c>ime()</c> inset (docs/design/SOFT-KEYBOARD.md §3); 0 anywhere else.</summary>
+    private float ReadKeyboardInset() =>
+        _window != null && ContentInsets is { Keyboard: > 0 } px ? px.Keyboard * InputScale : 0f;
+
+    /// <summary>Insets in window pixels, top, right, bottom, left, and the soft keyboard's height
+    /// over the bottom edge.</summary>
+    internal sealed record PixelInsets(int Top, int Right, int Bottom, int Left, int Keyboard = 0);
 
     /// <summary>The insets content should clear, from the platform rather than SDL (Android's
     /// system bars and display cutout, read by HultUI.Platform.Android's activity); null to use
@@ -1049,12 +1061,15 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         SDL_PushEvent(&evt);
     }
 
-    /// <summary>Reads the safe area again, and tells the window when it changed.</summary>
+    /// <summary>Reads the safe area and the keyboard's inset again, and tells the window when
+    /// either changed.</summary>
     internal void RefreshSafeArea()
     {
         var now = ReadSafeArea();
-        if (now == _safeArea) return;
+        float keyboard = ReadKeyboardInset();
+        if (now == _safeArea && keyboard == _keyboardInset) return;
         _safeArea = now;
+        _keyboardInset = keyboard;
         _safeAreaChanged?.Invoke();
     }
 
@@ -2385,35 +2400,73 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         }
     }
 
-    public void StartTextInput() => StartTextInput(TextInputKind.Text);
+    public void StartTextInput() => StartTextInput(TextInputKind.Text, multiline: false);
+
+    public void StartTextInput(TextInputKind kind) => StartTextInput(kind, multiline: false);
 
     /// <summary>
-    /// Text input for a field of <paramref name="kind"/>. A switch restarts it, because SDL's
-    /// Windows backend arms its input method only on a start. A password goes to SDL as
-    /// <c>TEXT_PASSWORD_HIDDEN</c>, which its Wayland backend hands the input method as the
-    /// password purpose; its Windows backend ignores the type, so <see cref="KeepInputMethodOut"/>
-    /// does what a native password box does there.
+    /// Text input for a field of <paramref name="kind"/>, as SDL's text-input properties
+    /// (docs/design/SOFT-KEYBOARD.md §2): the type, capitalization, correction and lines, which
+    /// pick a phone's keyboard, and Android's own input type where SDL has no type for the kind.
+    /// The lines are always said: SDL takes a field to be multiline unless told, and Android's
+    /// keyboard then shows a new-line key on a one-line field. A switch restarts input, because
+    /// SDL's Windows backend arms its input method only on a start; on Android it does not, since
+    /// SDL there hands the keyboard the new type on any start, and a stop would hide the keyboard
+    /// for a frame. A password goes to SDL as <c>TEXT_PASSWORD_HIDDEN</c>, which its Wayland
+    /// backend hands the input method as the password purpose; its Windows backend ignores the
+    /// type, so <see cref="KeepInputMethodOut"/> does what a native password box does there.
     /// </summary>
-    public void StartTextInput(TextInputKind kind)
+    public void StartTextInput(TextInputKind kind, bool multiline)
     {
-        if (_textInputActive && _textInputKind == kind) return;
-        if (_textInputActive) SDL_StopTextInput(_window);
+        if (_textInputActive && _textInputKind == kind && _textInputMultiline == multiline) return;
+        if (_textInputActive && !OperatingSystem.IsAndroid()) SDL_StopTextInput(_window);
         _textInputActive = true;
         _textInputKind = kind;
+        _textInputMultiline = multiline;
 
-        if (kind != TextInputKind.Password)
-        {
-            SDL_StartTextInput(_window);
-            return;
-        }
-
+        var (type, caps, correct, android) = TextInputProperties(kind);
         // SDL copies the properties into the window, so they are ours to destroy.
         var props = SDL_CreateProperties();
         fixed (byte* name = SDL_PROP_TEXTINPUT_TYPE_NUMBER)
-            SDL_SetNumberProperty(props, name, (long)SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT_PASSWORD_HIDDEN);
+            SDL_SetNumberProperty(props, name, (long)type);
+        fixed (byte* name = SDL_PROP_TEXTINPUT_CAPITALIZATION_NUMBER)
+            SDL_SetNumberProperty(props, name, (long)caps);
+        fixed (byte* name = SDL_PROP_TEXTINPUT_AUTOCORRECT_BOOLEAN)
+            SDL_SetBooleanProperty(props, name, correct);
+        fixed (byte* name = SDL_PROP_TEXTINPUT_MULTILINE_BOOLEAN)
+            SDL_SetBooleanProperty(props, name, multiline);
+        if (android != 0)
+            fixed (byte* name = SDL_PROP_TEXTINPUT_ANDROID_INPUTTYPE_NUMBER)
+                SDL_SetNumberProperty(props, name, android);
         SDL_StartTextInputWithProperties(_window, props);
         SDL_DestroyProperties(props);
         KeepInputMethodOut();
+    }
+
+    /// <summary>
+    /// SDL's type, capitalization and correction for a kind (SOFT-KEYBOARD.md §2's table), and
+    /// Android's <c>InputType</c> bits for the kinds SDL has no type for (0 for none). Android's
+    /// bits replace everything else there, so they carry no-suggestions themselves.
+    /// </summary>
+    internal static (SDL_TextInputType Type, SDL_Capitalization Caps, bool Correct, int Android) TextInputProperties(TextInputKind kind)
+    {
+        // android.text.InputType
+        const int ClassText = 0x1, ClassNumber = 0x2, ClassPhone = 0x3;
+        const int NumberSigned = 0x1000, NumberDecimal = 0x2000;
+        const int TextUri = 0x10, TextNoSuggestions = 0x80000;
+        return kind switch
+        {
+            TextInputKind.Password => (SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT_PASSWORD_HIDDEN, SDL_Capitalization.SDL_CAPITALIZE_NONE, false, 0),
+            TextInputKind.Number => (SDL_TextInputType.SDL_TEXTINPUT_TYPE_NUMBER, SDL_Capitalization.SDL_CAPITALIZE_NONE, false, ClassNumber),
+            TextInputKind.Decimal => (SDL_TextInputType.SDL_TEXTINPUT_TYPE_NUMBER, SDL_Capitalization.SDL_CAPITALIZE_NONE, false, ClassNumber | NumberDecimal | NumberSigned),
+            TextInputKind.Phone => (SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT, SDL_Capitalization.SDL_CAPITALIZE_NONE, false, ClassPhone),
+            TextInputKind.Email => (SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT_EMAIL, SDL_Capitalization.SDL_CAPITALIZE_NONE, false, 0),
+            TextInputKind.Url => (SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT, SDL_Capitalization.SDL_CAPITALIZE_NONE, false, ClassText | TextUri | TextNoSuggestions),
+            TextInputKind.Username => (SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT_USERNAME, SDL_Capitalization.SDL_CAPITALIZE_NONE, false, 0),
+            TextInputKind.Name => (SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT_NAME, SDL_Capitalization.SDL_CAPITALIZE_WORDS, false, 0),
+            TextInputKind.Search => (SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT, SDL_Capitalization.SDL_CAPITALIZE_NONE, true, 0),
+            _ => (SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT, SDL_Capitalization.SDL_CAPITALIZE_SENTENCES, true, 0),
+        };
     }
 
     /// <summary>

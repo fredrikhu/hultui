@@ -120,16 +120,20 @@ public abstract class HultUIActivity : SDLActivity
     /// <summary>
     /// Hands SDL3Window the insets content should clear (docs/design/ANDROID-PLATFORM.md §3):
     /// the system bars and the display cutout. SDL's own safe area also takes out the gesture
-    /// zones, which Android keeps for edge swipes, not content. Then applies the insets as the
-    /// view would have, so SDL's surface below still gets them.
+    /// zones, which Android keeps for edge swipes, not content. And the soft keyboard's height,
+    /// the <c>ime()</c> inset, for <c>Window.KeyboardInset</c> (docs/design/SOFT-KEYBOARD.md §3):
+    /// an edge-to-edge window is no longer resized for the keyboard. With no insets animation
+    /// callback set, Android hands this listener the keyboard's end height as the slide starts.
+    /// Then applies the insets as the view would have, so SDL's surface below still gets them.
     /// </summary>
     private sealed class ContentInsetsListener : Java.Lang.Object, View.IOnApplyWindowInsetsListener
     {
         public WindowInsets OnApplyWindowInsets(View view, WindowInsets insets)
         {
             var bars = insets.GetInsets(WindowInsets.Type.SystemBars() | WindowInsets.Type.DisplayCutout());
+            int keyboard = insets.IsVisible(WindowInsets.Type.Ime()) ? insets.GetInsets(WindowInsets.Type.Ime()).Bottom : 0;
             global::HultUI.Platform.SDL3.SDL3Window.SetContentInsets(
-                new global::HultUI.Platform.SDL3.SDL3Window.PixelInsets(bars.Top, bars.Right, bars.Bottom, bars.Left));
+                new global::HultUI.Platform.SDL3.SDL3Window.PixelInsets(bars.Top, bars.Right, bars.Bottom, bars.Left, keyboard));
             return view.OnApplyWindowInsets(insets) ?? insets;
         }
     }

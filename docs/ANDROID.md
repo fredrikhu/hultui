@@ -59,7 +59,30 @@ says when it changes (a rotation, the bars hidden).
 - **To draw behind the bars** (a full-bleed video, a hero image), set
   `window.LaysOutInSafeArea = false` and pad your own controls by `window.SafeArea`.
 - **Overlays stay inside the safe area** either way.
-- **The soft keyboard is not part of the safe area.** Its inset comes with the keyboard work.
+- **The soft keyboard is not part of the safe area.** It has its own inset: see below.
+
+## The soft keyboard
+
+The keyboard shows while a field has focus and hides when focus leaves it. Say what a field
+holds, and the phone shows the keyboard for it:
+
+```csharp
+TextInput.New().Kind(TextInputKind.Email)     // @, no capitals, no correction
+TextInput.New().Kind(TextInputKind.Number)    // digits
+```
+
+- **The kinds:** `Text` (the default), `Password`, `Number`, `Decimal`, `Phone`, `Email`,
+  `Url`, `Username`, `Name`, `Search`. `.Password()` wins over the kind. The desktop ignores all
+  but `Password`.
+- **A text area and the rich text editor** get a new-line key; a `TextInput` gets the keyboard's
+  action key, which arrives as `KeyCode.Return`. The key's label (Search, Go, Done) cannot be set.
+- **A number field** asks for digits, with the point and minus when its step or range needs them.
+- **The root is laid out above the keyboard** by default, so a scroll view shrinks and can still
+  be scrolled to its end, and the focused field is scrolled above the keyboard when it comes up or
+  focus moves. `Window.KeyboardInset` is the keyboard's height over the window's bottom edge, in
+  layout units, and `Window.KeyboardInsetChanged` says when it changes. An app that moves its own
+  bottom bar sets `window.LaysOutAboveKeyboard = false` and reads the inset.
+- **Overlays stay above the keyboard**: a dialog is centred in the space above it.
 
 ## The Back key
 
@@ -137,7 +160,6 @@ HultUI's own messages go to logcat under `DOTNET` (what a desktop app writes to 
 These are plan 20's later phases:
 - **Touch text editing.** A finger places the caret but does not select; selection handles and
   the edit menu are phase 4. No pinch yet.
-- **The soft keyboard covers the field.** The visible area and touch text editing are phase 4.
 - **No TalkBack** until its bridge (phase 6).
 - **File dialogs** return Android's `content://` addresses, which `File.Open` cannot open.
 - **No second window.**

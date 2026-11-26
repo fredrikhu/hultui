@@ -1,4 +1,4 @@
-using HultUI.Core.Platform;
+﻿using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
 
 namespace HultUI.Platform.SDL3;
@@ -22,6 +22,8 @@ public sealed class SDL3TextInputHost : ITextInputHost
     public void StartTextInput() => _window.StartTextInput(TextInputKind.Text);
 
     public void StartTextInput(TextInputKind kind) => _window.StartTextInput(kind);
+
+    public void StartTextInput(TextInputKind kind, bool multiline) => _window.StartTextInput(kind, multiline);
 
     public void StopTextInput()
     {

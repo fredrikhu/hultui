@@ -27,6 +27,14 @@ public interface ITextInputHost
     void StartTextInput(TextInputKind kind) => StartTextInput();
 
     /// <summary>
+    /// Enables text input for a field of <paramref name="kind"/> that takes several lines (a text
+    /// area, the rich text editor) or one (<paramref name="multiline"/> false). A phone's keyboard
+    /// shows a new-line key for the first and its action key for the second. The default ignores
+    /// the lines, for a host whose platform has no such keyboard.
+    /// </summary>
+    void StartTextInput(TextInputKind kind, bool multiline) => StartTextInput(kind);
+
+    /// <summary>
     /// Disables OS text input routing for the window.
     /// </summary>
     void StopTextInput();

@@ -1,4 +1,4 @@
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
@@ -637,6 +637,10 @@ public abstract class Element
     /// field, area or editor, a number field, a terminal. A read-only viewer does not.
     /// </summary>
     internal virtual bool TakesTypedText => WantsTextInput;
+
+    /// <summary>What an element that <see cref="WantsTextInput"/> asks of the platform's text
+    /// input, for a phone's keyboard: a number field asks for digits.</summary>
+    internal virtual Platform.TextInputKind WantedInputKind => Platform.TextInputKind.Text;
 
     /// <summary>
     /// Content of this element that keeps its own accessibility tree — a web page's engine.

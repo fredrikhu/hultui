@@ -2,6 +2,7 @@
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
+using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
@@ -190,6 +191,10 @@ public static class ElementExtensions
     /// off the clipboard. Sets <see cref="TextInputElement.Masked"/>, under another name for the
     /// reason <see cref="Chromeless{T}"/> has one.</summary>
     public static T Password<T>(this T el, bool masked = true) where T : TextInputElement { el.Masked = masked; return el; }
+    /// <summary>What the field holds, so a phone shows the keyboard for it: digits for
+    /// <see cref="TextInputKind.Number"/>, <c>@</c> for <see cref="TextInputKind.Email"/>. Sets
+    /// <see cref="TextInputElement.InputKind"/>; <see cref="Password{T}"/> wins over it.</summary>
+    public static T Kind<T>(this T el, TextInputKind kind) where T : TextInputElement { el.InputKind = kind; return el; }
     /// <summary>A reusable look for this field, layered over the theme's; see <see cref="TextInputStyle"/>.</summary>
     public static T Style<T>(this T el, TextInputStyle? style) where T : TextInputElement { el.Style = style; return el; }
 

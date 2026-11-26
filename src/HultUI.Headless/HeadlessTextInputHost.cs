@@ -1,4 +1,4 @@
-using HultUI.Core.Platform;
+﻿using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
 
 namespace HultUI.Headless;
@@ -22,12 +22,23 @@ public sealed class HeadlessTextInputHost : ITextInputHost
     /// <summary>The kind of field the most recent start was for.</summary>
     public TextInputKind Kind { get; private set; }
 
-    public void StartTextInput() => StartTextInput(TextInputKind.Text);
+    /// <summary>Whether the most recent start was for a field of several lines (a text area, the
+    /// rich text editor), for which a phone's keyboard shows a new-line key.</summary>
+    public bool Multiline { get; private set; }
 
-    public void StartTextInput(TextInputKind kind)
+    /// <summary>How many times text input was started, switches between kinds included.</summary>
+    public int StartCount { get; private set; }
+
+    public void StartTextInput() => StartTextInput(TextInputKind.Text, multiline: false);
+
+    public void StartTextInput(TextInputKind kind) => StartTextInput(kind, multiline: false);
+
+    public void StartTextInput(TextInputKind kind, bool multiline)
     {
         IsTextInputActive = true;
         Kind = kind;
+        Multiline = multiline;
+        StartCount++;
     }
 
     public void StopTextInput() => IsTextInputActive = false;

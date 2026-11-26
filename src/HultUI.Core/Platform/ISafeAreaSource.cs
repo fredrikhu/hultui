@@ -12,7 +12,11 @@ internal interface ISafeAreaSource
     /// <summary>How far in from each edge the system's furniture reaches, in layout units.</summary>
     Thickness SafeArea { get; }
 
-    /// <summary>Raised on the UI thread when <see cref="SafeArea"/> changed: a rotation, the bars
-    /// shown or hidden.</summary>
+    /// <summary>How far up from the window's bottom edge the soft keyboard reaches, in layout
+    /// units; 0 while it is hidden, and always on the desktop (docs/design/SOFT-KEYBOARD.md §3).</summary>
+    float KeyboardInset { get; }
+
+    /// <summary>Raised on the UI thread when <see cref="SafeArea"/> or <see cref="KeyboardInset"/>
+    /// changed: a rotation, the bars shown or hidden, the keyboard shown or hidden.</summary>
     event Action? SafeAreaChanged;
 }
