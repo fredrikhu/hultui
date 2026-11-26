@@ -46,6 +46,17 @@ public sealed class VideoPlayer : Component
     // Build reads it as a plain field, so a fade frame rebuilds nothing.
     private float _barOpacity = 1f;
     private readonly Signal<bool> _fullscreen = new(false);
+
+    /// <summary>
+    /// Whether the player is narrower than its one-row bar (<see cref="NarrowWidth"/>): a phone held
+    /// upright, 360 to 412 DIP. The bar is then two rows, the scrubber across the whole width over the
+    /// buttons, and has no volume slider (a phone has its volume keys); in one row at 412 DIP the
+    /// buttons lay over the time and the scrubber had no room (seen on the emulator).
+    /// </summary>
+    private readonly Signal<bool> _narrow = new(false);
+
+    /// <summary>Below this width, in layout units, the bar is two rows.</summary>
+    internal const float NarrowWidth = 560f;
     private readonly Signal<VideoPlayerTheme> _theme = new(VideoPlayerTheme.CreateDefault(Theme.Light));
     /// <summary>Where the pointer is on the scrubber, in seconds, while it is over it. A plain
     /// field: a move along the track writes the preview card in place (<see cref="ShowPreview"/>).</summary>
@@ -389,6 +400,12 @@ public sealed class VideoPlayer : Component
         // Explicit: a box with a click handler would otherwise be announced as a button.
         root.Role = AccessibilityRole.Group;
         root.On<PointerMoveEvent>(_ => Reveal());
+        // Narrow (a phone held upright): the bar in two rows, from the width the player was laid
+        // out at. A change of it rebuilds the player once.
+        root.OnLayoutChanged(e =>
+        {
+            if (e.SizeChanged && (e.Box.Width < NarrowWidth) != _narrow.Value) _narrow.Value = e.Box.Width < NarrowWidth;
+        });
         root.WithRef(_root);
 
         root.Children(
@@ -418,7 +435,7 @@ public sealed class VideoPlayer : Component
         var host = Box.New().Width(Dimension.Percent(100)).AutomationId("video-preview");
         host.Position.Type = PositionType.Absolute;
         host.Position.Left = Dimension.Px(0);
-        host.Position.Bottom = Dimension.Px(theme.BarHeight + 8f);
+        host.Position.Bottom = Dimension.Px(BarHeight(theme, _narrow.Value) + 8f);
         host.IsHitTestVisible = false;
 
         // Read so that a card coming or going rebuilds the player; the hovered position is not.
@@ -624,10 +641,10 @@ public sealed class VideoPlayer : Component
         // instead of rebuilding the player.
         var position = ReactiveScope.Untracked(() => player.Position);
 
-        var bar = Flex.Row(gap: 4)
-            .Height(theme.BarHeight).Padding(6f)
+        bool narrow = _narrow.Value;
+        var bar = (narrow ? Flex.Column(gap: 0) : Flex.Row(gap: 4).AlignItems(AlignItems.Center))
+            .Height(BarHeight(theme, narrow)).Padding(6f)
             .Background(theme.Scrim)
-            .AlignItems(AlignItems.Center)
             .Opacity(opacity)
             .AutomationId("video-controls")
             .FontSize(theme.FontSize).TextColor(theme.Foreground)
@@ -640,8 +657,10 @@ public sealed class VideoPlayer : Component
         bar.Role = AccessibilityRole.Group;
         bar.WithRef(_bar);
 
-        // Children(...) replaces, so the bar is assembled first and set once.
+        // Children(...) replaces, so the bar is assembled first and set once. Narrow, the time and
+        // the scrubber are a row of their own over the buttons.
         var items = new List<Element>();
+        var timeline = narrow ? new List<Element>() : items;
 
         items.Add(IconButton(theme, playing ? "Pause" : "Play", "video-play",
             playing ? PauseGlyph(theme.Foreground) : Phosphor.Draw("play", 16f, theme.Foreground),
@@ -653,7 +672,7 @@ public sealed class VideoPlayer : Component
         items.Add(IconButton(theme, $"Forward {jump}", "video-jump-forward", ChevronsGlyph(theme.Foreground, back: false),
             () => player.SeekBy(JumpStep)));
 
-        items.Add(Text.New(FormatTime(position, duration)).AutomationId("video-elapsed").WithRef(_elapsed));
+        timeline.Add(Text.New(FormatTime(position, duration)).AutomationId("video-elapsed").WithRef(_elapsed));
 
         if (duration is { } total && total > TimeSpan.Zero)
         {
@@ -668,28 +687,32 @@ public sealed class VideoPlayer : Component
             scrubber.ShowHoverFill = true;
             if (_chapterSeconds.Length > 0) scrubber.Segments = _chapterSeconds;
             scrubber.WithRef(_scrubber);
-            items.Add(scrubber);
-            items.Add(Text.New(FormatTime(total, duration)).TextColor(theme.MutedForeground).AutomationId("video-duration"));
+            timeline.Add(scrubber);
+            timeline.Add(Text.New(FormatTime(total, duration)).TextColor(theme.MutedForeground).AutomationId("video-duration"));
         }
         else
         {
-            items.Add(Box.New().FlexGrow(1));
+            timeline.Add(Box.New().FlexGrow(1));
             if (player.HasMedia)
-                items.Add(Text.New("LIVE").TextColor(theme.MutedForeground).AutomationId("video-live"));
+                timeline.Add(Text.New("LIVE").TextColor(theme.MutedForeground).AutomationId("video-live"));
         }
+        if (narrow) items.Add(Box.New().FlexGrow(1));
 
         items.Add(IconButton(theme, player.Muted ? "Unmute" : "Mute", "video-mute",
             SpeakerGlyph(theme.Foreground, player.Muted), () => player.Muted = !player.Muted));
 
-        var volume = Slider.New(player.Muted ? 0 : player.Volume * 100, 0, 100)
-            .Width(80f)
-            .AccessibleName("Volume").AutomationId("video-volume")
-            .OnValueChanged(v =>
-            {
-                player.Volume = (float)(v / 100);
-                if (player.Muted && v > 0) player.Muted = false;
-            });
-        items.Add(volume);
+        if (!narrow)
+        {
+            var volume = Slider.New(player.Muted ? 0 : player.Volume * 100, 0, 100)
+                .Width(80f)
+                .AccessibleName("Volume").AutomationId("video-volume")
+                .OnValueChanged(v =>
+                {
+                    player.Volume = (float)(v / 100);
+                    if (player.Muted && v > 0) player.Muted = false;
+                });
+            items.Add(volume);
+        }
 
         if ((player.Capabilities & BackendCapabilities.Rate) != 0)
         {
@@ -723,9 +746,21 @@ public sealed class VideoPlayer : Component
             Phosphor.Draw(full ? "arrows-in" : "arrows-out", 16f, theme.Foreground),
             () => FullscreenRequested?.Invoke()));
 
-        bar.Children(items.ToArray());
+        if (!narrow)
+        {
+            bar.Children(items.ToArray());
+            return bar;
+        }
+        float row = theme.BarHeight - 12f;
+        bar.Children(
+            Flex.Row(gap: 6).Height(row).AlignItems(AlignItems.Center).Children(timeline.ToArray()),
+            Flex.Row(gap: 4).Height(row).AlignItems(AlignItems.Center).Children(items.ToArray()));
         return bar;
     }
+
+    /// <summary>The bar's height: two rows when narrow, each a one-row bar's less its padding.</summary>
+    private static float BarHeight(VideoPlayerTheme theme, bool narrow) =>
+        narrow ? theme.BarHeight * 2f - 12f : theme.BarHeight;
 
     private static ContextMenuItem TrackItem(string title, int? id, int? selected, Action<int?> select) => new()
     {

@@ -40,13 +40,18 @@ internal static class ApertureAndroid
     }
 }
 
-/// <summary>A made-up library for looking at the app with no server: made-up titles, no artwork,
-/// nothing that plays.</summary>
+/// <summary>
+/// A made-up library for looking at the app with no server: made-up titles, no artwork. Its "server"
+/// is a folder of the app's own, so a film plays what is put where its stream would be:
+/// <c>files/demo/Videos/&lt;id&gt;/stream?static=true</c> (the fake's stream address, a file URL here),
+/// as scripts put a test clip there.
+/// </summary>
 internal static class DemoLibrary
 {
     public static IMediaLibrary Make()
     {
-        var library = new FakeMediaLibrary()
+        string folder = Path.Combine(global::Android.App.Application.Context.FilesDir!.AbsolutePath, "demo");
+        var library = new FakeMediaLibrary(new ServerInfo("file://" + folder, "Demo library", "12.1.0", "demo"))
             .AddLibrary("films", "Films", LibraryKind.Movies)
             .AddLibrary("shows", "Series", LibraryKind.TvShows);
         string[] films =

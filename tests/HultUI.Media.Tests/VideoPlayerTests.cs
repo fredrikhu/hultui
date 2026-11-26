@@ -24,12 +24,12 @@ public class VideoPlayerTests
         public MediaPlayer Player { get; }
         public VideoPlayer VideoPlayer { get; }
 
-        public Fixture(bool open = true)
+        public Fixture(bool open = true, float width = 640f)
         {
-            Session = HeadlessSession.Create(640, 400);
+            Session = HeadlessSession.Create((int)width, 400);
             Player = new MediaPlayer(Backend);
             VideoPlayer = new VideoPlayer(Player);
-            Session.Application.SetRoot(Box.New().Children(VideoPlayer.Mount().Width(640f).Height(400f)));
+            Session.Application.SetRoot(Box.New().Children(VideoPlayer.Mount().Width(width).Height(400f)));
             if (open) Player.Open(Clip);
             Session.PumpFrames(2);
         }
@@ -54,6 +54,33 @@ public class VideoPlayerTests
             Player.Dispose();
             Session.Dispose();
         }
+    }
+
+    /// <summary>A phone held upright (plan 20 phase 5): the bar is two rows, the scrubber across the
+    /// whole width over the buttons, and has no volume slider; at a desktop's width, one row.</summary>
+    [Theory]
+    [InlineData(412f, true)]
+    [InlineData(640f, false)]
+    public void ANarrowPlayer_HasItsScrubberOverItsButtons_AndNoVolumeSlider(float width, bool narrow)
+    {
+        using var f = new Fixture(width: width);
+        f.Session.PumpFrames(3);
+
+        var seek = f.Session.Window.FindByAutomationId("video-seek")!.Node.BoundingRect;
+        var play = f.Session.Window.FindByAutomationId("video-play")!.Node.BoundingRect;
+        if (narrow)
+        {
+            Assert.True(seek.Bottom <= play.Y + 1, $"the scrubber ({seek}) is not over the buttons ({play})");
+            Assert.True(seek.Width > width * 0.5f, $"the scrubber is {seek.Width} wide");
+            Assert.Null(f.Session.Window.FindByAutomationId("video-volume"));
+        }
+        else
+        {
+            Assert.True(Math.Abs(seek.Y + seek.Height / 2 - (play.Y + play.Height / 2)) < 4, "one row");
+            Assert.NotNull(f.Session.Window.FindByAutomationId("video-volume"));
+        }
+        // Every button on screen, none over another.
+        Assert.True(f.Session.Window.FindByAutomationId("video-fullscreen")!.Node.BoundingRect.Right <= width);
     }
 
     [Fact]
