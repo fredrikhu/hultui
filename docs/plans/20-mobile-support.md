@@ -550,8 +550,8 @@ Built:
   - the `android` job in `mpv-natives.yml` and the Android RIDs in `HultUI.Media.Mpv.Natives`.
     The job has not run yet: running it by hand replaces the rolling prerelease the installers use.
 - **Video on GL ES** through the render-API path:
-  - `hwdec=auto-safe` lands on `mediacodec-copy`. The AImageReader zero-copy path works on the
-    S25 but not on the emulator, and saved no CPU at 4K, so it is not the default.
+  - `hwdec=mediacodec,mediacodec-copy`: zero-copy through AImageReader, then the copy where that
+    will not start. It was `auto-safe`, which lands on the copy; see the playback profile below.
   - The Java VM goes to FFmpeg before mpv starts.
   - Audio is AudioTrack with a 0.5 s buffer, then AAudio (see the fixes below).
   - libass gets the system's Roboto.
@@ -609,18 +609,43 @@ Fixed on the way, each found on the phone:
     delay took its first step at once, but its later steps waited for the other's deadline. For
     the swipe, that was the toast's cancelled hold. Meanwhile the loop spun on 1 ms waits. A
     drawn step now makes the next one due with the next frame (`Application.RunUntil`).
+- An https HLS transcode (Aperture with a streaming limit) could not play, because FFmpeg has no
+  TLS and the user declined the LGPLv3 that OpenSSL or mbedTLS would bring. Aperture played the
+  original file instead. FFmpeg now fetches the playlist and its segments from a loopback proxy
+  in plain http (`MpvLoopbackProxy`), and the proxy asks the server over https through
+  `HttpClient`. That was chosen over a progressive transcode through `MpvHttpStream`, which cannot
+  seek by range: each seek would restart the transcode, and the player would need the time offset.
+  On the S25, a 4K film at a 4 Mbps limit transcodes and plays.
+  - A seek in it took ~13 s, nearly all of it the server's. The proxy's timings showed this
+    (Aperture's Debug build sends stderr to logcat when started with `-e env`). With a software
+    transcode of 4K HEVC, Jellyfin took 7.5 s to restart and deliver the first segment, and
+    2.4–3 s for each 3 s segment after that. With the server's Intel iGPU passed into its
+    container (QuickSync), the first segment takes 1.0 s, each later one ~0.2 s, and a seek
+    ~2 s. The proxy adds ~20 ms a request.
+- **Playback profile** on the S25: a 4K HEVC film at 36 Mbps, played directly over https, Debug
+  build. Measured with per-thread `/proc` deltas and `simpleperf`; 100 % is one core.
+  - Before: the app took 54 %, the codec service 9 %, audioserver 12 %, surfaceflinger 5 %.
+  - Two copies of every byte made most of it. The threads named `Thread-N` are not Java's own.
+    They are mpv's and FFmpeg's native threads, which FFmpeg attaches to the Java VM for MediaCodec.
+    - **The https stream** copied mpv's whole ~128 KB read buffer into a new Java array and back
+      for each ~16 KB TLS record. That cost 12–16 % in `memmove` and most of a ~10 % Java GC. Each
+      read now asks for at most 32 KB, and that thread takes 1.6 %.
+    - **The decoder** copied every 4K frame out of MediaCodec
+      (`ff_mediacodec_sw_buffer_copy_yuv420_semi_planar`, ~13 %). The GL driver then uploaded it
+      again: 28 %, part of it on two Adreno threads that inherit the UI thread's name `SDLThread`.
+      Zero-copy (`hwdec=mediacodec`) removes both.
+  - After both: the app takes 30 % and the codec service 4 %. The whole device went from ~118 % to
+    88 % of its eight cores. HDR10 and Dolby Vision tone-mapping, subtitles, pausing, seeking while
+    paused and rotation all check out. `video-check.ps1` passes on the S25 and the emulator alike,
+    and a first mode that will not start falls through to `mediacodec-copy`.
+  - Left in the app: the UI thread's ~13 %, Skia and mpv drawing each frame into the window.
+    audioserver's 12 % is the system's own.
 
 Left:
 - **SDL with 8dc8694**, when a ppy.SDL3-CS carries it; then the Android workaround goes.
-- **The https stream's Java side.** At 4K it costs about a fifth of that 58 %: the Java threads
-  of the platform's HTTP handler, and their garbage collection. .NET's managed handler might
-  cost less.
 - **TalkBack's explore check** on the emulator: TalkBack now adds the window's name to the first
   button it reads, "Tap me. Button. Window HultUI spike". It does so with or without 96e88cb0;
   the check, or TalkBack's settings, wants a look.
-- **An https HLS transcode** cannot play (no TLS in FFmpeg; the user declined LGPLv3, which
-  OpenSSL or mbedTLS would bring). Aperture plays the original file instead and says so
-  (7641a456); a progressive transcode through `MpvHttpStream` would be the way to transcode.
 - **A tablet layout.** At 600 DIP and over, Aperture keeps its desktop layout.
 - **Android TV.**
 - **Distribution.** It needs a signing key the user makes.

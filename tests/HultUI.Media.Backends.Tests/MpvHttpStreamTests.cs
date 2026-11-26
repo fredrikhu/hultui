@@ -36,6 +36,24 @@ public class MpvHttpStreamTests
         }
     }
 
+    /// <summary>However much mpv asks for, a read takes at most MaxRead. Android's response stream is
+    /// a Java one that copied the whole buffer in and out for each TLS record it returned: 12-16 % of
+    /// a core at 36 Mbps on a Galaxy S25 (plan 20's playback profile).</summary>
+    [Fact]
+    public void AReadTakesAtMostMaxRead_WhateverMpvAsksFor()
+    {
+        using var server = new RangeServer(Data);
+        using var stream = new MpvHttpStream(server.Url);
+        stream.Open();
+        var all = new MemoryStream();
+        var buffer = new byte[1024 * 1024];
+        long largest = 0;
+        for (long got; (got = stream.Read(buffer)) > 0; all.Write(buffer, 0, (int)got))
+            largest = Math.Max(largest, got);
+        Assert.InRange(largest, 1, MpvHttpStream.MaxRead);
+        Assert.Equal(Data, all.ToArray());
+    }
+
     [Fact]
     public void ItReadsTheWholeResource_InOneRequest_AndKnowsItsSize()
     {

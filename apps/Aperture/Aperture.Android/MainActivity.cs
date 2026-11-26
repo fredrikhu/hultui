@@ -22,8 +22,11 @@ public class MainActivity : HultUIActivity
         // `-e env "K=V;K=V"`: environment variables for the run, as the spike takes them, for the
         // diagnostics HultUI reads there (HULTUI_MPV_LOG, HULTUI_FRAMELOG). CoreCLR on Android reads
         // no debug.mono.env. Quote the value for the device's shell, or its `;` ends the command.
-        foreach (var pair in (Intent?.GetStringExtra("env") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))
+        string env = Intent?.GetStringExtra("env") ?? "";
+        foreach (var pair in env.Split(';', StringSplitOptions.RemoveEmptyEntries))
             if (pair.Split('=', 2) is [var key, var value]) Environment.SetEnvironmentVariable(key, value);
+        // What those diagnostics write to stderr, which nothing reads on Android, into logcat.
+        if (env.Length > 0) Console.SetError(new LogcatWriter());
 #endif
         base.OnCreate(savedInstanceState);
     }

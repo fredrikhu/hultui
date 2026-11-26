@@ -186,10 +186,17 @@ desktop, drawn with GL ES. `HultUI.Media.Mpv.Natives` carries `libmpv.so` for `a
 as `AndroidNativeLibrary` items with their ABI, as the spike and `Aperture.Android` do.
 
 What differs from the desktop:
-- **Decoding.** `hwdec=auto-safe` lands on `mediacodec-copy`. FFmpeg needs the app's Java VM for
-  MediaCodec, and `MpvBackend` hands it over before mpv starts. mpv's zero-copy path
-  (`mediacodec` with AImageReader, `HULTUI_MPV_HWDEC=mediacodec`) works on a Galaxy S25 but did
-  not start on the emulator, and at 4K it used no less CPU than the copy, so it is not the default.
+- **Decoding.** `hwdec=mediacodec,mediacodec-copy`. FFmpeg needs the app's Java VM for MediaCodec,
+  and `MpvBackend` hands it over before mpv starts.
+  - Zero-copy comes first: `mediacodec`, through AImageReader. The decoder's frames reach mpv's
+    GL textures directly.
+  - The copy is the fallback where zero-copy will not start. It moves every frame through memory
+    and uploads it again; `auto-safe` lands on it.
+  - At 4K HEVC (36 Mbps) on a Galaxy S25, zero-copy cut the app from 50 % of a core to 30 %, and
+    the codec service from 9 % to 4 %. HDR10 and Dolby Vision are tone-mapped right, subtitles
+    draw, and a paused picture stays. The emulator decodes zero-copy too.
+  - An older measurement said zero-copy saved nothing. It was taken while SDL's wait kept every
+    app busy on a whole core.
 - **Chroma scaling.** mpv scales chroma bilinearly on Android (`cscale=bilinear`). MediaCodec
   decodes to NV12, and on the S25's Adreno every separable scaler mpv has turned NV12's
   two-channel chroma plane into speckled noise.
@@ -197,9 +204,16 @@ What differs from the desktop:
   the picture after a seek made while paused; AudioTrack underran with mpv's 0.2 s buffer.
 - **https.** The Android libmpv's FFmpeg has no TLS. An https:// source is read through
   `HttpClient` instead (the platform's TLS and trusted certificates), by range requests mpv can
-  seek with. An HLS playlist is not: FFmpeg fetches its segments itself, which needs TLS in
-  FFmpeg (and would make the libmpv build LGPLv3), so an https HLS transcode fails to open.
-  Aperture then plays the original file and says so.
+  seek with. Each read asks for at most 32 KB (`MpvHttpStream.MaxRead`). Android's response stream
+  is a Java one, and every read copied mpv's whole ~128 KB buffer into a new Java array and back
+  for one ~16 KB TLS record: 12–16 % of a core and most of the Java GC's ~10 % at 36 Mbps. With
+  the cap, the stream's thread takes under 2 %. An HLS playlist (a Jellyfin transcode) cannot go that way, because FFmpeg fetches its
+  segments itself. FFmpeg fetches it from a proxy on the loopback address instead, in plain http,
+  and the proxy asks the server over https through `HttpClient` (`MpvLoopbackProxy`). Seeking and
+  the duration work as on the desktop, and FFmpeg needs no TLS, which would make the libmpv build
+  LGPLv3. The proxy forwards only requests that carry the process's random secret, and only to a
+  server the app gave it. If a transcode still fails to open, Aperture plays the original file and
+  says so.
 - **Subtitles.** ASS fonts a file embeds are used as on the desktop. Otherwise libass gets the
   system's Roboto, so subtitles without embedded fonts in scripts Roboto lacks (CJK) draw nothing.
 - **Still pictures on GL ES.** A paused picture is copied out of mpv's cache, and some GL ES drivers

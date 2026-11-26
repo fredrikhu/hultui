@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
 using HultUI.Core.DevTools;
@@ -99,11 +100,18 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
         // distribution libmpv loaded through HULTUI_MPV_PATH, "auto" skips the whitelist and
         // may pick methods known to be broken.
         //
+        // Android: "auto-safe" lands on mediacodec-copy, which copies each decoded frame out of
+        // MediaCodec and uploads it to a texture again. Zero-copy (mediacodec, through
+        // AImageReader) is asked for first: at 4K HEVC on a Galaxy S25 the app took 30 % of a core
+        // against 50 %, and the codec service 4 % against 9 %. Where it will not start (the
+        // emulator), mpv goes on to the copy.
+        //
         // HULTUI_MPV_HWDEC overrides it with any mode mpv understands. mpv falls back to
         // software on its own if the mode it is given cannot initialise.
         mpv_set_option_string(_mpv, "hwdec",
-            Environment.GetEnvironmentVariable("HULTUI_MPV_HWDEC") is { Length: > 0 } mode
-                ? mode : "auto-safe");
+            Environment.GetEnvironmentVariable("HULTUI_MPV_HWDEC") is { Length: > 0 } mode ? mode
+            : OperatingSystem.IsAndroid() ? "mediacodec,mediacodec-copy"
+            : "auto-safe");
         // Android: AudioTrack (through JNI) first, as mpv-android has it; AAudio where it will not
         // open. mpv 0.41's AAudio output froze playback after a seek made while paused (a Galaxy
         // S25 and the emulator alike): the picture and the position stood still while the sound
@@ -231,9 +239,17 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
         // An https:// source this libmpv's FFmpeg cannot open goes through HttpClient. mpv caches
         // only what it knows to be a network stream, which a callback stream is not, so the cache
         // is asked for; queued before the load, it applies to this file.
-        // An HLS playlist is not: see MpvHttpStream.Carries.
+        // An HLS playlist is not: FFmpeg fetches it and its segments from MpvLoopbackProxy, in plain
+        // http, and the proxy asks the server over https.
         bool throughClient = _httpsThroughClient && MpvHttpStream.Carries(target);
         if (throughClient) target = MpvHttpStream.Wrap(target);
+        else if (_httpsThroughClient && MpvLoopbackProxy.Carries(target))
+        {
+            try { target = MpvLoopbackProxy.Shared.Wrap(target); }
+            // No loopback listener: FFmpeg is given the playlist, fails to open it, and the app
+            // hears so as from any source that will not open.
+            catch (Exception e) when (e is SocketException or InvalidOperationException) { }
+        }
         if (throughClient != _cacheForced)
         {
             _cacheForced = throughClient;
