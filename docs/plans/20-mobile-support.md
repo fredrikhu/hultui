@@ -531,6 +531,47 @@ phone, and Aperture's login and search by touch.
 
 ### Phase 5: Aperture on Android (L)
 
+**Status (2026-11-26): built and checked on the emulator, waiting for the phone.** On branch
+`claude/android-spike`, unpushed.
+
+Built:
+- **libmpv for Android**, arm64 and x86_64:
+  - built by `native/mpv/build-libmpv-android.sh` with NDK r27c at API 31 and the same LGPL trim;
+  - FFmpeg gets MediaCodec, and mpv gets EGL on Android, AAudio and AudioTrack;
+  - libmpv.so is 25 MB (arm64) and 31 MB (x86_64);
+  - the `android` job in `mpv-natives.yml` and the Android RIDs in `HultUI.Media.Mpv.Natives`.
+    The job has not run: nothing is pushed.
+- **Video on GL ES** through the render-API path:
+  - `hwdec=auto-safe` lands on `mediacodec-copy`; the AImageReader zero-copy path does not start
+    on the emulator.
+  - The Java VM goes to FFmpeg before mpv starts.
+  - Audio is AAudio, then AudioTrack.
+  - libass gets the system's Roboto.
+  - Paused pictures were black on the emulator's GL ES, which refuses mpv's float-to-RGBA8 copy;
+    `GlesFboFormat` tries that copy once and picks a format that copies.
+- **Aperture on Android** (`apps/Aperture/Aperture.Android`):
+  - cleartext HTTP allowed for LAN servers;
+  - the token in `CredentialStore.Default`, the Keystore;
+  - a phone layout below 600 DIP: smaller posters, the film page in one column, the library's
+    chips in a strip that scrolls, no caption buttons, no key hints;
+  - `VideoPlayer`'s bar in two rows below 560 DIP;
+  - a debug-only demo library (`-e demo 1`) that plays a clip from the app's folder, for checking
+    with no server.
+
+Checked on the emulator:
+- The spike's video sample plays H.264 and AV1 1080p at 30 fps, with sound and ASS subtitles.
+- Backgrounding pauses, and playback survives rotation.
+- Pausing and resuming keep the picture.
+- Aperture's Home, library and film page are laid out for the phone, and its own player plays,
+  pauses and resumes.
+
+Left:
+- **The phone:** sign-in to the lab server, 1080p HEVC and 4K with hardware decoding, zero-copy.
+- **A tablet layout.** At 600 DIP and over, Aperture keeps its desktop layout.
+- **Android TV.**
+- **Distribution.** It needs a signing key the user makes.
+- **The CI job's first run.**
+
 - **libmpv for Android.** arm64 and x86_64, built with the NDK from `native/mpv/` with the same
   LGPL trim, as a new job in `mpv-natives.yml` and an Android RID in `HultUI.Media.Mpv.Natives`.
   `Mpv.cs` gets `libmpv.so` candidates for Android.

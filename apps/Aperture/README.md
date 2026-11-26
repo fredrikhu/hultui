@@ -330,6 +330,31 @@ dotnet run .claude/skills/run-hultui-app/driver.cs -- --app aperture \
   --server http://jellyfin.home:8096 --api-key-file ~/jf.key --out shots settle:2000 shot:home
 ```
 
+## On Android
+
+`apps/Aperture/Aperture.Android` is the same app as an Android activity (plan 20, phase 5),
+checked on the emulator so far. It needs the Android libmpv in `native/mpv/out/android-*`
+(`native/mpv/build-libmpv-android.sh`, or the `mpv-natives` workflow's artifacts), which the
+project packs when it is there. Build and install:
+
+```bash
+dotnet build apps/Aperture/Aperture.Android -c Debug -p:HultUIAndroid=true -p:EmbedAssembliesIntoApk=true \
+  -p:AndroidSdkDirectory=<sdk> -p:JavaSdkDirectory=<jdk>
+adb install -r apps/Aperture/Aperture.Android/bin/Debug/net11.0-android/org.hultui.aperture-Signed.apk
+```
+
+Below 600 DIP on the shorter side it uses a phone layout (`Halide.UsePhoneSizes`). A Debug
+build started with `-e demo 1` opens a made-up library instead of the sign-in, for looking at
+the app with no server:
+
+```bash
+adb shell am start -n org.hultui.aperture/crc64a74877e600b1fa64.MainActivity -e demo 1
+```
+
+Its films play whatever file is at `files/demo/Videos/<id>/stream?static=true` in the app's
+private folder (`run-as org.hultui.aperture`). `docs/ANDROID.md` covers what differs about
+video there.
+
 ## Tests
 
 ```bash

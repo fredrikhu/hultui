@@ -170,6 +170,30 @@ otherwise expect fast deployment (`dotnet build -t:Install`), and the app aborts
 HultUI's own messages go to logcat under `DOTNET` (what a desktop app writes to stderr) and
 `HultUI` (`adb logcat -s DOTNET:* HultUI:*`).
 
+## Video
+
+`HultUI.Media` with the mpv backend plays on Android through the same render-API path as on the
+desktop, drawn with GL ES. `HultUI.Media.Mpv.Natives` carries `libmpv.so` for `android-arm64` and
+`android-x64`, built by `native/mpv/build-libmpv-android.sh` (the `android` job in
+`mpv-natives.yml`; `native/mpv/README.md`). An app built against HultUI's source lists them itself,
+as `AndroidNativeLibrary` items with their ABI, as the spike and `Aperture.Android` do.
+
+What differs from the desktop:
+- **Decoding.** `hwdec=auto-safe` lands on `mediacodec-copy`. FFmpeg needs the app's Java VM for
+  MediaCodec, and `MpvBackend` hands it over before mpv starts. mpv's zero-copy path
+  (`mediacodec` with AImageReader) did not start on the emulator and is unchecked on a phone.
+- **Audio.** AAudio first, then AudioTrack.
+- **Subtitles.** ASS fonts a file embeds are used as on the desktop. Otherwise libass gets the
+  system's Roboto, so subtitles without embedded fonts in scripts Roboto lacks (CJK) draw nothing.
+- **Still pictures on GL ES.** A paused picture is copied out of mpv's cache, and some GL ES drivers
+  refuse the copy from mpv's usual float format (the emulator does). `MpvBackend` tries the copy
+  once and gives mpv a format that works; the emulator gets `rgb10_a2`.
+- **Size.** `libmpv.so` is 25 MB for arm64 and 31 MB for x86_64, before the APK's compression.
+- **Backgrounding** pauses a playing video (see the lifecycle above).
+
+`VideoPlayer` lays its bar out in two rows below 560 DIP wide, a phone held upright: the time and
+the scrubber over the buttons, and no volume slider, since the phone has volume buttons.
+
 ## Not yet
 
 These are plan 20's later phases:
@@ -179,4 +203,5 @@ These are plan 20's later phases:
   announcements. Nothing is checked on a phone yet.
 - **File dialogs** return Android's `content://` addresses, which `File.Open` cannot open.
 - **No second window.**
-- **Video** needs a libmpv build for Android (phase 5).
+- **Video is checked on the emulator only** (phase 5): hardware decoding of HEVC and 4K, and
+  zero-copy, need a phone.
