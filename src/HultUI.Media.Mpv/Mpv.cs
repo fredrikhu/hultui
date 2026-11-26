@@ -292,6 +292,28 @@ internal static unsafe partial class Mpv
     [LibraryImport(Library)] public static partial int mpv_render_context_render(nint context, mpv_render_param* parameters);
     [LibraryImport(Library)] public static partial void mpv_render_context_free(nint context);
 
+    // ──── Stream callbacks (stream_cb.h; cancel_fn since client API 1.106) ────
+
+    public const int MPV_ERROR_LOADING_FAILED = -13, MPV_ERROR_UNSUPPORTED = -18, MPV_ERROR_GENERIC = -20;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct mpv_stream_cb_info
+    {
+        public void* cookie;
+        public delegate* unmanaged[Cdecl]<void*, byte*, ulong, long> read_fn;
+        public delegate* unmanaged[Cdecl]<void*, long, long> seek_fn;
+        public delegate* unmanaged[Cdecl]<void*, long> size_fn;
+        public delegate* unmanaged[Cdecl]<void*, void> close_fn;
+        public delegate* unmanaged[Cdecl]<void*, void> cancel_fn;
+    }
+
+    [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int mpv_stream_cb_add_ro(nint handle, string protocol, void* userData,
+        delegate* unmanaged[Cdecl]<void*, byte*, mpv_stream_cb_info*, int> open);
+
+    /// <summary>(major &lt;&lt; 16) | minor of the loaded libmpv's client API.</summary>
+    [LibraryImport(Library)] public static partial CULong mpv_client_api_version();
+
     // ──── Helpers ────
 
     public static string ErrorString(int error)

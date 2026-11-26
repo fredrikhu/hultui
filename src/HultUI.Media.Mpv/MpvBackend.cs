@@ -131,6 +131,12 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
         ApplyExtraOptions();
         Check(mpv_initialize(_mpv));
 
+        // An FFmpeg built without TLS (Android's; Linux's unless built with GnuTLS or OpenSSL)
+        // cannot open https://; such sources are read through HttpClient instead (MpvHttpStream).
+        // A synchronous read, safe here: there is no render context yet for the core to wait on.
+        bool ffmpegHttps = (GetString(_mpv, "protocol-list") ?? "").Split(',').Contains("https");
+        _httpsThroughClient = !ffmpegHttps && MpvHttpStream.Register(_mpv, mpv_client_api_version().Value >= 0x1006A);
+
         Check(mpv_observe_property(_mpv, ObservePause, "pause", MPV_FORMAT_FLAG));
         Check(mpv_observe_property(_mpv, ObservePosition, "time-pos", MPV_FORMAT_DOUBLE));
         Check(mpv_observe_property(_mpv, ObserveDuration, "duration", MPV_FORMAT_DOUBLE));
@@ -204,8 +210,28 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
     /// as the synchronous calls' results were.</summary>
     private const ulong LoadReply = 0x100;
 
+    /// <summary>https:// sources are read through <see cref="MpvHttpStream"/>: this libmpv's FFmpeg
+    /// has no TLS.</summary>
+    private readonly bool _httpsThroughClient;
+
+    /// <summary>The cache was set to "yes" for a source read through <see cref="MpvHttpStream"/>.</summary>
+    private bool _cacheForced;
+
+    /// <summary>Whether https:// sources go through HttpClient. For tests.</summary>
+    internal bool HttpsThroughClient => _httpsThroughClient;
+
     private void Load(string target)
     {
+        // An https:// source this libmpv's FFmpeg cannot open goes through HttpClient. mpv caches
+        // only what it knows to be a network stream, which a callback stream is not, so the cache
+        // is asked for; queued before the load, it applies to this file.
+        bool throughClient = _httpsThroughClient && target.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+        if (throughClient) target = MpvHttpStream.Wrap(target);
+        if (throughClient != _cacheForced)
+        {
+            _cacheForced = throughClient;
+            SetStringAsync(_mpv, 0, "cache", throughClient ? "yes" : "auto");
+        }
         SetFlagAsync(_mpv, 0, "pause", true);
         int error = CommandAsync(_mpv, LoadReply, "loadfile", target, "replace");
         if (error < 0) Raise(new BackendEvent.Failed(ErrorString(error)));
