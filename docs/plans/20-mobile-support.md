@@ -528,7 +528,8 @@ keyboard. Caret placement, word selection, handles and the edit menu for `TextIn
 them. Built and headless-tested: the input kinds and the keyboard's area (the note's §8), and
 touch text editing (§9). Checked on the emulator (`keyboard-check.ps1`, five checks), and on the
 Galaxy S25 with Samsung's keyboard: 5 of 5, and the user signed in to Aperture and searched with
-it. The sign-in card, wider than the phone at first, now fits it (698a21f3).
+it. The sign-in card, wider than the phone at first, now fits it (698a21f3), as does Settings
+(83fd4973), whose token row now names the Android Keystore.
 
 **Exit criteria**
 
@@ -609,11 +610,6 @@ Left:
 - **An https HLS transcode** cannot play (no TLS in FFmpeg; the user declined LGPLv3, which
   OpenSSL or mbedTLS would bring). Aperture plays the original file instead and says so
   (7641a456); a progressive transcode through `MpvHttpStream` would be the way to transcode.
-- **Aperture's Settings at a phone's width:**
-  - Sign out and the request server's Connect run off the right edge;
-  - the "Seasons seen" path overflows, and Quality reads "10 Mb…";
-  - the Access token row says "not stored on this platform", though Android keeps it in the
-    Keystore.
 - **Toasts are one line** (`ToastElement.MaxLines = 1`), so long ones are cut at a phone's width.
 - **A tablet layout.** At 600 DIP and over, Aperture keeps its desktop layout.
 - **Android TV.**
