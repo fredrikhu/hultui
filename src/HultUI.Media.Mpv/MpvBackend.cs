@@ -787,6 +787,14 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
     {
         _getProcAddress = getProcAddress;
         _procAddressHandle = GCHandle.Alloc(getProcAddress);
+        // GL ES: a still picture is copied out of mpv's cache, and mpv's own format may not copy
+        // into the sink's texture there (GlesFboFormat). Queued ahead of anything loading.
+        if (GlesFboFormat.Choose(getProcAddress) is { } fboFormat)
+        {
+            SetStringAsync(_mpv, 0, "fbo-format", fboFormat);
+            if (Environment.GetEnvironmentVariable("HULTUI_MPV_LOG") is { Length: > 0 })
+                Console.Error.WriteLine($"[mpv] GL ES will not copy rgba16f into RGBA8: fbo-format={fboFormat}");
+        }
         var apiType = "opengl\0"u8.ToArray();
         fixed (byte* api = apiType)
         {
