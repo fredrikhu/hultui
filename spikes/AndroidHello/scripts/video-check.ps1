@@ -2,7 +2,7 @@
 # the video sample (HultUI's player over libmpv on GL ES), and checks, from the app's logcat lines
 # (tag HultUISpike) and from screenshots:
 #   - the first frame arrives, and playback keeps at least 20 frames a second;
-#   - the picture is on screen while playing;
+#   - the picture is on screen, whole, while playing;
 #   - a tap on the picture pauses, and the paused picture stays (on GL ES it was black once:
 #     src/HultUI.Media.Mpv/GlesFboFormat.cs);
 #   - a second tap plays on.
@@ -25,8 +25,9 @@ function Check([string] $what, [bool] $ok, [string] $detail) {
     Write-Output ("{0}  {1}  {2}" -f ($(if ($ok) { 'PASS' } else { 'FAIL' })), $what, $detail)
 }
 
-# The share of the screen's middle band, sampled every 8 pixels, that is not near black. A playing
-# test pattern covers most of it; a black picture leaves none.
+# The share of the screen's middle band, sampled every 8 pixels, that is not near black. A clean
+# test pattern fills it (1.0 on the emulator and on a Galaxy S25); a black picture leaves none, and
+# speckled chroma (NV12 through a separable scaler on Adreno, see MpvBackend's cscale) about a third.
 Add-Type -AssemblyName System.Drawing
 function Colour([string] $name) {
     $device = "/sdcard/video-check.png"
@@ -73,7 +74,7 @@ Start-Sleep -Seconds 4
 $report = LastReport
 Check 'plays at 20 fps or more' ((FramesIn $report) -ge 40) "$report"
 $playing = Colour 'playing'
-Check 'picture while playing' ($playing -ge 0.3) "$playing of the middle band lit"
+Check 'picture while playing' ($playing -ge 0.8) "$playing of the middle band lit"
 
 # 2. A tap pauses, and the picture stays.
 Adb shell input tap $cx $cy
@@ -81,7 +82,7 @@ Start-Sleep -Seconds 3
 $report = LastReport
 Check 'tap pauses' ([bool]($report -match '^video: Paused')) "$report"
 $paused = Colour 'paused'
-Check 'picture while paused' ($paused -ge 0.3) "$paused of the middle band lit"
+Check 'picture while paused' ($paused -ge 0.8) "$paused of the middle band lit"
 
 # 3. Another plays on.
 Adb shell input tap $cx $cy

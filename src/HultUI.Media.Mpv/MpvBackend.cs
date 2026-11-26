@@ -107,9 +107,17 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
         // Android: AAudio, Android's low-latency output, first; AudioTrack (through JNI) where it
         // will not open. With the Java VM given, mpv's own order put AudioTrack first, and it
         // underran at the start (seen on the emulator).
+        //
+        // Chroma scaled bilinearly. On a Galaxy S25 (Adreno 830, GL ES 3.2) each separable scaler
+        // tried (mpv's default lanczos, spline36, mitchell, catmull_rom, hermite) turned the two-channel
+        // chroma plane of NV12, which MediaCodec decodes to, into speckled noise, while bilinear and
+        // the polar ewa_lanczos drew it clean; three-plane I420 was clean either way. Bilinear is
+        // the cheap one of the two, and chroma is at half resolution to begin with.
+        // HULTUI_MPV_OPTIONS, applied after, still overrides it.
         if (OperatingSystem.IsAndroid())
         {
             mpv_set_option_string(_mpv, "ao", "aaudio,audiotrack");
+            mpv_set_option_string(_mpv, "cscale", "bilinear");
             UseAndroidSubtitleFont();
         }
         // No headroom: mpv signals a frame when it is due, not early with a sleep in
