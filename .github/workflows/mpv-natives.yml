@@ -124,8 +124,47 @@ jobs:
           bash ../../scripts/release-transport.sh upload "$RELEASE_TAG" out/linux-x64/libmpv.so.2 libmpv.so.2
           bash ../../scripts/release-transport.sh upload "$RELEASE_TAG" out/linux-x64/LICENCE-REPORT.txt LICENCE-REPORT-linux-x64.txt
 
+  # Plan 20 phase 5: the same libmpv for Android, both ABIs, cross-built with the pinned NDK
+  # (native/mpv/README.md, Android). No backend tests: the library runs only on Android; the build
+  # itself checks what it needs, what it exports and its licence.
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: write # the binaries go to the release
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Build dependencies, and the pinned NDK
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential git meson ninja-build nasm pkg-config python3 python3-jinja2 \
+            autoconf automake libtool gawk
+          source native/mpv/versions.env
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ANDROID_NDK_REVISION" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$ANDROID_NDK_REVISION" >> "$GITHUB_ENV"
+
+      - name: Build libmpv for arm64-v8a
+        run: cd native/mpv && bash ./build-libmpv-android.sh arm64-v8a
+
+      - name: Build libmpv for x86_64
+        run: cd native/mpv && bash ./build-libmpv-android.sh x86_64
+
+      - name: Publish the binaries to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd native/mpv
+          bash ../../scripts/release-transport.sh ensure "$RELEASE_TAG" $RELEASE_KIND
+          for rid in android-arm64 android-x64; do
+            bash ../../scripts/release-transport.sh upload "$RELEASE_TAG" out/$rid/libmpv.so libmpv-$rid.so
+            bash ../../scripts/release-transport.sh upload "$RELEASE_TAG" out/$rid/LICENCE-REPORT.txt LICENCE-REPORT-$rid.txt
+          done
+
   package:
-    needs: [windows, linux]
+    needs: [windows, linux, android]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -139,7 +178,7 @@ jobs:
         with:
           global-json-file: global.json
 
-      - name: Fetch both binaries from the release
+      - name: Fetch the binaries from the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -148,6 +187,10 @@ jobs:
           bash ../../scripts/release-transport.sh download "$RELEASE_TAG" LICENCE-REPORT-win-x64.txt out/win-x64/LICENCE-REPORT.txt
           bash ../../scripts/release-transport.sh download "$RELEASE_TAG" libmpv.so.2 out/linux-x64/libmpv.so.2
           bash ../../scripts/release-transport.sh download "$RELEASE_TAG" LICENCE-REPORT-linux-x64.txt out/linux-x64/LICENCE-REPORT.txt
+          for rid in android-arm64 android-x64; do
+            bash ../../scripts/release-transport.sh download "$RELEASE_TAG" libmpv-$rid.so out/$rid/libmpv.so
+            bash ../../scripts/release-transport.sh download "$RELEASE_TAG" LICENCE-REPORT-$rid.txt out/$rid/LICENCE-REPORT.txt
+          done
 
       # Tag mpv-natives-v1.2.0 -> 1.2.0; a dispatch build gets a prerelease stamp. The
       # version reaches a command line below, so a tag that does not hold one stops here.
