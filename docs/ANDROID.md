@@ -197,8 +197,9 @@ What differs from the desktop:
   the picture after a seek made while paused; AudioTrack underran with mpv's 0.2 s buffer.
 - **https.** The Android libmpv's FFmpeg has no TLS. An https:// source is read through
   `HttpClient` instead (the platform's TLS and trusted certificates), by range requests mpv can
-  seek with. A stream FFmpeg fetches more of by itself, such as the segments of an HLS
-  transcode, cannot be read that way and needs TLS in FFmpeg.
+  seek with. An HLS playlist is not: FFmpeg fetches its segments itself, which needs TLS in
+  FFmpeg (and would make the libmpv build LGPLv3), so an https HLS transcode fails to open.
+  Aperture then plays the original file and says so.
 - **Subtitles.** ASS fonts a file embeds are used as on the desktop. Otherwise libass gets the
   system's Roboto, so subtitles without embedded fonts in scripts Roboto lacks (CJK) draw nothing.
 - **Still pictures on GL ES.** A paused picture is copied out of mpv's cache, and some GL ES drivers
@@ -219,4 +220,5 @@ These are plan 20's later phases:
   announcements. Nothing is checked on a phone yet.
 - **File dialogs** return Android's `content://` addresses, which `File.Open` cannot open.
 - **No second window.**
-- **Video over an https HLS transcode** (see Video above), and an Android TV build (phase 5).
+- **An Android TV build** (phase 5).
+- **Toasts are one line** (`ToastElement`), so a long message is cut off at a phone's width.

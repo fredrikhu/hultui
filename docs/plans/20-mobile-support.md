@@ -606,8 +606,15 @@ Left:
 - **TalkBack's explore check** on the emulator: TalkBack now adds the window's name to the first
   button it reads, "Tap me. Button. Window HultUI spike". It does so with or without 96e88cb0;
   the check, or TalkBack's settings, wants a look.
-- **An https HLS transcode** needs TLS in FFmpeg (a licence decision: OpenSSL or mbedTLS make the
-  build LGPLv3).
+- **An https HLS transcode** cannot play (no TLS in FFmpeg; the user declined LGPLv3, which
+  OpenSSL or mbedTLS would bring). Aperture plays the original file instead and says so
+  (7641a456); a progressive transcode through `MpvHttpStream` would be the way to transcode.
+- **Aperture's Settings at a phone's width:**
+  - Sign out and the request server's Connect run off the right edge;
+  - the "Seasons seen" path overflows, and Quality reads "10 Mb…";
+  - the Access token row says "not stored on this platform", though Android keeps it in the
+    Keystore.
+- **Toasts are one line** (`ToastElement.MaxLines = 1`), so long ones are cut at a phone's width.
 - **A tablet layout.** At 600 DIP and over, Aperture keeps its desktop layout.
 - **Android TV.**
 - **Distribution.** It needs a signing key the user makes.
