@@ -1912,7 +1912,7 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     {
         if (evt.Button != 0) return;
 
-        int pos = PositionFromPoint(evt.Position);
+        int pos = PositionFromPoint(PointerToLayout(evt.Position));
         // The word or the line is taken on the press that completes the double or triple
         // click, so the drag that follows extends the selection in the same unit instead of
         // dropping back to characters the moment the pointer moves.
@@ -1969,9 +1969,10 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         }
     }
 
+    // A pointer's point, from a move or from the window while the drag is held outside.
     private void DragTo(Point position)
     {
-        int pos = PositionFromPoint(position);
+        int pos = PositionFromPoint(PointerToLayout(position));
         if (_dragUnit == SelectionUnit.Character)
             _cursorPos = pos;
         else
@@ -2199,10 +2200,12 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     private float TotalContentHeight() =>
         LineCount(GetWrapWidth(), ResolvedInherited) * GetLineHeight(ResolvedInherited);
 
+    // The window's point against the bar where it is drawn (ScreenContentBox), not its layout
+    // box: layout is unscrolled, so inside a scrolled page the layout box is as far below the
+    // bar as the page has scrolled, and a press on the bar's top part missed it.
     public bool TryStartScrollbarDrag(Point position)
     {
-        var contentBox = Layout.AbsoluteContentBox;
-        var hit = _bar.HitTest(contentBox, TotalContentHeight(), _scrollOffsetY, position,
+        var hit = _bar.HitTest(ScreenContentBox, TotalContentHeight(), _scrollOffsetY, position,
             vertical: true, out float grab, out float trackOffset);
 
         switch (hit)
@@ -2221,7 +2224,7 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     }
 
     public bool IsPointOverScrollbar(Point position) =>
-        _bar.Contains(Layout.AbsoluteContentBox, TotalContentHeight(), position, vertical: true);
+        _bar.Contains(ScreenContentBox, TotalContentHeight(), position, vertical: true);
 
     /// <summary>See <see cref="IScrollbarDraggable.SetScrollbarHover"/> — the window decides this
     /// by geometry, because the bar is painted over the text it scrolls.</summary>
@@ -2232,7 +2235,7 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     {
         if (!_draggingScrollbar) return;
         _scrollOffsetY = _bar.OffsetFromDrag(
-            Layout.AbsoluteContentBox, TotalContentHeight(), position, _scrollbarGrabOffset, vertical: true);
+            ScreenContentBox, TotalContentHeight(), position, _scrollbarGrabOffset, vertical: true);
         MarkPaintDirty();
     }
 
@@ -2387,7 +2390,10 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         return w > 0 ? w : 200f; // fallback for pre-layout
     }
 
-    private int PositionFromPoint(Point screenPos)
+    // A point in layout space: a pointer's goes through PointerToLayout first, as layout is
+    // unscrolled and a scroll view above the area moves it only when painting. A page scrolled
+    // by three lines put a click three lines below where it landed.
+    private int PositionFromPoint(Point layoutPoint)
     {
         var contentBox = Layout.AbsoluteContentBox;
         var style = ResolvedInherited;
@@ -2395,10 +2401,10 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         float lh = GetLineHeight(style);
         var starts = GetLineStarts(wrapWidth, style);
 
-        float localY = screenPos.Y - contentBox.Y + _scrollOffsetY;
+        float localY = layoutPoint.Y - contentBox.Y + _scrollOffsetY;
         int line = Math.Clamp((int)(localY / lh), 0, starts.Count - 1);
 
-        float localX = screenPos.X - contentBox.X;
+        float localX = layoutPoint.X - contentBox.X;
         int lineStart = starts[line];
         int lineEnd = line + 1 < starts.Count ? starts[line + 1] : _text.Length;
         if (lineEnd > lineStart && lineEnd <= _text.Length && _text[lineEnd - 1] == '\n')

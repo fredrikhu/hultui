@@ -536,7 +536,7 @@ public class TextInputElement : BoxElement, ITouchTextEditing
     {
         if (evt.Button != 0) return;
 
-        int pos = PositionFromPoint(evt.Position);
+        int pos = PositionFromPoint(PointerToLayout(evt.Position));
 
         // The word (or the whole value) is taken on the second press, not on the release that
         // completes the double-click: the button is still down, so the drag that follows keeps
@@ -580,9 +580,10 @@ public class TextInputElement : BoxElement, ITouchTextEditing
         _ => (pos, pos),
     };
 
+    // A pointer's point, from a move or from the window while the drag is held outside.
     private void DragTo(Point position)
     {
-        int pos = PositionFromPoint(position);
+        int pos = PositionFromPoint(PointerToLayout(position));
         if (_dragUnit == SelectionUnit.Character)
             _cursorPos = pos;
         else
@@ -660,10 +661,12 @@ public class TextInputElement : BoxElement, ITouchTextEditing
 
     IReadOnlyList<ContextMenuItem> ITouchTextEditing.TouchEditItems() => BuildContextMenuItems();
 
-    private int PositionFromPoint(Point screenPos)
+    // A point in layout space: a pointer's goes through PointerToLayout first, as layout is
+    // unscrolled and a scroll view above the field moves it only when painting.
+    private int PositionFromPoint(Point layoutPoint)
     {
         var contentBox = Layout.AbsoluteContentBox;
-        float clickX = screenPos.X - contentBox.X + _scrollOffset;
+        float clickX = layoutPoint.X - contentBox.X + _scrollOffset;
         return SnapToBoundary(HitTestTextPosition(clickX));
     }
 

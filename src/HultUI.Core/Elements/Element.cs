@@ -283,6 +283,20 @@ public abstract class Element
         }
     }
 
+    /// <summary>
+    /// A point where this element's pointer events arrive (the window's space, or its overlay's)
+    /// taken back into the unscrolled layout space of <see cref="LayoutResult.AbsoluteBorderBox"/>:
+    /// the inverse of <see cref="ScreenBorderBox"/>'s shift. An editor that maps the pointer to a
+    /// place in its text from its layout box needs it, or every scroll view above it moves the
+    /// click by as far as it has scrolled.
+    /// </summary>
+    internal Point PointerToLayout(Point pointer)
+    {
+        var offset = AncestorScrollOffset;
+        var stuck = StickyShiftWithAncestors;
+        return new Point(pointer.X + offset.X - stuck.X, pointer.Y + offset.Y - stuck.Y);
+    }
+
     /// <summary>Where the overlay this element is the root of sits in the window, kept by the
     /// host; zero for the main tree.</summary>
     internal Point OverlayOrigin { get; set; }

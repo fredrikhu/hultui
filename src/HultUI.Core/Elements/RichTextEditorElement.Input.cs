@@ -38,11 +38,16 @@ public partial class RichTextEditorElement
         return _blocks.Count > 0;
     }
 
-    private Point ToDocument(Point screen)
+    // A point in layout space, as the touch handles' are, into the document's.
+    private Point ToDocument(Point layout)
     {
         var content = Layout.AbsoluteContentBox;
-        return new Point(screen.X - content.X, screen.Y - content.Y + _scrollY);
+        return new Point(layout.X - content.X, layout.Y - content.Y + _scrollY);
     }
+
+    // A pointer's point into the document's. Layout is unscrolled: a scroll view above the editor
+    // moves it only when painting, so its offset is taken back first.
+    private Point PointerToDocument(Point pointer) => ToDocument(PointerToLayout(pointer));
 
     // ── Text and the input method ──
 
@@ -265,7 +270,8 @@ public partial class RichTextEditorElement
         {
             // The context menu that opens next is about what is under the pointer — a table's
             // rows, a picture — so a press outside the selection moves the caret there first.
-            var (p, up) = PositionAt(ToDocument(evt.Position).X, ToDocument(evt.Position).Y);
+            var press = PointerToDocument(evt.Position);
+            var (p, up) = PositionAt(press.X, press.Y);
             var s = _state.Selection;
             if (s.IsCollapsed || p < s.Start || p > s.End)
             {
@@ -276,7 +282,7 @@ public partial class RichTextEditorElement
             return;
         }
         if (evt.Button != 0 || !EnsureFreshLayout()) return;
-        var at = ToDocument(evt.Position);
+        var at = PointerToDocument(evt.Position);
 
         if (!_readOnly && TaskBoxAt(at) is int task)
         {
@@ -310,7 +316,7 @@ public partial class RichTextEditorElement
     {
         if (!_dragging || !evt.IsPrimary || !EnsureFreshLayout()) return;
         if (_pressedLink is not null && Distance(evt.Position, _pressPoint) > 4f) _pressedLink = null;
-        var at = ToDocument(evt.Position);
+        var at = PointerToDocument(evt.Position);
         var (pos, upstream) = PositionAt(at.X, at.Y);
         _upstream = upstream;
         if (_dragUnit == SelectionUnit.Character)
