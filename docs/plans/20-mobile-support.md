@@ -591,9 +591,21 @@ Fixed on the way, each found on the phone:
 - A stream that failed to load was reported stopped at 0:00, which cleared the item's resume point
   on the server; the stop now reports the resume point when it was never reached.
 - After a seek made while paused, playback froze: mpv's AAudio output. AudioTrack comes first now.
+- Every HultUI app on Android took a whole core, idle or not: SDL 3.5.0's Android wait woke
+  itself with every poll sentinel it queued (fixed upstream in SDL 8dc8694). Android turns the
+  sentinel off (96e88cb0). On the S25 after it:
+  - idle, under 1 % of a core;
+  - 1080p with subtitles, 31 % in all;
+  - a 4K HEVC film at 36 Mbps over https, 58 % in all, against about 130 % before.
 
 Left:
-- **CPU.** Playback takes 1.1–1.4 cores, at 1080p as at 4K and with zero-copy too. Profile it.
+- **SDL with 8dc8694**, when a ppy.SDL3-CS carries it; then the Android workaround goes.
+- **The https stream's Java side.** At 4K it costs about a fifth of that 58 %: the Java threads
+  of the platform's HTTP handler, and their garbage collection. .NET's managed handler might
+  cost less.
+- **TalkBack's explore check** on the emulator: TalkBack now adds the window's name to the first
+  button it reads, "Tap me. Button. Window HultUI spike". It does so with or without 96e88cb0;
+  the check, or TalkBack's settings, wants a look.
 - **An https HLS transcode** needs TLS in FFmpeg (a licence decision: OpenSSL or mbedTLS make the
   build LGPLv3).
 - **A tablet layout.** At 600 DIP and over, Aperture keeps its desktop layout.

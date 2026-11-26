@@ -170,6 +170,13 @@ otherwise expect fast deployment (`dotnet build -t:Install`), and the app aborts
 HultUI's own messages go to logcat under `DOTNET` (what a desktop app writes to stderr) and
 `HultUI` (`adb logcat -s DOTNET:* HultUI:*`).
 
+## Waiting for events
+
+The UI thread sleeps in `SDL_WaitEventTimeout` between frames. SDL 3.5.0, as `ppy.SDL3-CS`
+2026.1002.1 ships it, never slept there on Android: each pass of its wait queued a poll sentinel,
+which woke the wait again, so an idle app took a whole core. HultUI turns the sentinel off on
+Android, which SDL's own fix (upstream 8dc8694) makes unnecessary once a package carries it.
+
 ## Video
 
 `HultUI.Media` with the mpv backend plays on Android through the same render-API path as on the
