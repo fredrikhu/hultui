@@ -68,6 +68,8 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
                 : "libmpv was not found. Put libmpv-2.dll / libmpv.so.2 / libmpv.2.dylib beside the application, " +
                   "on the library path, or point HULTUI_MPV_PATH at it — see HultUI.Media.Mpv's README.");
 
+        // Android: MediaCodec needs the app's Java VM in FFmpeg before anything opens.
+        PrepareForAndroid();
         _mpv = mpv_create();
         if (_mpv == 0) throw new InvalidOperationException("mpv_create failed.");
 
@@ -102,6 +104,14 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
         mpv_set_option_string(_mpv, "hwdec",
             Environment.GetEnvironmentVariable("HULTUI_MPV_HWDEC") is { Length: > 0 } mode
                 ? mode : "auto-safe");
+        // Android: AAudio, Android's low-latency output, first; AudioTrack (through JNI) where it
+        // will not open. With the Java VM given, mpv's own order put AudioTrack first, and it
+        // underran at the start (seen on the emulator).
+        if (OperatingSystem.IsAndroid())
+        {
+            mpv_set_option_string(_mpv, "ao", "aaudio,audiotrack");
+            UseAndroidSubtitleFont();
+        }
         // No headroom: mpv signals a frame when it is due, not early with a sleep in
         // the render call to make up the difference (see Render, which also turns
         // that sleep off). The loop then wakes and draws it.
@@ -651,6 +661,34 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
     /// the first <c>=</c> of a pair splits, so values may contain their own. A pair mpv refuses
     /// is reported and skipped.
     /// </summary>
+    /// <summary>
+    /// Android: libass has no font provider there (Android has no fontconfig), so a subtitle drew
+    /// nothing unless its file carried its fonts ("failed to find any fallback", seen on the
+    /// emulator). It is given the system's Roboto through a folder of its own, the font linked, not
+    /// copied, and Roboto is the default subtitle and OSD font. Not the whole of /system/fonts: libass
+    /// reads every font in the folder into memory, and the CJK one alone is 32 MB. Fonts a file
+    /// embeds (most ASS subtitles in MKV) are used as on any platform. Best effort: without it,
+    /// such subtitles draw nothing, as before.
+    /// </summary>
+    private void UseAndroidSubtitleFont()
+    {
+        const string Roboto = "/system/fonts/Roboto-Regular.ttf";
+        if (!File.Exists(Roboto)) return;
+        try
+        {
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "hultui-mpv-fonts");
+            Directory.CreateDirectory(dir);
+            string link = Path.Combine(dir, "Roboto-Regular.ttf");
+            if (!File.Exists(link)) File.CreateSymbolicLink(link, Roboto);
+            mpv_set_option_string(_mpv, "sub-fonts-dir", dir);
+            mpv_set_option_string(_mpv, "osd-fonts-dir", dir);
+            mpv_set_option_string(_mpv, "sub-font-provider", "none");
+            mpv_set_option_string(_mpv, "sub-font", "Roboto");
+            mpv_set_option_string(_mpv, "osd-font", "Roboto");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    }
+
     private void ApplyExtraOptions()
     {
         if (Environment.GetEnvironmentVariable("HULTUI_MPV_OPTIONS") is not { Length: > 0 } extra) return;

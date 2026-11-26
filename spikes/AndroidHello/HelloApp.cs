@@ -38,6 +38,9 @@ internal static class HelloApp
     /// <summary>Which app to run: null for this one, "fluent" for the Fluent sample's UI.</summary>
     public static string? Sample;
 
+    /// <summary>The video sample's file (<c>-e file</c>).</summary>
+    public static string? VideoFile;
+
     /// <summary>
     /// The Keystore store behind CredentialStore.Default, on the device: a round trip, a delete,
     /// and an entry kept across launches (written on the first run, read back on the next). Each
@@ -117,6 +120,56 @@ internal static class HelloApp
         app.Run();
     }
 
+    /// <summary>
+    /// Plan 20 phase 5: video through libmpv on GL ES (native/mpv/build-libmpv-android.sh),
+    /// scripts/video-check.ps1. Plays <see cref="VideoFile"/> (or mpv's test pattern) in HultUI's
+    /// player, and logs what mpv chose: the decoder, hardware or not, and the frames drawn.
+    /// </summary>
+    private static void RunVideo(Stopwatch clock)
+    {
+        using var app = new Application("HultUI video", 400, 800);
+        var status = Text.New("").FontSize(14f).FlexShrink(0);
+        if (!HultUI.Media.Mpv.MpvBackend.IsAvailable)
+        {
+            string why;
+            try { System.Runtime.InteropServices.NativeLibrary.Load("libmpv.so"); why = "loads by name"; }
+            catch (Exception e) { why = e.Message; }
+            Info($"video: libmpv not available ({why})");
+            app.SetRoot(Flex.Column().Padding(16).Children(Text.New("libmpv not found").FontSize(20f)));
+            app.Run();
+            return;
+        }
+        var player = new HultUI.Media.MediaPlayer(new HultUI.Media.Mpv.MpvBackend());
+        var video = new HultUI.Media.VideoPlayer(player);
+        int frames = 0;
+        bool subtitlesOn = false;
+        player.FrameArrived += () =>
+        {
+            if (frames++ == 0) Info($"video: first frame at {clock.ElapsedMilliseconds} ms");
+            // A file with subtitles shows its first track (the ASS check): the player starts with none.
+            if (!subtitlesOn && player.SubtitleTracks.Count > 0)
+            {
+                subtitlesOn = true;
+                player.SelectSubtitleTrack(player.SubtitleTracks[0].Id);
+                Info($"video: subtitles on, track {player.SubtitleTracks[0].Id}");
+            }
+        };
+        app.SetRoot(Flex.Column(gap: 8).Padding(8).Children(status, video.Mount().FlexGrow(1)));
+        string source = VideoFile ?? "av://lavfi:testsrc2=size=1280x720:rate=30";
+        Info($"video: opening {source}");
+        player.Open(VideoFile is not null ? HultUI.Media.MediaSource.FromFile(VideoFile) : HultUI.Media.MediaSource.FromUri(source), autoPlay: true);
+        int last = 0;
+        using var report = new Timer(_ => Application.InvokeOnMainThread(() =>
+        {
+            Info($"video: {player.State} at {player.Position.TotalSeconds:0.0} s of {player.Duration?.TotalSeconds ?? 0:0.0}, " +
+                 $"{frames - last} frames in 2 s");
+            status.Content = $"{player.State} {player.Position.TotalSeconds:0.0} s";
+            last = frames;
+        }), null, 2000, 2000);
+        Info($"video sample made at {clock.ElapsedMilliseconds} ms");
+        app.Run();
+    }
+
     private static void RunFluent(Stopwatch clock)
     {
         using var app = new Application("Fluent Sample", 1280, 860, HultUI.Core.Styling.WindowStyle.Borderless);
@@ -145,6 +198,7 @@ internal static class HelloApp
             // SDL_SetMainReady is HultUIActivity's now, before RunApp.
             if (Sample == "fluent") RunFluent(clock);
             else if (Sample == "a11y") RunA11y(clock);
+            else if (Sample == "video") RunVideo(clock);
             else if (Sample == "credentials") TestCredentials();
             else RunApp(clock);
         }

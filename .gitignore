@@ -17,6 +17,7 @@ docs/api/
 
 # libmpv native build trees and outputs (native/mpv/README.md)
 native/mpv/work/
+native/mpv/work-android/
 native/mpv/out/
 
 # hultui-cef-helper builds (native/cef-helper/build.sh)

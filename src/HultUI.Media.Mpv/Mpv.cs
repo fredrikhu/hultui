@@ -31,6 +31,58 @@ internal static unsafe partial class Mpv
         return TryLoad(out var handle) ? handle : 0;
     }
 
+    private static int _javaVmTried;
+
+    /// <summary>
+    /// Before the first player is made, on Android: the Java VM to the FFmpeg inside libmpv
+    /// (<see cref="GiveJavaVm"/>). Called by the backend, not from <see cref="Resolve"/>: .NET for
+    /// Android finds the library in the APK itself and never asks the resolver (seen on the
+    /// emulator: the handoff never ran, and MediaCodec said no Java VM was registered).
+    /// </summary>
+    internal static void PrepareForAndroid()
+    {
+        if (!OperatingSystem.IsAndroid() || Interlocked.Exchange(ref _javaVmTried, 1) != 0) return;
+        if (TryLoad(out var handle)) GiveJavaVm(handle);
+    }
+
+    /// <summary>
+    /// On Android, hands the app's Java VM to the FFmpeg inside libmpv, before anything plays:
+    /// FFmpeg's MediaCodec decoders reach Android's codecs through JNI, and mpv only reads the VM
+    /// back from FFmpeg (misc/jni.c). An app's own libmpv user sets it from <c>JNI_OnLoad</c>; this
+    /// library is loaded by .NET, which runs none, so the VM comes from <c>JNI_GetCreatedJavaVMs</c>
+    /// (libnativehelper, Android 12 and later: plan 20's minimum) and goes in through
+    /// <c>av_jni_set_java_vm</c>, which the bundled build exports (native/mpv/build-libmpv-android.sh
+    /// checks that it does). Without it mpv decodes in software. Nothing to do for a libmpv that
+    /// has no MediaCodec, which has no such function.
+    /// </summary>
+    private static void GiveJavaVm(nint libmpv)
+    {
+        JavaVmHandoff = Handoff();
+        if (Environment.GetEnvironmentVariable("HULTUI_MPV_LOG") is { Length: > 0 })
+            Console.Error.WriteLine($"[mpv] Java VM to FFmpeg: {JavaVmHandoff}");
+
+        string Handoff()
+        {
+            if (!NativeLibrary.TryGetExport(libmpv, "av_jni_set_java_vm", out var setVm)) return "no av_jni_set_java_vm (no MediaCodec in this libmpv)";
+            if (!NativeLibrary.TryLoad("libnativehelper.so", out var helper)) return "libnativehelper.so would not load";
+            if (!NativeLibrary.TryGetExport(helper, "JNI_GetCreatedJavaVMs", out var getVms)) return "no JNI_GetCreatedJavaVMs";
+            nint vm = 0;
+            int count = 0;
+            int got = ((delegate* unmanaged<nint*, int, int*, int>)getVms)(&vm, 1, &count);
+            if (got != 0 || count < 1 || vm == 0) return $"JNI_GetCreatedJavaVMs gave {got}, {count} VMs";
+            int set = ((delegate* unmanaged<nint, nint, int>)setVm)(vm, 0);
+            if (set != 0) return $"av_jni_set_java_vm refused it ({set})";
+            JavaVmGiven = true;
+            return "given";
+        }
+    }
+
+    /// <summary>What became of the Java VM's handoff (Android), for the log.</summary>
+    internal static string? JavaVmHandoff { get; private set; }
+
+    /// <summary>Whether the Java VM went to FFmpeg (Android): for the startup trace and tests.</summary>
+    internal static bool JavaVmGiven { get; private set; }
+
     /// <summary>Finds and loads the library without throwing.</summary>
     internal static bool TryLoad(out nint handle) => TryLoad(out handle, out _);
 
@@ -84,7 +136,8 @@ internal static unsafe partial class Mpv
     internal static string? PortableRid()
     {
         var arch = RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant();
-        return OperatingSystem.IsLinux() ? "linux-" + arch
+        return OperatingSystem.IsAndroid() ? "android-" + arch
+            : OperatingSystem.IsLinux() ? "linux-" + arch
             : OperatingSystem.IsWindows() ? "win-" + arch
             : OperatingSystem.IsMacOS() ? "osx-" + arch
             : null;

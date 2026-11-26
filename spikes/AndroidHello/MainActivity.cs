@@ -21,6 +21,11 @@ public class MainActivity : HultUIActivity
         HelloApp.BlockOnPause = Intent?.GetStringExtra("block") != "0";
         HelloApp.Ticker = Intent?.GetStringExtra("ticker") != "0";
         HelloApp.Sample = Intent?.GetStringExtra("sample");
+        // The video sample (plan 20 phase 5): a file to play, and mpv's switches as environment
+        // variables, "HULTUI_MPV_HWDEC=mediacodec-copy;HULTUI_MPV_LOG=info".
+        HelloApp.VideoFile = Intent?.GetStringExtra("file");
+        foreach (var pair in (Intent?.GetStringExtra("env") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))
+            if (pair.Split('=', 2) is [var key, var value]) Environment.SetEnvironmentVariable(key, value);
         base.OnCreate(savedInstanceState);
     }
 
