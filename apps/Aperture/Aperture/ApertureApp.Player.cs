@@ -370,10 +370,10 @@ public sealed partial class ApertureApp
         if (original.StreamUrl == transcode.StreamUrl) return;
         _playback = original;
         OpenStream(original);
-        // Short: a toast is one line, and a phone held upright fits about fifty characters.
+        // On a phone held upright this wraps to two or three lines.
         Flash(MaxStreamingBitrateBps is null
-                ? "Transcode won't play here: playing the original"
-                : "Transcode won't play here: original, over your limit",
+                ? "The transcode won't play here, so the original file is playing"
+                : "The transcode won't play here, so the original file is playing, over your streaming limit",
             ToastSeverity.Warning, seconds: 6f);
     }
 

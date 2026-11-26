@@ -708,7 +708,7 @@ public partial class ApertureAppHostTests
             Assert.Equal(TimeSpan.FromMinutes(58), app.Player!.Position);
             Assert.Equal("ReportStarted(m2, at=0:58:00)",
                 library.Calls.First(c => c.StartsWith("Report", StringComparison.Ordinal)));
-            Assert.True(Shows(session, "Transcode won't play here: original, over your limit"),
+            Assert.True(Shows(session, "The transcode won't play here, so the original file is playing, over your streaming limit"),
                 session.Window.DumpAccessibilityTree());
         }, () => backend, width: 960, height: 600);
     }
