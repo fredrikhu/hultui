@@ -181,8 +181,17 @@ as `AndroidNativeLibrary` items with their ABI, as the spike and `Aperture.Andro
 What differs from the desktop:
 - **Decoding.** `hwdec=auto-safe` lands on `mediacodec-copy`. FFmpeg needs the app's Java VM for
   MediaCodec, and `MpvBackend` hands it over before mpv starts. mpv's zero-copy path
-  (`mediacodec` with AImageReader) did not start on the emulator and is unchecked on a phone.
-- **Audio.** AAudio first, then AudioTrack.
+  (`mediacodec` with AImageReader, `HULTUI_MPV_HWDEC=mediacodec`) works on a Galaxy S25 but did
+  not start on the emulator, and at 4K it used no less CPU than the copy, so it is not the default.
+- **Chroma scaling.** mpv scales chroma bilinearly on Android (`cscale=bilinear`). MediaCodec
+  decodes to NV12, and on the S25's Adreno every separable scaler mpv has turned NV12's
+  two-channel chroma plane into speckled noise.
+- **Audio.** AudioTrack first, with a 0.5 s buffer, then AAudio. mpv 0.41's AAudio output froze
+  the picture after a seek made while paused; AudioTrack underran with mpv's 0.2 s buffer.
+- **https.** The Android libmpv's FFmpeg has no TLS. An https:// source is read through
+  `HttpClient` instead (the platform's TLS and trusted certificates), by range requests mpv can
+  seek with. A stream FFmpeg fetches more of by itself, such as the segments of an HLS
+  transcode, cannot be read that way and needs TLS in FFmpeg.
 - **Subtitles.** ASS fonts a file embeds are used as on the desktop. Otherwise libass gets the
   system's Roboto, so subtitles without embedded fonts in scripts Roboto lacks (CJK) draw nothing.
 - **Still pictures on GL ES.** A paused picture is copied out of mpv's cache, and some GL ES drivers
@@ -203,5 +212,4 @@ These are plan 20's later phases:
   announcements. Nothing is checked on a phone yet.
 - **File dialogs** return Android's `content://` addresses, which `File.Open` cannot open.
 - **No second window.**
-- **Video is checked on the emulator only** (phase 5): hardware decoding of HEVC and 4K, and
-  zero-copy, need a phone.
+- **Video over an https HLS transcode** (see Video above), and an Android TV build (phase 5).

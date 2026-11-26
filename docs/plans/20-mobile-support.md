@@ -505,11 +505,17 @@ touch driver. Pinch waits until an element needs it.
 **Status (2026-11-26): built, tested headless, and checked on the emulator; not on the phone yet.** Pointer identity
 (`docs/design/POINTER-IDENTITY.md` §8) and the gestures (`docs/design/GESTURES.md` §9), with
 `TouchPointerTests` (19) and `TouchGestureTests` (22). Left for this phase:
-- the phone (the emulator passed a tap, a drag, a fling and a long press,
-  `spikes/AndroidHello/scripts/touch-check.ps1`), two fingers, and frame time while flinging
-  Aperture's grid
+- frame time while flinging Aperture's grid
 - the Fluent sample and Aperture by touch (the first exit criterion)
 - the perf suite
+
+**On the Galaxy S25 (2026-11-26):**
+- `touch-check.ps1` passes 6 of 6.
+- Scrolling runs at the display's 120 Hz: the refresh-rate fix works, and a scroll's steps come
+  every 8 ms.
+- The user checked two fingers by hand: a second finger presses no button, a scroll follows the
+  first finger with no jump, two fingers on a button make one click at most, and a pinch does
+  nothing. The log agrees.
 
 ### Phase 4: Soft keyboard and touch text editing (M, public API)
 
@@ -520,8 +526,10 @@ keyboard. Caret placement, word selection, handles and the edit menu for `TextIn
 **Status (2026-11-26): note approved, all six recommendations taken**
 (`docs/design/SOFT-KEYBOARD.md`). Return-key labels are left out: SDL 3 has no property for
 them. Built and headless-tested: the input kinds and the keyboard's area (the note's §8), and
-touch text editing (§9). Checked on the emulator (`keyboard-check.ps1`, five checks); left: the
-phone, and Aperture's login and search by touch.
+touch text editing (§9). Checked on the emulator (`keyboard-check.ps1`, five checks), and on the
+Galaxy S25 with Samsung's keyboard: 5 of 5, and the user signed in to Aperture and searched with
+it. Left: Aperture's sign-in screen, which is wider than a phone (its Connect button half off the
+edge).
 
 **Exit criteria**
 
@@ -531,8 +539,8 @@ phone, and Aperture's login and search by touch.
 
 ### Phase 5: Aperture on Android (L)
 
-**Status (2026-11-26): built and checked on the emulator, waiting for the phone.** On branch
-`claude/android-spike`, unpushed.
+**Status (2026-11-26): built, and checked on the emulator and on a Galaxy S25.** On branch
+`claude/android-spike` (PR fredrikhu/hultui#13).
 
 Built:
 - **libmpv for Android**, arm64 and x86_64:
@@ -540,13 +548,14 @@ Built:
   - FFmpeg gets MediaCodec, and mpv gets EGL on Android, AAudio and AudioTrack;
   - libmpv.so is 25 MB (arm64) and 31 MB (x86_64);
   - the `android` job in `mpv-natives.yml` and the Android RIDs in `HultUI.Media.Mpv.Natives`.
-    The job has not run: nothing is pushed.
+    The job has not run yet: running it by hand replaces the rolling prerelease the installers use.
 - **Video on GL ES** through the render-API path:
-  - `hwdec=auto-safe` lands on `mediacodec-copy`; the AImageReader zero-copy path does not start
-    on the emulator.
+  - `hwdec=auto-safe` lands on `mediacodec-copy`. The AImageReader zero-copy path works on the
+    S25 but not on the emulator, and saved no CPU at 4K, so it is not the default.
   - The Java VM goes to FFmpeg before mpv starts.
-  - Audio is AAudio, then AudioTrack.
+  - Audio is AudioTrack with a 0.5 s buffer, then AAudio (see the fixes below).
   - libass gets the system's Roboto.
+  - https:// sources go through `HttpClient` (`MpvHttpStream`): the Android FFmpeg has no TLS.
   - Paused pictures were black on the emulator's GL ES, which refuses mpv's float-to-RGBA8 copy;
     `GlesFboFormat` tries that copy once and picks a format that copies.
 - **Aperture on Android** (`apps/Aperture/Aperture.Android`):
@@ -565,8 +574,30 @@ Checked on the emulator:
 - Aperture's Home, library and film page are laid out for the phone, and its own player plays,
   pauses and resumes.
 
+Checked on the Galaxy S25 (Android 17, Adreno 830), against the user's https Jellyfin server:
+- Aperture signs in, browses, searches, and the token outlives a restart.
+- Each title plays hardware decoded at full rate (24–26 frames a second for 23.976 fps):
+  - 1080p AV1;
+  - 1080p HEVC Main 10 with TrueHD 5.1;
+  - 4K HEVC at 36 Mbps;
+  - 4K Dolby Vision with an HDR10 base, tone-mapped to SDR and looking right.
+- A seek 26 minutes into the 4K film plays on.
+- `video-check.ps1` passes, with H.264, AV1 and ASS subtitles.
+- Backgrounding pauses, and playback survives rotation.
+
+Fixed on the way, each found on the phone:
+- NV12 chroma came out as speckled noise through mpv's separable scalers on Adreno;
+  `cscale=bilinear` on Android.
+- https streams would not open (no TLS in the Android FFmpeg); `MpvHttpStream`.
+- A stream that failed to load was reported stopped at 0:00, which cleared the item's resume point
+  on the server; the stop now reports the resume point when it was never reached.
+- After a seek made while paused, playback froze: mpv's AAudio output. AudioTrack comes first now.
+
 Left:
-- **The phone:** sign-in to the lab server, 1080p HEVC and 4K with hardware decoding, zero-copy.
+- **CPU.** Playback takes 1.1–1.4 cores, at 1080p as at 4K and with zero-copy too. Profile it.
+- **Aperture's sign-in screen** is wider than a phone.
+- **An https HLS transcode** needs TLS in FFmpeg (a licence decision: OpenSSL or mbedTLS make the
+  build LGPLv3).
 - **A tablet layout.** At 600 DIP and over, Aperture keeps its desktop layout.
 - **Android TV.**
 - **Distribution.** It needs a signing key the user makes.

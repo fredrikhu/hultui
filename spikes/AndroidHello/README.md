@@ -242,21 +242,27 @@ Two findings, both fixed in `HultUIActivity`, each checked by taking the fix out
   letters. On such a switch HultUI hands SDL's `showTextInput` the type SDL would have made and
   restarts the keyboard's input.
 
-## Video on the emulator (phase 5, 2026-11-26)
+## Video on the emulator and the phone (phase 5, 2026-11-26)
 
 `-e sample video -e file <path>` plays a file in HultUI's player over the Android libmpv
 (`native/mpv/out/android-*`, which the build packs when it is there). The file has to be one the
 app can read, such as one in its own files folder. Without one the sample asks for mpv's lavfi test
 pattern, which the trimmed build lacks (no libavdevice), so nothing opens.
 
-`scripts/video-check.ps1 -Clip <file>` puts a clip there, plays it, taps to pause and to play on,
-and reads logcat and screenshots. Six of six with H.264 and AV1 1080p test patterns: the first
-frame at about 600 ms, 47–60 frames in 2 s, and the picture on screen while playing and while
-paused.
+`scripts/video-check.ps1 -Clip <file> [-Serial …] [-Env "K=V;K=V"]` puts a clip there, plays it,
+taps to pause, seeks back while paused (Left), taps to play on, and reads logcat and screenshots.
+Six of six with H.264 and AV1 1080p test patterns on the emulator, and on the Galaxy S25 with
+H.264, AV1 and the ASS clip: the first frame at 170–300 ms there (about 600 ms on the emulator),
+60 frames in 2 s, and the picture whole on screen while playing and while paused.
 
-Checked by taking the fix out: with `GlesFboFormat` turned off, the paused picture is black
-(0.04 of the middle band lit) and the check fails. mpv drew a still frame into its cache in
-rgba16f and copied it into the target with a blit the emulator's GL ES refuses.
+Each picture check was tried with its fix taken out:
+- **`GlesFboFormat` off (emulator):** the paused picture is black, 0.04 of the middle band lit.
+  mpv drew a still frame into its cache in rgba16f and copied it into the target with a blit the
+  emulator's GL ES refuses.
+- **The S25 before `cscale=bilinear`:** every hardware-decoded picture was speckled noise, about
+  a third of the band lit. The check's bar went from 0.3 to 0.8 because of it.
+- **`-Env HULTUI_MPV_OPTIONS=ao=aaudio`:** the seek check fails with "Playing at 0.0 s, 0
+  frames". That is mpv's AAudio output after a seek made while paused.
 
 ## TalkBack on the emulator (phase 6, 2026-11-26)
 
