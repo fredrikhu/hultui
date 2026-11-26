@@ -51,6 +51,9 @@ public class ToastElement : BoxElement
     private float _accentGap = 10f;
     private float _actionGap = 12f;
 
+    /// <summary>The most lines the message wraps to; a longer one ends in an ellipsis.</summary>
+    private const int MessageLines = 4;
+
     public string Message
     {
         get => _message;
@@ -81,8 +84,12 @@ public class ToastElement : BoxElement
         Flex.AlignItems = AlignItems.Center;
         _accent.Flex.AlignSelf = AlignSelf.Stretch;
         _accent.Flex.FlexShrink = 0;
-        _text.MaxLines = 1;
+        // The message wraps where the window is too narrow for it (a phone), up to a few lines,
+        // rather than one line cut off at the window's edge; the verb stays whole beside it.
+        _text.MaxLines = MessageLines;
+        _text.Overflow = TextOverflow.Ellipsis;
         _action.MaxLines = 1;
+        _action.Flex.FlexShrink = 0;
         Describe();
         Arrange();
         OnOwn<ClickEvent>(evt =>

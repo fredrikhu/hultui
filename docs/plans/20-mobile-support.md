@@ -598,6 +598,9 @@ Fixed on the way, each found on the phone:
   - idle, under 1 % of a core;
   - 1080p with subtitles, 31 % in all;
   - a 4K HEVC film at 36 Mbps over https, 58 % in all, against about 130 % before.
+- Toasts were one line, so a long one was cut off at a phone's edges. `ToastElement` now wraps
+  the message, up to four lines. `ToastHost` keeps the pill 16 DIP from the window's sides, and
+  the action verb stays whole. This holds in every app, not only on Android.
 
 Left:
 - **SDL with 8dc8694**, when a ppy.SDL3-CS carries it; then the Android workaround goes.
@@ -610,7 +613,6 @@ Left:
 - **An https HLS transcode** cannot play (no TLS in FFmpeg; the user declined LGPLv3, which
   OpenSSL or mbedTLS would bring). Aperture plays the original file instead and says so
   (7641a456); a progressive transcode through `MpvHttpStream` would be the way to transcode.
-- **Toasts are one line** (`ToastElement.MaxLines = 1`), so long ones are cut at a phone's width.
 - **A tablet layout.** At 600 DIP and over, Aperture keeps its desktop layout.
 - **Android TV.**
 - **Distribution.** It needs a signing key the user makes.

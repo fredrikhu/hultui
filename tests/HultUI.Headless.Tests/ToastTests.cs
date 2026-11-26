@@ -53,9 +53,9 @@ public class ToastTests
         }
     }
 
-    private static (HeadlessSession session, Page page) Mount()
+    private static (HeadlessSession session, Page page) Mount(int width = 600, int height = 400)
     {
-        var session = HeadlessSession.Create(width: 600, height: 400);
+        var session = HeadlessSession.Create(width: width, height: height);
         var page = new Page();
         session.Window.SetRoot(page.Mount());
         session.PumpFrame();
@@ -166,6 +166,67 @@ public class ToastTests
 
         save.Click();
         Assert.Equal(1, page.Saves);
+    }
+
+    // ── At a phone's width (plan 20) ──
+
+    private const string Long = "The transcode would not play on this device, so the original file is playing instead, over your limit";
+
+    /// <summary>The message is the first text in the pill; the verb, if any, the second.</summary>
+    private static TextElement[] Texts(ToastElement toast) => toast.Children.OfType<TextElement>().ToArray();
+
+    /// <summary>A toast was one line: at a phone's 360 DIP a long message ran to the window's
+    /// edges and was cut off there. It wraps inside the window, with a margin at either side, and
+    /// all of it shows: more than one line, fewer than the four after which it would end in "…".</summary>
+    [Fact]
+    public void ALongToast_InANarrowWindow_WrapsInsideIt_AndShowsAllOfIt()
+    {
+        var (session, page) = Mount(width: 360, height: 640);
+        using var _ = session;
+        page.Toasts.Flash("Saved");
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        float line = Texts(page.Shown()!)[0].Layout.AbsoluteBorderBox.Height;
+        var shortPill = page.Shown()!.Layout.AbsoluteBorderBox;
+        Assert.True(shortPill.Width < 200, $"a short toast is {shortPill.Width} wide: it should not fill the strip");
+
+        page.Toasts.Flash(Long);
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        var toast = page.Shown()!;
+        var pill = toast.Layout.AbsoluteBorderBox;
+        Assert.True(pill.X >= 16 - 0.5f && pill.Right <= 360 - 16 + 0.5f, $"the pill spans {pill.X}..{pill.Right} in a window 360 wide");
+        Assert.Equal(640 - 22, pill.Bottom, 1);
+        // The room the pill wraps in, which the pill itself need not fill: its lines end at a word.
+        var room = toast.Parent!.Layout.AbsoluteContentBox;
+        Assert.True(room.X >= 16 - 0.5f && room.Right <= 360 - 16 + 0.5f, $"the pill's room spans {room.X}..{room.Right} in a window 360 wide");
+
+        var text = Texts(toast)[0].Layout.AbsoluteBorderBox;
+        Assert.True(text.Right <= pill.Right, $"the message ends at {text.Right}, past the pill's {pill.Right}");
+        Assert.True(text.Height >= 2 * line - 1 && text.Height <= 3 * line + 1,
+            $"the message is {text.Height} tall, a line {line}: it should wrap to two or three lines");
+        // Still named by all of it.
+        Assert.NotNull(session.Window.FindByRole(AccessibilityRole.Alert, Long));
+    }
+
+    /// <summary>With a verb, the message wraps and the verb stays whole, on one line, inside the pill.</summary>
+    [Fact]
+    public void ALongToast_WithAnAction_KeepsTheVerbWhole()
+    {
+        var (session, page) = Mount(width: 360, height: 640);
+        using var _ = session;
+        page.Toasts.Flash("Saved", action: ("Play from start", () => { }));
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        var verbAlone = Texts(page.Shown()!)[1].Layout.AbsoluteBorderBox;
+
+        page.Toasts.Flash(Long, action: ("Play from start", () => { }));
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        var toast = page.Shown()!;
+        var pill = toast.Layout.AbsoluteBorderBox;
+        var verb = Texts(toast)[1].Layout.AbsoluteBorderBox;
+        Assert.True(pill.X >= 16 - 0.5f && pill.Right <= 360 - 16 + 0.5f, $"the pill spans {pill.X}..{pill.Right} in a window 360 wide");
+        Assert.Equal(verbAlone.Width, verb.Width, 1);
+        Assert.Equal(verbAlone.Height, verb.Height, 1);
+        Assert.True(verb.Right <= pill.Right, $"the verb ends at {verb.Right}, past the pill's {pill.Right}");
+        Assert.True(Texts(toast)[0].Layout.AbsoluteBorderBox.Height > verb.Height + 1, "the message should wrap beside the verb");
     }
 
     // ── The fades are drawn on the toast, not built (plan 17, round 3, step 12) ──

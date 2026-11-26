@@ -1495,7 +1495,10 @@ sits there; the pill inside it is still clickable.
 
 **`ToastElement`** draws the pill from `Theme.Toast` (`ToastTheme`: surface fill,
 border, text, the action verb in `Primary`, and fixed success/warning accents plus
-`Danger` for errors). A severity draws a bar at the leading edge.
+`Danger` for errors). A severity draws a bar at the leading edge. A message too long for
+the window wraps, up to four lines, then ends in "…". The pill stays at least 16 DIP inside
+the window's side edges, and the verb stays whole on one line beside the message. A single
+word wider than the window, such as a long URL, is not broken and can still run past the edge.
 
 **Accessibility:** a plain toast is an **alert** named by its message. Either way the
 message is announced as the toast appears (`Element.Announce`: politely, an error

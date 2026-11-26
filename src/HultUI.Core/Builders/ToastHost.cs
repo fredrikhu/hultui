@@ -64,6 +64,8 @@ public sealed class ToastHost
     public float BottomMargin { get; set; } = 22f;
     /// <summary>Z-order of the strip among the root's children.</summary>
     public int ZIndex { get; set; } = 50;
+    /// <summary>The least distance from the window's side edges.</summary>
+    private const float SideMargin = 16f;
 
     /// <summary>
     /// Shows <paramref name="message"/>, replacing whatever was up. With an
@@ -156,10 +158,12 @@ public sealed class ToastHost
             toast.OnAction = () => { Dismiss(); action.Run(); };
         }
 
+        // Padded at the sides too, so a message too long for the window wraps inside it with a
+        // margin, rather than running to the window's edges (a phone) and past them.
         var strip = Flex.Row(gap: 0)
             .Width(Dimension.Percent(100))
             .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.FlexEnd)
-            .Padding(new Thickness(0, 0, BottomMargin, 0))
+            .Padding(new Thickness(0, SideMargin, BottomMargin, SideMargin))
             .ZIndex(ZIndex)
             .Children(toast);
         strip.Position.Type = PositionType.Absolute;

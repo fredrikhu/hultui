@@ -221,4 +221,3 @@ These are plan 20's later phases:
 - **File dialogs** return Android's `content://` addresses, which `File.Open` cannot open.
 - **No second window.**
 - **An Android TV build** (phase 5).
-- **Toasts are one line** (`ToastElement`), so a long message is cut off at a phone's width.
