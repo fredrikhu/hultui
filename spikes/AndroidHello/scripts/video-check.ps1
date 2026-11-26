@@ -5,14 +5,16 @@
 #   - the picture is on screen, whole, while playing;
 #   - a tap on the picture pauses, and the paused picture stays (on GL ES it was black once:
 #     src/HultUI.Media.Mpv/GlesFboFormat.cs);
-#   - a second tap plays on.
+#   - after a seek while paused, a second tap plays on from there.
 # The picture checks look for colour in the middle of the screen, so the clip should be a bright
 # test pattern, such as ffmpeg's testsrc2:
 #   ffmpeg -f lavfi -i testsrc2=size=1920x1080:rate=30:duration=12 -f lavfi -i sine=duration=12 \
 #     -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest h264-1080p.mp4
 # The spike needs the Android libmpv (native/mpv/out/android-*) when it is built.
 #   pwsh spikes/AndroidHello/scripts/video-check.ps1 -Clip h264-1080p.mp4 [-Serial emulator-5554]
-param([Parameter(Mandatory)] [string] $Clip, [string] $Serial = 'emulator-5554')
+#   -Env "K=V;K=V" passes environment variables to the sample (MainActivity's -e env), e.g.
+#   HULTUI_MPV_OPTIONS=ao=aaudio to try another audio output.
+param([Parameter(Mandatory)] [string] $Clip, [string] $Serial = 'emulator-5554', [string] $Env = '')
 $ErrorActionPreference = 'Stop'
 $adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
 $pkg = 'org.hultui.spike.androidhello'
@@ -49,6 +51,9 @@ function Colour([string] $name) {
 }
 function LastReport { Lines | Where-Object { $_ -match '^video: (Playing|Paused) at' } | Select-Object -Last 1 }
 function FramesIn([string] $report) { if ($report -match ', (\d+) frames in 2 s') { [int]$Matches[1] } else { -1 } }
+function PositionIn([string] $report) {
+    if ($report -match ' at ([\d.]+) s of') { [double]::Parse($Matches[1], [Globalization.CultureInfo]::InvariantCulture) } else { -1 }
+}
 
 # The clip goes through run-as, which a debuggable app allows on any device: the shell reads it,
 # the app's own user writes it.
@@ -58,7 +63,8 @@ Adb shell "cat /data/local/tmp/$name | run-as $pkg sh -c 'mkdir -p files && cat 
 
 Adb shell am force-stop $pkg
 Adb logcat -c
-$started = Adb shell am start -W -n $activity -e ticker 0 -e sample video -e file "/data/user/0/$pkg/files/$name" 2>&1
+# Quoted for the device's shell, where a `;` would end the command.
+$started = Adb shell "am start -W -n $activity -e ticker 0 -e sample video -e file /data/user/0/$pkg/files/$name -e env '$Env'" 2>&1
 if (-not ($started | Select-String 'Status: ok')) { throw "start failed: $started" }
 # An override size, when there is one, is the line after the physical one.
 $size = (Adb shell wm size | Select-Object -Last 1) -replace '.*:\s*', '' -split 'x'
@@ -84,11 +90,18 @@ Check 'tap pauses' ([bool]($report -match '^video: Paused')) "$report"
 $paused = Colour 'paused'
 Check 'picture while paused' ($paused -ge 0.8) "$paused of the middle band lit"
 
-# 3. Another plays on.
+# 3. A seek while paused (Left: back 5 s, the picture's own key), then another tap plays on from
+# there. mpv's AAudio output froze here once: the position stood at the seek and no frame came,
+# while the sound ran on (MpvBackend, the "ao" option).
+$pausedAt = PositionIn $report
+Adb shell input keyevent KEYCODE_DPAD_LEFT
+Start-Sleep -Seconds 1
 Adb shell input tap $cx $cy
 Start-Sleep -Seconds 4.5
 $report = LastReport
-Check 'tap plays on' ([bool]($report -match '^video: Playing') -and (FramesIn $report) -ge 40) "$report"
+$at = PositionIn $report
+Check 'tap plays on after a seek while paused' ([bool]($report -match '^video: Playing') -and (FramesIn $report) -ge 40 `
+    -and $at -lt $pausedAt + 2.5) "paused at $pausedAt s, then $report"
 
 $subtitles = Lines | Where-Object { $_ -match '^video: subtitles on' } | Select-Object -First 1
 if ($subtitles) { Write-Output "note  $subtitles (look at the screenshots in $([IO.Path]::GetTempPath()))" }

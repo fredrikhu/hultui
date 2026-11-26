@@ -104,9 +104,14 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
         mpv_set_option_string(_mpv, "hwdec",
             Environment.GetEnvironmentVariable("HULTUI_MPV_HWDEC") is { Length: > 0 } mode
                 ? mode : "auto-safe");
-        // Android: AAudio, Android's low-latency output, first; AudioTrack (through JNI) where it
-        // will not open. With the Java VM given, mpv's own order put AudioTrack first, and it
-        // underran at the start (seen on the emulator).
+        // Android: AudioTrack (through JNI) first, as mpv-android has it; AAudio where it will not
+        // open. mpv 0.41's AAudio output froze playback after a seek made while paused (a Galaxy
+        // S25 and the emulator alike): the picture and the position stood still while the sound
+        // ran on. Its delay is frames written less frames presented and discarded, the discarded
+        // count is taken at start() from the timestamp before the pause, and the flush of the seek
+        // makes AAudio count the dropped buffer as presented too. AudioTrack underran as playback
+        // started and after each seek (a moment of silence) with mpv's 0.2 s buffer, and did not
+        // with 0.5 s on the S25; the delay is accounted for, so the picture stays in sync.
         //
         // Chroma scaled bilinearly. On a Galaxy S25 (Adreno 830, GL ES 3.2) each separable scaler
         // tried (mpv's default lanczos, spline36, mitchell, catmull_rom, hermite) turned the two-channel
@@ -116,7 +121,8 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
         // HULTUI_MPV_OPTIONS, applied after, still overrides it.
         if (OperatingSystem.IsAndroid())
         {
-            mpv_set_option_string(_mpv, "ao", "aaudio,audiotrack");
+            mpv_set_option_string(_mpv, "ao", "audiotrack,aaudio");
+            mpv_set_option_string(_mpv, "audio-buffer", "0.5");
             mpv_set_option_string(_mpv, "cscale", "bilinear");
             UseAndroidSubtitleFont();
         }

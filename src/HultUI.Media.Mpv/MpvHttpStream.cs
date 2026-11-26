@@ -35,6 +35,9 @@ internal sealed unsafe class MpvHttpStream : IDisposable
     /// stopped this many times before mpv is told the stream ended in an error.</summary>
     internal const int Retries = 3;
 
+    /// <summary>Each request said on stderr, with mpv's own log (HULTUI_MPV_LOG).</summary>
+    private static readonly bool Log = Environment.GetEnvironmentVariable("HULTUI_MPV_LOG") is { Length: > 0 };
+
     private readonly Uri _url;
     private readonly HttpClient _client;
     private readonly CancellationTokenSource _cancel = new();
@@ -160,9 +163,16 @@ internal sealed unsafe class MpvHttpStream : IDisposable
             }
             _response = response;
             _body = body;
+            if (Log)
+                Console.Error.WriteLine($"[mpv] https: from {from}: {(int)response.StatusCode}, " +
+                    $"range {response.Content.Headers.ContentRange?.ToString() ?? "none"}, length {_size?.ToString() ?? "unknown"}");
             // A server that ignored the range sent from the start; the bytes before the position are
             // read and dropped, which is slow but right.
-            if (start < from) Skip(from - start);
+            if (start < from)
+            {
+                if (Log) Console.Error.WriteLine($"[mpv] https: the server ignored the range; skipping {from - start} bytes");
+                Skip(from - start);
+            }
         }
         catch
         {
