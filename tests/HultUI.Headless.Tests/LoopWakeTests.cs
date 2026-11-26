@@ -219,6 +219,37 @@ public class LoopWakeTests
         Assert.InRange(firstAt, 100, 101);
     }
 
+    /// <summary>And runs on with every frame after that first step, to its end in its time. Its first
+    /// step came with the next frame, but the steps after it waited for the delay's deadline: a
+    /// toast swiped away (whose hold the swipe cancels) slid one frame, then stood until the cancelled
+    /// hold would have ended, and the loop spun on 1 ms waits meanwhile (plan 20).</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]   // the delay cancelled as the tween starts, as a swipe cancels a toast's hold
+    public void ATweenStartedDuringALongDelay_RunsToItsEndInItsTime(bool cancelTheDelay)
+    {
+        using var run = new Run();
+        var delay = Animate.After(5f, () => { });
+        long start = run.Now;
+        double doneAt = -1;
+        int steps = 0;
+        bool started = false;
+
+        RunUntil(run, () => doneAt >= 0, start, TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(100), () =>
+        {
+            if (started) return;
+            started = true;
+            if (cancelTheDelay) delay.Cancel();
+            Animate.Value(0f, 1f, _ => { steps++; run.Box.MarkPaintDirty(); })
+                .Duration(0.3f).OnComplete(() => doneAt = run.MsSince(start)).Start();
+        });
+
+        // Started at 100 ms, 300 ms long, stepped at 60 Hz (its first step an interval: it ends
+        // up to an interval off).
+        Assert.InRange(doneAt, 380, 420);
+        Assert.InRange(steps, 17, 21);
+    }
+
     /// <summary>The same for one started after the pass's step, by a frame that no tween drew:
     /// a post-frame callback here, a Build in an app, of a frame a post asked for.</summary>
     [Fact]

@@ -964,7 +964,15 @@ public sealed class Application : IDisposable
 
             if (RunFrameCore(elapsed, forceRender: false, allowRender: due, tick, boundFirstStep: true))
             {
-                if (tick) stepDrawn = true;
+                if (tick)
+                {
+                    stepDrawn = true;
+                    // A drawn step's next is due with the next frame. A new tween's first step is
+                    // taken whatever the others wait for, and nextTickAt still held their deadline:
+                    // its steps after the first waited for that (a swiped toast slid one frame and
+                    // stood until its cancelled hold would have ended), on 1 ms waits.
+                    nextTickAt = now;
+                }
                 // The next deadline follows the schedule, not this render: a frame that
                 // took its slack and drew a millisecond early shifts the phase, not the
                 // rate (anchored to now it read 136 fps on a 120 Hz display). A frame
