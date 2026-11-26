@@ -2440,6 +2440,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         TickAutoScroll();
         TickSelectionEdgeScroll();
         TickFling();
+        CheckTouchText();
 
         // The same for a splitter, a pan or a slider following the pointer: the moves since the
         // last frame recorded where it is, and this applies the latest, once (PointerFollow).
@@ -2766,6 +2767,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // Overlay layer (tooltips, context menus, popups)
         RenderOverlays(ctx);
 
+        // A field's touch selection handles, above everything they could fall under.
+        RenderTouchHandles(ctx);
+
         // The drag ghost follows the pointer above everything, a dialog's own drag included.
         if (_isDragging && !_isExternalDrag)
             RenderDragGhost(ctx);
@@ -2966,6 +2970,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         InputActivity?.Invoke();
         NotePointer(evt);
         if (TryHandleDevToolsInput(evt)) return;
+        if (_touchText is not null) HideTouchTextFor(evt);
 
         // Snapshot the state that decides whether the input needs a frame (see the tail of
         // this method). Everything the framework changes on an input marks itself dirty
@@ -3250,7 +3255,11 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     // a context menu opened on a TextInput must keep the underlying
                     // element's focus and selection.
                     var focusTarget = FindFocusableAncestor(target);
-                    if (!isOverlayHit || focusTarget is not null)
+                    // A finger on nothing focusable may be a scroll starting, which keeps the
+                    // focus: its tap clears it, at the release (Window.TouchText.cs).
+                    _touchTapClearsFocus = PointerContext.IsTouch && focusTarget is null && !isOverlayHit
+                        && _focusManager.FocusedElement is not null;
+                    if (!_touchTapClearsFocus && (!isOverlayHit || focusTarget is not null))
                     {
                         // What a reader hears of the move waits for the click (BeginA11yPressHold).
                         if (!ReferenceEquals(focusTarget, _focusManager.FocusedElement) && _accessibilityBridge.IsActive)

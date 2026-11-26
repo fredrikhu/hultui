@@ -519,8 +519,9 @@ keyboard. Caret placement, word selection, handles and the edit menu for `TextIn
 
 **Status (2026-11-26): note approved, all six recommendations taken**
 (`docs/design/SOFT-KEYBOARD.md`). Return-key labels are left out: SDL 3 has no property for
-them. The input kinds and the keyboard's area are built and headless-tested (the note's §8);
-touch text editing is next.
+them. Built and headless-tested: the input kinds and the keyboard's area (the note's §8), and
+touch text editing (§9). Checked on the emulator (`keyboard-check.ps1`, five checks); left: the
+phone, and Aperture's login and search by touch.
 
 **Exit criteria**
 

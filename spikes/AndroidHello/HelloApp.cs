@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using HultUI;
 using HultUI.Core.Builders;
 using HultUI.Core.Layout;
@@ -119,9 +119,12 @@ internal static class HelloApp
         button.OnPointerDown(e => Info($"press {e.PointerType} id {e.PointerId} primary {e.IsPrimary}"));
         button.OnPointerCancel(_ => Info("press cancelled"));
 
-        var input = TextInput.New();
+        // Phase 4's check (scripts/keyboard-check.ps1): words to select by touch, and a number field.
+        var input = TextInput.New("alpha bravo charlie");
         input.Placeholder = "Type here";
         input.TextChanged = text => Info($"text: \"{text}\"");
+        var number = TextInput.New().Kind(HultUI.Core.Platform.TextInputKind.Number);
+        number.Placeholder = "A number";
 
         var rows = Enumerable.Range(1, 40).Select(i =>
             Box.New().Padding(new Thickness(12, 16, 12, 16))
@@ -149,6 +152,7 @@ internal static class HelloApp
                 .FontSize(15f).FlexShrink(0),
             Flex.Row(gap: 16).AlignItems(AlignItems.Center).FlexShrink(0).Children(button, label),
             input.FlexShrink(0),
+            number.FlexShrink(0),
             // An overlay for Back to close: tapped open, its list is an overlay of the window.
             Dropdown.New(["First choice", "Second choice", "Third choice"], 0).FlexShrink(0),
             list);
@@ -164,6 +168,7 @@ internal static class HelloApp
         var safeWindow = app.PrimaryWindow;
         Info($"safe area at start: {safeWindow.SafeArea}");
         safeWindow.SafeAreaChanged += () => Info($"safe area changed: {safeWindow.SafeArea}");
+        safeWindow.KeyboardInsetChanged += () => Info($"keyboard inset {safeWindow.KeyboardInset:0}");
         Info($"Application made at {clock.ElapsedMilliseconds} ms");
 
         // The first presented frame's time is in files/startup.txt (HULTUI_STARTUP); this
@@ -174,6 +179,7 @@ internal static class HelloApp
             Info($"after 2 s: layout {window.LayoutWidth}x{window.LayoutHeight} DIP, display scale {window.DisplayScale}");
             // Where the touch check aims, in layout units: the button and the list.
             Info($"geometry button {Dims(button.WindowBorderBox)} list {Dims(list.WindowBorderBox)}");
+            Info($"fields text {Dims(input.WindowContentBox)} number {Dims(number.WindowContentBox)}");
             // The start-up trace, into logcat too: run-as cannot read it from a release build.
             string trace = Environment.GetEnvironmentVariable("HULTUI_STARTUP")!;
             if (File.Exists(trace))
@@ -184,6 +190,16 @@ internal static class HelloApp
         // The background check: work posted to the UI thread every second, which also changes
         // the tree. With SDL's block on, the ticks stop in the background; with it off they
         // must go on, and the frame log must show no frames drawn there.
+        // The field's selection, as it changes: what a long press and a handle chose.
+        string selected = "", focusSeen = "other";
+        using var selection = new Timer(_ => Application.InvokeOnMainThread(() =>
+        {
+            string focusNow = ReferenceEquals(window.FocusedElement, input) ? "text" : ReferenceEquals(window.FocusedElement, number) ? "number" : "other";
+            if (focusNow != focusSeen) Info($"focus {focusSeen = focusNow}");
+            if (input.SelectedText == selected) return;
+            selected = input.SelectedText;
+            Info($"selected \"{selected}\"");
+        }), null, 250, 250);
         int ticks = 0;
         using var ticker = new Timer(_ => Application.InvokeOnMainThread(() =>
         {

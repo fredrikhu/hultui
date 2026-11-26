@@ -1,4 +1,4 @@
-using HultUI.Core.Elements;
+﻿using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Primitives;
 
@@ -57,6 +57,8 @@ public sealed partial class Window
                     return;
                 }
                 _primaryFinger = touch.FingerId;
+                // A selection's handle, which the finger drags (Window.TouchText.cs).
+                if (TryTakeTouchHandle(touch.FingerId, at)) return;
                 using var scope = PointerContext.Enter(id, PointerType.Touch, primary: true);
                 bool stoppedFling = StopFlingUnder(at);
                 // The finger is over what it lands on: its hover starts there (PointerEnter, a
@@ -74,6 +76,11 @@ public sealed partial class Window
                 var delta = new Point(at.X - finger.At.X, at.Y - finger.At.Y);
                 if (delta.X == 0 && delta.Y == 0) return;
                 _fingers[touch.FingerId] = finger with { At = at };
+                if (touch.FingerId == _handleFinger)
+                {
+                    DragTouchHandle(at);
+                    return;
+                }
                 if (touch.FingerId != _primaryFinger)
                 {
                     SendToCapture(finger.Id, at, delta, TouchPhase.Move, touch.Modifiers);
@@ -92,16 +99,29 @@ public sealed partial class Window
                 // A cancel ends the press where the finger last was: the platform's position on a
                 // cancel is not one the finger reached.
                 var end = cancel ? finger.At : at;
+                if (touch.FingerId == _handleFinger)
+                {
+                    _primaryFinger = NoFinger;
+                    ReleaseTouchHandle(cancel);
+                    return;
+                }
                 if (touch.FingerId != _primaryFinger)
                 {
                     SendToCapture(finger.Id, end, default, touch.Phase, touch.Modifiers);
                     return;
                 }
                 _primaryFinger = NoFinger;
+                var pressed = _pointerState.PressedElement;
+                bool longPressed = _gesture is { LongPressed: true } held && held.Finger == touch.FingerId;
                 // A gesture that claimed the finger cancelled its press then: nothing to release.
-                if (GestureEnd(touch.FingerId, end, ref cancel)) return;
+                if (GestureEnd(touch.FingerId, end, ref cancel))
+                {
+                    AfterTouchGesture(longPressed);
+                    return;
+                }
                 using var scope = PointerContext.Enter(finger.Id, PointerType.Touch, primary: true, cancelling: cancel);
-                _releaseOnPressed = Distance(end, finger.DownAt) <= PointerState.TouchSlop;
+                bool tap = Distance(end, finger.DownAt) <= PointerState.TouchSlop;
+                _releaseOnPressed = tap;
                 try
                 {
                     HandleInputEvent(new InputEvent.MouseButtonInput(end.X, end.Y, PointerEvent.LeftButton, false, touch.Modifiers));
@@ -112,6 +132,7 @@ public sealed partial class Window
                 }
                 // No sticky hover: a finger that has lifted is over nothing.
                 HandleInputEvent(new InputEvent.PointerLeftWindowInput());
+                AfterTouchTap(pressed, cancel, tap);
                 return;
             }
         }

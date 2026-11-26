@@ -8,7 +8,7 @@ using HultUI.Core.Styling;
 
 namespace HultUI.Core.Elements;
 
-public class TextInputElement : BoxElement
+public class TextInputElement : BoxElement, ITouchTextEditing
 {
     private string _text = "";
     private int _cursorPos;
@@ -606,6 +606,59 @@ public class TextInputElement : BoxElement
     {
         _isDragging = false;
     }
+
+    // ──── Touch text editing (docs/design/SOFT-KEYBOARD.md §4) ────
+
+    /// <summary>The insertion handle is being dragged: the caret moves with no selection.</summary>
+    private bool _touchCaretOnly;
+
+    bool ITouchTextEditing.HasTouchSelection => HasSelection;
+
+    (Rect Start, Rect End)? ITouchTextEditing.TouchCaretBoxes() =>
+        _renderCtx is null ? null : (CaretBoxAt(SelectionStart), CaretBoxAt(SelectionEnd));
+
+    /// <summary>The caret's box before character <paramref name="index"/>, as the field draws it.</summary>
+    private Rect CaretBoxAt(int index)
+    {
+        var contentBox = Layout.AbsoluteContentBox;
+        var style = ResolvedInherited;
+        var shown = ShownText;
+        float x = shown.Length > 0 ? _renderCtx!.TextCaretX(shown, style, Math.Clamp(index, 0, shown.Length)) : 0;
+        float height = _renderCtx!.MeasureText("X", style).Height;
+        return new Rect(contentBox.X + x - _scrollOffset, contentBox.Y + (contentBox.Height - height) / 2, CursorWidth, height);
+    }
+
+    void ITouchTextEditing.TouchSelectWordAt(Point position)
+    {
+        int pos = PositionFromPoint(position);
+        (_selectionStart, _cursorPos) = Masked ? (0, _text.Length) : WordBoundary.RangeAt(_text, pos);
+        _history.Seal();
+        MarkPaintDirty();
+    }
+
+    void ITouchTextEditing.TouchBeginHandleDrag(bool movesEnd)
+    {
+        _touchCaretOnly = !HasSelection;
+        if (!_touchCaretOnly)
+        {
+            int start = SelectionStart, end = SelectionEnd;
+            (_selectionStart, _cursorPos) = movesEnd ? (start, end) : (end, start);
+        }
+        _history.Seal();
+    }
+
+    void ITouchTextEditing.TouchDragHandleTo(Point position)
+    {
+        int pos = PositionFromPoint(position);
+        if (pos == _cursorPos || (!_touchCaretOnly && pos == _selectionStart)) return;
+        _cursorPos = pos;
+        if (_touchCaretOnly) _selectionStart = pos;
+        MarkPaintDirty();
+    }
+
+    void ITouchTextEditing.TouchEndHandleDrag() => _touchCaretOnly = false;
+
+    IReadOnlyList<ContextMenuItem> ITouchTextEditing.TouchEditItems() => BuildContextMenuItems();
 
     private int PositionFromPoint(Point screenPos)
     {

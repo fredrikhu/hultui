@@ -215,6 +215,31 @@ app's logcat lines. On the emulator (scale 2.625), all six checks pass:
 Not checked yet: two fingers (the emulator's multi-touch needs its window), a drag on a slider in
 the list, frame time while flinging, and all of it on the S25, including the refresh-rate fix.
 
+## The soft keyboard on the emulator (phase 4, 2026-11-26)
+
+`scripts/keyboard-check.ps1` taps the spike's text and number fields, presses Back and long-presses
+the field's words, and reads logcat and the keyboard's `EditorInfo` (`dumpsys input_method`). All
+five checks pass:
+
+| Check | Result |
+|---|---|
+| A tap on the text field | The keyboard comes up; `Window.KeyboardInset` 336 DIP, told once |
+| The text field's input type | `0x1c001`: text, sentence capitals, correction, one line (no new-line key) |
+| A tap on the number field, the keyboard up | `0x2`, the digits; the inset follows the shorter keyboard (292) |
+| Back | The keyboard goes; the inset is 0 |
+| A long press on the words | "bravo" selected, two handles and the edit bar (`p-keyboard-selection.png`) |
+
+Two findings, both fixed in `HultUIActivity`, each checked by taking the fix out:
+- **Android's default soft-input mode panned the window.** When the keyboard came up, adjust-pan
+  moved the whole window down by the status bar (49 DIP) to reveal SDL's hidden edit view at the
+  window's corner, so everything was drawn, and touched, 49 DIP below its layout, under a black
+  status bar. `SoftInput.AdjustResize` on an edge-to-edge window neither resizes nor pans.
+- **SDL never tells a keyboard that is up about a new field's type.** It sends Java the type only
+  when it shows the keyboard, which it skips while the keyboard is shown, and its Java only stores
+  it (`SDLDummyEdit.setInputType`). A move from the text field to the number field kept the
+  letters. On such a switch HultUI hands SDL's `showTextInput` the type SDL would have made and
+  restarts the keyboard's input.
+
 ## What broke (for phase 2)
 
 1. **Black after returning from the background.** The app survives Home and return (no crash,

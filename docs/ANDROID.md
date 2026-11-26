@@ -123,6 +123,16 @@ Gestures (`docs/design/GESTURES.md`):
   dismiss, a carousel. Implement `IPanScrollable` on a surface of your own that scrolls.
 - **A slider** follows a sideways swipe and lets a vertical one scroll the page.
 - **An element that captures the pointer on its press** keeps the finger from every scroller.
+- **A finger on empty space** clears the focus when it lifts as a tap, not when it lands, so a
+  scroll of the page keeps the field's focus and its keyboard.
+
+Text by touch (`TextInput`, `TextArea`, the rich text editor), as on Android:
+- **A tap** places the caret and shows a handle under it for a few seconds; drag it to move the
+  caret, tap it for Paste and Select All.
+- **A long press or a double tap** selects the word and shows two handles and the edit bar: Cut,
+  Copy, Paste, Select All, and "⋯" for the rest of the field's context menu.
+- **Drag a handle** to move its end of the selection.
+- **A tap elsewhere, typing or the mouse** put them away.
 
 ## Secrets
 
@@ -158,8 +168,7 @@ HultUI's own messages go to logcat under `DOTNET` (what a desktop app writes to 
 ## Not yet
 
 These are plan 20's later phases:
-- **Touch text editing.** A finger places the caret but does not select; selection handles and
-  the edit menu are phase 4. No pinch yet.
+- **No pinch** yet, and no magnifier over the text a handle moves.
 - **No TalkBack** until its bridge (phase 6).
 - **File dialogs** return Android's `content://` addresses, which `File.Open` cannot open.
 - **No second window.**

@@ -1,4 +1,4 @@
-using HultUI.Core.Accessibility;
+﻿using HultUI.Core.Accessibility;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Platform;
@@ -27,7 +27,8 @@ namespace HultUI.Core.Elements;
 /// the block changes; blocks are immutable, so "changed" is a reference compare. Only the blocks
 /// on screen are drawn.</para>
 /// </remarks>
-public partial class RichTextEditorElement : BoxElement, IScrollbarDraggable, IAutoScrollable, IPanScrollable, ITextServicesClient
+public partial class RichTextEditorElement : BoxElement, IScrollbarDraggable, IAutoScrollable, IPanScrollable, ITextServicesClient,
+    ITouchTextEditing
 {
     private readonly RichEditState _state;
     private RichDocument _lastIncoming;

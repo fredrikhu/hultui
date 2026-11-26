@@ -69,7 +69,25 @@ public abstract class HultUIActivity : SDLActivity
         if (Window?.DecorView is { } decor) DisableFocusHighlight(decor);
         // The safe area HultUI lays out in: the bars and the cutout, as they arrive and change.
         FindViewById(global::Android.Resource.Id.Content)?.SetOnApplyWindowInsetsListener(new ContentInsetsListener());
+        // The keyboard's area is HultUI's to keep clear (Window.KeyboardInset). Under the default,
+        // adjust-pan, Android moved the whole window down by the status bar when the keyboard came
+        // up, to reveal SDL's hidden edit view at the window's corner: drawn and touched 49 DIP
+        // lower than HultUI laid out (measured on the emulator). On an edge-to-edge window
+        // adjust-resize neither resizes nor pans; it only reports the inset.
+        Window?.SetSoftInputMode(SoftInput.AdjustResize);
         FollowPeakRefreshRate();
+        // Focus moved to another kind of field with the keyboard up (docs/design/SOFT-KEYBOARD.md
+        // §8): SDL sends Java no new type while its keyboard shows. SDL's own show task stores
+        // it, and the keyboard reads it when its input restarts, which is posted after the task.
+        global::HultUI.Platform.SDL3.SDL3Window.TextInputSwitched = (inputType, area) =>
+        {
+            ShowTextInput(inputType, area.x, area.y, area.w, area.h);
+            RunOnUiThread(() =>
+            {
+                if (CurrentFocus is { } editor && GetSystemService(InputMethodService) is global::Android.Views.InputMethods.InputMethodManager keyboard)
+                    keyboard.RestartInput(editor);
+            });
+        };
     }
 
     /// <summary>

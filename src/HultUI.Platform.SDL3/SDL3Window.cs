@@ -2409,17 +2409,23 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// (docs/design/SOFT-KEYBOARD.md §2): the type, capitalization, correction and lines, which
     /// pick a phone's keyboard, and Android's own input type where SDL has no type for the kind.
     /// The lines are always said: SDL takes a field to be multiline unless told, and Android's
-    /// keyboard then shows a new-line key on a one-line field. A switch restarts input, because
-    /// SDL's Windows backend arms its input method only on a start; on Android it does not, since
-    /// SDL there hands the keyboard the new type on any start, and a stop would hide the keyboard
-    /// for a frame. A password goes to SDL as <c>TEXT_PASSWORD_HIDDEN</c>, which its Wayland
+    /// keyboard then shows a new-line key on a one-line field. A switch restarts input on the
+    /// desktop, because SDL's Windows backend arms its input method only on a start. On Android
+    /// no start reaches a keyboard already up: SDL sends the type to Java only when it shows the
+    /// keyboard, which it skips while the keyboard is shown, and a stop first does not help, as the
+    /// hide is asynchronous. So focus moved from a text field to a number field kept the letters
+    /// (measured on the emulator). There <see cref="TextInputSwitched"/> hands
+    /// HultUI.Platform.Android the new Android input type, as SDL would have made it
+    /// (<see cref="AndroidInputType"/>), to give SDL's Java and restart the keyboard's input with.
+    /// A password goes to SDL as <c>TEXT_PASSWORD_HIDDEN</c>, which its Wayland
     /// backend hands the input method as the password purpose; its Windows backend ignores the
     /// type, so <see cref="KeepInputMethodOut"/> does what a native password box does there.
     /// </summary>
     public void StartTextInput(TextInputKind kind, bool multiline)
     {
         if (_textInputActive && _textInputKind == kind && _textInputMultiline == multiline) return;
-        if (_textInputActive && !OperatingSystem.IsAndroid()) SDL_StopTextInput(_window);
+        bool switching = _textInputActive;
+        if (switching && !OperatingSystem.IsAndroid()) SDL_StopTextInput(_window);
         _textInputActive = true;
         _textInputKind = kind;
         _textInputMultiline = multiline;
@@ -2441,6 +2447,54 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         SDL_StartTextInputWithProperties(_window, props);
         SDL_DestroyProperties(props);
         KeepInputMethodOut();
+        if (switching && TextInputSwitched is { } switched)
+            switched(AndroidInputType(kind, multiline), _textInputArea);
+    }
+
+    /// <summary>
+    /// Raised on the UI thread after input switched to another kind of field while it was on,
+    /// with Android's input type for the new field and the text-input area in window pixels.
+    /// HultUI.Platform.Android hands both to SDL's Java and restarts the keyboard's input there
+    /// (see <see cref="StartTextInput(TextInputKind, bool)"/>).
+    /// </summary>
+    internal static Action<int, SDL_Rect>? TextInputSwitched { get; set; }
+
+    /// <summary>The text-input area last given to SDL, in window coordinates.</summary>
+    private SDL_Rect _textInputArea;
+
+    /// <summary>
+    /// Android's <c>InputType</c> bits for a kind, as SDL's <c>Android_ShowScreenKeyboard</c> makes
+    /// them from the properties <see cref="StartTextInput(TextInputKind, bool)"/> passes: Android's
+    /// own bits where given, else the class and variation for SDL's type, the capitalization,
+    /// auto-correct and auto-complete with correction, and multi-line. A one-line text field is
+    /// <c>0x1c001</c>, as the emulator's keyboard reported.
+    /// </summary>
+    internal static int AndroidInputType(TextInputKind kind, bool multiline)
+    {
+        var (type, caps, correct, android) = TextInputProperties(kind);
+        if (android != 0) return android;
+        const int ClassText = 0x1, ClassNumber = 0x2;
+        int bits = type switch
+        {
+            SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT_NAME => ClassText | 0x60,          // PERSON_NAME
+            SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT_EMAIL => ClassText | 0x20,         // EMAIL_ADDRESS
+            SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT_PASSWORD_HIDDEN => ClassText | 0x80,   // PASSWORD
+            SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT_PASSWORD_VISIBLE => ClassText | 0x90,  // VISIBLE_PASSWORD
+            SDL_TextInputType.SDL_TEXTINPUT_TYPE_NUMBER => ClassNumber,
+            SDL_TextInputType.SDL_TEXTINPUT_TYPE_NUMBER_PASSWORD_HIDDEN => ClassNumber | 0x10,   // NUMBER_PASSWORD
+            SDL_TextInputType.SDL_TEXTINPUT_TYPE_NUMBER_PASSWORD_VISIBLE => ClassNumber,
+            _ => ClassText,   // TEXT and USERNAME: NORMAL
+        };
+        bits |= caps switch
+        {
+            SDL_Capitalization.SDL_CAPITALIZE_LETTERS => 0x1000,     // CAP_CHARACTERS
+            SDL_Capitalization.SDL_CAPITALIZE_WORDS => 0x2000,       // CAP_WORDS
+            SDL_Capitalization.SDL_CAPITALIZE_SENTENCES => 0x4000,   // CAP_SENTENCES
+            _ => 0,
+        };
+        if (correct) bits |= 0x8000 | 0x10000;   // AUTO_CORRECT, AUTO_COMPLETE
+        if (multiline) bits |= 0x20000;          // MULTI_LINE
+        return bits;
     }
 
     /// <summary>
@@ -2499,6 +2553,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             w = Math.Max(1, (int)(caretRect.Width * toWindow)),
             h = Math.Max(1, (int)(caretRect.Height * toWindow))
         };
+        _textInputArea = rect;
         SDL_SetTextInputArea(_window, &rect, cursorOffset);
     }
 

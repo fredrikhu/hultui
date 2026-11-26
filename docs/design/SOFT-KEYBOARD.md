@@ -1,7 +1,8 @@
 # Soft keyboard and touch text editing — design note
 
-**Status (2026-11-26): approved by the user, all six recommendations in §6 taken. §2 and §3
-built (§8); §4, touch text editing, next.** Plan 20, phase 4
+**Status (2026-11-26): approved by the user, all six recommendations in §6 taken. Built and
+headless-tested: §2 and §3 (§8), §4 (§9). Checked on the emulator
+(`spikes/AndroidHello/scripts/keyboard-check.ps1`); not yet on the phone.** Plan 20, phase 4
 ([plan](../plans/20-mobile-support.md) §2.4). It builds on the [gestures note](GESTURES.md):
 long press, pan, and `PointerCancel`.
 
@@ -232,5 +233,64 @@ be reached: `input.Kind(...)` binds to the property and fails (CS1955), the reas
 - Each rule checked with a negative control: the covered part of the view, the overlay height
   with the menu clamp, the kind's patch, the area's lines, and the reveal itself.
 
-**Still to check on a device:** that the listener gets the `ime()` inset with the activity's
-default soft-input mode (§3), and each keyboard.
+**On the emulator** (`spikes/AndroidHello/scripts/keyboard-check.ps1`, README "The soft keyboard
+on the emulator"): the listener gets the `ime()` inset (336 DIP, and 292 for the digits), a
+one-line field is `0x1c001`, a number field `0x2`, Back clears the inset. Two findings:
+- **§3's fallback was needed, for another reason.** The default soft-input mode (adjust-pan) moved
+  the window down by the status bar when the keyboard came up, to reveal SDL's hidden edit view at
+  the window's corner: drawn and touched 49 DIP below HultUI's layout. `HultUIActivity` sets
+  adjust-resize, which on an edge-to-edge window neither resizes nor pans.
+- **A switch of kind with the keyboard up did not reach it.** SDL sends Java a type only when it
+  shows the keyboard, which it skips while shown, and SDL's Java only stores the type. So
+  `SDL3Window.TextInputSwitched` hands HultUI.Platform.Android the type SDL would have made
+  (`SDL3Window.AndroidInputType`, pinned to the emulator's values in `TextInputPropertiesTests`),
+  which it gives SDL's `showTextInput` before restarting the keyboard's input. Android does not
+  stop input first on a switch (the desktop still does, for Windows).
+
+Still to check on the phone: each keyboard, and the field kept in view in Aperture's login and
+search.
+
+## 9. As built: touch text editing (2026-11-26)
+
+**Shape.** An internal `ITouchTextEditing` on `TextInputElement`, `TextAreaElement` and
+`RichTextEditorElement` (the selection's caret boxes, the word at a point, a handle's drag, the
+menu), and `Window.TouchText.cs`, which draws the handles above the overlays and keeps the bar.
+No public API.
+
+**As §4 says:**
+- A tap shows the insertion handle for 4 s; a tap on it shows the bar with Paste and Select All;
+  a drag of it moves the caret.
+- A long press on text selects the word, with two handles and the bar, in place of the context
+  menu. An `OnLongPress` handler on the path still comes first. A double tap does the same (its
+  second press selects the word, as a double click does).
+- A handle's drag moves its end by character, never onto the other end. The finger holds the
+  handle below the line; the offset from the finger to the caret's middle is kept for the drag.
+- The handles and the bar go on a tap elsewhere, a key or typed text, the mouse, the wheel, the
+  focus leaving, or the selection they showed going (cut, typed over).
+- The handles are 22 DIP across, in the theme's primary colour, and are not drawn where their
+  caret is scrolled out of the field or a scroll view around it.
+
+**Different from §4:**
+- **The bar shows Cut, Copy, Paste and Select All**, the enabled ones, not the whole context
+  menu: the rich text editor's menu has a link's and a table's items. When the menu holds more,
+  the bar ends with "⋯", which opens the whole menu. Undo and Redo are left to the keyboard.
+- **A scroll keeps the handles**, following the text, rather than hiding them until it ends; the
+  bar goes while it scrolls and comes back.
+- **No word snapping** while a handle moves outwards: by character both ways, for now.
+- **A handle at the field's edge** scrolls the text input and the text area by their own caret
+  reveal, a step per move, not `TickSelectionEdgeScroll` (which serves labels in a scroll view).
+- **Finding: a finger on empty space no longer clears the focus at the press.** A press there
+  may be a scroll starting, and clearing the focus dropped the field's keyboard and its
+  selection under any scroll of the page. The focus is cleared when the finger lifts as a tap,
+  so a tap there still does what a click does.
+
+**Tests:** `TouchTextEditingTests` (25): the long press, the handles' place and colour, the double
+tap, Copy, Select All and Cut from the bar, the bar above the selection and below it with no
+room, each handle's drag, a handle never collapsing the selection, the insertion handle's tap,
+drag and timeout, a tap elsewhere, typing (with a selection and without), the mouse, a pan on
+the page, the text area and the editor, a scrolled page, an `OnLongPress` handler around a field,
+and the focus under a tap and a scroll on empty space. Each rule checked with a negative control.
+
+**Found in passing, not fixed here:** a mouse click on a text area inside a scrolled page puts
+the caret on the wrong line: the area reads the window's point as its layout's. The touch path
+maps the finger through the area's drawn place and is right.

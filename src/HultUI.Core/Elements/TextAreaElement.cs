@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
@@ -9,7 +9,7 @@ using HultUI.Core.Styling;
 
 namespace HultUI.Core.Elements;
 
-public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable, IPanScrollable
+public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable, IPanScrollable, ITouchTextEditing
 {
     private string _text = "";
     private int _cursorPos;
@@ -2126,6 +2126,69 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     }
 
     public void EndDrag() => _isDragging = false;
+
+    // ──── Touch text editing (docs/design/SOFT-KEYBOARD.md §4) ────
+
+    /// <summary>The insertion handle is being dragged: the caret moves with no selection.</summary>
+    private bool _touchCaretOnly;
+
+    bool ITouchTextEditing.HasTouchSelection => HasSelection;
+
+    (Rect Start, Rect End)? ITouchTextEditing.TouchCaretBoxes() =>
+        _renderCtx is null ? null : (CaretBoxAt(SelectionStart), CaretBoxAt(SelectionEnd));
+
+    /// <summary>The caret's box before character <paramref name="index"/>, as the area draws it:
+    /// on its visual line, under the area's own scroll.</summary>
+    private Rect CaretBoxAt(int index)
+    {
+        var contentBox = Layout.AbsoluteContentBox;
+        var style = ResolvedInherited;
+        float wrapWidth = contentBox.Width;
+        var starts = GetLineStarts(wrapWidth, style);
+        float lh = GetLineHeight(style);
+        index = Math.Clamp(index, 0, _text.Length);
+        var (line, _) = CursorToLineCol(index, wrapWidth, style);
+        var (lineStart, lineEnd) = VisualLineRange(starts, line);
+        float x = contentBox.X + CaretXOnLine(lineStart, lineEnd, index, style);
+        return new Rect(x, contentBox.Y + line * lh - _scrollOffsetY, CursorWidth, lh);
+    }
+
+    void ITouchTextEditing.TouchSelectWordAt(Point position)
+    {
+        int pos = PositionFromPoint(position);
+        _history.Seal();
+        CaretMoved();
+        (_selectionStart, _cursorPos) = WordBoundary.RangeAt(_text, pos);
+        _needsScrollToCursor = true;
+        MarkPaintDirty();
+    }
+
+    void ITouchTextEditing.TouchBeginHandleDrag(bool movesEnd)
+    {
+        _touchCaretOnly = !HasSelection;
+        if (!_touchCaretOnly)
+        {
+            int start = SelectionStart, end = SelectionEnd;
+            (_selectionStart, _cursorPos) = movesEnd ? (start, end) : (end, start);
+        }
+        _history.Seal();
+    }
+
+    void ITouchTextEditing.TouchDragHandleTo(Point position)
+    {
+        int pos = PositionFromPoint(position);
+        if (pos == _cursorPos || (!_touchCaretOnly && pos == _selectionStart)) return;
+        CaretMoved();
+        _cursorPos = pos;
+        if (_touchCaretOnly) _selectionStart = pos;
+        // Past the area's edge the caret is on a line out of view: the area scrolls to it.
+        _needsScrollToCursor = true;
+        MarkPaintDirty();
+    }
+
+    void ITouchTextEditing.TouchEndHandleDrag() => _touchCaretOnly = false;
+
+    IReadOnlyList<ContextMenuItem> ITouchTextEditing.TouchEditItems() => BuildContextMenuItems();
 
     // ──── Scrollbar thumb drag (IScrollbarDraggable) ────
     private bool _draggingScrollbar;

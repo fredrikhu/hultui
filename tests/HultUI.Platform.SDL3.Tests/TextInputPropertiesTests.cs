@@ -56,6 +56,25 @@ public class TextInputPropertiesTests
         Assert.Equal(0, p.Android);
     }
 
+    [Theory]
+    // As the emulator's keyboard reported them (adb shell dumpsys input_method):
+    [InlineData(TextInputKind.Text, false, 0x1c001)]     // CLASS_TEXT, CAP_SENTENCES, AUTO_CORRECT, AUTO_COMPLETE
+    [InlineData(TextInputKind.Number, false, 0x2)]       // CLASS_NUMBER
+    // As SDL's Android_ShowScreenKeyboard makes them:
+    [InlineData(TextInputKind.Text, true, 0x3c001)]      // and MULTI_LINE
+    [InlineData(TextInputKind.Email, false, 0x21)]       // EMAIL_ADDRESS
+    [InlineData(TextInputKind.Name, false, 0x2061)]      // PERSON_NAME, CAP_WORDS
+    [InlineData(TextInputKind.Password, false, 0x81)]    // PASSWORD
+    [InlineData(TextInputKind.Username, false, 0x1)]
+    [InlineData(TextInputKind.Search, false, 0x18001)]   // correction, no capitals
+    [InlineData(TextInputKind.Url, true, 0x80011)]       // Android's own bits win, lines and all
+    public void TheAndroidInputType_IsWhatSdlWouldHaveMade(TextInputKind kind, bool multiline, int expected)
+    {
+        // Handed to SDL's Java when focus moves between kinds with the keyboard up, which SDL
+        // itself does not do: it must match what SDL gives a field focused first.
+        Assert.Equal(expected, SDL3Window.AndroidInputType(kind, multiline));
+    }
+
     [Fact]
     public void EveryKind_HasAnEntry_OtherThanTheTextFallback()
     {

@@ -1,4 +1,4 @@
-using HultUI.Core.Animation;
+﻿using HultUI.Core.Animation;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Primitives;
@@ -307,11 +307,15 @@ public sealed partial class Window
         for (var e = target; e is not null; e = e.Parent)
         {
             if (!e.HasEventHandler<LongPressEvent>()) continue;
+            HideTouchText();
             using var scope = PointerContext.Enter(g.PointerId, PointerType.Touch, primary: true);
             EventDispatcher.Dispatch(new LongPressEvent { Position = Local(g, g.LastAt), Button = PointerEvent.LeftButton, Modifiers = g.Modifiers }, target);
             _root.MarkPaintDirty();   // the input safety net's rule: a handler ran
             return;
         }
+        // Text: the word, its handles and the edit bar, in place of the field's context menu
+        // (docs/design/SOFT-KEYBOARD.md §4). Anything else puts away the handles shown.
+        if (SelectWordByTouch(target, g.LastAt)) return;
         // 2. The context menu, as a right click opens it: every menu made for the mouse works by touch.
         if (FindContextMenuOwner(target).owner is not null)
         {
