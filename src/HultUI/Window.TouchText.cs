@@ -413,6 +413,50 @@ public sealed partial class Window
         _root?.MarkPaintDirty();
     }
 
+    // ──── A finger moving on the text, not on a handle ────
+
+    /// <summary>The caret follows the finger from here: a sideways drag on the focused field, or a
+    /// long press past its text. The insertion handle shows under the caret, and the bar goes.</summary>
+    private void BeginTouchCaretDrag(TouchGesture g, Element field)
+    {
+        if (TouchTextOf(field) is not { } text) return;
+        g.TextField = field;
+        g.ExtendsWords = false;
+        _insertionHandleTimer?.Cancel();
+        _insertionHandleTimer = null;
+        _touchText = field;
+        _touchTextSelects = false;
+        text.TouchBeginHandleDrag(movesEnd: true);
+        _root?.MarkPaintDirty();
+    }
+
+    /// <summary>The finger moved: the caret goes to it, or the long press's selection grows to the
+    /// word under it. The bar goes while it changes.</summary>
+    private void MoveTouchText(TouchGesture g, Point at)
+    {
+        if (g.TextField is not { } field || TouchTextOf(field) is not { } text || !IsShownInWindow(field)) return;
+        var by = LayoutToWindow(field);
+        var point = new Point(at.X - by.X, at.Y - by.Y);
+        var before = TouchCaretsInWindow();
+        if (g.ExtendsWords) text.TouchExtendSelectionTo(point);
+        else text.TouchDragHandleTo(point);
+        if (Equals(before, TouchCaretsInWindow())) return;
+        CloseEditBar();
+        _root?.MarkPaintDirty();
+    }
+
+    /// <summary>The finger lifted: after a long press the bar comes back, for the selection or for
+    /// Paste; after a drag the insertion handle stays a while.</summary>
+    private void EndTouchTextMove(TouchGesture g, bool cancel)
+    {
+        var field = g.TextField!;
+        var text = TouchTextOf(field);
+        if (!g.ExtendsWords) text?.TouchEndHandleDrag();
+        if (cancel || text is null || !IsShownInWindow(field)) HideTouchText();
+        else if (g.LongPressed) ShowTouchSelection(field);
+        else ShowInsertionHandle(field);
+    }
+
     private void ReleaseTouchHandle(bool cancel)
     {
         var owner = _touchText;

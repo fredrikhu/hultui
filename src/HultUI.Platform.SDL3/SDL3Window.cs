@@ -2423,8 +2423,12 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// </summary>
     public void StartTextInput(TextInputKind kind, bool multiline)
     {
-        if (_textInputActive && _textInputKind == kind && _textInputMultiline == multiline) return;
-        bool switching = _textInputActive;
+        // SDL stops input by itself where the system puts the keyboard away (Android's Back, through
+        // SDL's nativeKeyboardFocusLost), and ours stayed on: a start for the same field returned
+        // here, and the keyboard never came back for it.
+        bool on = _textInputActive && SDL_TextInputActive(_window);
+        if (on && _textInputKind == kind && _textInputMultiline == multiline) return;
+        bool switching = on;
         if (switching && !OperatingSystem.IsAndroid()) SDL_StopTextInput(_window);
         _textInputActive = true;
         _textInputKind = kind;

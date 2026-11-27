@@ -21,8 +21,14 @@ internal interface ITouchTextEditing
     /// nothing is selected. Null while the control cannot measure, before its first frame.</summary>
     (Rect Start, Rect End)? TouchCaretBoxes();
 
-    /// <summary>Selects the word at <paramref name="position"/>: a long press.</summary>
+    /// <summary>Selects the word at <paramref name="position"/>: a long press. Past the text's end
+    /// the caret goes there and nothing is selected.</summary>
     void TouchSelectWordAt(Point position);
+
+    /// <summary>The finger that selected a word by its long press moved on, still down: the
+    /// selection grows from that word, a whole word at a time, to the word at
+    /// <paramref name="position"/>, either way, as Android's does.</summary>
+    void TouchExtendSelectionTo(Point position);
 
     /// <summary>A handle's drag begins: <paramref name="movesEnd"/> says which end of the selection
     /// moves, and the other stays. With nothing selected the caret moves alone.</summary>

@@ -107,7 +107,12 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
             return;
         }
         if (EnabledElement(id) is { } element)
+        {
             EventDispatcher.DispatchDirect(ClickOn(element), element);
+            // A field with the focus whose keyboard was put away (Android's Back) gets it back, as
+            // a finger's press on it does (Window.StartTextInputFor).
+            if (element.TakesTypedText) _window.TextInputAgain(element);
+        }
     });
 
     public void ToggleElement(ElementId id) => Enqueue(() =>

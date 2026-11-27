@@ -736,9 +736,20 @@ user found is fixed and checked again on the phone (TALKBACK.md §11 has each on
 
 One public API came of it, on the user's OK: `Element.AccessibilityHidden`.
 
-Left:
-- on the phone: the a11y sample (text by unit, the long press's menu, the dialog, the 3,000-item
-  list), all passing on the emulator.
+**The a11y sample on the S25, the same day:** text by character, the dialog, the long press's
+menu, the 3,000-item list and the announcement all work. Fixed on the way (TALKBACK.md §11,
+SOFT-KEYBOARD.md §10):
+- **Menu items:** a menu's current item said "Selected". Now a menu item that is on or off says
+  "checked".
+- **The keyboard:** it did not come back after Back for the same field. On Android 16 and later the
+  keyboard takes Back itself and SDL is never told.
+- **Touch editing:**
+  - A long press past the text's end selected the last word.
+  - A finger's drag selected; it now moves the caret.
+  - A long press's finger did not grow the selection.
+
+Left: nothing of phase 6 on this phone; another phone and keyboard would show what this one
+cannot.
 
 **Exit criteria**
 

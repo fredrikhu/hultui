@@ -294,3 +294,32 @@ and the focus under a tap and a scroll on empty space. Each rule checked with a 
 **Found in passing, not fixed here:** a mouse click on a text area inside a scrolled page puts
 the caret on the wrong line: the area reads the window's point as its layout's. The touch path
 maps the finger through the area's drawn place and is right.
+
+## 10. On the Galaxy S25 (2026-11-27)
+
+The user tried the fields by hand on the phone (Android 17, SwiftKey), with TalkBack and without.
+Four faults, each fixed, tested (each test failing without its fix) and checked again there:
+- **The keyboard did not come back** for the field it was put away from. From Android 16, Back
+  goes to the keyboard's own back callback, past the app, so SDL is never told the keyboard went
+  (its `onKeyPreIme` sees no Back) and keeps input on; a start for a field of the same kind then
+  changed nothing. Only a field of another kind and back brought it. The window now notes the
+  keyboard's inset falling to 0 under a focused field, and its next start stops input first;
+  a press on the focused field, or a reader's click on it, asks again
+  (`Window.StartTextInputFor`). `SDL3Window.StartTextInput` also reads SDL's own state, for
+  Android 15 and earlier, where SDL is told and stops input itself. The emulator (Android 15)
+  shows only the second.
+- **A long press past the text's end selected the last word**, so nothing could be pasted after
+  it. Off the text (right of a line that ends the text or a paragraph, or below the last line) it
+  now puts the caret there and shows the bar for Paste, as an EditText does; on a word it selects
+  the word.
+- **A finger's drag on a field selected**, as a mouse's does. A finger's press no longer starts a
+  selection drag; a mostly sideways drag on the focused field moves the caret, as Android's
+  cursor drag from anywhere (from 11), and an upright one scrolls. The window claims the finger
+  for it before any scroller (`Window.Gestures.cs`, `TryClaim`).
+- **The finger that made a long press's selection did nothing more** while still down. It now
+  grows the selection a whole word at a time, either way (`ITouchTextEditing.TouchExtendSelectionTo`,
+  on the controls' own word-drag anchor); past the text it moves the caret. The bar goes while the
+  selection changes and comes back at the lift.
+
+**Tests:** `TouchTextEditingTests` (32 now) and `SoftKeyboardTests` (the keyboard put away, by the
+inset and by SDL's stop).

@@ -800,6 +800,10 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         bool safeAreaChanged = now != _safeArea, keyboardChanged = keyboard != _keyboardInset;
         if (!safeAreaChanged && !keyboardChanged) return;
         if (keyboardChanged && keyboard > _keyboardInset) _revealAboveKeyboard = true;
+        // The keyboard went away with a field still focused: the system put it away
+        // (StartTextInputFor).
+        if (keyboardChanged && keyboard <= 0 && _keyboardInset > 0 && FocusedElement is { TakesTypedText: true })
+            _keyboardPutAway = true;
         _safeArea = now;
         _keyboardInset = keyboard;
         if (_root is not null)
@@ -1236,6 +1240,66 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         return null;
     }
 
+    /// <summary>
+    /// Asks for text input, and so a phone's keyboard, for <paramref name="element"/> when it takes
+    /// typed text; false when it takes none. As the focus moves, and again when a field that has
+    /// the focus is pressed or clicked: Android's Back puts the keyboard away with the field still
+    /// focused, and with no focus move nothing asked for it again (a Galaxy S25: a tap or TalkBack's
+    /// double tap on the field just left brought no keyboard; another field and back did).
+    /// <para>Once the keyboard went away with a field focused, input is stopped before it is started
+    /// again. From Android 16 Back goes to the keyboard's own back callback, past the app, so SDL is
+    /// never told the keyboard is gone (its onKeyPreIme sees no Back): it keeps input on, and a start
+    /// for a field of the same kind showed nothing (Android 17 on the S25; the emulator's 15 tells
+    /// SDL).</para>
+    /// </summary>
+    private bool StartTextInputFor(Element? element)
+    {
+        TextInputKind kind;
+        bool multiline;
+        switch (element)
+        {
+            case TextInputElement textInput:
+                textInput.Clipboard = Clipboard;
+                textInput.TextInputHost = TextInputHost;
+                (kind, multiline) = (textInput.RequestedInputKind, false);
+                break;
+            case TextAreaElement textArea:
+                textArea.Clipboard = Clipboard;
+                textArea.TextInputHost = TextInputHost;
+                (kind, multiline) = (TextInputKind.Text, true);
+                break;
+            case ITextServicesClient client:
+                client.Clipboard = Clipboard;
+                client.TextInputHost = TextInputHost;
+                (kind, multiline) = (TextInputKind.Text, true);
+                break;
+            case { WantsTextInput: true }:
+                (kind, multiline) = (element.WantedInputKind, false);
+                break;
+            default:
+                _keyboardPutAway = false;
+                return false;
+        }
+        if (_keyboardPutAway)
+        {
+            _keyboardPutAway = false;
+            TextInputHost.StopTextInput();
+        }
+        TextInputHost.StartTextInput(kind, multiline);
+        return true;
+    }
+
+    // The keyboard went away while a field had the focus (OnPlatformSafeAreaChanged): the next start
+    // stops input first.
+    private bool _keyboardPutAway;
+
+    /// <summary>A field that already has the focus, pressed or clicked from an assistive tool: its
+    /// keyboard is asked for again (<see cref="StartTextInputFor"/>).</summary>
+    internal void TextInputAgain(Element element)
+    {
+        if (ReferenceEquals(_focusManager.FocusedElement, element)) StartTextInputFor(element);
+    }
+
     private void OnFocusChanged(Element? element)
     {
         // A selectable label copies through the window's clipboard too, however it took the focus:
@@ -1244,32 +1308,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         if (element is TextElement { Selectable: true } label)
             label.Clipboard = Clipboard;
 
-        if (element is TextInputElement textInput)
-        {
-            textInput.Clipboard = Clipboard;
-            textInput.TextInputHost = TextInputHost;
-            TextInputHost.StartTextInput(textInput.RequestedInputKind, multiline: false);
-        }
-        else if (element is TextAreaElement textArea)
-        {
-            textArea.Clipboard = Clipboard;
-            textArea.TextInputHost = TextInputHost;
-            TextInputHost.StartTextInput(TextInputKind.Text, multiline: true);
-        }
-        else if (element is ITextServicesClient client)
-        {
-            client.Clipboard = Clipboard;
-            client.TextInputHost = TextInputHost;
-            TextInputHost.StartTextInput(TextInputKind.Text, multiline: true);
-        }
-        else if (element is { WantsTextInput: true })
-        {
-            TextInputHost.StartTextInput(element.WantedInputKind, multiline: false);
-        }
-        else
-        {
-            TextInputHost.StopTextInput();
-        }
+        if (!StartTextInputFor(element)) TextInputHost.StopTextInput();
 
         // Focus moved to another field while the keyboard is up (Next, a tap on a field under it):
         // the new one is scrolled above it after the next layout.
@@ -3265,9 +3304,11 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     if (!_touchTapClearsFocus && (!isOverlayHit || focusTarget is not null))
                     {
                         // What a reader hears of the move waits for the click (BeginA11yPressHold).
-                        if (!ReferenceEquals(focusTarget, _focusManager.FocusedElement) && _accessibilityBridge.IsActive)
+                        bool focusedAlready = focusTarget is not null && ReferenceEquals(focusTarget, _focusManager.FocusedElement);
+                        if (!focusedAlready && _accessibilityBridge.IsActive)
                             BeginA11yPressHold(button.Button);
                         _focusManager.SetFocus(focusTarget, FocusReason.Pointer);
+                        if (focusedAlready) TextInputAgain(focusTarget!);
 
                         // Provide clipboard to text inputs when focused
                         if (focusTarget is TextInputElement textInput)

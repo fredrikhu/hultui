@@ -90,7 +90,12 @@ internal static class AndroidNodeMapper
         if (visible) flags |= AndroidNodeFlags.VisibleToUser;
         if (node.IsPassword) flags |= AndroidNodeFlags.Password;
         if (role == AccessibilityRole.Heading) flags |= AndroidNodeFlags.Heading;
-        if (node.IsSelected == true) flags |= AndroidNodeFlags.Selected;
+        // A menu's selected item is its cursor, the keys' and the pointer's, which TalkBack's own focus
+        // stands in for; Android's own menus mark none. TalkBack said "Selected" before the first item
+        // of a menu it had opened, and again after a swipe to the next and back (a Galaxy S25). What
+        // is chosen in a menu is its checked state.
+        bool selected = node.IsSelected == true && role != AccessibilityRole.MenuItem;
+        if (selected) flags |= AndroidNodeFlags.Selected;
         bool clickable = enabled && IsClickable(node);
         if (clickable) flags |= AndroidNodeFlags.Clickable;
         // A long press where one means something (a handler, a context menu), on a stop of TalkBack's
@@ -193,7 +198,7 @@ internal static class AndroidNodeMapper
             Range = range,
             Collection = CollectionOf(node),
             CollectionItem = servedIndex >= 0
-                ? new AndroidCollectionItem(servedIndex, 0, false, node.IsSelected == true)
+                ? new AndroidCollectionItem(servedIndex, 0, false, selected)
                 : CollectionItemOf(node),
             Granularities = granularities,
             SelectionStart = selectionStart,
@@ -333,6 +338,10 @@ internal static class AndroidNodeMapper
     {
         AccessibilityRole.Checkbox or AccessibilityRole.Switch or AccessibilityRole.RadioButton => true,
         AccessibilityRole.Button => node.IsToggled is not null,
+        // A menu's choice that is on or off (a genre, a sort, a quality), as Android's checkable menu
+        // items: TalkBack says "checked". Its only word for the choice was "Selected", from the menu's
+        // cursor, which a menu opened on its choice happened to be on.
+        AccessibilityRole.MenuItem => node.IsToggled is not null,
         _ => false,
     };
 
@@ -401,6 +410,8 @@ internal static class AndroidNodeMapper
             if (sibling.Role == node.Role) index++;
         }
         bool across = parent.Role == AccessibilityRole.TabList || header;
-        return new AndroidCollectionItem(across ? 0 : index, across ? index : 0, header, node.IsSelected == true);
+        // A menu item's selected state is the menu's cursor, which TalkBack is not told (Map).
+        bool selected = node.IsSelected == true && node.Role != AccessibilityRole.MenuItem;
+        return new AndroidCollectionItem(across ? 0 : index, across ? index : 0, header, selected);
     }
 }

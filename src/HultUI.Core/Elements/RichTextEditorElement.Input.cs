@@ -316,6 +316,9 @@ public partial class RichTextEditorElement
     {
         if (!_dragging || !evt.IsPrimary || !EnsureFreshLayout()) return;
         if (_pressedLink is not null && Distance(evt.Position, _pressPoint) > 4f) _pressedLink = null;
+        // A finger's drag does not select, as on a phone: a sideways one moves the caret and an
+        // upright one scrolls (the window's gestures), and a long press selects.
+        if (evt.PointerType == PointerType.Touch) return;
         var at = PointerToDocument(evt.Position);
         var (pos, upstream) = PositionAt(at.X, at.Y);
         _upstream = upstream;
@@ -434,9 +437,44 @@ public partial class RichTextEditorElement
         if (!EnsureFreshLayout()) return;
         var at = ToDocument(position);
         var (pos, upstream) = PositionAt(at.X, at.Y);
-        _dragUnit = SelectionUnit.Word;
-        var word = UnitRange(pos);
-        _state.Select(word.Start, word.End);
+        // Past a paragraph's text (right of its end, or below its last line), the caret goes there
+        // and no word is selected, as Android's EditText does, so the bar offers Paste there.
+        if (PastParagraphEnd(pos, upstream, at))
+        {
+            _dragUnit = SelectionUnit.Character;
+            _state.Select(pos, pos);
+        }
+        else
+        {
+            _dragUnit = SelectionUnit.Word;
+            _dragAnchor = UnitRange(pos);
+            _state.Select(_dragAnchor.Start, _dragAnchor.End);
+        }
+        _upstream = upstream;
+        _preferredX = -1;
+        MarkPaintDirty();
+    }
+
+    /// <summary>Whether document point <paramref name="at"/>, nearest <paramref name="pos"/>, is off
+    /// its paragraph's text: below the paragraph's last line, or right of its end.</summary>
+    private bool PastParagraphEnd(RichPosition pos, bool upstream, Point at)
+    {
+        if (_blocks[pos.Block].Paragraph is not { } para) return false;
+        var lines = para.Lines;
+        if (lines.Count == 0) return false;
+        int end = lines[^1].Start + lines[^1].Length;
+        if (at.Y > CaretRect(new RichPosition(pos.Block, end), upstream: false).Bottom) return true;
+        return pos.Offset == end && at.X > CaretRect(pos, upstream).Right;
+    }
+
+    void ITouchTextEditing.TouchExtendSelectionTo(Point position)
+    {
+        if (!EnsureFreshLayout()) return;
+        var at = ToDocument(position);
+        var (pos, upstream) = PositionAt(at.X, at.Y);
+        var hit = UnitRange(pos);
+        if (hit.Start < _dragAnchor.Start) _state.Select(_dragAnchor.End, hit.Start);
+        else _state.Select(_dragAnchor.Start, hit.End);
         _upstream = upstream;
         _preferredX = -1;
         MarkPaintDirty();

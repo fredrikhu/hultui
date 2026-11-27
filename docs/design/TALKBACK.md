@@ -171,8 +171,7 @@ The differ now hands a value change its previous node, which TalkBack's text-cha
     - A drop-down's open list was swiped past. Opening it from an assistive tool focuses it, and
       the window gives the open list the reader's focus.
     - Plan 20, phase 6, has the details.
-  - **Aperture's main views are checked there too** (2026-11-27), §11.
-  - **Not yet on the phone:** the a11y sample (§9).
+  - **Aperture's main views and the a11y sample are checked there too** (2026-11-27), §11.
 - ~~A text field that has only a placeholder has no accessible name, so TalkBack says "Edit box"
   alone.~~ Done the same day, on the user's word, for every platform: a text field with no other
   name is named by its placeholder, as browsers do (docs/ELEMENTS.md), so TalkBack says it as the
@@ -338,6 +337,21 @@ everything found is fixed and checked again there. The phone runs Google's TalkB
   turned on stays put (it pushed Favourites partly out of view on the phone).
 - While the player is open, the title bar and the page under it are hidden from readers.
 - The "·" in the title bar is hidden from readers.
+
+**The a11y sample on the phone** (§9's checks, by hand, the same day):
+- **They work there:** text by character in both fields (TalkBack's swipe up and down moves the
+  caret and says the character), the dialog with its title, the long press's menu, the
+  3,000-item list (swiping past the last item scrolls a page, as Android's own lists do), and the
+  announcement ("Counted 1", "Counted 2").
+- **A menu's current item said "Selected"**, before Rename and again after a swipe to Delete and
+  back: the menu's cursor was told as selected. A menu item is no longer told as selected
+  (Android's own menus mark none). A menu item that is on or off is now checkable, so TalkBack says
+  "checked"; "Selected" had been the only word for Aperture's chosen genre.
+- **The sample's list drew white text on the light page**; it uses the theme's colour now.
+- **The keyboard did not come back** after Back for the same field, with TalkBack or without:
+  SOFT-KEYBOARD.md §10, with the rest of what the phone showed of touch editing.
+- "Keyboard hidden", said twice as the keyboard goes, is the keyboard's own announcement (SwiftKey)
+  and TalkBack's window change, not the app's.
 
 **Checked:** each change has its desktop test, each failing without its change (the in-place
 refresh of a hidden subtree, `MatchChild`, has none that reaches it). On the emulator, Google

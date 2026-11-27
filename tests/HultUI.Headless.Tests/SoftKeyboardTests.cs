@@ -48,6 +48,68 @@ public sealed class SoftKeyboardTests
         Assert.False(host.Multiline, "a text input takes one line: a phone shows its action key, not a new line");
     }
 
+    /// <summary>A field whose keyboard the system put away (Android's Back: SDL stops input by
+    /// itself, and the field keeps the focus) gets it back from a press on it or a reader's double
+    /// tap. Only a move to another field and back brought it (TalkBack on a Galaxy S25).</summary>
+    [Fact]
+    public void AFieldWhoseKeyboardWasPutAway_GetsItBack_FromAPressOrAReadersInvoke()
+    {
+        using var session = HeadlessSession.Create(Width, Height);
+        var notes = TextArea.New("alpha bravo").Height(80);
+        session.Window.SetRoot(Flex.Column().Children(notes));
+        session.PumpFrame();
+        session.Window.Click(notes);
+        var host = session.Window.TextInputHost;
+        Assert.True(host.IsTextInputActive);
+
+        host.StopTextInput();   // the system's Back, as SDL takes it
+        session.Window.Click(notes);
+        Assert.True(host.IsTextInputActive, "a press on the focused field");
+
+        host.StopTextInput();
+        var router = session.Window.InstallActionRouter();
+        router.InvokeElement(notes.Id);
+        session.PumpFrame();
+        Assert.True(host.IsTextInputActive, "a reader's invoke of the focused field");
+    }
+
+    /// <summary>A keyboard that went away with the field still focused and input left on: from
+    /// Android 16, Back goes to the keyboard's own callback and SDL is never told, so its input stays
+    /// on and a start for a field of the same kind showed nothing (Android 17 on a Galaxy S25, with
+    /// TalkBack and without). The next start, from a press on the field or a move to another, stops
+    /// input first. While the keyboard is up, a press restarts nothing.</summary>
+    [Fact]
+    public void AKeyboardThatWentAway_WithInputLeftOn_IsStoppedBeforeTheNextStart()
+    {
+        using var session = HeadlessSession.Create(Width, Height);
+        var notes = TextArea.New("alpha bravo").Height(80);
+        var other = TextArea.New("charlie").Height(80);
+        session.Window.SetRoot(Flex.Column().Children(notes, other));
+        session.PumpFrame();
+        session.Window.Click(notes);
+        session.Window.SetKeyboardInset(Keyboard);
+        session.PumpFrame();
+        var host = session.Window.TextInputHost;
+        int stops = host.StopCount;
+        session.Window.Click(notes);
+        Assert.Equal(stops, host.StopCount);   // the keyboard is up
+
+        session.Window.SetKeyboardInset(0);   // the keyboard's own Back: nothing else is told
+        session.PumpFrame();
+        Assert.True(host.IsTextInputActive);
+        session.Window.Click(notes);
+        Assert.Equal(stops + 1, host.StopCount);
+        Assert.True(host.IsTextInputActive);
+
+        // Again, and away to another field of the same kind.
+        session.Window.SetKeyboardInset(Keyboard);
+        session.Window.SetKeyboardInset(0);
+        session.PumpFrame();
+        session.Window.Click(other);
+        Assert.Equal(stops + 2, host.StopCount);
+        Assert.True(host.IsTextInputActive);
+    }
+
     [Fact]
     public void Masked_WinsOverTheKind_AndUnmaskingGivesTheKindBack()
     {
