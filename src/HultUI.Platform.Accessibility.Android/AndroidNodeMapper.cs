@@ -38,6 +38,26 @@ internal static class AndroidNodeMapper
         return true;
     }
 
+    /// <summary>
+    /// The words an event of <paramref name="type"/> about <paramref name="node"/> carries, as a
+    /// native view fills them: a pane's state change its title; a content change none, as View fills
+    /// only its click, focus, hover, selection and text events, unless the node is a live region,
+    /// whose words are what changed; a field its text, or its hint when it has none, as TextView's
+    /// getTextForAccessibility gives it; anything else its text or its content description.
+    /// <para>An empty field put "" in its focus event, and TalkBack said "Unlabeled" for Aperture's
+    /// Search field (a Galaxy S25). A toggle's content change carried its name, and TalkBack spoke
+    /// that, not its new state: a double tap on Aperture's Favourites chip said "Favourites", not
+    /// "On" (TalkBack 15 on the emulator, and the S25).</para>
+    /// </summary>
+    public static string? EventWords(AndroidNode node, AndroidEventType type) => type switch
+    {
+        AndroidEventType.WindowStateChanged => node.PaneTitle,
+        AndroidEventType.WindowContentChanged when node.LiveRegion == AndroidLiveRegion.None => null,
+        _ => Nonempty(node.Text)
+            ?? (node.ClassName == AndroidClasses.EditText ? Nonempty(node.HintText) : null)
+            ?? Nonempty(node.ContentDescription),
+    };
+
     /// <summary>A control with a name, which says what is drawn inside it.</summary>
     public static bool CoversContent(AccessibilityNode node) =>
         IsControl(node.Role) && node.Role != AccessibilityRole.TextInput && !string.IsNullOrEmpty(node.Name);
@@ -109,6 +129,12 @@ internal static class AndroidNodeMapper
                 if (r.Value > r.Minimum) actions |= AndroidActions.ScrollBackward;
             }
         }
+        // A switch's state in words, as Android's own Switch gives it (setStateDescription, from 11).
+        // TalkBack says that, not the checked flag: it read Aperture's Favourites chip as
+        // "Favourites. Switch", neither on nor off (TalkBack 15 on the emulator). English, as HultUI's
+        // other spoken words are for now.
+        if (state is null && ClassOf(node) == AndroidClasses.Switch)
+            state = IsChecked(node) ? "On" : "Off";
 
         if (node.ScrollExtent is { } extent)
         {
@@ -179,7 +205,10 @@ internal static class AndroidNodeMapper
     /// <summary>The widget class TalkBack reads the role from.</summary>
     public static string ClassOf(AccessibilityNode node) => node.Role switch
     {
-        AccessibilityRole.Button => node.IsToggled is null ? AndroidClasses.Button : AndroidClasses.ToggleButton,
+        // A button that toggles is a switch to TalkBack, which says it on or off. As a ToggleButton
+        // it said no state as it was reached: a native one's text is its state ("ON", "OFF"), so
+        // TalkBack reads the text and adds none (Aperture's Favourites chip, TalkBack 15 on the emulator).
+        AccessibilityRole.Button => node.IsToggled is null ? AndroidClasses.Button : AndroidClasses.Switch,
         AccessibilityRole.TextInput => AndroidClasses.EditText,
         AccessibilityRole.Label or AccessibilityRole.Heading => AndroidClasses.TextView,
         AccessibilityRole.Image => AndroidClasses.ImageView,

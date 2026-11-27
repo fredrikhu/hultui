@@ -387,12 +387,11 @@ public sealed partial class Window
         // 2. The context menu, as a right click opens it: every menu made for the mouse works by touch.
         if (FindContextMenuOwner(target).owner is not null)
         {
+            // With a reader on, its focus goes into the menu (ShowContextMenu puts an item current):
+            // TalkBack's double tap held arrives here, as a press Android passes on at TalkBack's
+            // focus, and the menu, an overlay at the tree's end, was swiped to only past the rest of
+            // the page.
             TryShowContextMenu(target, g.LastAt);
-            // With a reader on, its focus goes into the menu: its first item is the current one, as a
-            // menu opened from the keyboard has it. TalkBack's double tap held arrives here, as a press
-            // Android passes on at TalkBack's focus; the menu, an overlay at the tree's end, was swiped
-            // to only past the rest of the page.
-            if (Core.Accessibility.AccessibilityClients.Active) _contextMenuElement?.MoveToEdge(first: true);
             return;
         }
         // 3. The tooltip, while the finger stays down: how Android names an icon button.

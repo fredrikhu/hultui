@@ -680,8 +680,8 @@ Left:
 (`docs/design/TALKBACK.md`): its own package, live regions, a desktop-tested mapper under a thin
 Android layer, the Fluent sample first. No public API.
 
-**Built (2026-11-26), checked with TalkBack on the emulator, and its basics on a Galaxy S25
-(2026-11-27, below); not yet Aperture on the phone.** The bridge (`HultUI.Platform.Accessibility.Android`), 46 desktop tests, and the Android
+**Built (2026-11-26), checked with TalkBack on the emulator, and its basics and Aperture's main
+views on a Galaxy S25 (2026-11-27, below).** The bridge (`HultUI.Platform.Accessibility.Android`), 46 desktop tests, and the Android
 layer on SDL's surface. On the emulator (`spikes/AndroidHello/scripts/talkback-check.ps1`) TalkBack
 reads the spike and the Fluent sample by explore-by-touch and by swipe, a double tap clicks, swiping
 past a list's last row scrolls it, a two-finger drag scrolls, and an announcement is spoken from a
@@ -715,10 +715,30 @@ same day, on the user's word (§10 there).
 - After the keyboard is closed with the system Back button, TalkBack's focus stays on Back. The
   Settings app's search field does the same, so this is TalkBack's behaviour, not the bridge's.
 
+**Aperture's main views on the Galaxy S25, by hand (2026-11-27), in three rounds:** everything the
+user found is fixed and checked again on the phone (TALKBACK.md §11 has each one):
+- **Reading:**
+  - The title bar's "·" was a stop of its own.
+  - The rail did not say which view is open, and no title was a heading.
+  - Runtimes were read as "1 h 47 m".
+- **Moving around:**
+  - A film's Back was read last, and returned to the first card instead of the one opened.
+  - The player's back arrow was read as "Stop".
+  - The film's page could be swiped to from the player.
+- **Menus and chips:**
+  - After a choice in the Genre and View chips' menus, the focus went to the title bar's wordmark.
+  - The toggle chips moved TalkBack to their neighbour, and never said on or off.
+  - Turning on a filter pushed its chip partly out of view.
+- **Focus:**
+  - The focus box did not follow a scroll.
+  - Search said "Unlabelled" some times as it opened: SDL's keyboard view, which is now hidden from
+    TalkBack.
+
+One public API came of it, on the user's OK: `Element.AccessibilityHidden`.
+
 Left:
 - on the phone: the a11y sample (text by unit, the long press's menu, the dialog, the 3,000-item
-  list), all passing on the emulator;
-- Aperture's main views on the phone.
+  list), all passing on the emulator.
 
 **Exit criteria**
 

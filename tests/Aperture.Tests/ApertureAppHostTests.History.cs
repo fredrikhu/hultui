@@ -515,7 +515,7 @@ public partial class ApertureAppHostTests
             app.Navigate(new Route(ApertureView.Detail, "m2", "Solaris"));
             PumpUntilShown(session, "Solaris");
             var resume = session.Window.FindByAutomationId("detail-play")!.Element;
-            Assert.Equal("Resume Solaris, 58 m in", resume.AccessibleName);
+            Assert.Equal("Resume Solaris, 58 minutes in", resume.AccessibleName);
             Assert.Contains(AllOf(resume).OfType<TextElement>(), t => t.Content == "Resume 58 m in");
         });
     }

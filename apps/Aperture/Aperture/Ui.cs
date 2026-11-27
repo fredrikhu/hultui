@@ -180,7 +180,8 @@ public static class Ui
     public static Element SectionHeading(string title, string? trailing = null)
     {
         var row = Flex.Row(gap: Halide.S3).AlignItems(AlignItems.Center).FlexShrink(0);
-        row.AddChild(Text.New(title).FontSize(15f).FontWeight(FontWeight.SemiBold).TextColor(Halide.Text));
+        row.AddChild(Text.New(title).FontSize(15f).FontWeight(FontWeight.SemiBold).TextColor(Halide.Text)
+            .AccessibleRole(AccessibilityRole.Heading));
         if (trailing != null)
         {
             row.AddChild(Box.New().FlexGrow(1));
@@ -219,5 +220,24 @@ public static class Ui
     {
         var left = total - position;
         return left <= TimeSpan.Zero ? "Finished" : $"{Runtime(left)} left";
+    }
+
+    /// <summary>A runtime as a reader says it: "1 hour 47 minutes", "47 minutes". TalkBack read the
+    /// drawn "47 m" as "47 meters".</summary>
+    public static string SpokenRuntime(TimeSpan span)
+    {
+        int hours = (int)span.TotalHours;
+        int minutes = hours > 0 ? span.Minutes : Math.Max(1, (int)span.TotalMinutes);
+        string m = minutes == 1 ? "1 minute" : $"{minutes} minutes";
+        if (hours == 0) return m;
+        string h = hours == 1 ? "1 hour" : $"{hours} hours";
+        return minutes == 0 ? h : $"{h} {m}";
+    }
+
+    /// <summary><see cref="Remaining"/> as a reader says it: "38 minutes left".</summary>
+    public static string SpokenRemaining(TimeSpan total, TimeSpan position)
+    {
+        var left = total - position;
+        return left <= TimeSpan.Zero ? "Finished" : $"{SpokenRuntime(left)} left";
     }
 }

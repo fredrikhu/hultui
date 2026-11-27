@@ -212,10 +212,19 @@ public sealed partial class ApertureApp : Component, IDisposable
         // Full screen means the window has no chrome — so neither do we. The app's own
         // title bar is the only chrome there is here, and leaving it up would put a strip
         // of app furniture across the top of a film.
-        if (!_window.IsFullscreen) root.AddChild(PlaceTitleBar().FlexShrink(0));
+        // While a film plays, what the player covers is no part of what a reader meets: TalkBack
+        // swiped from the player into the film's page behind it (a Galaxy S25).
+        bool covered = _playingItem is not null;
+        if (!_window.IsFullscreen)
+        {
+            var titleBar = PlaceTitleBar().FlexShrink(0);
+            titleBar.AccessibilityHidden = covered;
+            root.AddChild(titleBar);
+        }
 
         var body = _stage == ApertureStage.Connect ? BuildConnectView() : BuildBrowsing();
         body.Key = BodyKey;
+        body.AccessibilityHidden = covered;
         root.AddChild(body);
         // A ref into a view holds the whole view through its parents (REACTIVITY.md, "A ref into a
         // view keeps the whole view"): a build that shows no library grid lets go of the last one.
@@ -305,7 +314,10 @@ public sealed partial class ApertureApp : Component, IDisposable
         left.AddChild(Ui.Wordmark(12f, Halide.TextMuted));
         if (shows.Server is { } server)
         {
-            left.AddChild(Text.New("·").FontSize(12f).TextColor(Halide.TextFaint));
+            // Decoration: TalkBack said "middle dot" between the app's name and the server's.
+            var dot = Text.New("·").FontSize(12f).TextColor(Halide.TextFaint);
+            dot.AccessibilityHidden = true;
+            left.AddChild(dot);
             left.AddChild(Ui.Line(server.Name, 12f, Halide.TextDim));
         }
         left.WindowDrag();
@@ -482,6 +494,9 @@ public sealed partial class ApertureApp : Component, IDisposable
             .AutomationId("rail-" + label.ToLowerInvariant().Replace(' ', '-'))
             .Pressable();
         if (active) b.Background(Halide.Tint(Halide.Accent));
+        // One of a set, the lit one said as selected: TalkBack read every door the same, and which
+        // view is open was only drawn.
+        b.AccessibleSelected = active;
         b.AddChild(Ui.Icon(glyph, 18f, fg));
         if (key.Length > 0)
             b.AddChild(Ui.Mono(key, 9f, active ? Halide.Alpha(Halide.Accent, 0.85) : Halide.TextFaint));

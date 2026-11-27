@@ -5635,8 +5635,10 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         _contextMenuNavigate = request?.Navigate;
         if (request?.HighlightFirst == true && _contextMenuElement is { } menu)
         {
-            // Opened from the keyboard (a menu bar's Alt+letter, F10, Enter): underlined at once.
-            menu.MoveSelection(1);
+            // Opened from the keyboard (a menu bar's Alt+letter, F10, Enter): underlined at once. On
+            // the first item, whatever ShowContextMenu made current for a reader: a step from there
+            // went to the second.
+            menu.MoveToEdge(first: true);
             menu.ShowMnemonics = true;
         }
     }
@@ -5714,6 +5716,11 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             menuElement.MoveToEdge(first: true);
             menuElement.ShowMnemonics = true;
         }
+        // With a reader on, a menu opened by the pointer or a reader's click holds the reader's
+        // focus from the start (UpdateA11yMenuFocus), on its checked item, else its first. Opened with
+        // nothing current, the focus went to the menu itself (TalkBack on Aperture's genre and
+        // quality chips, a Galaxy S25); a long press's menu went there too before this.
+        else if (Core.Accessibility.AccessibilityClients.Active) menuElement.MoveToChoice();
         _contextMenuElement = menuElement;
         _contextMenuOverlay = ShowOverlay(menuElement, pos.X, pos.Y, dismissOnOutsideClick: true, hitTestable: true);
         if (anchor is not { } a) return;

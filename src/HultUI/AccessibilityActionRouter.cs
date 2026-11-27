@@ -107,7 +107,7 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
             return;
         }
         if (EnabledElement(id) is { } element)
-            EventDispatcher.DispatchDirect(new ClickEvent { Position = default }, element);
+            EventDispatcher.DispatchDirect(ClickOn(element), element);
     });
 
     public void ToggleElement(ElementId id) => Enqueue(() =>
@@ -126,7 +126,7 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
         // A switch had no route here and its Toggle did nothing.
         var target = EnabledElement(id);
         if (target is CheckboxElement or ToggleSwitchElement or { AccessibleToggled: not null })
-            EventDispatcher.DispatchDirect(new ClickEvent { Position = default }, target);
+            EventDispatcher.DispatchDirect(ClickOn(target!), target);
     });
 
     public void SelectElement(ElementId id) => Enqueue(() =>
@@ -144,11 +144,11 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
             // A radio is selected by its click, which also clears the rest of its group: set
             // directly, the group was left with two checked.
             case RadioButtonElement { IsChecked: false } rb:
-                EventDispatcher.DispatchDirect(new ClickEvent { Position = default }, rb);
+                EventDispatcher.DispatchDirect(ClickOn(rb), rb);
                 break;
             // One of a set that selects itself on click — a tab.
             case { AccessibleSelected: false } item:
-                EventDispatcher.DispatchDirect(new ClickEvent { Position = default }, item);
+                EventDispatcher.DispatchDirect(ClickOn(item), item);
                 break;
         }
     });
@@ -177,10 +177,32 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
                 else picker.ClosePopup();
                 break;
             case { AccessibleExpanded: { } open } element when open != expand:
-                EventDispatcher.DispatchDirect(new ClickEvent { Position = default }, element);
+                EventDispatcher.DispatchDirect(ClickOn(element), element);
+                break;
+            // One that says nothing of being open but opens on its click: a chip that opens a menu
+            // (Aperture's genre, view and quality). TalkBack's double tap on a combo box arrives
+            // as an expand, and did nothing (a Galaxy S25).
+            case { AccessibleExpanded: null } element when expand:
+                // Focused first, as a finger's press focuses it: the menu it opens holds the
+                // reader's focus while it is open, and gives it back here when it closes (the
+                // window's UpdateA11yMenuFocus). Unfocused, TalkBack went to the window's first
+                // element after a choice (Aperture's genre chip, a Galaxy S25).
+                if (element.IsFocusable && !element.IsFocused) element.Focus();
+                EventDispatcher.DispatchDirect(ClickOn(element), element);
                 break;
         }
     });
+
+    /// <summary>
+    /// The click a reader's activation sends: at the element's middle, in window coordinates, as a
+    /// finger's tap lands. A handler that places something by the click, such as a chip's menu,
+    /// puts it beside the element. At (0, 0) it went to the window's corner.
+    /// </summary>
+    private static ClickEvent ClickOn(Element element)
+    {
+        var box = element.WindowBorderBox;
+        return new ClickEvent { Position = new Core.Primitives.Point(box.X + box.Width / 2, box.Y + box.Height / 2) };
+    }
 
     /// <summary>
     /// Scrolls the element into view in every scroll view that holds it, innermost first. A list

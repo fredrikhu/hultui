@@ -411,6 +411,7 @@ public static partial class AccessibilityTreeBuilder
     private static bool MatchChild(Element child, ref ChildWalk kids,
         FocusManager? focusManager, Place place, Rect clip, Point prevAbove, Point currAbove, LayoutRefresh refresh)
     {
+        if (child.AccessibilityHidden) return true;   // as BuildChild: nothing of it is in the tree
         var childPlace = Placed(child, place);
         if (!IsSemantic(child))
             return MatchElementChildren(child, ref kids, focusManager, ChildPlace(child, childPlace),

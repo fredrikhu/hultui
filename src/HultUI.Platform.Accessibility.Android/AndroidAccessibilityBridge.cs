@@ -329,13 +329,17 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
                 break;
             case AccessibilityProperties.IsToggled:
                 Content(id, AndroidContentChange.StateDescription | AndroidContentChange.Checked);
+                ClickedIfFocused(id);
                 break;
             case AccessibilityProperties.IsExpanded:
                 Content(id, AndroidContentChange.StateDescription | AndroidContentChange.Expanded);
                 break;
             case AccessibilityProperties.IsSelected:
                 if (node.Role == AccessibilityRole.RadioButton)
+                {
                     Content(id, AndroidContentChange.StateDescription | AndroidContentChange.Checked);
+                    ClickedIfFocused(id);
+                }
                 else if (node.IsSelected == true)
                     _events.Add(new AndroidEvent(AndroidEventType.ViewSelected, id));
                 else Content(id, AndroidContentChange.Undefined);
@@ -348,6 +352,13 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
                 break;
             case AccessibilityProperties.ScrollPosition:
                 Scrolled(id, node, change.Previous);
+                // TalkBack's box is drawn where the focused node was when Android last read it. A
+                // scroll moves the node on screen, but not its box in the tree, which is unscrolled,
+                // so no BoundingRect change comes: the box stayed behind (a Galaxy S25). Told as
+                // changed, it is read again. Android compares the bounds and redraws only if they
+                // moved, so a focused node outside this scroll view costs one event.
+                if (Volatile.Read(ref _accessibilityFocused) is var focused && focused != AndroidIds.None && focused != id)
+                    Content(focused, AndroidContentChange.Undefined);
                 break;
             case AccessibilityProperties.BoundingRect:
                 // Read again when asked; only TalkBack's highlight, drawn where the focused node was, needs telling.
@@ -420,6 +431,19 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
             ScrollDeltaX = Px(offset.X - before.X, scale),
             ScrollDeltaY = Px(offset.Y - before.Y, scale),
         });
+    }
+
+    /// <summary>
+    /// A checkable node TalkBack is on changed its state: told as clicked, after the change, as a
+    /// native check box or switch sends its click once it has toggled. The click, routed to the UI
+    /// thread, changes the state a frame after TalkBack's action, so the event comes from here.
+    /// TalkBack 15 says the new state ("On") with it or without it, from the content change, as long
+    /// as that carries no words (<see cref="AndroidNodeMapper.EventWords"/>).
+    /// </summary>
+    private void ClickedIfFocused(int id)
+    {
+        if (id == Volatile.Read(ref _accessibilityFocused))
+            _events.Add(new AndroidEvent(AndroidEventType.ViewClicked, id));
     }
 
     private static int Px(float layout, float scale) => (int)MathF.Round(layout * scale);

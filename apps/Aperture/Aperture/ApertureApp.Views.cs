@@ -1,6 +1,7 @@
 ﻿using Aperture.Core;
 using Aperture.Core.Requests;
 using Aperture.Theme;
+using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
@@ -190,7 +191,7 @@ public sealed partial class ApertureApp
             .BorderColor(Halide.Border).BorderWidth(new Thickness(0, 0, 1, 0));
         bar.AddChild(Ui.IconButton(Icons.Back, "Back (Esc)", () => GoBack(), 15f, Halide.TextMuted,
             automationId + "-back"));
-        bar.AddChild(Text.New(title).FontSize(18f).FontWeight(FontWeight.SemiBold).TextColor(Halide.Text));
+        bar.AddChild(Text.New(title).FontSize(18f).FontWeight(FontWeight.SemiBold).TextColor(Halide.Text).AccessibleRole(AccessibilityRole.Heading));
         if (items.Count > 0) bar.AddChild(Ui.Mono(items.Count.ToString(), 11.5f, Halide.TextFaint));
         column.AddChild(bar);
 
@@ -233,7 +234,7 @@ public sealed partial class ApertureApp
         var page = Flex.Column(gap: Halide.S5).Padding(new Thickness(Halide.Phone ? Halide.S4 : Halide.S5))
             .MaxWidth(Dimension.Px(720));
 
-        page.AddChild(Text.New("Settings").FontSize(20f).FontWeight(FontWeight.SemiBold).TextColor(Halide.Text));
+        page.AddChild(Text.New("Settings").FontSize(20f).FontWeight(FontWeight.SemiBold).TextColor(Halide.Text).AccessibleRole(AccessibilityRole.Heading));
 
         if (_library is { } lib)
         {
@@ -289,7 +290,7 @@ public sealed partial class ApertureApp
             .CornerRadius(Halide.Radius2)
             .Background(Halide.Surface)
             .BorderColor(Halide.Border).BorderWidth(1f);
-        card.AddChild(Text.New(title).FontSize(13f).FontWeight(FontWeight.SemiBold).TextColor(Halide.TextDim));
+        card.AddChild(Text.New(title).FontSize(13f).FontWeight(FontWeight.SemiBold).TextColor(Halide.TextDim).AccessibleRole(AccessibilityRole.Heading));
         return card;
     }
 

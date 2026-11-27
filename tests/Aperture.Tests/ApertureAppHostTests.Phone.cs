@@ -137,4 +137,37 @@ public partial class ApertureAppHostTests
                 && n.Children.Count > 0 && n.ScrollExtent is { } e && e.Content.Width > e.Viewport.Width);
         });
     }
+
+    /// <summary>A filter turned on moves no filter chip: Clear filters comes in on the side away from
+    /// where the chips are held. On a phone it came in front of the strip's chips and pushed them all
+    /// right, Favourites, just turned on, partly out of view (a Galaxy S25). On the desktop the bar
+    /// holds them at its right end, and Clear comes in front.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void TurningAFilterOn_MovesNoFilterChip(bool phone)
+    {
+        void Body(HeadlessSession session, ApertureApp app)
+        {
+            PumpUntilShown(session, "Films");
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            PumpUntilShown(session, "Stalker");
+            string[] ids = ["filter-genre", "filter-unwatched", "filter-favourites"];
+            var before = ids.Select(id => session.Window.FindByAutomationId(id)!.Node.BoundingRect.X).ToArray();
+            Assert.Null(session.Window.FindByAutomationId("filter-clear"));
+
+            session.Window.FindByAutomationId("filter-favourites")!.Click();
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+            Assert.True(app.GridHasFilters);
+            var after = ids.Select(id => session.Window.FindByAutomationId(id)!.Node.BoundingRect.X).ToArray();
+            Assert.Equal(before, after);
+            var clear = session.Window.FindByAutomationId("filter-clear")!.Node.BoundingRect;
+            var favourites = session.Window.FindByAutomationId("filter-favourites")!.Node.BoundingRect;
+            if (phone) Assert.True(clear.X >= favourites.Right, $"Clear at {clear.X}, Favourites ends at {favourites.Right}");
+            else Assert.True(clear.Right <= before[0], $"Clear ends at {clear.Right}, Genre starts at {before[0]}");
+        }
+
+        if (phone) AtPhoneSize(Body);
+        else Host(Library(), Body);
+    }
 }

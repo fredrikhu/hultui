@@ -229,11 +229,14 @@ the scrubber over the buttons, and no volume slider, since the phone has volume 
 
 These are plan 20's later phases:
 - **No pinch** yet, and no magnifier over the text a handle moves.
-- **TalkBack on a phone is checked for the basics only** (phase 6, docs/design/TALKBACK.md §8 and
-  §9). On a Galaxy S25 it explores, swipes, clicks, scrolls, types and hears announcements, and it
-  goes into an open drop-down. These pass on the emulator but are not yet checked on a phone:
-  moving through text by unit, the long press's menu, dialogs, a 3,000-item list, and Aperture's
-  views.
+- **TalkBack on a phone is checked for the basics and Aperture's views** (phase 6,
+  docs/design/TALKBACK.md §8, §9 and §11). On a Galaxy S25 it explores, swipes, clicks, scrolls,
+  types and hears announcements, goes into an open drop-down, and reads and runs Aperture's main
+  views. These pass on the emulator but are not yet checked on a phone: moving through text by
+  unit, the long press's menu, dialogs and a 3,000-item list.
+- **SDL's keyboard view** (`org.libsdl.app.SDLDummyEdit`, which SDL focuses for the keyboard's input)
+  is hidden from TalkBack by the bridge. A view added to SDL's layout beside the surface is
+  otherwise TalkBack's to meet, unnamed.
 - **File dialogs** return Android's `content://` addresses, which `File.Open` cannot open.
 - **No second window.**
 - **An Android TV build** (phase 5).

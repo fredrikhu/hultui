@@ -171,8 +171,8 @@ The differ now hands a value change its previous node, which TalkBack's text-cha
     - A drop-down's open list was swiped past. Opening it from an assistive tool focuses it, and
       the window gives the open list the reader's focus.
     - Plan 20, phase 6, has the details.
-  - **Not yet on the phone:** the a11y sample (§9), and **Aperture's main views**, the plan's exit
-    criterion.
+  - **Aperture's main views are checked there too** (2026-11-27), §11.
+  - **Not yet on the phone:** the a11y sample (§9).
 - ~~A text field that has only a placeholder has no accessible name, so TalkBack says "Edit box"
   alone.~~ Done the same day, on the user's word, for every platform: a text field with no other
   name is named by its placeholder, as browsers do (docs/ELEMENTS.md), so TalkBack says it as the
@@ -290,3 +290,57 @@ edit control. **The user said yes.**
   (`talkback-a11y-check.ps1`, 13 of 13).
 - **Not checked:** a real desktop reader (NVDA, Narrator, Orca). The UI Automation and AT-SPI events
   are what a native edit raises, but no one has listened yet.
+
+## 11. Aperture on the phone (2026-11-27)
+
+The user went through Aperture's main views with TalkBack on a Galaxy S25, in three rounds, and
+everything found is fixed and checked again there. The phone runs Google's TalkBack
+(`com.google.android.marvin.talkback`), with its log at Verbose: its "Speaking fragment" and
+"Unlabelled" lines in logcat are what settled the last two faults.
+
+**The bridge:**
+- **A content change carries no words** (`AndroidNodeMapper.EventWords`), as a native View fills only
+  its click, focus, hover, selection and text events. A live region's still does (an alert, the
+  announcer), as its words are what changed. With the name in it, TalkBack spoke the name for a
+  toggle's change: a double tap on Favourites said "Favourites", not "On".
+- **A toggle is a switch,** `android.widget.Switch`, with its state in words ("On", "Off") as its
+  state description, as Android's own Switch has it. As a ToggleButton with the checked flag
+  TalkBack read "Favourites. Switch", neither on nor off. Now: "Off. Favourites. Switch".
+- **A toggle that TalkBack is on and that changes is told as clicked,** after the change, as a native
+  switch sends its click once it has toggled. TalkBack 15 says the new state with the click or
+  without it; the click is there for readers that go by it.
+- **A scroll tells the node TalkBack is on as changed,** so Android reads its bounds again and the
+  focus box moves with it. It stayed where the node had been.
+- **An empty field's events carry its hint**, as TextView's getTextForAccessibility gives it.
+- **SDL's keyboard view is hidden from TalkBack** (`AndroidAccessibility.LayoutDelegate`). SDL
+  focuses `org.libsdl.app.SDLDummyEdit` as text input starts, for the keyboard to type into; it draws
+  nothing and has no name. Android's focus event for it reached TalkBack 6 ms before the field's,
+  TalkBack put its focus there, and some times it said "Unlabelled" as the Search page opened. SDL's
+  layout now drops the view's first event and hides it then (not important, not visible to TalkBack,
+  refusing its focus); it keeps the input focus, which the keyboard needs.
+
+**The framework:**
+- **`Element.AccessibilityHidden`** (public, the user's OK): a subtree left out of what assistive
+  technology is told, as `aria-hidden` does (docs/ELEMENTS.md).
+- **The router clicks at the element's middle** (`AccessibilityActionRouter.ClickOn`), not at (0, 0),
+  and its expand of an element with no expanded state focuses it, then clicks it.
+- **A context menu opened from an assistive tool beside its element** starts on its checked item
+  (`ContextMenuElement.MoveToChoice`), and the reader's focus goes back to the element as it closes:
+  Aperture's Genre and View chips sent TalkBack to the title bar's wordmark after a choice.
+
+**Aperture:**
+- The rail says which view is open (selected); page and shelf titles are headings.
+- A film's Back is read first and returns to the card it was opened from; it is named "Back", with
+  "(Esc)" only where there is a keyboard; the player's arrow is "Back" too.
+- Runtimes are spoken words ("1 hour 47 minutes"), not "1 h 47 m".
+- The filter chips are toggles that say their state, keyed so a filter turning on keeps each chip's
+  element; Clear filters comes in on the side away from where the chips are held, so the chip just
+  turned on stays put (it pushed Favourites partly out of view on the phone).
+- While the player is open, the title bar and the page under it are hidden from readers.
+- The "·" in the title bar is hidden from readers.
+
+**Checked:** each change has its desktop test, each failing without its change (the in-place
+refresh of a hidden subtree, `MatchChild`, has none that reaches it). On the emulator, Google
+TalkBack 15 says "Off. Favourites. Switch", then "On" after a double tap, and "Editing. Edit box.
+Search" as Search opens, and typing still reaches the field. The phone is the only check for the
+keyboard view: the emulator never lost that race.

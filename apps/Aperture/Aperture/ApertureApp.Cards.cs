@@ -903,7 +903,7 @@ public sealed partial class ApertureApp
         else if (item.SubLine.Length > 0)
             parts.Add(item.SubLine);
         if (item.Played) parts.Add("watched");
-        else if (item.ResumePosition is not null) parts.Add("part-watched");
+        else if (item.ResumePosition is not null) parts.Add("partly watched");
         if (item.UnplayedItemCount is > 0 and var unplayed) parts.Add($"{unplayed} unwatched");
         return string.Join(", ", parts);
     }
@@ -912,14 +912,38 @@ public sealed partial class ApertureApp
     {
         var name = AccessibleNameFor(item);
         if (item.RunTime is { } run && item.ResumePosition is { } at)
-            return $"Resume {name}, {Ui.Remaining(run, at)}";
+            return $"Resume {name}, {Ui.SpokenRemaining(run, at)}";
         return "Play " + name;
     }
 
     /// <summary>Opening an item: a film or an episode goes to its detail page, a series or
     /// season to its children, a folder into itself.</summary>
-    internal void Open(MediaItem item) =>
+    internal void Open(MediaItem item)
+    {
+        CursorOnto(item);
         Navigate(new Route(ApertureView.Detail, item.Id, item.Name));
+    }
+
+    /// <summary>
+    /// The cursor onto <paramref name="item"/>'s card in the list it is walking, however the card
+    /// was opened (a click, a finger, a reader's double tap), so Back returns to it, the card focused.
+    /// Only the keys moved the cursor. Back from a page opened any other way started at the first card
+    /// on screen, which TalkBack read instead of the card it had opened (a Galaxy S25).
+    /// </summary>
+    private void CursorOnto(MediaItem item)
+    {
+        int byId = -1;
+        for (int i = 0; i < _cursorItems.Count; i++)
+        {
+            if (ReferenceEquals(_cursorItems[i], item))
+            {
+                _cursorIndex = i;
+                return;
+            }
+            if (byId < 0 && _cursorItems[i] is MediaItem same && same.Id == item.Id) byId = i;
+        }
+        if (byId >= 0) _cursorIndex = byId;
+    }
 
     /// <summary>A row of cards that pages sideways with two buttons rather than scrolling.
     /// A horizontal scroller nested in the page's vertical one is the framework's known
@@ -940,7 +964,9 @@ public sealed partial class ApertureApp
         int pages = Math.Max(1, (count + perPage - 1) / perPage);
 
         var heading = Flex.Row(gap: Halide.S2).AlignItems(AlignItems.Center);
-        heading.AddChild(Text.New(title).FontSize(15f).FontWeight(FontWeight.SemiBold).TextColor(Halide.Text));
+        // A heading for a reader, which TalkBack moves between by headings and says as one.
+        heading.AddChild(Text.New(title).FontSize(15f).FontWeight(FontWeight.SemiBold).TextColor(Halide.Text)
+            .AccessibleRole(AccessibilityRole.Heading));
         if (trailing is not null)
         {
             heading.AddChild(Box.New().Width(Halide.S2));

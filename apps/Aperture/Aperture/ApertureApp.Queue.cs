@@ -188,7 +188,7 @@ public sealed partial class ApertureApp
             if (sub.Length > 0) text.AddChild(Ui.Line(sub, 11f, Halide.TextFaint));
             row.AddChild(text);
             if (item.RunTime is { } run)
-                row.AddChild(Ui.Mono(Ui.Runtime(run), 11f, Halide.TextFaint).FlexShrink(0));
+                row.AddChild(Ui.Mono(Ui.Runtime(run), 11f, Halide.TextFaint).AccessibleName(Ui.SpokenRuntime(run)).FlexShrink(0));
 
             row.OnClick(_ => PlayQueueAt(index));
             if (!playing) row.HoverBg(Halide.Raised);
