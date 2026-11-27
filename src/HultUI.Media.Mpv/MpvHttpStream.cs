@@ -30,7 +30,23 @@ internal sealed unsafe class MpvHttpStream : IDisposable
 
     // Shared, as HttpClient is meant to be: one connection pool for every stream of the process,
     // and for MpvLoopbackProxy's requests.
-    private static readonly Lazy<HttpClient> s_client = new(() => new HttpClient { Timeout = Timeout.InfiniteTimeSpan });
+    private static readonly Lazy<HttpClient> s_client = new(MakeClient);
+
+    /// <summary>
+    /// Android's own handler there (its TLS, its trusted certificates), which disconnects a response
+    /// that is disposed. Elsewhere .NET's, with no drain: a response let go before its end (a seek,
+    /// <see cref="Cancel"/>) closes its connection at once. SocketsHttpHandler otherwise reads on a
+    /// body of under 1 MiB for up to 2 s, to keep the connection, and a read waiting on it ends only
+    /// then: every cancel of a stalled read took 2 s (measured), and over 5 s on a busy CI runner.
+    /// </summary>
+    private static HttpClient MakeClient()
+    {
+        var client = OperatingSystem.IsAndroid()
+            ? new HttpClient()
+            : new HttpClient(new SocketsHttpHandler { MaxResponseDrainSize = 0 });
+        client.Timeout = Timeout.InfiniteTimeSpan;
+        return client;
+    }
 
     /// <summary>The process's client for sources this libmpv's FFmpeg cannot open itself.</summary>
     internal static HttpClient SharedClient => s_client.Value;
@@ -145,8 +161,9 @@ internal sealed unsafe class MpvHttpStream : IDisposable
     {
         try { _cancel.Cancel(); }
         catch (ObjectDisposedException) { }
-        // A synchronous read of the body does not watch the token; disposing the response aborts
-        // its connection, and the read ends with an exception that Read turns into -1.
+        // A synchronous read of the body does not watch the token; disposing the response closes
+        // its connection (undrained: MakeClient), and the read ends with an exception or the
+        // body's end, which Read turns into -1.
         try { Volatile.Read(ref _response)?.Dispose(); }
         catch (Exception e) when (e is IOException or ObjectDisposedException) { }
     }
