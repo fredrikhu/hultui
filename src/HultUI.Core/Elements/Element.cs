@@ -848,6 +848,27 @@ public abstract class Element
     }
     private AccessibilityRole _role = AccessibilityRole.None;
 
+    /// <summary>
+    /// Leaves this element and everything inside it out of what assistive technology is told, on
+    /// every platform, as the web's <c>aria-hidden</c> does. It has no node in the accessibility tree,
+    /// nothing a reader reaches by swiping, touch or its own commands, and its text names nothing
+    /// around it. It is still drawn, and still takes the pointer and the keys.
+    /// <para>For what a reader should not meet: a page covered by another (a player over the page
+    /// it was opened from), or a decoration that is text. A change rebuilds the tree.</para>
+    /// </summary>
+    public bool AccessibilityHidden
+    {
+        get => _accessibilityHidden;
+        set
+        {
+            if (_accessibilityHidden == value) return;
+            _accessibilityHidden = value;
+            NotifyAccessibilityPropertyChanged(nameof(AccessibilityHidden));
+            MarkPaintDirty();   // a frame to tell it in
+        }
+    }
+    private bool _accessibilityHidden;
+
     /// <summary>The name a screen reader says for the element, in place of one the framework
     /// works out from its content. A change is told: UIA's Name, AT-SPI's accessible-name.</summary>
     public string? AccessibleName
@@ -1892,6 +1913,7 @@ public abstract class Element
         _contextMenuItems = source._contextMenuItems;
         _opacity = source._opacity;
         Transform = source.Transform;
+        AccessibilityHidden = source.AccessibilityHidden;
         // Interaction config follows the latest build, like event handlers: overrides
         // are pure functions of the element, so the incoming build's config carries
         // across reconciliation — and an incoming element WITHOUT interaction clears

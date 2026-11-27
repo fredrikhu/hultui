@@ -256,7 +256,7 @@ internal sealed class SurfaceAccessibility : Java.Lang.Object, View.IOnHoverList
             {
                 // What describes the source, as ExploreByTouchHelper fills an event for a virtual view.
                 ev.ClassName = node.ClassName;
-                if ((e.Type == AndroidEventType.WindowStateChanged ? node.PaneTitle : node.Text ?? node.ContentDescription) is { } words)
+                if (AndroidNodeMapper.EventWords(node, e.Type) is { } words)
                     ev.Text?.Add(new Java.Lang.String(words));
                 ev.ContentDescription = node.ContentDescription;
                 ev.Enabled = node.Has(AndroidNodeFlags.Enabled);
@@ -315,6 +315,7 @@ internal sealed class SurfaceAccessibility : Java.Lang.Object, View.IOnHoverList
 
     private static EventTypes TypeOf(AndroidEventType type) => type switch
     {
+        AndroidEventType.ViewClicked => EventTypes.ViewClicked,
         AndroidEventType.ViewFocused => EventTypes.ViewFocused,
         AndroidEventType.ViewSelected => EventTypes.ViewSelected,
         AndroidEventType.ViewScrolled => EventTypes.ViewScrolled,

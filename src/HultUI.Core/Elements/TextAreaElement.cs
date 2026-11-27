@@ -1950,7 +1950,9 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         _history.Seal();
         _preferredX = -1;
         _needsScrollToCursor = true;
-        _isDragging = true;
+        // A finger's drag does not select, as on a phone: a sideways one moves the caret and an
+        // upright one scrolls (the window's gestures), and a long press selects.
+        _isDragging = evt.PointerType != PointerType.Touch;
         MarkPaintDirty();
         CaretMoved();
     }
@@ -2179,7 +2181,31 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         int pos = PositionFromPoint(position);
         _history.Seal();
         CaretMoved();
-        (_selectionStart, _cursorPos) = WordBoundary.RangeAt(_text, pos);
+        // Off the text, the caret goes there and no word is selected, as Android's EditText does,
+        // so the bar offers Paste there: right of a line that ends the text or a paragraph, or
+        // below the last line. The last word was selected (a Galaxy S25).
+        bool endsParagraph = pos == _text.Length || _text[pos] == '\n';
+        bool pastLine = endsParagraph && position.X > CaretBoxAt(pos).Right;
+        bool belowText = position.Y > CaretBoxAt(_text.Length).Bottom;
+        if (pastLine || belowText)
+            (_selectionStart, _cursorPos) = (pos, pos);
+        else
+        {
+            _dragUnit = SelectionUnit.Word;
+            _dragAnchor = UnitRangeAt(pos);
+            (_selectionStart, _cursorPos) = _dragAnchor;
+        }
+        _needsScrollToCursor = true;
+        MarkPaintDirty();
+    }
+
+    void ITouchTextEditing.TouchExtendSelectionTo(Point position)
+    {
+        var to = DragSelection.Extend(_dragAnchor, UnitRangeAt(PositionFromPoint(position)));
+        if (to == (_selectionStart, _cursorPos)) return;
+        CaretMoved();
+        (_selectionStart, _cursorPos) = to;
+        _preferredX = -1;
         _needsScrollToCursor = true;
         MarkPaintDirty();
     }

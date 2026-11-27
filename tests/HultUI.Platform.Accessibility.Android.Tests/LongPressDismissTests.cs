@@ -19,6 +19,34 @@ public class LongPressDismissTests
 
     private static IReadOnlyList<ContextMenuItem> Menu() => [new ContextMenuItem { Label = "Rename" }];
 
+    /// <summary>A menu's current item, its cursor, is not told as selected: TalkBack's own focus
+    /// stands in for it, and Android's own menus mark none. TalkBack said "Selected" before Rename in a
+    /// menu it had opened, and again after a swipe to Delete and back (a Galaxy S25). A checked item
+    /// says it is checked.</summary>
+    [Fact]
+    public void AMenusCurrentItem_IsNotToldAsSelected_ButACheckedOneIsChecked()
+    {
+        var menu = new ContextMenuElement(
+            [new ContextMenuItem { Label = "Rename" }, new ContextMenuItem { Label = "Sort by name", IsChecked = true }],
+            new HultUI.Core.Styling.ContextMenuTheme(), closeMenu: () => { });
+        menu.MoveToEdge(first: true);
+        using var h = new Harness(Box.New().Width(400).Height(800).Children(menu));
+        var items = h.Node(menu).Children.Select(id => h.Bridge.Node(id)!).ToList();
+        var rename = items.Single(n => n.Text == "Rename");
+        Assert.True(Find(h.Tree, "Rename")!.IsSelected, "the tree says which item is current");
+        Assert.False(rename.Has(AndroidNodeFlags.Selected));
+        Assert.False(rename.CollectionItem!.Value.Selected);
+        Assert.True(items.Single(n => n.Text == "Sort by name").Has(AndroidNodeFlags.Checked));
+    }
+
+    private static AccessibilityNode? Find(AccessibilityNode node, string name)
+    {
+        if (node.Name == name) return node;
+        foreach (var child in node.Children)
+            if (Find(child, name) is { } found) return found;
+        return null;
+    }
+
     [Fact]
     public void AButtonWithAContextMenu_OffersALongPress_AndAPlainOneDoesNot()
     {

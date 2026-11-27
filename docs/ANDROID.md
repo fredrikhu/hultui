@@ -83,6 +83,9 @@ TextInput.New().Kind(TextInputKind.Number)    // digits
   layout units, and `Window.KeyboardInsetChanged` says when it changes. An app that moves its own
   bottom bar sets `window.LaysOutAboveKeyboard = false` and reads the inset.
 - **Overlays stay above the keyboard**: a dialog is centred in the space above it.
+- **Put away with Back,** the keyboard comes back with a tap on the field. From Android 16 the
+  keyboard takes Back itself and the app is not told; HultUI sees the keyboard's inset fall to 0
+  and starts input afresh on the next tap (docs/design/SOFT-KEYBOARD.md §10).
 
 ## The Back key
 
@@ -129,8 +132,12 @@ Gestures (`docs/design/GESTURES.md`):
 Text by touch (`TextInput`, `TextArea`, the rich text editor), as on Android:
 - **A tap** places the caret and shows a handle under it for a few seconds; drag it to move the
   caret, tap it for Paste and Select All.
+- **A sideways drag** on the focused field moves the caret with the finger, and selects nothing;
+  an up or down one scrolls.
 - **A long press or a double tap** selects the word and shows two handles and the edit bar: Cut,
-  Copy, Paste, Select All, and "⋯" for the rest of the field's context menu.
+  Copy, Paste, Select All, and "⋯" for the rest of the field's context menu. The finger, still
+  down after a long press, grows the selection a word at a time.
+- **A long press past the text's end** puts the caret there and shows the bar for Paste.
 - **Drag a handle** to move its end of the selection.
 - **A tap elsewhere, typing or the mouse** put them away.
 
@@ -229,11 +236,13 @@ the scrubber over the buttons, and no volume slider, since the phone has volume 
 
 These are plan 20's later phases:
 - **No pinch** yet, and no magnifier over the text a handle moves.
-- **TalkBack on a phone is checked for the basics only** (phase 6, docs/design/TALKBACK.md §8 and
-  §9). On a Galaxy S25 it explores, swipes, clicks, scrolls, types and hears announcements, and it
-  goes into an open drop-down. These pass on the emulator but are not yet checked on a phone:
-  moving through text by unit, the long press's menu, dialogs, a 3,000-item list, and Aperture's
-  views.
+- **TalkBack is checked on one phone, a Galaxy S25** (phase 6, docs/design/TALKBACK.md §8, §9
+  and §11): it explores, swipes, clicks, scrolls, types and hears announcements, goes into an open
+  drop-down and a long press's menu, moves through text by character, reads a dialog and a
+  3,000-item list, and reads and runs Aperture's main views. Not yet on another phone or keyboard.
+- **SDL's keyboard view** (`org.libsdl.app.SDLDummyEdit`, which SDL focuses for the keyboard's input)
+  is hidden from TalkBack by the bridge. A view added to SDL's layout beside the surface is
+  otherwise TalkBack's to meet, unnamed.
 - **File dialogs** return Android's `content://` addresses, which `File.Open` cannot open.
 - **No second window.**
 - **An Android TV build** (phase 5).

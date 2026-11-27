@@ -523,7 +523,9 @@ public sealed partial class ApertureApp
         strip.Position.Top = Dimension.Px(0);
         strip.Box.Width = Dimension.Percent(100);
 
-        strip.AddChild(Ui.IconButton(Icons.Back, "Stop (Esc)", () => StopPlayback(report: true),
+        // Named for the arrow it draws: it stops the film and goes back. TalkBack said "Stop" for an
+        // arrow that points back (a Galaxy S25).
+        strip.AddChild(Ui.IconButton(Icons.Back, Ui.HasKeyboard ? "Back (Esc)" : "Back", () => StopPlayback(report: true),
             16f, Halide.Text, "player-back"));
 
         var titles = Flex.Column(gap: 1).FlexGrow(1).FlexShrink(1);

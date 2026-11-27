@@ -55,6 +55,10 @@ public sealed partial class Window
         public Point Total;
         public bool LongPressed;
         public bool TooltipShown;
+        /// <summary>The text field the finger edits as it moves (Window.TouchText.cs): its caret, or
+        /// the selection a long press made, a word at a time when <see cref="ExtendsWords"/>.</summary>
+        public Element? TextField;
+        public bool ExtendsWords;
         public readonly VelocityTracker Velocity = new();
     }
 
@@ -138,7 +142,12 @@ public sealed partial class Window
         if (_gesture is not { } g || g.Finger != finger) return false;
         g.Velocity.Add(NowMs(), at);
         g.LastAt = at;
-        if (g.LongPressed) return true;   // a drag from the long press is later work (§4)
+        if (g.TextField is not null)
+        {
+            MoveTouchText(g, at);
+            return true;
+        }
+        if (g.LongPressed) return true;
         if (g.Claimant is not null)
         {
             Pan(g, delta);
@@ -155,6 +164,18 @@ public sealed partial class Window
     private bool TryClaim(TouchGesture g, Point at)
     {
         float dx = at.X - g.DownAt.X, dy = at.Y - g.DownAt.Y;
+        // Sideways on the field that has the focus: its caret follows the finger, as Android's
+        // cursor drag from anywhere (from 11), before anything scrolls. It selected, as a mouse's
+        // drag does (a Galaxy S25).
+        if (Math.Abs(dx) >= Math.Abs(dy) && TouchTextOwnerOf(g.Target) is { } field
+            && ReferenceEquals(_focusManager.FocusedElement, field) && IsShownInWindow(field))
+        {
+            CancelPressForGesture(g);
+            g.Claimant = field;
+            BeginTouchCaretDrag(g, field);
+            MoveTouchText(g, at);
+            return true;
+        }
         var axis = Math.Abs(dx) > Math.Abs(dy) ? PanAxis.Horizontal : PanAxis.Vertical;
         // The content follows the finger, so it moves against it through the content.
         int direction = axis == PanAxis.Horizontal ? -Math.Sign(dx) : -Math.Sign(dy);
@@ -252,6 +273,11 @@ public sealed partial class Window
         if (_gesture is not { } g || g.Finger != finger) return false;
         _gesture = null;
         CancelLongPressTimer(g);
+        if (g.TextField is not null)
+        {
+            EndTouchTextMove(g, cancel);
+            return true;
+        }
         if (g.LongPressed)
         {
             if (g.TooltipShown) HideTooltip();
@@ -383,16 +409,29 @@ public sealed partial class Window
         }
         // Text: the word, its handles and the edit bar, in place of the field's context menu
         // (docs/design/SOFT-KEYBOARD.md §4). Anything else puts away the handles shown.
-        if (SelectWordByTouch(target, g.LastAt)) return;
+        if (SelectWordByTouch(target, g.LastAt))
+        {
+            // The finger, still down, goes on: a word's selection grows from it a word at a time;
+            // past the text, the caret follows it.
+            if (_touchText is { } field && TouchTextOf(field) is { } edited)
+            {
+                if (edited.HasTouchSelection)
+                {
+                    g.TextField = field;
+                    g.ExtendsWords = true;
+                }
+                else BeginTouchCaretDrag(g, field);
+            }
+            return;
+        }
         // 2. The context menu, as a right click opens it: every menu made for the mouse works by touch.
         if (FindContextMenuOwner(target).owner is not null)
         {
+            // With a reader on, its focus goes into the menu (ShowContextMenu puts an item current):
+            // TalkBack's double tap held arrives here, as a press Android passes on at TalkBack's
+            // focus, and the menu, an overlay at the tree's end, was swiped to only past the rest of
+            // the page.
             TryShowContextMenu(target, g.LastAt);
-            // With a reader on, its focus goes into the menu: its first item is the current one, as a
-            // menu opened from the keyboard has it. TalkBack's double tap held arrives here, as a press
-            // Android passes on at TalkBack's focus; the menu, an overlay at the tree's end, was swiped
-            // to only past the rest of the page.
-            if (Core.Accessibility.AccessibilityClients.Active) _contextMenuElement?.MoveToEdge(first: true);
             return;
         }
         // 3. The tooltip, while the finger stays down: how Android names an icon button.

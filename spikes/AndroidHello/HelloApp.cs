@@ -101,7 +101,8 @@ internal static class HelloApp
         });
         var items = Enumerable.Range(0, 3000).Select(i => $"Item {i}").ToList();
         var list = HultUI.Core.Elements.VirtualListElement<string>.New().ItemHeight(48f).FlexGrow(1)
-            .RenderWith(t => Flex.Row().Padding(new Thickness(12, 16, 12, 16)).Children(Text.New(t).FontSize(16f).TextColor(Color.White)))
+            // The theme's text colour: white was invisible on the light page (a Galaxy S25).
+            .RenderWith(t => Flex.Row().Padding(new Thickness(12, 16, 12, 16)).Children(Text.New(t).FontSize(16f)))
             .Items(items);
         list.OnItemActivate = item => Info($"activated {item}");
         var root = Flex.Column(gap: 12).Padding(16).Children(

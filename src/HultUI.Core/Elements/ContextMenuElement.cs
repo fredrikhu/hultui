@@ -240,6 +240,19 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
         Hover(-1);
     }
 
+    /// <summary>Puts the selection on the first checked item, the choice a reader came to change (a
+    /// genre, a quality); on the first enabled item when none is checked.</summary>
+    internal void MoveToChoice()
+    {
+        for (int i = 0; i < _items.Count; i++)
+            if (_items[i] is { IsChecked: true, IsSeparator: false, IsDisabled: false })
+            {
+                Hover(i);
+                return;
+            }
+        MoveToEdge(first: true);
+    }
+
     /// <summary>Whether the items' mnemonics are underlined: in a menu opened from the keyboard,
     /// and in any menu once a key has been used in it, as Windows and GTK do.</summary>
     internal bool ShowMnemonics

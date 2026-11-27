@@ -33,7 +33,7 @@ public sealed partial class ApertureApp
         var page = Flex.Column(gap: Halide.S6).Padding(new Thickness(Halide.S5));
 
         var header = Flex.Row(gap: Halide.S3).AlignItems(AlignItems.Center).FlexShrink(0);
-        header.AddChild(Text.New("Discover").FontSize(20f).FontWeight(FontWeight.SemiBold).TextColor(Halide.Text));
+        header.AddChild(Text.New("Discover").FontSize(20f).FontWeight(FontWeight.SemiBold).TextColor(Halide.Text).AccessibleRole(AccessibilityRole.Heading));
         header.AddChild(Ui.Chip(RequestServerTitle));
         header.AddChild(Box.New().FlexGrow(1));
         header.AddChild(Ui.Button(ButtonVariant.Secondary, "Search", () => Navigate(new Route(ApertureView.Search)),
@@ -577,7 +577,7 @@ public sealed partial class ApertureApp
             .Padding(new Thickness(0, Halide.S5, 0, Halide.S5))
             .BorderColor(Halide.Border).BorderWidth(new Thickness(0, 0, 1, 0));
         bar.AddChild(Ui.IconButton(Icons.Back, "Back (Esc)", () => GoBack(), 15f, Halide.TextMuted, automationId + "-back"));
-        bar.AddChild(Text.New(title).FontSize(18f).FontWeight(FontWeight.SemiBold).TextColor(Halide.Text));
+        bar.AddChild(Text.New(title).FontSize(18f).FontWeight(FontWeight.SemiBold).TextColor(Halide.Text).AccessibleRole(AccessibilityRole.Heading));
         if (count > 0) bar.AddChild(Ui.Mono(count.ToString(), 11.5f, Halide.TextFaint));
         return bar;
     }
@@ -926,12 +926,12 @@ public sealed partial class ApertureApp
 
         var block = Flex.Column(gap: Halide.S3).FlexShrink(1).FlexGrow(1);
         block.AddChild(Text.New(item.Title).FontSize(30f).FontWeight(FontWeight.Bold).TextColor(Halide.Text)
-            .MaxLines(2).TextOverflow(TextOverflow.Ellipsis));
+            .MaxLines(2).TextOverflow(TextOverflow.Ellipsis).AccessibleRole(AccessibilityRole.Heading));
 
         var meta = Flex.Row(gap: Halide.S2).AlignItems(AlignItems.Center);
         meta.AddChild(Ui.Chip(item.Kind == DiscoverKind.Movie ? "Film" : "Series"));
         if (item.Year is { } year) meta.AddChild(Ui.Chip(year.ToString()));
-        if (detail.Runtime is { } run) meta.AddChild(Ui.Chip(Ui.Runtime(run)));
+        if (detail.Runtime is { } run) meta.AddChild(Ui.Chip(Ui.Runtime(run)).AccessibleName(Ui.SpokenRuntime(run)));
         if (item.Kind == DiscoverKind.Tv && detail.Seasons.Count > 0)
             meta.AddChild(Ui.Chip($"{detail.Seasons.Count} season{(detail.Seasons.Count == 1 ? "" : "s")}"));
         if (item.VoteAverage is { } score and > 0)

@@ -1,5 +1,6 @@
 ﻿using Aperture.Core;
 using Aperture.Theme;
+using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Components;
 using HultUI.Core.Elements;
@@ -236,7 +237,7 @@ public sealed partial class ApertureApp
             .Padding(new Thickness(0, Halide.S5, 0, Halide.S5))
             .BorderColor(Halide.Border).BorderWidth(new Thickness(0, 0, 1, 0));
 
-        bar.AddChild(Text.New(title).FontSize(18f).FontWeight(FontWeight.SemiBold).TextColor(Halide.Text));
+        bar.AddChild(Text.New(title).FontSize(18f).FontWeight(FontWeight.SemiBold).TextColor(Halide.Text).AccessibleRole(AccessibilityRole.Heading));
         // With a filter on, the count is of what the filter leaves — say so, or "12 of 16"
         // reads as a paging bug.
         var count = GridTotal > 0
@@ -251,15 +252,25 @@ public sealed partial class ApertureApp
         // bar beside it they ran off the screen, and the count was squeezed to two lines.
         var chips = Halide.Phone ? Flex.Row(gap: Halide.S3).AlignItems(AlignItems.Center).FlexShrink(0) : bar;
 
+        // Clear comes and goes with the filters, on the side of them away from where the chips are
+        // held, so the chip just turned on or off stays where it was: the bar holds them at its
+        // right end, the phone's strip at its left. In front of them on a phone it pushed every
+        // chip right as a filter turned on, Favourites partly out of view (a Galaxy S25).
+        Element? clear = null;
         if (GridHasFilters)
-            chips.AddChild(Ui.IconButton(Icons.WinClose, "Clear filters", ClearGridFilters, 12f,
-                Halide.TextMuted, "filter-clear"));
+        {
+            clear = Ui.IconButton(Icons.WinClose, "Clear filters", ClearGridFilters, 12f,
+                Halide.TextMuted, "filter-clear");
+            clear.Key = "filter-clear";
+        }
 
+        if (clear is not null && !Halide.Phone) chips.AddChild(clear);
         chips.AddChild(GenreChip());
         chips.AddChild(FilterChip("Unwatched", GridPlayedFilter == false,
             () => SetGridPlayedFilter(GridPlayedFilter == false ? null : false), "filter-unwatched"));
         chips.AddChild(FilterChip("Favourites", GridFavouritesOnly,
             () => SetGridFavouritesOnly(!GridFavouritesOnly), "filter-favourites"));
+        if (clear is not null && Halide.Phone) chips.AddChild(clear);
 
         chips.AddChild(Box.New().Width(Halide.S2));
         chips.AddChild(SortChip("A–Z", ItemSort.Name, false, "sort-name"));
@@ -317,6 +328,7 @@ public sealed partial class ApertureApp
                 window.OpenContextMenu(e.CurrentTarget, e.Position);
         });
         if (!active) chip.HoverBg(Halide.Raised);
+        chip.Key = "filter-genre";
         return chip;
     }
 
@@ -339,6 +351,7 @@ public sealed partial class ApertureApp
             .Children(Ui.Line(list ? "List" : "Grid", 11.5f, Halide.TextMuted));
         chip.OnClick(e => _window.OpenContextMenu(e.CurrentTarget, e.Position));
         chip.HoverBg(Halide.Raised);
+        chip.Key = "library-view";
         return chip;
     }
 
@@ -396,13 +409,29 @@ public sealed partial class ApertureApp
         return items;
     }
 
-    private Element FilterChip(string label, bool active, Action onClick, string automationId) =>
-        Chip(label, active, onClick, automationId);
+    /// <summary>A filter that is on or off: a toggle for a reader, which says which.</summary>
+    private Element FilterChip(string label, bool active, Action onClick, string automationId)
+    {
+        var chip = Chip(label, active, onClick, automationId);
+        chip.AccessibleToggled = active;
+        return chip;
+    }
 
-    private Element SortChip(string label, ItemSort sort, bool descending, string automationId) =>
-        Chip(label, GridSort == sort, () => SetGridSort(sort, descending), automationId);
+    /// <summary>One sort of the set: the one in use said as selected.</summary>
+    private Element SortChip(string label, ItemSort sort, bool descending, string automationId)
+    {
+        var chip = Chip(label, GridSort == sort, () => SetGridSort(sort, descending), automationId);
+        chip.AccessibleSelected = GridSort == sort;
+        return chip;
+    }
 
-    private Element Chip(string label, bool active, Action onClick, string automationId)
+    /// <summary>
+    /// A chip of the library's bar, keyed by what it is. Keyed, it keeps its element across the
+    /// bar's builds. Clear filters, added at the front once a filter is on, shifted every chip after it
+    /// into the next one's element: TalkBack's focus, on Unwatched, read Genre after the double tap
+    /// that turned it on (a Galaxy S25).
+    /// </summary>
+    private BoxElement Chip(string label, bool active, Action onClick, string automationId)
     {
         var chip = Box.New()
             .Padding(new Thickness(5, Halide.S3, 5, Halide.S3))
@@ -411,10 +440,11 @@ public sealed partial class ApertureApp
             .Background(active ? Halide.Tint(Halide.Accent) : Color.Transparent)
             .Cursor(CursorType.Pointer)
             .AccessibleRole(HultUI.Core.Accessibility.AccessibilityRole.Button)
-            .AccessibleName(active ? label + " (on)" : label)
+            .AccessibleName(label)
             .AutomationId(automationId)
             .Pressable()
             .Children(Ui.Line(label, 11.5f, active ? Halide.Accent300 : Halide.TextMuted));
+        chip.Key = automationId;
         chip.OnClick(_ => onClick());
         if (!active) chip.HoverBg(Halide.Raised);
         return chip;
@@ -637,7 +667,7 @@ public sealed partial class ApertureApp
             row.AddChild(star);
         }
         if (item.RunTime is { } run)
-            row.AddChild(Ui.Mono(Ui.Runtime(run), 11.5f, Halide.TextFaint).Width(Dimension.Px(64)).FlexShrink(0));
+            row.AddChild(Ui.Mono(Ui.Runtime(run), 11.5f, Halide.TextFaint).AccessibleName(Ui.SpokenRuntime(run)).Width(Dimension.Px(64)).FlexShrink(0));
         row.AddChild(Ui.Mono(item.ProductionYear?.ToString() ?? "", 11.5f, Halide.TextFaint)
             .Width(Dimension.Px(44)).FlexShrink(0));
 

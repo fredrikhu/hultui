@@ -133,15 +133,17 @@ public sealed partial class ApertureApp
             content.AddChild(Artwork(item, ImageKind.Primary, 150f, 225f, Halide.Radius3));
 
         content.AddChild(TitleBlock(item));
-        hero.AddChild(content);
 
-        // Back, top-left over the artwork.
-        var back = Ui.IconButton(Icons.Back, "Back (Esc)", () => GoBack(), 16f, Halide.Text, "detail-back");
-        back.Background(Halide.Alpha(Halide.Bg, 0.55)).CornerRadius(Halide.Radius1);
+        // Back, top-left over the artwork. Before the title block in the tree, so a reader comes to
+        // it first, as it is drawn (TalkBack read it after the verbs and the overview); over it by
+        // its z-index, for the pointer and the eye.
+        var back = Ui.IconButton(Icons.Back, Ui.HasKeyboard ? "Back (Esc)" : "Back", () => GoBack(), 16f, Halide.Text, "detail-back");
+        back.Background(Halide.Alpha(Halide.Bg, 0.55)).CornerRadius(Halide.Radius1).ZIndex(1);
         back.Position.Type = PositionType.Absolute;
         back.Position.Left = Dimension.Px(Halide.S4);
         back.Position.Top = Dimension.Px(Halide.S4);
         hero.AddChild(back);
+        hero.AddChild(content);
         return hero;
     }
 
@@ -153,14 +155,14 @@ public sealed partial class ApertureApp
             block.AddChild(Ui.Line(series, 13f, Halide.Accent300));
 
         block.AddChild(Text.New(item.Name).FontSize(Halide.Phone ? 24f : 30f).FontWeight(FontWeight.Bold).TextColor(Halide.Text)
-            .MaxLines(2).TextOverflow(TextOverflow.Ellipsis));
+            .MaxLines(2).TextOverflow(TextOverflow.Ellipsis).AccessibleRole(AccessibilityRole.Heading));
 
         var meta = Flex.Row(gap: Halide.S2).AlignItems(AlignItems.Center);
         // On a phone the chips go on to a second line rather than off the screen.
         if (Halide.Phone) meta.Flex.Wrap = FlexWrap.Wrap;
         if (item.Kind == MediaKind.Episode && item.SubLine.Length > 0) meta.AddChild(Ui.Chip(item.SubLine));
         if (item.ProductionYear is { } year) meta.AddChild(Ui.Chip(year.ToString()));
-        if (item.RunTime is { } run) meta.AddChild(Ui.Chip(Ui.Runtime(run)));
+        if (item.RunTime is { } run) meta.AddChild(Ui.Chip(Ui.Runtime(run)).AccessibleName(Ui.SpokenRuntime(run)));
         if (item.OfficialRating is { Length: > 0 } rating) meta.AddChild(Ui.Chip(rating));
         if (item.CommunityRating is { } score)
         {
@@ -196,7 +198,7 @@ public sealed partial class ApertureApp
             // What a screen reader says as the page opens, this button having the keyboard: the film
             // with the verb. The label says the verb alone, under the title it sits below; read out
             // alone it named nothing ("Play, button").
-            play.AccessibleName = resumeAt is { } from ? $"Resume {item.Name}, {Ui.Runtime(from)} in" : $"Play {item.Name}";
+            play.AccessibleName = resumeAt is { } from ? $"Resume {item.Name}, {Ui.SpokenRuntime(from)} in" : $"Play {item.Name}";
             row.AddChild(play);
 
             if (resumeAt is not null)
@@ -329,10 +331,10 @@ public sealed partial class ApertureApp
         row.AddChild(text);
 
         var right = Flex.Column(gap: 4).AlignItems(AlignItems.FlexEnd).FlexShrink(0);
-        if (episode.RunTime is { } run) right.AddChild(Ui.Mono(Ui.Runtime(run), 11.5f, Halide.TextFaint));
+        if (episode.RunTime is { } run) right.AddChild(Ui.Mono(Ui.Runtime(run), 11.5f, Halide.TextFaint).AccessibleName(Ui.SpokenRuntime(run)));
         if (episode.Played) right.AddChild(Ui.Icon(Icons.Watched, 14f, Halide.StatusOk));
         else if (episode.ResumePosition is { } at && episode.RunTime is { } total)
-            right.AddChild(Ui.Line(Ui.Remaining(total, at), 11.5f, Halide.Accent300));
+            right.AddChild(Ui.Line(Ui.Remaining(total, at), 11.5f, Halide.Accent300).AccessibleName(Ui.SpokenRemaining(total, at)));
         row.AddChild(right);
 
         // Starting from an episode queues the rest of them: clicking the fourth of twelve

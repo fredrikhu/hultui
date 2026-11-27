@@ -155,6 +155,92 @@ public class EventTests
         Assert.Equal(1400, scrolled.MaxScrollY);
     }
 
+    /// <summary>An empty field's events carry its name, as a native field's carry its hint. Its
+    /// focus event carried "", and TalkBack said "Unlabeled" for it (Aperture's Search, a Galaxy S25).
+    /// One with text carries its text.</summary>
+    [Fact]
+    public void AnEmptyFieldsEvents_CarryItsName_AndAFilledOnesItsText()
+    {
+        var empty = TextInput.New("").AccessibleName("Search").Width(200);
+        var filled = TextInput.New("drama").AccessibleName("Genre").Width(200);
+        using var h = Page(empty, filled);
+        Assert.Equal("Search", AndroidNodeMapper.EventWords(h.Node(empty), AndroidEventType.ViewAccessibilityFocused));
+        Assert.Equal("drama", AndroidNodeMapper.EventWords(h.Node(filled), AndroidEventType.ViewAccessibilityFocused));
+    }
+
+    /// <summary>A content change carries no words, as a native view's carries none: TalkBack then says
+    /// what changed, a toggle's new state. With the name in it, a double tap on Aperture's Favourites
+    /// chip said "Favourites", not "On" (TalkBack 15 on the emulator). A live region's carries its
+    /// words, which are what changed: an alert's, the announcer's. A click carries the name.</summary>
+    [Fact]
+    public void AContentChange_CarriesNoWords_UnlessItsNodeIsALiveRegion()
+    {
+        var favourites = Button.New("Favourites").Width(120);
+        favourites.AccessibleToggled = true;
+        var alert = Text.New("Saved").AccessibleRole(AccessibilityRole.Alert);
+        using var h = Page(favourites, alert);
+        Assert.Null(AndroidNodeMapper.EventWords(h.Node(favourites), AndroidEventType.WindowContentChanged));
+        Assert.Equal("Favourites", AndroidNodeMapper.EventWords(h.Node(favourites), AndroidEventType.ViewClicked));
+        Assert.Equal("Saved", AndroidNodeMapper.EventWords(h.Node(alert), AndroidEventType.WindowContentChanged));
+        h.Bridge.Announce(null, "File saved", AnnouncementPoliteness.Polite);
+        Assert.Equal("File saved",
+            AndroidNodeMapper.EventWords(h.Bridge.Node(AndroidIds.Announcer)!, AndroidEventType.WindowContentChanged));
+    }
+
+    /// <summary>A toggle TalkBack is on that changes its state is told as clicked, after the change,
+    /// as a native switch sends its click: TalkBack says the new state from it. From the content
+    /// change alone it said only the name (Aperture's Favourites chip, a Galaxy S25). One it is not
+    /// on is not.</summary>
+    [Fact]
+    public void AToggleTalkBackIsOn_ChangingItsState_IsToldAsClicked()
+    {
+        var favourites = Button.New("Favourites").Width(120);
+        favourites.AccessibleToggled = false;
+        var unwatched = Button.New("Unwatched").Width(120);
+        unwatched.AccessibleToggled = false;
+        using var h = Page(favourites, unwatched);
+        h.ReadAll();
+        int id = h.Id(favourites), other = h.Id(unwatched);
+        Assert.True(h.Bridge.Perform(id, AndroidActions.AccessibilityFocus));
+        h.Sink.Clear();
+
+        favourites.AccessibleToggled = true;
+        unwatched.AccessibleToggled = true;
+        h.Apply();
+        var clicked = Assert.Single(h.Sink.Events, e => e.Type == AndroidEventType.ViewClicked);
+        Assert.Equal(id, clicked.Source);
+        Assert.True(h.Bridge.Node(id)!.Has(AndroidNodeFlags.Checked));
+        // A switch to TalkBack, its state in words as Android's own gives it: TalkBack says that, and
+        // read the chip "Favourites. Switch", neither on nor off (TalkBack 15 on the emulator).
+        Assert.Equal(AndroidClasses.Switch, h.Bridge.Node(id)!.ClassName);
+        Assert.Equal("On", h.Bridge.Node(id)!.StateDescription);
+        favourites.AccessibleToggled = false;
+        h.Apply();
+        Assert.Equal("Off", h.Bridge.Node(id)!.StateDescription);
+        Assert.Contains(h.Sink.Events, e => e.Type == AndroidEventType.WindowContentChanged && e.Source == other);
+    }
+
+    /// <summary>A scroll moves TalkBack's focused node on screen, though its box in the tree (which is
+    /// unscrolled) stays the same. So the node is told as changed, Android reads its bounds again,
+    /// and the focus box moves with it. It stayed where the node had been (a Galaxy S25).</summary>
+    [Fact]
+    public void AScroll_TellsTheFocusedNodeChanged_SoTheFocusBoxFollowsIt()
+    {
+        var row = Button.New("Row").Height(40).FlexShrink(0);
+        var page = ScrollView.Vertical().Width(300).Height(200)
+            .Children(Flex.Column().FlexShrink(0).Children(row, Box.New().Height(900).FlexShrink(0)));
+        using var h = new Harness(page, width: 300, height: 200, scale: 2f);
+        h.ReadAll();   // as TalkBack reads the window when it first looks
+        int rowId = h.Id(row);
+        Assert.True(h.Bridge.Perform(rowId, AndroidActions.AccessibilityFocus));
+        h.Sink.Clear();
+
+        page.ScrollOffsetY = 20;
+        h.Apply();
+        Assert.True(h.Sink.Events.Any(e => e.Type == AndroidEventType.WindowContentChanged && e.Source == rowId),
+            $"row {rowId}: " + string.Join(", ", h.Sink.Events.Select(e => $"{e.Type} {e.Source} {e.Changes}")));
+    }
+
     [Fact]
     public void AnEdit_IsToldAsTheTextThatWentAndCame()
     {

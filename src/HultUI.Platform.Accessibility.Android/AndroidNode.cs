@@ -191,6 +191,9 @@ internal readonly record struct PixelBox(int Left, int Top, int Right, int Botto
 /// <summary>An event's type, by Android's names (<c>AccessibilityEvent.TYPE_*</c>).</summary>
 internal enum AndroidEventType
 {
+    /// <summary>A view was clicked. Sent for a checkable node TalkBack is on, once its new state is
+    /// in the tree, as a native one sends it after its click.</summary>
+    ViewClicked,
     ViewFocused,
     ViewSelected,
     ViewScrolled,

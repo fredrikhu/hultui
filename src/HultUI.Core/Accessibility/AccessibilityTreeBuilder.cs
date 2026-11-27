@@ -269,6 +269,7 @@ public static partial class AccessibilityTreeBuilder
     private static void BuildChild(Element child, List<AccessibilityNode> pending, FocusManager? focusManager,
         Place place, Rect clip, int maxEager)
     {
+        if (child.AccessibilityHidden) return;   // it and all under it are out (Element.AccessibilityHidden)
         Realize(child);
         // The child's own box sits in the parent's scroll space; its own
         // scroll (if it's a ScrollView) applies to its descendants.
@@ -1006,6 +1007,7 @@ public static partial class AccessibilityTreeBuilder
         for (int i = 0; i < children.Count; i++)
         {
             var child = children[i];
+            if (child.AccessibilityHidden) continue;
             if (child is TextElement text && !string.IsNullOrEmpty(text.Content))
             {
                 if (name is null) return false;
@@ -1053,6 +1055,7 @@ public static partial class AccessibilityTreeBuilder
         for (int i = 0; i < children.Count; i++)
         {
             var child = children[i];
+            if (child.AccessibilityHidden) continue;   // names nothing (Element.AccessibilityHidden)
             if (child is TextElement text && !string.IsNullOrEmpty(text.Content))
             {
                 if (first is null) first = text.Content;
@@ -1084,6 +1087,7 @@ public static partial class AccessibilityTreeBuilder
         for (int i = 0; i < children.Count; i++)
         {
             var child = children[i];
+            if (child.AccessibilityHidden) continue;
             if (IsSemantic(child) && ResolveRole(child) != AccessibilityRole.Label)
                 return false;
             if (!HasOnlyTextDescendants(child))

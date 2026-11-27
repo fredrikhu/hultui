@@ -263,6 +263,24 @@ public class ApertureUnitTests
         Assert.Equal("Finished", Ui.Remaining(TimeSpan.FromMinutes(96), TimeSpan.FromMinutes(96)));
     }
 
+    /// <summary>What a reader is told: TalkBack read the drawn "56 m" as "56 meters" (a Galaxy S25).</summary>
+    [Theory]
+    [InlineData(107, "1 hour 47 minutes")]
+    [InlineData(60, "1 hour")]
+    [InlineData(121, "2 hours 1 minute")]
+    [InlineData(56, "56 minutes")]
+    [InlineData(1, "1 minute")]
+    [InlineData(0, "1 minute")]
+    public void RuntimesAreSpokenInWords(int minutes, string expected) =>
+        Assert.Equal(expected, Ui.SpokenRuntime(TimeSpan.FromMinutes(minutes)));
+
+    [Fact]
+    public void WhatIsLeftIsSpokenInWords()
+    {
+        Assert.Equal("38 minutes left", Ui.SpokenRemaining(TimeSpan.FromMinutes(96), TimeSpan.FromMinutes(58)));
+        Assert.Equal("Finished", Ui.SpokenRemaining(TimeSpan.FromMinutes(96), TimeSpan.FromMinutes(96)));
+    }
+
     [Fact]
     public void ACardsAccessibleNameCarriesWhatTheTickAndSliverShowVisually()
     {
@@ -270,7 +288,7 @@ public class ApertureUnitTests
         Assert.Equal("Solaris, 1972, watched", ApertureApp.AccessibleNameFor(watched));
 
         var partWatched = watched with { Played = false, ResumePosition = TimeSpan.FromMinutes(20) };
-        Assert.Equal("Solaris, 1972, part-watched", ApertureApp.AccessibleNameFor(partWatched));
+        Assert.Equal("Solaris, 1972, partly watched", ApertureApp.AccessibleNameFor(partWatched));
     }
 
     // ── Track matching ───────────────────────────────────────────────────

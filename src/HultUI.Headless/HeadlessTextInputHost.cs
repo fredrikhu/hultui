@@ -41,7 +41,14 @@ public sealed class HeadlessTextInputHost : ITextInputHost
         StartCount++;
     }
 
-    public void StopTextInput() => IsTextInputActive = false;
+    public void StopTextInput()
+    {
+        IsTextInputActive = false;
+        StopCount++;
+    }
+
+    /// <summary>How many times text input was stopped.</summary>
+    internal int StopCount { get; private set; }
 
     public void SetInputArea(Rect caretRect, int cursorOffset) => LastInputArea = caretRect;
 

@@ -832,7 +832,7 @@ public partial class ApertureAppHostTests
             session.Window.FindByAutomationId("resume-m2")!.Click();
             for (int i = 0; i < 10; i++) session.PumpFrame();
 
-            Assert.True(Shows(session, "APERTURE"), "the title bar should be up in a window");
+            Assert.True(TitleBarUp(app), "the title bar should be up in a window");
 
             session.Window.PressKey(HultUI.Core.Events.KeyCode.F);
             for (int i = 0; i < 3; i++) session.PumpFrame();
@@ -841,12 +841,12 @@ public partial class ApertureAppHostTests
             // Maximizing is the thing this must not do: it leaves the task bar and the
             // title bar over the picture.
             Assert.False(session.Window.Window.IsMaximized, "full screen must not be a maximize");
-            Assert.False(Shows(session, "APERTURE"), "the app's title bar survived into full screen");
+            Assert.False(TitleBarUp(app), "the app's title bar survived into full screen");
 
             session.Window.PressKey(HultUI.Core.Events.KeyCode.F);
             for (int i = 0; i < 3; i++) session.PumpFrame();
             Assert.False(session.Window.Window.IsFullscreen);
-            Assert.True(Shows(session, "APERTURE"));
+            Assert.True(TitleBarUp(app));
         }, () => backend);
     }
 
@@ -1307,7 +1307,10 @@ public partial class ApertureAppHostTests
             Assert.Equal(ItemSort.DateAdded, app.GridSort);
             Assert.True(app.GridDescending);
             Assert.False(app.GridHasFilters);
-            PumpUntilShown(session, "Newest (on)");
+            // The sort in use is the selected one of the set, as a reader is told.
+            for (int i = 0; i < 12 && session.Window.FindByAutomationId("sort-added")?.Node.IsSelected != true; i++) session.PumpFrame();
+            Assert.True(session.Window.FindByAutomationId("sort-added")?.Node.IsSelected, session.Window.DumpAccessibilityTree());
+            Assert.False(session.Window.FindByAutomationId("sort-name")?.Node.IsSelected);
         });
     }
 

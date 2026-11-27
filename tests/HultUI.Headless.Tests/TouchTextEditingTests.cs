@@ -336,6 +336,196 @@ public sealed class TouchTextEditingTests
         Assert.Equal("alpha brpastedavo charlie", field.Text);
     }
 
+    /// <summary>A long press past the text's end puts the caret there with the bar for Paste, as an
+    /// Android EditText does; on the last word it still selects it. It selected the last word, and
+    /// nothing could be pasted after it (a Galaxy S25).</summary>
+    [Fact]
+    public void ALongPressPastTheTextsEnd_PutsTheCaretThere_AndOffersPaste()
+    {
+        var (session, field, _) = Started();
+        using var _s = session;
+        session.Window.Clipboard.Text = "!";
+        var end = AtIndex(session, field, Words.Length);
+
+        LongPressAt(session, new Point(end.X + 30, end.Y));
+
+        Assert.Equal("", field.SelectedText);
+        Assert.Equal(Words.Length, field.CursorPosition);
+        Assert.Equal(1, W(session).TouchHandleCount);
+        Assert.Equal(["Paste", "Select All"], BarLabels(session));
+        TapBarItem(session, "Paste");
+        Assert.Equal(Words + "!", field.Text);
+
+        LongPressAt(session, AtIndex(session, field, 15));
+        Assert.Equal("charlie", field.SelectedText);
+    }
+
+    [Fact]
+    public void InATextArea_ALongPressPastALinesEndOrBelowTheText_PutsTheCaretThere()
+    {
+        using var session = HeadlessSession.Create(width: 400, height: 300);
+        var area = TextArea.New(Words + "\nsecond line").Width(320).Height(120);
+        session.Window.SetRoot(Flex.Column().Padding(20).Children(area));
+        session.PumpFrame();
+        session.Window.Clipboard.Text = "!";
+        area.Focus();
+        var firstEnd = AtIndex(session, area, Words.Length);
+        var lastEnd = AtIndex(session, area, area.Text.Length);
+
+        LongPressAt(session, new Point(firstEnd.X + 30, firstEnd.Y));
+        Assert.Equal("", area.SelectedText);
+        Assert.Equal(["Paste", "Select All"], BarLabels(session));
+        TapBarItem(session, "Paste");
+        Assert.Equal(Words + "!\nsecond line", area.Text);
+
+        LongPressAt(session, new Point(lastEnd.X - 20, lastEnd.Y + 40));   // under the last line
+        Assert.Equal("", area.SelectedText);
+        Assert.Equal(1, W(session).TouchHandleCount);
+
+        LongPressAt(session, AtIndex(session, area, area.Text.Length - 2));
+        Assert.Equal("line", area.SelectedText);
+    }
+
+    [Fact]
+    public void InTheRichTextEditor_ALongPressPastTheTextsEnd_PutsTheCaretThere()
+    {
+        using var session = HeadlessSession.Create(width: 400, height: 300);
+        var editor = RichTextEditor.New().Width(320).Height(120);
+        session.Window.SetRoot(Flex.Column().Padding(20).Children(editor));
+        session.PumpFrame();
+        editor.Focus();
+        session.Window.TypeText(Words);
+        session.PumpFrame();
+        var end = AtIndexOfSelectionEnd(session, editor);
+
+        LongPressAt(session, new Point(end.X + 30, end.Y));
+
+        Assert.Equal("", editor.State.SelectedText);
+        Assert.Equal(1, W(session).TouchHandleCount);
+        Assert.Contains("Select All", BarLabels(session));
+    }
+
+    /// <summary>A finger dragged sideways on the focused field moves its caret and selects nothing,
+    /// as Android's cursor drag from anywhere; the insertion handle shows after. It selected, as a
+    /// mouse's drag does (a Galaxy S25).</summary>
+    [Fact]
+    public void ASidewaysDragOnTheFocusedField_MovesTheCaret_AndSelectsNothing()
+    {
+        var (session, field, _) = Started();
+        using var _s = session;
+        var from = AtIndex(session, field, 2);
+        var to = AtIndex(session, field, 15);
+
+        session.Window.TouchDown(1, from.X, from.Y);
+        // Inside the touch slop first, as a finger starts: the field alone hears it.
+        session.Window.TouchMove(1, from.X + PointerState.TouchSlop - 1, from.Y);
+        for (int i = 1; i <= 5; i++)
+        {
+            session.PumpFrame(TimeSpan.FromMilliseconds(16));
+            session.Window.TouchMove(1, from.X + (to.X - from.X) * i / 5f, from.Y);
+        }
+        session.Window.TouchUp(1);
+        session.PumpFrame();
+
+        Assert.Equal("", field.SelectedText);
+        Assert.Equal(15, field.CursorPosition);
+        Assert.Equal(1, W(session).TouchHandleCount);
+    }
+
+    /// <summary>After a long press selects a word, the finger, still down, grows the selection a
+    /// word at a time either way, as Android's does; the bar comes back at the lift. It stayed the
+    /// one word (a Galaxy S25).</summary>
+    [Fact]
+    public void AfterALongPress_MovingTheFinger_GrowsTheSelectionAWordAtATime()
+    {
+        var (session, field, _) = Started();
+        using var _s = session;
+        var bravo = AtIndex(session, field, 8);
+        var charlie = AtIndex(session, field, 15);
+        var alpha = AtIndex(session, field, 2);
+
+        session.Window.TouchDown(1, bravo.X, bravo.Y);
+        session.PumpFrame(TimeSpan.FromSeconds(HultUI.Window.LongPressSeconds + 0.1));
+        Assert.Equal("bravo", field.SelectedText);
+        session.Window.TouchMove(1, charlie.X, charlie.Y);
+        session.PumpFrame();
+        Assert.Equal("bravo charlie", field.SelectedText);
+        Assert.Null(W(session).TouchEditBar);   // away while it changes
+        session.Window.TouchMove(1, alpha.X, alpha.Y);
+        session.PumpFrame();
+        Assert.Equal("alpha bravo", field.SelectedText);
+        session.Window.TouchUp(1);
+        session.PumpFrame();
+
+        Assert.Equal("alpha bravo", field.SelectedText);
+        Assert.Equal(2, W(session).TouchHandleCount);
+        Assert.Contains("Copy", BarLabels(session));
+    }
+
+    [Fact]
+    public void InATextArea_ASidewaysDragMovesTheCaret_AndALongPressDragGrowsByWords()
+    {
+        using var session = HeadlessSession.Create(width: 400, height: 300);
+        var area = TextArea.New(Words + "\nsecond line").Width(320).Height(120);
+        session.Window.SetRoot(Flex.Column().Padding(20).Children(area));
+        session.PumpFrame();
+        area.Focus();
+        var from = AtIndex(session, area, 2);
+        var to = AtIndex(session, area, 15);
+
+        session.Window.TouchDown(1, from.X, from.Y);
+        session.Window.TouchMove(1, from.X + PointerState.TouchSlop - 1, from.Y);
+        for (int i = 1; i <= 5; i++)
+        {
+            session.PumpFrame(TimeSpan.FromMilliseconds(16));
+            session.Window.TouchMove(1, from.X + (to.X - from.X) * i / 5f, from.Y);
+        }
+        session.Window.TouchUp(1);
+        session.PumpFrame();
+        Assert.Equal("", area.SelectedText);
+        Assert.Equal(15, area.CursorPosition);
+
+        var bravo = AtIndex(session, area, 8);
+        var second = AtIndex(session, area, Words.Length + 3);
+        session.Window.TouchDown(1, bravo.X, bravo.Y);
+        session.PumpFrame(TimeSpan.FromSeconds(HultUI.Window.LongPressSeconds + 0.1));
+        session.Window.TouchMove(1, second.X, second.Y);
+        session.PumpFrame();
+        session.Window.TouchUp(1);
+        session.PumpFrame();
+        Assert.Equal("bravo charlie\nsecond", area.SelectedText);
+    }
+
+    [Fact]
+    public void InTheRichTextEditor_ASidewaysDragMovesTheCaret_AndSelectsNothing()
+    {
+        using var session = HeadlessSession.Create(width: 400, height: 300);
+        var editor = RichTextEditor.New().Width(320).Height(120);
+        session.Window.SetRoot(Flex.Column().Padding(20).Children(editor));
+        session.PumpFrame();
+        editor.Focus();
+        session.Window.TypeText(Words);
+        session.PumpFrame();
+        var to = AtIndexOfSelectionEnd(session, editor);   // the end: 19
+        session.Window.PressKey(KeyCode.Home);
+        for (int i = 0; i < 2; i++) session.Window.PressKey(KeyCode.Right);
+        session.PumpFrame();
+        var from = AtIndexOfSelectionEnd(session, editor);
+
+        session.Window.TouchDown(1, from.X, from.Y);
+        session.Window.TouchMove(1, from.X + PointerState.TouchSlop - 1, from.Y);
+        for (int i = 1; i <= 5; i++)
+        {
+            session.PumpFrame(TimeSpan.FromMilliseconds(16));
+            session.Window.TouchMove(1, from.X + (to.X - from.X) * i / 5f, from.Y);
+        }
+        session.Window.TouchUp(1);
+        session.PumpFrame();
+
+        Assert.Equal("", editor.State.SelectedText);
+        Assert.Equal(Words.Length, editor.State.Selection.Focus.Offset);
+    }
+
     [Fact]
     public void DraggingTheInsertionHandle_MovesTheCaret()
     {

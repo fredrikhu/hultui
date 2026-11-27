@@ -326,6 +326,14 @@ or any other role (a tab), builds the tree, as does an element that starts or st
 selected. Keep what changes often out of such an item's name: a new name on an element with
 children builds the tree.
 
+`AccessibilityHidden` (a property, not fluent) leaves an element and everything inside it out of
+what assistive technology is told, on every platform, as the web's `aria-hidden` does. The subtree
+has no nodes, nothing a reader reaches by swiping, touch or its own commands, and its text names
+nothing around it, but it is still drawn and still takes the pointer and the keys. Use it for what a
+reader should not meet: a page another covers (Aperture hides its title bar and page while the
+player is open; TalkBack swiped from the player into the film's page), or a decoration that is text
+(the "·" between two names was a stop of its own). A change rebuilds the tree.
+
 `AccessibleName` is what a screen reader announces. `Name` is only its last-resort fallback — reach for `AccessibleName` on anything user-facing, and leave `Name` for debugging.
 
 A text field (`TextInput`, `TextArea`, the rich text editor) with neither is named by its
