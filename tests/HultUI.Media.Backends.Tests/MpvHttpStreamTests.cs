@@ -135,7 +135,10 @@ public class MpvHttpStreamTests
         Assert.False(read.Wait(300));   // it waits for bytes that do not come
         stream.Cancel();
 
-        Assert.True(read.Wait(TimeSpan.FromSeconds(5)), "the read did not end");
+        // At once, not after .NET's drain of the response: a body under 1 MiB (this one) was read
+        // on for up to 2 s before its connection closed, so every cancel took 2 s, and over 5 on a
+        // busy CI runner (run 46052464732).
+        Assert.True(read.Wait(TimeSpan.FromSeconds(1.5)), "the read did not end before the response's drain would have");
         Assert.Equal(-1, read.Result);
         Assert.Equal(-1, stream.Read(new byte[16]));
     }
