@@ -502,12 +502,27 @@ touch driver. Pinch waits until an element needs it.
 - The headless tests cover slop, latching, handoff, velocity and cancellation on virtual time.
 - The perf suite is flat.
 
-**Status (2026-11-26): built, tested headless, and checked on the emulator; not on the phone yet.** Pointer identity
+**Status (2026-11-27): done; every exit criterion met on the Galaxy S25.** Pointer identity
 (`docs/design/POINTER-IDENTITY.md` §8) and the gestures (`docs/design/GESTURES.md` §9), with
-`TouchPointerTests` (19) and `TouchGestureTests` (22). Left for this phase:
-- frame time while flinging Aperture's grid
-- the Fluent sample and Aperture by touch (the first exit criterion)
-- the perf suite
+`TouchPointerTests` (19) and `TouchGestureTests` (22).
+
+**The last of it, 2026-11-27:**
+- **The Fluent sample and Aperture by touch:** every scroller pans and flings, and nested ones hand
+  off at their edges, by the user's hand on the phone.
+  - Aperture's shelves page with buttons, not a scroller (a nested horizontal scroller is the
+    wheel's trap). A sideways swipe did nothing on them, so it now turns the page
+    (`ApertureApp.ShelfSwipe.cs`): the row follows the finger, and past a quarter of its width (or
+    a flick) the next page slides in; short of it, or at an end, it springs back.
+  - The Fluent sample's read-only Markdown box brought the keyboard up; fixed (SOFT-KEYBOARD.md §10).
+- **Frame time flinging Aperture's Films grid:** 124 frames in a row at 8.33 ms each, none missed
+  (SurfaceFlinger's present times for the app's layer, the fling's last second).
+- **The perf suite:** timings flat (no row past ±10 % twice; an A/A pair clean). Allocations were
+  not: phase 3's handlers had made a slider 640 B dearer to build and a stepper 408 B (the ninth
+  handler doubled its array), so a screen of 25 of them took 6 % more to mount. Own handlers are
+  static now, finding their control as the event's target: a slider 1,584 B (1,560 before phase 3),
+  a stepper 1,744 B (1,784), and the gallery mount back to 459.7 KB (459.5). `OnPan`'s axis answer
+  is one shared delegate an axis. Left: +1.2 KB in the 1 kHz scrubber rows, the 12 B every pointer
+  event carries for pointer identity.
 
 **On the Galaxy S25 (2026-11-26):**
 - `touch-check.ps1` passes 6 of 6.
@@ -748,8 +763,14 @@ SOFT-KEYBOARD.md §10):
   - A finger's drag selected; it now moves the caret.
   - A long press's finger did not grow the selection.
 
-Left: nothing of phase 6 on this phone; another phone and keyboard would show what this one
-cannot.
+**The Fluent sample on the S25, the same day** (the exit criterion's other app): it reads and runs
+by swipe and by touch. Fixed on the way (TALKBACK.md §11): check boxes and radio buttons say their
+new state, a chosen radio is not also "Selected", "column header" once, an InfoBar read once (and
+not again as a swipe scrolls on), a card's second line read, an expander's change and a swatch's
+pick said, a disabled control a stop, and the rich text toolbar there before the editor is touched.
+
+**Phase 6 is done:** every exit criterion is met on the S25. Another phone and keyboard would show
+what this one cannot.
 
 **Exit criteria**
 

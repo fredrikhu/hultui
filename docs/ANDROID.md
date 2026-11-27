@@ -239,7 +239,8 @@ These are plan 20's later phases:
 - **TalkBack is checked on one phone, a Galaxy S25** (phase 6, docs/design/TALKBACK.md §8, §9
   and §11): it explores, swipes, clicks, scrolls, types and hears announcements, goes into an open
   drop-down and a long press's menu, moves through text by character, reads a dialog and a
-  3,000-item list, and reads and runs Aperture's main views. Not yet on another phone or keyboard.
+  3,000-item list, and reads and runs Aperture's main views and the Fluent sample. Not yet on
+  another phone or keyboard.
 - **SDL's keyboard view** (`org.libsdl.app.SDLDummyEdit`, which SDL focuses for the keyboard's input)
   is hidden from TalkBack by the bridge. A view added to SDL's layout beside the surface is
   otherwise TalkBack's to meet, unnamed.

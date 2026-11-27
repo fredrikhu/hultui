@@ -94,102 +94,126 @@ public class SliderElement : Element, IRangeValueElement
     {
         IsFocusable = true;
         Inherited.Cursor = CursorType.Pointer;
-        // The press captures the pointer, so a drag that wanders above or below the
-        // track keeps moving the thumb, as sliders do everywhere; only the release ends it.
-        OnOwn<PointerDownEvent>(e =>
-        {
-            // A second finger reaches the capture holder too (docs/design/POINTER-IDENTITY.md §2):
-            // the thumb follows the first. The same in every handler below.
-            if (e.Button != PointerEvent.LeftButton || !e.IsPrimary) return;
-            // What the moves before the press were to show comes first.
-            _follow?.Flush();
-            // A finger is a horizontal pan here, not a capture (docs/design/GESTURES.md §2): a
-            // vertical swipe that starts on the slider scrolls the page around it, a sideways one
-            // drags the thumb (the Pan handlers below), and a tap sets the value (the release).
-            if (e.PointerType == PointerType.Touch)
-            {
-                _touchPressX = e.LocalPosition.X;
-                Focus();
-                return;
-            }
-            e.CapturePointer();
-            _dragging = true;
-            Focus();
-            ApplyUserValue(ValueFromLocalX(e.LocalPosition.X));
-        });
-        OnOwn<PointerMoveEvent>(e =>
-        {
-            if (!e.IsPrimary) return;
-            // Recorded, and applied once per frame that may be drawn (FollowPointer): a drag's
-            // OnChanged and the hover's OnHoverValue rebuild their owner, a video player for the
-            // scrubber's preview, and a 1,000 Hz mouse rebuilt it about sixteen times a frame
-            // drawn. A hover nothing shows or hears needs no frame at all.
-            _pointerAt = ValueFromLocalX(e.LocalPosition.X);
-            if (_dragging || OnHoverValue is not null || ShowHoverFill)
-                (_follow ??= new PointerFollow(FollowPointer)).Request(this);
-            else
-                SetHover(_pointerAt);
-        });
-        OnOwn<PointerLeaveEvent>(_ =>
-        {
-            // A drag's value still lands; a hover the next frame was to show goes with the pointer.
-            if (_dragging) _follow?.Flush();
-            else _follow?.Cancel();
-            SetHover(null);
-            OnHoverValue?.Invoke(null);
-        });
-        OnOwn<PointerUpEvent>(e =>
-        {
-            if (!e.IsPrimary) return;
-            // A finger's tap: the value under it. One that slid past the slop did something else.
-            if (e.PointerType == PointerType.Touch && !_dragging)
-            {
-                float x = e.LocalPosition.X;
-                if (Math.Abs(x - _touchPressX) <= PointerState.TouchSlop) ApplyUserValue(ValueFromLocalX(x));
-                return;
-            }
-            // The drag ends exactly where the pointer did, whether or not a frame came between.
-            _follow?.Flush();
-            _dragging = false;
-        });
-        OnOwn<PanAxisQuery>(q => q.Axis ??= PanAxis.Horizontal);
-        OnOwn<PanStartEvent>(e =>
-        {
-            _dragging = true;
-            ApplyUserValue(ValueFromLocalX(e.LocalPosition.X));
-        });
-        OnOwn<PanUpdateEvent>(e =>
-        {
-            _pointerAt = ValueFromLocalX(e.LocalPosition.X);
-            (_follow ??= new PointerFollow(FollowPointer)).Request(this);
-        });
+        // Each handler is static and finds its slider as the event's current target: one delegate
+        // for every slider, not one a slider. Twelve handlers that each held their slider cost
+        // 2,200 B a slider; the four touch added (pans and a cancel) made 640 B of that, and a
+        // settings screen of 25 sliders and steppers allocated 6 % more to mount (the perf suite's
+        // controls/gallery mount, plan 20 phase 3).
+        OnOwn<PointerDownEvent>(static e => Of(e).HandlePointerDown(e));
+        OnOwn<PointerMoveEvent>(static e => Of(e).HandlePointerMove(e));
+        OnOwn<PointerLeaveEvent>(static e => Of(e).HandlePointerLeave());
+        OnOwn<PointerUpEvent>(static e => Of(e).HandlePointerUp(e));
+        OnOwn<PanAxisQuery>(static q => q.Axis ??= PanAxis.Horizontal);
+        OnOwn<PanStartEvent>(static e => Of(e).HandlePanStart(e));
+        OnOwn<PanUpdateEvent>(static e => Of(e).HandlePanUpdate(e));
         // Lifted or taken, the value reached stays.
-        OnOwn<PanEndEvent>(_ =>
-        {
-            _follow?.Flush();
-            _dragging = false;
-        });
+        OnOwn<PanEndEvent>(static e => Of(e).EndDrag());
         // A press the system took ends as a release does: the value it reached stays.
-        OnOwn<PointerCancelEvent>(e =>
+        OnOwn<PointerCancelEvent>(static e => { if (e.IsPrimary) Of(e).EndDrag(); });
+        OnOwn<FocusEvent>(static e => Of(e).SetFocused(true));
+        OnOwn<BlurEvent>(static e => Of(e).SetFocused(false));
+        OnOwn<KeyDownEvent>(static e => Of(e).HandleKeyDown(e));
+    }
+
+    /// <summary>The slider an own handler runs for: the event's current target.</summary>
+    private static SliderElement Of(ElementEvent e) => (SliderElement)e.CurrentTarget;
+
+    // The press captures the pointer, so a drag that wanders above or below the
+    // track keeps moving the thumb, as sliders do everywhere; only the release ends it.
+    private void HandlePointerDown(PointerDownEvent e)
+    {
+        // A second finger reaches the capture holder too (docs/design/POINTER-IDENTITY.md §2):
+        // the thumb follows the first. The same in every handler below.
+        if (e.Button != PointerEvent.LeftButton || !e.IsPrimary) return;
+        // What the moves before the press were to show comes first.
+        _follow?.Flush();
+        // A finger is a horizontal pan here, not a capture (docs/design/GESTURES.md §2): a
+        // vertical swipe that starts on the slider scrolls the page around it, a sideways one
+        // drags the thumb (the Pan handlers below), and a tap sets the value (the release).
+        if (e.PointerType == PointerType.Touch)
         {
-            if (!e.IsPrimary) return;
-            _follow?.Flush();
-            _dragging = false;
-        });
-        OnOwn<FocusEvent>(_ => { _focused = true; MarkPaintDirty(); });
-        OnOwn<BlurEvent>(_ => { _focused = false; MarkPaintDirty(); });
-        OnOwn<KeyDownEvent>(e =>
+            _touchPressX = e.LocalPosition.X;
+            Focus();
+            return;
+        }
+        e.CapturePointer();
+        _dragging = true;
+        Focus();
+        ApplyUserValue(ValueFromLocalX(e.LocalPosition.X));
+    }
+
+    private void HandlePointerMove(PointerMoveEvent e)
+    {
+        if (!e.IsPrimary) return;
+        // Recorded, and applied once per frame that may be drawn (FollowPointer): a drag's
+        // OnChanged and the hover's OnHoverValue rebuild their owner, a video player for the
+        // scrubber's preview, and a 1,000 Hz mouse rebuilt it about sixteen times a frame
+        // drawn. A hover nothing shows or hears needs no frame at all.
+        _pointerAt = ValueFromLocalX(e.LocalPosition.X);
+        if (_dragging || OnHoverValue is not null || ShowHoverFill)
+            (_follow ??= new PointerFollow(FollowPointer)).Request(this);
+        else
+            SetHover(_pointerAt);
+    }
+
+    private void HandlePointerLeave()
+    {
+        // A drag's value still lands; a hover the next frame was to show goes with the pointer.
+        if (_dragging) _follow?.Flush();
+        else _follow?.Cancel();
+        SetHover(null);
+        OnHoverValue?.Invoke(null);
+    }
+
+    private void HandlePointerUp(PointerUpEvent e)
+    {
+        if (!e.IsPrimary) return;
+        // A finger's tap: the value under it. One that slid past the slop did something else.
+        if (e.PointerType == PointerType.Touch && !_dragging)
         {
-            if (!_focused) return;
-            _follow?.Flush();
-            switch (e.Key)
-            {
-                case KeyCode.Left or KeyCode.Down: ApplyUserValue(_value - _step); break;
-                case KeyCode.Right or KeyCode.Up: ApplyUserValue(_value + _step); break;
-                case KeyCode.Home: ApplyUserValue(_min); break;
-                case KeyCode.End: ApplyUserValue(_max); break;
-            }
-        });
+            float x = e.LocalPosition.X;
+            if (Math.Abs(x - _touchPressX) <= PointerState.TouchSlop) ApplyUserValue(ValueFromLocalX(x));
+            return;
+        }
+        // The drag ends exactly where the pointer did, whether or not a frame came between.
+        EndDrag();
+    }
+
+    private void HandlePanStart(PanStartEvent e)
+    {
+        _dragging = true;
+        ApplyUserValue(ValueFromLocalX(e.LocalPosition.X));
+    }
+
+    private void HandlePanUpdate(PanUpdateEvent e)
+    {
+        _pointerAt = ValueFromLocalX(e.LocalPosition.X);
+        (_follow ??= new PointerFollow(FollowPointer)).Request(this);
+    }
+
+    private void EndDrag()
+    {
+        _follow?.Flush();
+        _dragging = false;
+    }
+
+    private void SetFocused(bool focused)
+    {
+        _focused = focused;
+        MarkPaintDirty();
+    }
+
+    private void HandleKeyDown(KeyDownEvent e)
+    {
+        if (!_focused) return;
+        _follow?.Flush();
+        switch (e.Key)
+        {
+            case KeyCode.Left or KeyCode.Down: ApplyUserValue(_value - _step); break;
+            case KeyCode.Right or KeyCode.Up: ApplyUserValue(_value + _step); break;
+            case KeyCode.Home: ApplyUserValue(_min); break;
+            case KeyCode.End: ApplyUserValue(_max); break;
+        }
     }
 
     public static SliderElement New(double value = 0, double min = 0, double max = 100, [OriginFile] string? file = null, [OriginLine] int line = 0) =>

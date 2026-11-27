@@ -48,6 +48,31 @@ public sealed class SoftKeyboardTests
         Assert.False(host.Multiline, "a text input takes one line: a phone shows its action key, not a new line");
     }
 
+    /// <summary>A read-only text area or editor takes no typing, so focusing it asks for no
+    /// keyboard, and puts away one a field had up; it still copies. The Fluent sample's read-only
+    /// Markdown box brought the keyboard up (a Galaxy S25).</summary>
+    [Fact]
+    public void AReadOnlyAreaOrEditor_AsksForNoKeyboard_AndPutsOneAway()
+    {
+        using var session = HeadlessSession.Create(Width, Height);
+        var field = TextInput.New("x");
+        var area = TextArea.New("read only").Height(60).ReadOnly();
+        var editor = RichTextEditor.New().Height(60);
+        editor.ReadOnly = true;
+        session.Window.SetRoot(Flex.Column().Children(field, area, editor));
+        session.PumpFrame();
+        var host = session.Window.TextInputHost;
+
+        session.Window.Click(field);
+        Assert.True(host.IsTextInputActive);
+        session.Window.Click(area);
+        Assert.False(host.IsTextInputActive, "the read-only area");
+        Assert.Same(area, session.Window.Window.FocusedElement);
+        session.Window.Click(field);
+        session.Window.Click(editor);
+        Assert.False(host.IsTextInputActive, "the read-only editor");
+    }
+
     /// <summary>A field whose keyboard the system put away (Android's Back: SDL stops input by
     /// itself, and the field keeps the focus) gets it back from a press on it or a reader's double
     /// tap. Only a move to another field and back brought it (TalkBack on a Galaxy S25).</summary>

@@ -63,6 +63,17 @@ public sealed partial class FluentApp : Component
     [Reactive] public partial bool InfoBarShown { get; set; }
     [Reactive] public partial int ClickCount { get; set; }
 
+    /// <summary>The gallery's "Clicked n times" line, which says the count to a reader.</summary>
+    public readonly Ref<TextElement> ClickLabel = new();
+
+    /// <summary>A gallery button was clicked: counted, and the count said, as a label's new text is
+    /// not. TalkBack's double tap gave its sound and no words (a Galaxy S25).</summary>
+    public void CountClick()
+    {
+        ClickCount++;
+        ClickLabel.Current?.Announce($"Clicked {ClickCount} times");
+    }
+
     // Rich text
     [Reactive] public partial HultUI.Core.RichText.RichDocument Notes { get; set; }
     [Reactive] public partial bool NotesReadOnly { get; set; }
@@ -209,7 +220,7 @@ public sealed partial class FluentApp : Component
                 F.Body(p, "All 12 items will be deleted for good. Empty the Recycle Bin?"),
                 // In a row, at its own width: the Fluent button's two boxes do not stretch together.
                 Flex.Row(gap: 0).Children(
-                    F.Button(p, "Yes, empty it", () => { ClickCount++; EmptyBinFlyout!.Close(); }, accent: true)));
+                    F.Button(p, "Yes, empty it", () => { CountClick(); EmptyBinFlyout!.Close(); }, accent: true)));
         });
         _menus = new MenuBar(
         [

@@ -308,12 +308,21 @@ public static class ElementExtensions
     public static T OnPan<T>(this T el, PanAxis axis,
         Action<PanStartEvent>? start, Action<PanUpdateEvent> update, Action<PanEndEvent>? end) where T : Element
     {
-        el.On<PanAxisQuery>(q => q.Axis ??= axis);
+        el.On(PanAxisAnswers[(int)axis]);
         if (start is not null) el.On(start);
         el.On(update);
         if (end is not null) el.On(end);
         return el;
     }
+    // OnPan's answer to the window's question, one for each axis: a lambda that captured the axis
+    // made a closure and a delegate at every call, which a build makes again each time.
+    private static readonly Action<PanAxisQuery>[] PanAxisAnswers =
+    [
+        static q => q.Axis ??= PanAxis.Horizontal,
+        static q => q.Axis ??= PanAxis.Vertical,
+        static q => q.Axis ??= PanAxis.Both,
+    ];
+
     public static T OnPointerEnter<T>(this T el, Action<PointerEnterEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnPointerLeave<T>(this T el, Action<PointerLeaveEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnScroll<T>(this T el, Action<ScrollEvent> handler) where T : Element { el.On(handler); return el; }

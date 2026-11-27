@@ -171,7 +171,8 @@ The differ now hands a value change its previous node, which TalkBack's text-cha
     - A drop-down's open list was swiped past. Opening it from an assistive tool focuses it, and
       the window gives the open list the reader's focus.
     - Plan 20, phase 6, has the details.
-  - **Aperture's main views and the a11y sample are checked there too** (2026-11-27), §11.
+  - **Aperture's main views, the a11y sample and the Fluent sample are checked there too**
+    (2026-11-27), §11.
 - ~~A text field that has only a placeholder has no accessible name, so TalkBack says "Edit box"
   alone.~~ Done the same day, on the user's word, for every platform: a text field with no other
   name is named by its placeholder, as browsers do (docs/ELEMENTS.md), so TalkBack says it as the
@@ -352,6 +353,32 @@ everything found is fixed and checked again there. The phone runs Google's TalkB
   SOFT-KEYBOARD.md §10, with the rest of what the phone showed of touch editing.
 - "Keyboard hidden", said twice as the keyboard goes, is the keyboard's own announcement (SwiftKey)
   and TalkBack's window change, not the app's.
+
+**The Fluent sample on the phone** (the exit criterion's other app, two rounds the same day). Fixed
+in the bridge, each with its test in `SpokenStateTests`:
+- **A check box and a radio button say "Checked" or "Not checked"** as their state description, as
+  Android's compound buttons do from 11, so TalkBack says the new state when one is toggled; it gave
+  only its sound. A chosen radio button is no longer also "Selected".
+- **A column header has no role word of ours**: TalkBack says "column header" for a collection's
+  header item itself, and said it twice.
+- **A named alert covers its text**, as a named control does: each InfoBar was read twice. A scroll
+  under a focused alert tells the host its subtree changed instead of the alert (`FocusedMoved`):
+  told itself, a live region is spoken again, and "Could not connect" was read once more as
+  TalkBack's swipe scrolled on.
+- **A description is read after the name**, in the content description TalkBack reads in place of
+  the text: TalkBack reads no hint of a button, and the Related settings cards were only titles.
+- **The node TalkBack is on says what happened to it**: "Expanded" or "Collapsed" as it opens or
+  closes, "Selected" as it is picked. TalkBack says neither of a change by itself; an expanded state
+  description was read twice on focus ("collapsed. Collapsed.").
+- **A disabled control is a stop**, read as disabled, as Android's are: a finger on the rich text
+  toolbar's disabled Redo put TalkBack's focus on the whole toolbar.
+
+In the framework: `RichTextToolbar` built before its editor (a page's first build) asks to be built
+again once laid out; it stayed all disabled until the editor's selection moved, and TalkBack read it
+as one stop of disabled names. Its buttons that are no toggles say what they did ("Horizontal rule
+inserted", "Undone"). In the sample: its toggle switch says on or off (`AccessibleToggled`; it was
+"off" either way, and TalkBack could not toggle it), accent swatches say which is chosen, titles are
+headings, and a gallery button announces the count.
 
 **Checked:** each change has its desktop test, each failing without its change (the in-place
 refresh of a hidden subtree, `MatchChild`, has none that reaches it). On the emulator, Google

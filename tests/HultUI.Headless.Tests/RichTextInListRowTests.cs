@@ -24,6 +24,59 @@ public sealed class RichTextInListRowTests : IDisposable
 
     public void Dispose() => AccessibilityClients.Force = null;
 
+    /// <summary>A bar built before its editor is on screen (a page's first build) asks its owner to
+    /// build it again once laid out, so its buttons are there to press before the editor is touched.
+    /// It waited for the editor's selection to move: TalkBack reached the bar first and found it all
+    /// disabled (the Fluent sample, a Galaxy S25). A bar built with its editor asks nothing.</summary>
+    [Fact]
+    public void ABarBuiltBeforeItsEditor_AsksToBeBuiltAgain_OnceLaidOut()
+    {
+        var editorRef = new Ref<RichTextEditorElement>();
+        int asked = 0;
+        var bar = new RichTextToolbar(editorRef, () => asked++);
+        using var session = HeadlessSession.Create(width: 700, height: 300);
+        var built = bar.Build();
+        Assert.False(built.Children.OfType<ButtonElement>().First(b => b.AccessibleName == "Bold").IsEnabled);
+        var editor = RichTextEditor.New(RichDocument.Empty).Width(600).Height(200);
+        editor.WithRef(editorRef);
+        session.Window.SetRoot(Box.New().Width(700).Height(300).Children(built, editor));
+        session.PumpFrames(2);
+
+        Assert.Equal(1, asked);
+        var again = bar.Build();
+        Assert.True(again.Children.OfType<ButtonElement>().First(b => b.AccessibleName == "Bold").IsEnabled);
+        session.Window.SetRoot(Box.New().Width(700).Height(300).Children(again, editor));
+        session.PumpFrames(2);
+        Assert.Equal(1, asked);
+    }
+
+    /// <summary>A toolbar button that is no toggle says what it did (a reader hears a toggle's new
+    /// state, but of an insertion only the click): a horizontal rule went in with TalkBack's sound and
+    /// no words (the Fluent sample, a Galaxy S25). A toggle says nothing of its own.</summary>
+    [Fact]
+    public void AToolbarButtonThatIsNoToggle_SaysWhatItDid()
+    {
+        var editorRef = new Ref<RichTextEditorElement>();
+        var bar = new RichTextToolbar(editorRef, () => { });
+        using var session = HeadlessSession.Create(width: 700, height: 300);
+        var editor = RichTextEditor.New(RichDocument.Empty).Width(600).Height(200);
+        session.Window.SetRoot(Box.New().Width(700).Height(300).Children(editor));
+        session.PumpFrame();
+        editorRef.Current = editor;
+        session.Window.Click(editor);
+        var bridge = session.Window.InstallAccessibilityBridge();
+        session.Window.SetRoot(Box.New().Width(700).Height(300).Children(bar.Build(), editor));
+        session.PumpFrames(2);
+        bridge.ClearAnnouncements();
+
+        session.Window.Click(session.Window.FindByAutomationId("richtext-bold")!.Element);
+        session.PumpFrame();
+        Assert.Empty(bridge.Announcements);
+        session.Window.Click(session.Window.FindByAutomationId("richtext-rule")!.Element);
+        session.PumpFrame();
+        Assert.Equal(["Horizontal rule inserted"], bridge.Announcements.Select(a => a.Text));
+    }
+
     private static (HeadlessSession Session, RichTextToolbar Bar, RichTextEditorElement Editor) Mounted(
         IReadOnlyList<RichTextCommand?>? commands = null)
     {

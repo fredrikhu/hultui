@@ -221,13 +221,8 @@ public class ScrollbarElement : Element, IRangeValueElement
             (_follow ??= new PointerFollow(FollowPointer)).Request(this);
         });
         // A press the system took ends as a release does: the thumb stays where it was dragged.
-        OnOwn<PointerCancelEvent>(e =>
-        {
-            if (!e.IsPrimary) return;
-            _follow?.Flush();
-            _dragging = false;
-            _bar.SetHover(false, this);
-        });
+        // Static, the bar being the event's current target: no delegate a scrollbar.
+        OnOwn<PointerCancelEvent>(static e => { if (e.IsPrimary) ((ScrollbarElement)e.CurrentTarget).CancelDrag(); });
         OnOwn<PointerUpEvent>(e =>
         {
             if (!e.IsPrimary) return;
@@ -243,6 +238,13 @@ public class ScrollbarElement : Element, IRangeValueElement
         OnOwn<FocusEvent>(_ => _focused = true);
         OnOwn<BlurEvent>(_ => _focused = false);
         OnOwn<KeyDownEvent>(OnKey);
+    }
+
+    private void CancelDrag()
+    {
+        _follow?.Flush();
+        _dragging = false;
+        _bar.SetHover(false, this);
     }
 
     public static ScrollbarElement New(ScrollbarAxis axis = ScrollbarAxis.Vertical,

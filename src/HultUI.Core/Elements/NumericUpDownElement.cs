@@ -45,15 +45,34 @@ public class NumericUpDownElement : Element, IRangeValueElement
         IsFocusable = true;
         Role = AccessibilityRole.SpinButton;
         Inherited.Cursor = CursorType.Pointer;
-        OnOwn<PointerDownEvent>(OnPointerDown);
-        OnOwn<PointerUpEvent>(_ => Release());
-        OnOwn<PointerCancelEvent>(_ => Release());
-        OnOwn<PointerLeaveEvent>(_ => Release());
-        OnOwn<FocusEvent>(_ => { _focused = true; MarkPaintDirty(); });
-        OnOwn<BlurEvent>(_ => { _focused = false; Commit(); Release(); MarkPaintDirty(); });
-        OnOwn<KeyDownEvent>(OnKeyDown);
-        OnOwn<TextInputEvent>(OnTextInput);
-        OnOwn<ScrollEvent>(OnScroll);
+        // Each handler is static and finds its stepper as the event's current target: one delegate
+        // for every stepper, not one a stepper. The cancel touch added was the ninth handler, which
+        // doubled the handler array; with a delegate each, a stepper cost 2,192 B, against 1,784 B
+        // before, and 25 of them were most of a settings screen's 6 % growth to mount (the perf
+        // suite's controls/gallery mount, plan 20 phase 3).
+        OnOwn<PointerDownEvent>(static e => Of(e).OnPointerDown(e));
+        OnOwn<PointerUpEvent>(static e => Of(e).Release());
+        OnOwn<PointerCancelEvent>(static e => Of(e).Release());
+        OnOwn<PointerLeaveEvent>(static e => Of(e).Release());
+        OnOwn<FocusEvent>(static e => Of(e).SetFocused(true));
+        OnOwn<BlurEvent>(static e => Of(e).SetFocused(false));
+        OnOwn<KeyDownEvent>(static e => Of(e).OnKeyDown(e));
+        OnOwn<TextInputEvent>(static e => Of(e).OnTextInput(e));
+        OnOwn<ScrollEvent>(static e => Of(e).OnScroll(e));
+    }
+
+    /// <summary>The stepper an own handler runs for: the event's current target.</summary>
+    private static NumericUpDownElement Of(ElementEvent e) => (NumericUpDownElement)e.CurrentTarget;
+
+    private void SetFocused(bool focused)
+    {
+        _focused = focused;
+        if (!focused)
+        {
+            Commit();
+            Release();
+        }
+        MarkPaintDirty();
     }
 
     public static NumericUpDownElement New(double value = 0, double min = 0, double max = 100, double step = 1,

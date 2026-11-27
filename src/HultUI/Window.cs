@@ -1280,6 +1280,13 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                 _keyboardPutAway = false;
                 return false;
         }
+        // A read-only text area or editor copies, and takes no typing: no input, so no keyboard. A
+        // phone showed its keyboard for the Fluent sample's read-only Markdown box (a Galaxy S25).
+        if (!element.TakesTypedText)
+        {
+            _keyboardPutAway = false;
+            return false;
+        }
         if (_keyboardPutAway)
         {
             _keyboardPutAway = false;
