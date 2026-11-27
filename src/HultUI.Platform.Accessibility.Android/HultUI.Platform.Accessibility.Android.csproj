@@ -24,8 +24,8 @@
   </PropertyGroup>
 
   <PropertyGroup Condition="$(TargetFramework.EndsWith('-android'))">
-    <!-- Android 12: plan 20's minimum. -->
-    <SupportedOSPlatformVersion>31</SupportedOSPlatformVersion>
+    <!-- Android 10: plan 20's minimum. -->
+    <SupportedOSPlatformVersion>29</SupportedOSPlatformVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="!$(TargetFramework.EndsWith('-android'))">

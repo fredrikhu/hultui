@@ -22,8 +22,9 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
     private const ulong ObservePause = 1, ObservePosition = 2, ObserveDuration = 3, ObserveEof = 4,
         ObservePausedForCache = 5, ObserveCacheState = 6;
 
+    // Android: through a P/Invoke, which loads the copy the player runs in (Mpv.LoadsForPInvoke).
     private static readonly Lazy<(bool Loaded, string? Error)> Available =
-        new(() => (TryLoad(out _, out var error), error));
+        new(() => OperatingSystem.IsAndroid() ? (LoadsForPInvoke(), null) : (TryLoad(out _, out var error), error));
 
     /// <summary>Whether a libmpv could be found and loaded; false means every <see cref="MpvBackend"/> constructor throws.</summary>
     public static bool IsAvailable => Available.Value.Loaded;
@@ -845,12 +846,13 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
         _getProcAddress = getProcAddress;
         _procAddressHandle = GCHandle.Alloc(getProcAddress);
         // GL ES: a still picture is copied out of mpv's cache, and mpv's own format may not copy
-        // into the sink's texture there (GlesFboFormat). Queued ahead of anything loading.
+        // into the sink's texture there, or on an Adreno 5xx draw whole (GlesFboFormat). Queued
+        // ahead of anything loading.
         if (GlesFboFormat.Choose(getProcAddress) is { } fboFormat)
         {
             SetStringAsync(_mpv, 0, "fbo-format", fboFormat);
             if (Environment.GetEnvironmentVariable("HULTUI_MPV_LOG") is { Length: > 0 })
-                Console.Error.WriteLine($"[mpv] GL ES will not copy rgba16f into RGBA8: fbo-format={fboFormat}");
+                Console.Error.WriteLine($"[mpv] fbo-format={fboFormat}: {GlesFboFormat.Why}");
         }
         var apiType = "opengl\0"u8.ToArray();
         fixed (byte* api = apiType)

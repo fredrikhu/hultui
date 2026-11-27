@@ -661,7 +661,15 @@ Left:
 - **TalkBack's explore check** on the emulator: TalkBack now adds the window's name to the first
   button it reads, "Tap me. Button. Window HultUI spike". It does so with or without 96e88cb0;
   the check, or TalkBack's settings, wants a look.
-- **A tablet layout.** At 600 DIP and over, Aperture keeps its desktop layout.
+- **A tablet layout.** At 600 DIP and over, Aperture keeps its desktop layout. On a Galaxy Tab
+  S4 (711 DIP upright, Android 10, 2026-11-27) it read well but for the library's bar, whose one
+  row squeezed the chips to an ellipsis or to nothing and broke "18 of 18" in two: the chips
+  now go to the phone's strip wherever the row is narrower than it needs (by width, not only on
+  a phone), and the count keeps one line. Its video showed a strip of each frame, or bands of
+  older frames: its Adreno 540 draws mpv's rgba16f pictures in part, so an Adreno 5xx gets
+  rgba16 (`GlesFboFormat`). And Android 10 loaded libmpv twice, once for the P/Invokes and once
+  for the path the Java VM was handed through, so zero-copy never started; the handoff is a
+  P/Invoke now.
 - **Android TV.**
 - **Distribution.** It needs a signing key the user makes.
 - **The CI job's first run.**
@@ -863,7 +871,11 @@ are deferred with iOS.
    measures startup on it, and NativeAOT is looked at again once it leaves experimental.**
 8. **Minimum OS versions.** Android API 31 makes ICU free (§2.7), and .NET 11's CoreCLR needs
    API 24 or later. The iOS minimum follows the .NET 11 workload. **Decided: API 31 (Android
-   12). Phones on Android 11 or older are not supported.**
+   12). Phones on Android 11 or older are not supported.** **Changed 2026-11-27: API 29
+   (Android 10),** for the user's Galaxy Tab S4, which Samsung left at 10. What it costs: the
+   legacy inset and system-bar calls, no frame-rate vote, state descriptions only from API 30,
+   no NDK ICU (the platform's, or the text pipeline's fallback), libmpv built at API 29, and
+   the Java VM handed to FFmpeg by the activity (`JNI_GetCreatedJavaVMs` is public from 31).
 9. **Devices.** Which phone (and tablet) to test on. **Decided: the emulator for phase 1. From
    phase 2, one mid-range phone with an Adreno or Mali GPU, plus a Google TV device.**
 10. **macOS desktop (deferred with iOS: it needs a Mac too).** The Metal renderer and the iOS work give most of a macOS port. In scope

@@ -11,8 +11,8 @@
   -->
   <PropertyGroup>
     <TargetFramework>$(HultUITargetFramework)-android</TargetFramework>
-    <!-- Android 12: the NDK's public ICU (libicu.so) starts there; plan 20's minimum. -->
-    <SupportedOSPlatformVersion>31</SupportedOSPlatformVersion>
+    <!-- Android 10: plan 20's minimum. The NDK's public ICU (libicu.so) starts at 12; before it the text pipeline breaks lines with its own fallback. -->
+    <SupportedOSPlatformVersion>29</SupportedOSPlatformVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>HultUI.Platform.Android</RootNamespace>

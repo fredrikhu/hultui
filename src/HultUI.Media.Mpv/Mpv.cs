@@ -42,20 +42,43 @@ internal static unsafe partial class Mpv
     internal static void PrepareForAndroid()
     {
         if (!OperatingSystem.IsAndroid() || Interlocked.Exchange(ref _javaVmTried, 1) != 0) return;
-        if (TryLoad(out var handle)) GiveJavaVm(handle);
+        GiveJavaVm();
     }
+
+    /// <summary>
+    /// Android: whether the libmpv .NET loads for the P/Invokes is there, asked through one of
+    /// them. <see cref="TryLoad(out nint, out string?)"/> loads it a second time on Android 10 (a
+    /// Galaxy Tab S4: the same file mapped twice, from another linker namespace), and what is set
+    /// in that copy, the Java VM, never reaches the one that plays. Android 16 maps it once.
+    /// </summary>
+    internal static bool LoadsForPInvoke()
+    {
+        try
+        {
+            _ = mpv_client_api_version();
+            return true;
+        }
+        catch (DllNotFoundException) { return false; }
+        catch (EntryPointNotFoundException) { return false; }
+    }
+
+    [LibraryImport(Library)] private static partial int av_jni_set_java_vm(nint vm, nint logContext);
 
     /// <summary>
     /// On Android, hands the app's Java VM to the FFmpeg inside libmpv, before anything plays:
     /// FFmpeg's MediaCodec decoders reach Android's codecs through JNI, and mpv only reads the VM
     /// back from FFmpeg (misc/jni.c). An app's own libmpv user sets it from <c>JNI_OnLoad</c>; this
     /// library is loaded by .NET, which runs none, so the VM comes from <c>JNI_GetCreatedJavaVMs</c>
-    /// (libnativehelper, Android 12 and later: plan 20's minimum) and goes in through
-    /// <c>av_jni_set_java_vm</c>, which the bundled build exports (native/mpv/build-libmpv-android.sh
-    /// checks that it does). Without it mpv decodes in software. Nothing to do for a libmpv that
-    /// has no MediaCodec, which has no such function.
+    /// (libnativehelper, Android 12 and later) and goes in through <c>av_jni_set_java_vm</c>, which
+    /// the bundled build exports (native/mpv/build-libmpv-android.sh checks that it does), called as
+    /// a P/Invoke so that it reaches the copy of the library the player runs in. On
+    /// Android 10 and 11 an app cannot load libnativehelper, and the VM comes from the app's
+    /// activity instead, which leaves it in <c>AppContext</c> (HultUIActivity.JavaVmSlot). Without it
+    /// FFmpeg reaches MediaCodec through the NDK, which has no zero-copy, and mpv copies each frame
+    /// (a Galaxy Tab S4). Nothing to do for a libmpv that has no MediaCodec, which has no such
+    /// function.
     /// </summary>
-    private static void GiveJavaVm(nint libmpv)
+    private static void GiveJavaVm()
     {
         JavaVmHandoff = Handoff();
         if (Environment.GetEnvironmentVariable("HULTUI_MPV_LOG") is { Length: > 0 })
@@ -63,19 +86,33 @@ internal static unsafe partial class Mpv
 
         string Handoff()
         {
-            if (!NativeLibrary.TryGetExport(libmpv, "av_jni_set_java_vm", out var setVm)) return "no av_jni_set_java_vm (no MediaCodec in this libmpv)";
-            if (!NativeLibrary.TryLoad("libnativehelper.so", out var helper)) return "libnativehelper.so would not load";
-            if (!NativeLibrary.TryGetExport(helper, "JNI_GetCreatedJavaVMs", out var getVms)) return "no JNI_GetCreatedJavaVMs";
             nint vm = 0;
-            int count = 0;
-            int got = ((delegate* unmanaged<nint*, int, int*, int>)getVms)(&vm, 1, &count);
-            if (got != 0 || count < 1 || vm == 0) return $"JNI_GetCreatedJavaVMs gave {got}, {count} VMs";
-            int set = ((delegate* unmanaged<nint, nint, int>)setVm)(vm, 0);
+            string from;
+            if (NativeLibrary.TryLoad("libnativehelper.so", out var helper))
+            {
+                if (!NativeLibrary.TryGetExport(helper, "JNI_GetCreatedJavaVMs", out var getVms)) return "no JNI_GetCreatedJavaVMs";
+                int count = 0;
+                int got = ((delegate* unmanaged<nint*, int, int*, int>)getVms)(&vm, 1, &count);
+                if (got != 0 || count < 1 || vm == 0) return $"JNI_GetCreatedJavaVMs gave {got}, {count} VMs";
+                from = "from JNI_GetCreatedJavaVMs";
+            }
+            else if (AppContext.GetData(JavaVmSlot) is long fromActivity && fromActivity != 0)
+            {
+                vm = (nint)fromActivity;
+                from = "from the activity (libnativehelper.so would not load)";
+            }
+            else return "libnativehelper.so would not load, and no activity left the VM";
+            int set;
+            try { set = av_jni_set_java_vm(vm, 0); }
+            catch (EntryPointNotFoundException) { return "no av_jni_set_java_vm (no MediaCodec in this libmpv)"; }
             if (set != 0) return $"av_jni_set_java_vm refused it ({set})";
             JavaVmGiven = true;
-            return "given";
+            return $"given, {from}";
         }
     }
+
+    /// <summary>Where HultUI.Platform.Android's activity leaves the Java VM (HultUIActivity.JavaVmSlot).</summary>
+    private const string JavaVmSlot = "HultUI.Android.JavaVM";
 
     /// <summary>What became of the Java VM's handoff (Android), for the log.</summary>
     internal static string? JavaVmHandoff { get; private set; }

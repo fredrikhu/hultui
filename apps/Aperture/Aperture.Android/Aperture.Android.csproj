@@ -11,8 +11,8 @@
   -->
   <PropertyGroup>
     <TargetFramework>net11.0-android</TargetFramework>
-    <!-- Android 12: plan 20's minimum. -->
-    <SupportedOSPlatformVersion>31</SupportedOSPlatformVersion>
+    <!-- Android 10: plan 20's minimum, lowered from 12 for a Galaxy Tab S4 and the Shield TV. -->
+    <SupportedOSPlatformVersion>29</SupportedOSPlatformVersion>
     <RuntimeIdentifiers>android-arm64;android-x64</RuntimeIdentifiers>
     <OutputType>Exe</OutputType>
     <Nullable>enable</Nullable>

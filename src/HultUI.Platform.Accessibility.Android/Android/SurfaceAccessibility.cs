@@ -7,7 +7,7 @@ using Log = Android.Util.Log;
 
 namespace HultUI.Platform.Accessibility.Android;
 
-// Obtain is how a node, an event and their infos are made on Android 12; the constructors that
+// Obtain is how a node, an event and their infos are made on Android 10 to 12; the constructors that
 // replace it start at 13 (API 33). Checked, a bool, is how 12 to 15 say checked.
 #pragma warning disable CA1422, CS0618
 
@@ -109,7 +109,8 @@ internal sealed class SurfaceAccessibility : Java.Lang.Object, View.IOnHoverList
         info.Text = node.Text;
         info.ContentDescription = node.ContentDescription;
         info.HintText = node.HintText;
-        info.StateDescription = node.StateDescription;
+        // From Android 11; before it TalkBack says a checkable's state from its checked flag.
+        if (OperatingSystem.IsAndroidVersionAtLeast(30)) info.StateDescription = node.StateDescription;
         if (node.PaneTitle is { } pane) info.PaneTitle = pane;
         if (node.ContainerTitle is { } title && OperatingSystem.IsAndroidVersionAtLeast(34)) info.ContainerTitle = title;
         // AndroidX's setRoleDescription, which TalkBack reads: the platform has no setter for it.
@@ -338,7 +339,7 @@ internal sealed class SurfaceAccessibility : Java.Lang.Object, View.IOnHoverList
         if ((changes & AndroidContentChange.Subtree) != 0) types |= ContentChangeTypes.Subtree;
         if ((changes & AndroidContentChange.Text) != 0) types |= ContentChangeTypes.Text;
         if ((changes & AndroidContentChange.ContentDescription) != 0) types |= ContentChangeTypes.ContentDescription;
-        if ((changes & AndroidContentChange.StateDescription) != 0) types |= ContentChangeTypes.StateDescription;
+        if ((changes & AndroidContentChange.StateDescription) != 0 && OperatingSystem.IsAndroidVersionAtLeast(30)) types |= ContentChangeTypes.StateDescription;
         if ((changes & AndroidContentChange.PaneTitle) != 0) types |= ContentChangeTypes.PaneTitle;
         if ((changes & AndroidContentChange.PaneAppeared) != 0) types |= ContentChangeTypes.PaneAppeared;
         if ((changes & AndroidContentChange.PaneDisappeared) != 0) types |= ContentChangeTypes.PaneDisappeared;
