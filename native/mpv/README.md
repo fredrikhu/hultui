@@ -110,12 +110,13 @@ What differs from the desktop build, all in the script's header:
 - **MediaCodec.** FFmpeg's MediaCodec decoders (`--enable-jni --enable-mediacodec`) and mpv's
   AImageReader interop (`android-media-ndk`, zero-copy into GL ES). FFmpeg needs the app's Java VM;
   `HultUI.Media.Mpv` hands it over through `av_jni_set_java_vm`, which the library exports (the
-  build checks it), from `JNI_GetCreatedJavaVMs`.
+  build checks it), from `JNI_GetCreatedJavaVMs` on Android 12 and later and from the activity
+  before that.
 - **Audio** through AAudio, AudioTrack the fallback.
 - **Subtitles:** libass has no font provider (no fontconfig on Android). `HultUI.Media.Mpv` gives it
   the system's Roboto; fonts a file embeds work as anywhere.
 - **The NDK** is pinned (`ANDROID_NDK_REVISION`, r27c), and so is the lowest Android it runs on
-  (`ANDROID_API`, 31: Android 12).
+  (`ANDROID_API`, 29: Android 10).
 
 The natives package puts the two under `runtimes/android-arm64/native/` and
 `runtimes/android-x64/native/`, which a .NET Android build puts in the APK's `lib/<abi>/`.
