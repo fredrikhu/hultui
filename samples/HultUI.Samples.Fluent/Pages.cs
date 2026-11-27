@@ -187,6 +187,9 @@ public static class Pages
                 .OnClick(_ => app.SetAccent(index))
                 .AccessibleRole(AccessibilityRole.Button)
                 .AccessibleName(preset.Name)
+                // One of a set to pick from: a reader says which is chosen (TalkBack said nothing
+                // of it, a Galaxy S25).
+                .AccessibleSelected(selected)
                 .Children(selected
                     ? IconRenderer.Draw(Icons.Success, 16f, p.TextOnAccent)
                     : Box.New()), () => app.SetAccent(index)));
@@ -215,6 +218,9 @@ public static class Pages
             .OnHover(b => b.Background(p.CardHover))
             .AccessibleRole(AccessibilityRole.Button)
             .AccessibleName(title)
+            // The line under the title, which the button's name hides: TalkBack read
+            // "Accessibility" alone (a Galaxy S25).
+            .AccessibleDescription(description)
             .Children(
                 IconRenderer.Draw(icon, 20f, p.TextPrimary),
                 Flex.Column(gap: 2f).FlexGrow(1).Children(
@@ -262,12 +268,12 @@ public static class Pages
 
         items.Add(Section(p, "Buttons",
             Flex.Row(gap: 8f).FlexWrap(FlexWrap.Wrap).AlignItems(AlignItems.Center).Children(
-                F.Button(p, "Accent button", () => app.ClickCount++, accent: true),
-                F.Button(p, "Standard button", () => app.ClickCount++),
-                F.Button(p, "With an icon", () => app.ClickCount++, icon: Icons.Update),
-                F.SubtleIconButton(p, Icons.Search, "Search", () => app.ClickCount++),
+                F.Button(p, "Accent button", app.CountClick, accent: true),
+                F.Button(p, "Standard button", app.CountClick),
+                F.Button(p, "With an icon", app.CountClick, icon: Icons.Update),
+                F.SubtleIconButton(p, Icons.Search, "Search", app.CountClick),
                 FlyoutButton(p, app),
-                F.Body(p, $"Clicked {app.ClickCount} times").TextColor(p.TextSecondary))));
+                F.Body(p, $"Clicked {app.ClickCount} times").TextColor(p.TextSecondary).WithRef(app.ClickLabel))));
 
         items.Add(Section(p, "Toggles and selection",
             Flex.Row(gap: 40f).FlexWrap(FlexWrap.Wrap).Children(

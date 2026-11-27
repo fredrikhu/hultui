@@ -988,6 +988,8 @@ public sealed partial class ApertureApp
         for (int i = page * perPage; i < Math.Min(count, (page + 1) * perPage); i++)
             row.AddChild(card(i));
         column.AddChild(row);
+        // A finger turns the page too (ApertureApp.ShelfSwipe.cs).
+        if (pages > 1) AddShelfSwipe(column, row, automationId, page, pages);
         return column;
     }
 

@@ -67,7 +67,8 @@ public partial class RichTextEditorElement : BoxElement, IScrollbarDraggable, IA
         OnOwn<PointerDownEvent>(OnPointerDown);
         OnOwn<PointerMoveEvent>(OnPointerMove);
         OnOwn<PointerUpEvent>(OnPointerUp);
-        OnOwn<PointerCancelEvent>(OnPointerCancel);
+        // Static, the editor being the event's current target: no delegate an editor.
+        OnOwn<PointerCancelEvent>(static e => ((RichTextEditorElement)e.CurrentTarget).OnPointerCancel(e));
         OnOwn<ScrollEvent>(OnScroll);
     }
 

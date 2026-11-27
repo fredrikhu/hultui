@@ -135,6 +135,13 @@ public sealed class RichTextToolbar
         var row = Flex.Row(gap: 2).AlignItems(AlignItems.Center).FlexWrap(FlexWrap.Wrap)
             .AccessibleName("Formatting").AutomationId("richtext-toolbar");
         row.Role = Accessibility.AccessibilityRole.Group;
+        // Built before its editor is on screen (a page's first build), the bar has no editor to
+        // ask, and every button is off until the editor says its selection moved. A reader reached
+        // the bar first and found nothing to press: TalkBack read its buttons as one stop of
+        // disabled names (the Fluent sample, a Galaxy S25). Once laid out, the editor is there,
+        // and the owner builds the bar again. The handler goes with the next build.
+        if (editor is null)
+            row.OnLayoutChanged(_ => { if (_editor.Current is not null && IsStale) _onChanged(); });
 
         bool lastWasDivider = true;
         foreach (var command in Commands)
@@ -189,8 +196,12 @@ public sealed class RichTextToolbar
                 OpenPictureEditor();
                 return;
             }
-            Execute(e, command);
+            bool done = Execute(e, command);
             e.Focus();
+            // What a button that is no toggle did, said: a reader hears a toggle's new state, but
+            // of an insertion only the click. A horizontal rule went in with TalkBack's sound and
+            // no words (the Fluent sample, a Galaxy S25).
+            if (done && DoneWords(command) is { } words) e.Announce(words);
             _onChanged();
         });
         if (command == RichTextCommand.Link) button.WithRef(_linkButton);
@@ -362,6 +373,20 @@ public sealed class RichTextToolbar
             or RichTextCommand.Image or RichTextCommand.Table
             or RichTextCommand.Outdent or RichTextCommand.Indent => editor.State.CurrentTable is null,
         _ => true,
+    };
+
+    /// <summary>What a reader is told a command that is no toggle did; null for a toggle, whose new
+    /// state it hears, and for one that opens an editor of its own.</summary>
+    private static string? DoneWords(RichTextCommand command) => command switch
+    {
+        RichTextCommand.Undo => "Undone",
+        RichTextCommand.Redo => "Redone",
+        RichTextCommand.Rule => "Horizontal rule inserted",
+        RichTextCommand.Table => "Table inserted",
+        RichTextCommand.Indent => "Indented",
+        RichTextCommand.Outdent => "Outdented",
+        RichTextCommand.ClearFormatting => "Formatting cleared",
+        _ => null,
     };
 
     private static bool IsToggle(RichTextCommand command) =>

@@ -333,6 +333,15 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
                 break;
             case AccessibilityProperties.IsExpanded:
                 Content(id, AndroidContentChange.StateDescription | AndroidContentChange.Expanded);
+                // The node TalkBack is on opened or closed: said. TalkBack says it on the node's
+                // focus, from its expand or collapse action (or, from 16, its expanded state), but
+                // nothing of the change: the Fluent sample's expander gave its sound and no words (a
+                // Galaxy S25, and TalkBack 15 on the emulator). As a state description it was said
+                // twice on focus ("collapsed. Collapsed."). Not a drop-down, whose open list takes
+                // the focus.
+                if (id == Volatile.Read(ref _accessibilityFocused) && node.Expanded is { } open
+                    && node.Role != AccessibilityRole.ComboBox)
+                    Announce(node, open ? "Expanded" : "Collapsed", AnnouncementPoliteness.Polite);
                 break;
             case AccessibilityProperties.IsSelected:
                 if (node.Role == AccessibilityRole.RadioButton)
@@ -341,7 +350,14 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
                     ClickedIfFocused(id);
                 }
                 else if (node.IsSelected == true)
+                {
                     _events.Add(new AndroidEvent(AndroidEventType.ViewSelected, id));
+                    // The node TalkBack is on was picked: said. Of the selection event TalkBack says
+                    // the name alone, which it had just said: a double tap on a Fluent accent swatch
+                    // gave "Blue" and no "Selected" (a Galaxy S25). Not a menu's cursor.
+                    if (id == Volatile.Read(ref _accessibilityFocused) && node.Role != AccessibilityRole.MenuItem)
+                        Announce(node, "Selected", AnnouncementPoliteness.Polite);
+                }
                 else Content(id, AndroidContentChange.Undefined);
                 break;
             case AccessibilityProperties.IsEnabled:
@@ -358,11 +374,11 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
                 // changed, it is read again. Android compares the bounds and redraws only if they
                 // moved, so a focused node outside this scroll view costs one event.
                 if (Volatile.Read(ref _accessibilityFocused) is var focused && focused != AndroidIds.None && focused != id)
-                    Content(focused, AndroidContentChange.Undefined);
+                    FocusedMoved(focused);
                 break;
             case AccessibilityProperties.BoundingRect:
                 // Read again when asked; only TalkBack's highlight, drawn where the focused node was, needs telling.
-                if (id == Volatile.Read(ref _accessibilityFocused)) Content(id, AndroidContentChange.Undefined);
+                if (id == Volatile.Read(ref _accessibilityFocused)) FocusedMoved(id);
                 break;
             case AccessibilityProperties.ItemCount:
                 // A served list's items past its end are gone.
@@ -444,6 +460,22 @@ internal sealed class AndroidAccessibilityBridge : IAccessibilityBridge, ITreeDi
     {
         if (id == Volatile.Read(ref _accessibilityFocused))
             _events.Add(new AndroidEvent(AndroidEventType.ViewClicked, id));
+    }
+
+    /// <summary>
+    /// The node TalkBack is on moved on screen: Android reads it again and moves the focus box with
+    /// it. Told as changed itself; but a live region's change is spoken again, and TalkBack read the
+    /// Fluent sample's "Could not connect" InfoBar a second time as its swipe scrolled on to the next
+    /// stop (a Galaxy S25). So for a live region the host is told its subtree changed instead, which
+    /// moves the box all the same (ViewRootImpl reads the focused virtual view again on a subtree
+    /// change from its host) and is no live region's.
+    /// </summary>
+    private void FocusedMoved(int focused)
+    {
+        if (Lookup(focused, out _) is { Role: AccessibilityRole.Alert })
+            Content(AndroidIds.Host, AndroidContentChange.Subtree);
+        else
+            Content(focused, AndroidContentChange.Undefined);
     }
 
     private static int Px(float layout, float scale) => (int)MathF.Round(layout * scale);

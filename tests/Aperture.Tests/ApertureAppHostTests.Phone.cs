@@ -138,6 +138,61 @@ public partial class ApertureAppHostTests
         });
     }
 
+    /// <summary>The shelf <paramref name="rowId"/>'s element: a plain box, which the accessibility tree
+    /// does not publish.</summary>
+    private static Element Shelf(ApertureApp app, string rowId) =>
+        AllOf(app.Mount()).First(e => e.AutomationId == rowId);
+
+    /// <summary>The cards on the shelf <paramref name="rowId"/> now, by automation id.</summary>
+    private static List<string> ShelfCards(ApertureApp app, string rowId) =>
+        AllOf(Shelf(app, rowId)).Select(e => e.AutomationId).OfType<string>()
+            .Where(id => id.StartsWith("card-", StringComparison.Ordinal) || id.StartsWith("resume-", StringComparison.Ordinal)).ToList();
+
+    /// <summary>A finger turns a shelf's page: swiped left past a quarter of the row, the next page;
+    /// a short swipe springs back; towards a page there is not, nothing. A sideways swipe on a shelf
+    /// did nothing, on the cards or the heading: only its buttons paged it (a Galaxy S25).</summary>
+    [Fact]
+    public void ASwipeOnAShelf_TurnsItsPage_AndAShortOneSpringsBack()
+    {
+        var library = Library();
+        for (int i = 4; i <= 14; i++)
+        {
+            library.AddMovie("m" + i, "Film " + i, "movies", 2000 + i, 90, resume: TimeSpan.FromMinutes(i));
+            library.ResumeIds.Add("m" + i);
+        }
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            var first = ShelfCards(app, "row-resume");
+            Assert.True(first.Count > 0);
+            var card = session.Window.FindByAutomationId(first[0])!.Node.BoundingRect;
+            var shelf = Shelf(app, "row-resume").WindowBorderBox;
+            float y = card.Y + card.Height / 2;
+            void SwipeBy(float dx)
+            {
+                float from = dx < 0 ? shelf.Right - 20 : shelf.X + 20;
+                session.Window.Swipe(new HultUI.Core.Primitives.Point(from, y), new HultUI.Core.Primitives.Point(from + dx, y),
+                    TimeSpan.FromMilliseconds(600));
+                for (int i = 0; i < 6; i++) session.PumpFrame(TimeSpan.FromMilliseconds(60));
+            }
+
+            SwipeBy(-shelf.Width * 0.1f);   // short and slow: back
+            Assert.Equal(first, ShelfCards(app, "row-resume"));
+            SwipeBy(shelf.Width * 0.5f);    // towards no page
+            Assert.Equal(first, ShelfCards(app, "row-resume"));
+
+            SwipeBy(-shelf.Width * 0.5f);
+            var second = ShelfCards(app, "row-resume");
+            Assert.NotEmpty(second);
+            Assert.Empty(second.Intersect(first));
+            Assert.Equal(ApertureView.Home, app.Current.View);   // the swipe opened no card
+
+            SwipeBy(shelf.Width * 0.5f);   // and back
+            Assert.Equal(first, ShelfCards(app, "row-resume"));
+        });
+    }
+
     /// <summary>A filter turned on moves no filter chip: Clear filters comes in on the side away from
     /// where the chips are held. On a phone it came in front of the strip's chips and pushed them all
     /// right, Favourites, just turned on, partly out of view (a Galaxy S25). On the desktop the bar

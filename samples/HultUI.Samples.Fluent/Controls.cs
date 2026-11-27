@@ -36,10 +36,13 @@ public static class F
     // four columns and taking three of them is how a ramp ends up nearly right. Caption is on
     // the Small cut rather than Text, and every style carries the published line height.
 
+    /// <summary>A page's title, and a heading to a reader, which moves between headings and says
+    /// them as such. TalkBack read "Controls gallery" as plain text (a Galaxy S25).</summary>
     public static TextElement Title(FluentPalette p, string s) =>
         Text.New(s).FontFamily(Fluent.DisplayFont).FontSize(Fluent.TitleSize)
             .LineHeight(Fluent.TitleLineHeight)
-            .FontWeight(FontWeight.SemiBold).TextColor(p.TextPrimary);
+            .FontWeight(FontWeight.SemiBold).TextColor(p.TextPrimary)
+            .AccessibleRole(AccessibilityRole.Heading);
 
     public static TextElement Subtitle(FluentPalette p, string s) =>
         Text.New(s).FontFamily(Fluent.DisplayFont).FontSize(Fluent.SubtitleSize)
@@ -63,9 +66,10 @@ public static class F
             .LineHeight(Fluent.CaptionLineHeight).TextColor(p.TextTertiary);
 
     /// <summary>The small bold label above a run of cards — "Related settings" and friends.
-    /// BodyStrong, not a heading size: WinUI groups content with weight rather than scale.</summary>
+    /// BodyStrong, not a heading size: WinUI groups content with weight rather than scale. A
+    /// heading to a reader all the same.</summary>
     public static Element SectionHeader(FluentPalette p, string s) =>
-        BodyStrong(p, s).Margin(new Thickness(8, 0, 0, 0)).FlexShrink(0);
+        BodyStrong(p, s).Margin(new Thickness(8, 0, 0, 0)).FlexShrink(0).AccessibleRole(AccessibilityRole.Heading);
 
     // ──────────────────────────────────────────────────────────────────────
     // Keyboard
@@ -250,7 +254,7 @@ public static class F
             .TranslateBy(on ? 20f : 0f, 0f)
             .Transition(TransitionProperty.Transform, 150f);
 
-        return Focusable(Box.New().FlexShrink(0)
+        var track = Box.New().FlexShrink(0)
             .Width(40f).Height(20f).CornerRadius(10f)
             .Background(on ? p.Accent : p.ControlAltFill)
             .Border(new Thickness(1), on ? p.Accent : p.ControlStrong)
@@ -263,7 +267,11 @@ public static class F
             .OnClick(_ => onChanged(!on))
             .AccessibleRole(AccessibilityRole.Switch)
             .AccessibleName(name)
-            .Children(knob), () => onChanged(!on));
+            .Children(knob);
+        // On or off, to a reader, and toggled by it (its toggle clicks a box that says it is on or
+        // off). Without it TalkBack said "off" either way and its double tap did nothing (a Galaxy S25).
+        track.AccessibleToggled = on;
+        return Focusable(track, () => onChanged(!on));
     }
 
     // ──────────────────────────────────────────────────────────────────────

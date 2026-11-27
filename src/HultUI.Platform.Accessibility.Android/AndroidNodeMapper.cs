@@ -58,9 +58,13 @@ internal static class AndroidNodeMapper
             ?? Nonempty(node.ContentDescription),
     };
 
-    /// <summary>A control with a name, which says what is drawn inside it.</summary>
+    /// <summary>A control with a name, which says what is drawn inside it; or an alert with one.
+    /// The Fluent sample's InfoBars name themselves by their title and message, and TalkBack read
+    /// each twice: the alert, then its text as a stop of its own (a Galaxy S25). A control inside
+    /// (the InfoBar's Close) is still a stop.</summary>
     public static bool CoversContent(AccessibilityNode node) =>
-        IsControl(node.Role) && node.Role != AccessibilityRole.TextInput && !string.IsNullOrEmpty(node.Name);
+        (IsControl(node.Role) && node.Role != AccessibilityRole.TextInput || node.Role == AccessibilityRole.Alert)
+        && !string.IsNullOrEmpty(node.Name);
 
     /// <param name="node">The node, of the tree the bridge last took.</param>
     /// <param name="id">Its virtual id.</param>
@@ -80,8 +84,10 @@ internal static class AndroidNodeMapper
 
         // Focusable only for a control: TalkBack makes a focusable node one stop and reads the labels
         // inside it as part of it, so a container that takes the keys (a scroll view, a list) would
-        // swallow every label in it.
-        bool focusable = node.IsFocusable && IsControl(role);
+        // swallow every label in it. A control that is off is a stop too, as Android's own disabled
+        // views are ("Redo, disabled"): with none, a finger on the rich text toolbar's Redo put
+        // TalkBack's focus, and its box, on the whole toolbar (a Galaxy S25).
+        bool focusable = IsControl(role) && (node.IsFocusable || !enabled);
         var flags = AndroidNodeFlags.None;
         if (enabled) flags |= AndroidNodeFlags.Enabled;
         if (focusable) flags |= AndroidNodeFlags.Focusable;
@@ -90,11 +96,9 @@ internal static class AndroidNodeMapper
         if (visible) flags |= AndroidNodeFlags.VisibleToUser;
         if (node.IsPassword) flags |= AndroidNodeFlags.Password;
         if (role == AccessibilityRole.Heading) flags |= AndroidNodeFlags.Heading;
-        // A menu's selected item is its cursor, the keys' and the pointer's, which TalkBack's own focus
-        // stands in for; Android's own menus mark none. TalkBack said "Selected" before the first item
-        // of a menu it had opened, and again after a swipe to the next and back (a Galaxy S25). What
-        // is chosen in a menu is its checked state.
-        bool selected = node.IsSelected == true && role != AccessibilityRole.MenuItem;
+        // Not for a menu item or a radio button (SelectedIsChecked): their selected state is told as
+        // checked, or not at all.
+        bool selected = node.IsSelected == true && !SelectedIsChecked(role);
         if (selected) flags |= AndroidNodeFlags.Selected;
         bool clickable = enabled && IsClickable(node);
         if (clickable) flags |= AndroidNodeFlags.Clickable;
@@ -134,12 +138,19 @@ internal static class AndroidNodeMapper
                 if (r.Value > r.Minimum) actions |= AndroidActions.ScrollBackward;
             }
         }
-        // A switch's state in words, as Android's own Switch gives it (setStateDescription, from 11).
-        // TalkBack says that, not the checked flag: it read Aperture's Favourites chip as
-        // "Favourites. Switch", neither on nor off (TalkBack 15 on the emulator). English, as HultUI's
-        // other spoken words are for now.
-        if (state is null && ClassOf(node) == AndroidClasses.Switch)
-            state = IsChecked(node) ? "On" : "Off";
+        // A checkable's state in words, as Android's own compound buttons give it (setStateDescription,
+        // from 11): a switch "On" or "Off", a check box or a radio button "Checked" or "Not checked".
+        // TalkBack says that, and says it again when it changes: it read Aperture's Favourites chip
+        // as "Favourites. Switch", neither on nor off (TalkBack 15 on the emulator), and the Fluent
+        // sample's check boxes, toggled, gave their sound and no words (a Galaxy S25). English, as
+        // HultUI's other spoken words are for now.
+        if (state is null)
+            state = ClassOf(node) switch
+            {
+                AndroidClasses.Switch => IsChecked(node) ? "On" : "Off",
+                AndroidClasses.CheckBox or AndroidClasses.RadioButton => IsChecked(node) ? "Checked" : "Not checked",
+                _ => null,
+            };
 
         if (node.ScrollExtent is { } extent)
         {
@@ -242,7 +253,8 @@ internal static class AndroidNodeMapper
         AccessibilityRole.Menu => "Menu",
         AccessibilityRole.MenuBar => "Menu bar",
         AccessibilityRole.TreeItem => "Tree item",
-        AccessibilityRole.ColumnHeader => "Column header",
+        // No word for a column header: it is a header item of its table's collection, which
+        // TalkBack says "column header" for. With one of ours too it said it twice (a Galaxy S25).
         AccessibilityRole.SpinButton => "Spin button",
         _ => null,
     };
@@ -285,7 +297,16 @@ internal static class AndroidNodeMapper
                 or AccessibilityRole.ScrollView or AccessibilityRole.Document or AccessibilityRole.Application:
                 return (null, null, description, null, name);
             default:
-                return (name ?? value, null, description, null, null);
+            {
+                // A description after the words, in the content description TalkBack reads in their
+                // place: TalkBack reads no hint of a button, and the Fluent sample's link cards were
+                // only their titles ("Accessibility", not "…, Contrast themes, narrator, magnifier";
+                // a Galaxy S25). The text stays the words alone, which TalkBack moves through by unit.
+                string? text = name ?? value;
+                return text is not null && description is not null
+                    ? (text, Join(text, description), null, null, null)
+                    : (text, null, description, null, null);
+            }
         }
     }
 
@@ -411,7 +432,16 @@ internal static class AndroidNodeMapper
         }
         bool across = parent.Role == AccessibilityRole.TabList || header;
         // A menu item's selected state is the menu's cursor, which TalkBack is not told (Map).
-        bool selected = node.IsSelected == true && node.Role != AccessibilityRole.MenuItem;
+        bool selected = node.IsSelected == true && !SelectedIsChecked(node.Role);
         return new AndroidCollectionItem(across ? 0 : index, across ? index : 0, header, selected);
     }
+
+    /// <summary>
+    /// Roles whose selected state is no selection to TalkBack. A menu's selected item is its cursor,
+    /// which TalkBack's own focus stands in for (Android's menus mark none): TalkBack said "Selected"
+    /// before the first item of a menu it had opened. A radio button's is its checked state, which
+    /// it is told as: TalkBack said "Selected, checked" for the one chosen (a Galaxy S25).
+    /// </summary>
+    private static bool SelectedIsChecked(AccessibilityRole role) =>
+        role is AccessibilityRole.MenuItem or AccessibilityRole.RadioButton;
 }

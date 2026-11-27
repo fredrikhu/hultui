@@ -323,3 +323,7 @@ Four faults, each fixed, tested (each test failing without its fix) and checked 
 
 **Tests:** `TouchTextEditingTests` (32 now) and `SoftKeyboardTests` (the keyboard put away, by the
 inset and by SDL's stop).
+
+**Found the same day in the Fluent sample:** a read-only text area or editor brought the keyboard up
+as it took the focus (the Markdown box). It takes no typing, so it asks for no input now and puts away
+a keyboard another field had up; it still copies (`Window.StartTextInputFor`).
