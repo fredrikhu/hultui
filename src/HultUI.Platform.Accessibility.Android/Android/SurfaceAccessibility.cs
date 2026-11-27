@@ -305,6 +305,12 @@ internal sealed class SurfaceAccessibility : Java.Lang.Object, View.IOnHoverList
                 break;
         }
         _host.Parent?.RequestSendAccessibilityEvent(_host, ev);
+        // TalkBack's focus box is drawn by the window (ViewRootImpl) over the view, in its own pass,
+        // which a move of the focus does not ask for: with nothing else redrawing SDL's surface view,
+        // the box showed only once something else did (the keyboard opening), seen on a Galaxy S25.
+        // ExploreByTouchHelper invalidates its host as the focus moves, too.
+        if (e.Type is AndroidEventType.ViewAccessibilityFocused or AndroidEventType.ViewAccessibilityFocusCleared)
+            _host.Invalidate();
     }
 
     private static EventTypes TypeOf(AndroidEventType type) => type switch

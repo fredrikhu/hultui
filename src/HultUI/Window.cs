@@ -1433,6 +1433,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         var menu = _contextMenuElement;
         for (int i = _contextSubmenus.Count - 1; i >= 0; i--)
             if (_contextSubmenus[i].Menu.HoveredIndex >= 0) { menu = _contextSubmenus[i].Menu; break; }
+        // A focused dropdown's open list, which takes the keys the same way (the W3C combobox
+        // pattern: the focus stays on the control).
+        menu ??= (_a11yFocusElement as DropdownElement)?.OpenList;
         if (ReferenceEquals(menu, _a11yMenuFocus)) return;
         if (menu is not null)
         {

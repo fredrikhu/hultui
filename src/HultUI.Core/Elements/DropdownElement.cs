@@ -180,10 +180,19 @@ public class DropdownElement : Element
     // ──── Open / close ────
 
     /// <summary>Opens or closes the list as Enter and Escape do: what UIA's ExpandCollapse
-    /// pattern does to a dropdown.</summary>
+    /// pattern does to a dropdown, and TalkBack's double tap.</summary>
+    /// <remarks>Opening takes the focus, as Enter has it: the open list then holds the reader's
+    /// focus with its chosen item current, as an open menu's does (the window's
+    /// UpdateA11yMenuFocus, through <see cref="OpenList"/>). Opened without it, TalkBack's next
+    /// swipe went on past the dropdown to what follows it on the page, the list being an overlay at
+    /// the tree's end (a Galaxy S25, plan 20).</remarks>
     internal void SetOpenFromAssistiveTool(bool open)
     {
-        if (open) OpenPopup();
+        if (open)
+        {
+            if (!IsFocused) Focus();
+            OpenPopup();
+        }
         else ClosePopup();
     }
 
@@ -237,6 +246,9 @@ public class DropdownElement : Element
         AccessibleExpanded = true;
         MarkPaintDirty();
     }
+
+    /// <summary>The open list, while it is open.</summary>
+    internal ContextMenuElement? OpenList => _open ? _popup : null;
 
     private void ClosePopup()
     {
