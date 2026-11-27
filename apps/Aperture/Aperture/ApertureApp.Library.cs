@@ -237,24 +237,29 @@ public sealed partial class ApertureApp
             .Padding(new Thickness(0, Halide.S5, 0, Halide.S5))
             .BorderColor(Halide.Border).BorderWidth(new Thickness(0, 0, 1, 0));
 
-        bar.AddChild(Text.New(title).FontSize(18f).FontWeight(FontWeight.SemiBold).TextColor(Halide.Text).AccessibleRole(AccessibilityRole.Heading));
+        bar.AddChild(Text.New(title).FontSize(18f).FontWeight(FontWeight.SemiBold).TextColor(Halide.Text)
+            .MaxLines(1).TextOverflow(TextOverflow.Ellipsis).AccessibleRole(AccessibilityRole.Heading));
         // With a filter on, the count is of what the filter leaves — say so, or "12 of 16"
-        // reads as a paging bug.
+        // reads as a paging bug. One line, never squeezed: "18 of 18" broke after its first number.
         var count = GridTotal > 0
             ? GridHasFilters ? $"{GridItems.Count} of {GridTotal} matching"
                              : $"{GridItems.Count} of {GridTotal}"
             : GridIsLoading ? "…" : "";
-        if (count.Length > 0) bar.AddChild(Ui.Mono(count, 11.5f, Halide.TextFaint));
+        if (count.Length > 0) bar.AddChild(Ui.Mono(count, 11.5f, Halide.TextFaint).MaxLines(1).FlexShrink(0));
 
         bar.AddChild(Box.New().FlexGrow(1));
 
-        // On a phone the chips are a strip of their own under the title, swiped sideways: in the
-        // bar beside it they ran off the screen, and the count was squeezed to two lines.
-        var chips = Halide.Phone ? Flex.Row(gap: Halide.S3).AlignItems(AlignItems.Center).FlexShrink(0) : bar;
+        // Where the bar's row is too narrow for them, the chips are a strip of their own under the
+        // title, swiped sideways: in the bar beside it they ran off a phone's screen, a tablet's
+        // squeezed them to an ellipsis or to nothing (a Galaxy Tab S4 at 711 DIP), and the count
+        // was squeezed to two lines.
+        bool strip = LibraryChipsInAStrip(_window.LayoutWidth);
+        _fitLibraryStrip = strip;
+        var chips = strip ? Flex.Row(gap: Halide.S3).AlignItems(AlignItems.Center).FlexShrink(0) : bar;
 
         // Clear comes and goes with the filters, on the side of them away from where the chips are
         // held, so the chip just turned on or off stays where it was: the bar holds them at its
-        // right end, the phone's strip at its left. In front of them on a phone it pushed every
+        // right end, the strip at its left. In front of them on a phone it pushed every
         // chip right as a filter turned on, Favourites partly out of view (a Galaxy S25).
         Element? clear = null;
         if (GridHasFilters)
@@ -264,13 +269,13 @@ public sealed partial class ApertureApp
             clear.Key = "filter-clear";
         }
 
-        if (clear is not null && !Halide.Phone) chips.AddChild(clear);
+        if (clear is not null && !strip) chips.AddChild(clear);
         chips.AddChild(GenreChip());
         chips.AddChild(FilterChip("Unwatched", GridPlayedFilter == false,
             () => SetGridPlayedFilter(GridPlayedFilter == false ? null : false), "filter-unwatched"));
         chips.AddChild(FilterChip("Favourites", GridFavouritesOnly,
             () => SetGridFavouritesOnly(!GridFavouritesOnly), "filter-favourites"));
-        if (clear is not null && Halide.Phone) chips.AddChild(clear);
+        if (clear is not null && strip) chips.AddChild(clear);
 
         chips.AddChild(Box.New().Width(Halide.S2));
         chips.AddChild(SortChip("A–Z", ItemSort.Name, false, "sort-name"));
@@ -281,21 +286,27 @@ public sealed partial class ApertureApp
         chips.AddChild(Box.New().Width(Halide.S2));
         chips.AddChild(ViewChip());
         var refresh = Ui.IconButton(Icons.Refresh, "Refresh (F5)", Refresh, 15f, Halide.TextMuted, "library-refresh");
-        if (!Halide.Phone)
-        {
-            bar.AddChild(refresh);
-            return bar;
-        }
-
         bar.AddChild(refresh);
-        bar.Padding(new Thickness(0, Halide.S4, 0, Halide.S4)).BorderWidth(0f);
-        var strip = ScrollView.Horizontal().FlexShrink(0).Height(44)
-            .Padding(new Thickness(0, Halide.S4, 0, Halide.S4))
+        if (!strip) return bar;
+
+        float side = Halide.Phone ? Halide.S4 : Halide.S5;
+        bar.Padding(new Thickness(0, side, 0, side)).BorderWidth(0f);
+        var chipStrip = ScrollView.Horizontal().FlexShrink(0).Height(44)
+            .Padding(new Thickness(0, side, 0, side))
             .Children(chips);
         return Flex.Column(gap: 0).FlexShrink(0)
             .BorderColor(Halide.Border).BorderWidth(new Thickness(0, 0, 1, 0))
-            .Children(bar, strip);
+            .Children(bar, chipStrip);
     }
+
+    /// <summary>The content width the bar's one row needs: about 765 DIP in the tests' fonts for a
+    /// short title and count, and a phone's or tablet's Roboto is wider, a library's name longer.</summary>
+    private const float LibraryBarRowWidth = 900f;
+
+    /// <summary>Whether the library's chips go in a strip of their own under the title, for a window
+    /// this wide: on a phone always, elsewhere where the bar's one row would squeeze them.</summary>
+    private static bool LibraryChipsInAStrip(float windowWidth) =>
+        Halide.Phone || windowWidth - Halide.RailWidth - Halide.S5 * 2 < LibraryBarRowWidth;
 
     /// <summary>
     /// The genre filter: a chip that opens the library's own genres. A menu rather than a

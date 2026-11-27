@@ -33,6 +33,10 @@ public sealed partial class ApertureApp
     /// <summary>The library grid's row height, when the last build built one.</summary>
     private float _fitGridStride;
 
+    /// <summary>Whether the last build put the library's chips in a strip of their own, when it built
+    /// the library's bar (<see cref="LibraryChipsInAStrip"/>).</summary>
+    private bool? _fitLibraryStrip;
+
     private void StartWindowFit()
     {
         _fitWidth = _window.LayoutWidth;
@@ -42,6 +46,7 @@ public sealed partial class ApertureApp
         _fitHero = false;
         _fitHeroAspect = null;
         _fitGridStride = 0f;
+        _fitLibraryStrip = null;
     }
 
     /// <summary>Whether a build at the window's size now would read anything else off it than the
@@ -50,6 +55,7 @@ public sealed partial class ApertureApp
     {
         float width = _window.LayoutWidth, height = _window.LayoutHeight;
         if (_window.IsFullscreen != _fitFullscreen) return true;
+        if (_fitLibraryStrip is bool strip && LibraryChipsInAStrip(width) != strip) return true;
         foreach (float cardWidth in _fitCardWidths)
             if (CardsAcross(cardWidth, width) != CardsAcross(cardWidth, _fitWidth)) return true;
         return _fitHero && (HeroHeightAt(height) != HeroHeightAt(_fitHeight)
