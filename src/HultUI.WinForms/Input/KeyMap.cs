@@ -140,6 +140,12 @@ internal static class KeyMap
         Keys.Pause => KeyCode.Pause,
         Keys.Apps => KeyCode.Menu,
 
+        // A keyboard's media keys (Windows has no fast-forward or rewind key).
+        Keys.MediaPlayPause => KeyCode.MediaPlayPause,
+        Keys.MediaStop => KeyCode.MediaStop,
+        Keys.MediaNextTrack => KeyCode.MediaNext,
+        Keys.MediaPreviousTrack => KeyCode.MediaPrevious,
+
         _ => KeyCode.Unknown,
     };
 

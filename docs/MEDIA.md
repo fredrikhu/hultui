@@ -218,8 +218,11 @@ menu, full-screen button) that appears on pointer movement and fades out.
 | `RefreshPreview()` | | asks `PreviewFrame` again for the hovered position: call it when a still the provider had no answer for arrives, so a pointer resting on the scrubber sees it. Nothing while nothing is hovered; UI thread |
 | `ChapterMarks` | empty | where chapters start; cuts the scrubber into pieces |
 
-Keys: Space or K play/pause, Left/Right and J/L seek, Up/Down volume, M mute, F full
-screen, Home/End, 0–9 jump to that tenth. Theme through `VideoPlayerTheme`
+Keys: Space, K, Enter on the picture or the media play/pause key play/pause (media play and pause
+each do theirs), Left/Right and J/L seek, fast-forward and rewind as J/L, Up/Down volume, M mute, F
+full screen, Home/End, 0–9 jump to that tenth. Media stop, next and previous are the app's to bind.
+On a D-pad (`Window.ArrowKeysMoveFocus`) Up/Down from the picture go into the bar instead, the arrows
+walk its buttons, and Back comes back to the picture (`docs/design/TV-VIDEO.md` §2b). Theme through `VideoPlayerTheme`
 (`Scrim`, `Foreground`, `Accent`, `BarHeight`, …): `Theme.Dark.With(new VideoPlayerTheme
 { Accent = brand })`.
 

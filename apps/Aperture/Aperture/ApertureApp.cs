@@ -638,6 +638,17 @@ public sealed partial class ApertureApp : Component, IDisposable
                     StepChapter(-1);
                     e.Handled = true;
                     break;
+                // A remote's next and previous: through the queue while one runs, else the chapters.
+                case "player.next":
+                    if (QueueIsRunning && QueueNext is not null) PlayQueueAt(QueueIndex + 1);
+                    else StepChapter(1);
+                    e.Handled = true;
+                    break;
+                case "player.previous":
+                    if (QueueIsRunning && QueueIndex > 0) PlayQueueAt(QueueIndex - 1);
+                    else StepChapter(-1);
+                    e.Handled = true;
+                    break;
             }
             return;
         }

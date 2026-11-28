@@ -139,6 +139,8 @@ media keys), not this one.
   it comes back to finds it again (on the desktop too).
 - **OK in the player** (Enter on the focused picture) plays and pauses, as a click on it does; it
   did nothing (`VideoPlayer`).
+- **Down from the Search field goes to the first result** (the user's choice), where the rule took
+  the one under the middle of the wide field.
 - **Search registers its results before making their cards.** A card asks the list what it is to the
   keyboard; made against the last list, the first result was no stop, so neither Tab (desktop too) nor
   the D-pad could reach the results from the field.

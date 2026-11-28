@@ -508,7 +508,9 @@ public sealed partial class ApertureApp
         column.AddChild(Ui.Icon(Icons.Loading, 24f, Halide.Accent));
         column.AddChild(Text.New(_playingItem is { } item ? $"Opening {item.Name}…" : "Opening…")
             .FontSize(14f).TextColor(Halide.TextDim));
-        column.AddChild(Text.New($"{Shortcuts.Keys("player.stop")} stops").FontSize(11.5f).TextColor(Halide.TextFaint));
+        // The key that stops, said as the device has it: Esc on a keyboard, Back on a phone's or a
+        // TV's (Back stops the film where there is no Escape). The media keys bound to it go unsaid.
+        column.AddChild(Text.New(Ui.HasKeyboard ? "Esc stops" : "Back stops").FontSize(11.5f).TextColor(Halide.TextFaint));
         return column;
     }
 

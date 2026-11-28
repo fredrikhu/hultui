@@ -20,22 +20,25 @@ X1+, a 4K HDR10 television).
   `_display_p3(_linear)`, `EGL_EXT_pixel_format_float` and `EGL_EXT_surface_SMPTE2086_metadata`. The
   display's HDR capabilities: HDR10 (type 2), 500 nits.
 
-## 2. The remote's media keys (needs public API)
+## 2. The remote's media keys (built; the user approved the eight members and names)
 
-Proposed: `KeyCode.MediaPlayPause`, `MediaPlay`, `MediaPause`, `MediaStop`, `MediaNext`,
-`MediaPrevious`, `MediaFastForward`, `MediaRewind`, appended to the enum, mapped from SDL's media
-scancodes in `EventTranslator` (desktop keyboards' media keys arrive the same way, so Reel and
-Aperture on the desktop get them too). `VideoPlayer.Shortcuts` binds them: play/pause, stop, the
-jumps (fast-forward and rewind as the jump keys, a hold repeating), next and previous as the queue's.
-**Question for the user:** these eight members, and those names.
+`KeyCode.MediaPlayPause`, `MediaPlay`, `MediaPause`, `MediaStop`, `MediaNext`, `MediaPrevious`,
+`MediaFastForward`, `MediaRewind`, appended to the enum, mapped from SDL's media scancodes in
+`EventTranslator` and from WinForms' `Keys.Media*`; `KeyChord` writes them "Play/Pause", "Media
+Play", "Media Pause" (not "Pause", the Pause key's), "Media Stop", "Next Track", "Previous Track",
+"Fast Forward", "Rewind", and reads those back. `VideoPlayer.Shortcuts` binds play/pause, play,
+pause, and fast-forward and rewind as the jump keys (a held key repeats). Stop, next and previous are
+the app's: in Aperture stop leaves the film as Escape does, and next and previous step the queue, or
+the chapters without one.
 
-## 2b. The player's controls on a D-pad (to decide)
+## 2b. The player's controls on a D-pad (built; the user's choice)
 
-OK on the picture plays and pauses now (as a click), and Left and Right seek, Up and Down change the
-volume, Back leaves. The bar's own buttons (subtitles, audio, speed, chapters) cannot be reached: the
-player takes all four arrows. A TV player usually lets Up or Down move into its bar while it shows,
-the arrows then walking the buttons, and Back hide the bar before it leaves. **Question for the user:**
-that, or leave Up and Down as the volume (a TV's own volume is the remote's volume keys).
+OK on the picture plays and pauses (as a click), Left and Right seek. On a D-pad Up or Down from the
+picture shows the bar and puts the focus on its play button (where they changed the volume, and no
+button could be reached); in the bar the arrows walk its controls by the window's rule (a slider keeps
+Left and Right), and Back gives the focus back to the picture before it would leave the film. The bar
+fading with the focus in it gives the focus back to the picture too. The bar's buttons show the focus
+ring (with Tab on the desktop as well).
 
 ## 3. 4K: a surface the size of the panel (to design)
 

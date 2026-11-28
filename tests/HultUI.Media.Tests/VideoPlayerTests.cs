@@ -24,9 +24,10 @@ public class VideoPlayerTests
         public MediaPlayer Player { get; }
         public VideoPlayer VideoPlayer { get; }
 
-        public Fixture(bool open = true, float width = 640f)
+        public Fixture(bool open = true, float width = 640f, bool dpad = false)
         {
             Session = HeadlessSession.Create((int)width, 400);
+            Session.Window.Window.ArrowKeysMoveFocus = dpad;   // a TV remote's D-pad
             Player = new MediaPlayer(Backend);
             VideoPlayer = new VideoPlayer(Player);
             Session.Application.SetRoot(Box.New().Children(VideoPlayer.Mount().Width(width).Height(400f)));
@@ -124,6 +125,67 @@ public class VideoPlayerTests
         Assert.False(f.Player.IsPlaying);
     }
 
+    /// <summary>A TV remote's play/pause, fast-forward and rewind, and a keyboard's play and pause.</summary>
+    [Fact]
+    public void TheMediaKeys_PlayPauseAndJump()
+    {
+        using var f = new Fixture();
+        f.FocusPlayer();
+        var w = f.Session.Window;
+
+        w.PressKey(KeyCode.MediaPlayPause);
+        Assert.True(f.Player.IsPlaying);
+        w.PressKey(KeyCode.MediaPlayPause);
+        Assert.False(f.Player.IsPlaying);
+        w.PressKey(KeyCode.MediaPlay);
+        Assert.True(f.Player.IsPlaying);
+        w.PressKey(KeyCode.MediaPlay);
+        Assert.True(f.Player.IsPlaying);           // play, not a toggle
+        w.PressKey(KeyCode.MediaPause);
+        Assert.False(f.Player.IsPlaying);
+
+        w.PressKey(KeyCode.MediaFastForward);
+        Assert.Equal(TimeSpan.FromSeconds(10), f.Player.Position);
+        w.PressKey(KeyCode.MediaRewind);
+        Assert.Equal(TimeSpan.Zero, f.Player.Position);
+    }
+
+    /// <summary>On a D-pad the bar's buttons could not be reached (the player took all four arrows):
+    /// Up or Down from the picture goes into the bar, the arrows walk it, Back comes back to the picture
+    /// without leaving, and the bar fading takes the focus back too.</summary>
+    [Fact]
+    public void OnADPad_UpOrDownGoesIntoTheBar_AndBackComesOut()
+    {
+        using var f = new Fixture(dpad: true);
+        f.FocusPlayer();
+        f.Player.Play();
+        f.Session.PumpFrame();
+        var w = f.Session.Window;
+        string? Focused() => w.Window.FocusedElement?.AutomationId;
+
+        w.PressKey(KeyCode.Down);
+        Assert.Equal("video-play", Focused());
+        Assert.Equal(1f, f.Player.Volume, 0.001f);   // not quieter
+
+        w.PressKey(KeyCode.Right);
+        Assert.Equal("video-jump-back", Focused());
+        Assert.Equal(TimeSpan.Zero, f.Player.Position);   // a move, not a seek
+
+        w.PressKey(KeyCode.Back);
+        Assert.Equal("video-player", Focused());
+        Assert.True(f.Player.IsPlaying);
+
+        // On the picture the arrows seek, as before.
+        w.PressKey(KeyCode.Right);
+        Assert.Equal(TimeSpan.FromSeconds(5), f.Player.Position);
+
+        // The bar fades with the focus in it: the picture has it again.
+        w.PressKey(KeyCode.Up);
+        Assert.Equal("video-play", Focused());
+        f.Elapse(f.VideoPlayer.AutoHideDelay.TotalSeconds + f.VideoPlayer.FadeDuration.TotalSeconds + 0.5);
+        Assert.Equal("video-player", Focused());
+    }
+
     [Fact]
     public void Keys_DoWhatTheDocsSay()
     {
@@ -185,7 +247,7 @@ public class VideoPlayerTests
 
         w.PressKey(KeyCode.F);
         Assert.True(fullscreen);
-        Assert.Equal("Space · k", VideoPlayer.Shortcuts.Keys("play"));
+        Assert.Equal("Space · k · Play/Pause", VideoPlayer.Shortcuts.Keys("play"));
     }
 
     [Fact]

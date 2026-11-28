@@ -108,4 +108,23 @@ public enum KeyCode : ushort
     /// (docs/design/ANDROID-PLATFORM.md §4).
     /// </summary>
     Back,
+
+    // A remote's and a keyboard's media keys: a TV remote's play/pause, fast-forward and rewind, a
+    // keyboard's play, stop and track keys (docs/design/TV-VIDEO.md §2). VideoPlayer binds them.
+    /// <summary>Play or pause, one key for both.</summary>
+    MediaPlayPause,
+    /// <summary>Play.</summary>
+    MediaPlay,
+    /// <summary>Pause.</summary>
+    MediaPause,
+    /// <summary>Stop.</summary>
+    MediaStop,
+    /// <summary>The next track, or the next item of a queue.</summary>
+    MediaNext,
+    /// <summary>The previous track, or the previous item of a queue.</summary>
+    MediaPrevious,
+    /// <summary>Fast-forward; held, a remote repeats it.</summary>
+    MediaFastForward,
+    /// <summary>Rewind; held, a remote repeats it.</summary>
+    MediaRewind,
 }

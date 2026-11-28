@@ -48,6 +48,15 @@ public sealed partial class ApertureApp
         field.On<KeyDownEvent>(e =>
         {
             if (e.Key == KeyCode.Escape) { SetSearchTerm(""); e.Handled = true; }
+            // On a D-pad, Down from the field goes to the first result, where the window's rule took the
+            // one under the middle of the wide field (the user's choice, on a Shield TV).
+            else if (e.Key == KeyCode.Down && _window.ArrowKeysMoveFocus && e.Modifiers == KeyModifiers.None
+                && _cursorKey.StartsWith("search:", StringComparison.Ordinal) && _cursorItems.Count > 0)
+            {
+                MoveCursorTo(0);
+                e.Handled = true;
+                e.StopPropagation = true;
+            }
         });
         field.Key = "search-input";
         column.AddChild(field);

@@ -3,6 +3,7 @@ using Aperture.Core.Testing;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Platform;
+using HultUI.Media.Testing;
 using HultUI.Headless;
 using Xunit;
 
@@ -109,7 +110,7 @@ public partial class ApertureAppHostTests
             session.Window.PressKey(KeyCode.Down);
             session.PumpFrames(2);
             Assert.StartsWith("card-", FocusedId(session) ?? $"(nothing)");
-            Assert.True(app.CursorIndex >= 0, "the cursor did not follow the focus onto the result");
+            Assert.Equal(0, app.CursorIndex);   // the first result, not the one under the field's middle
 
             session.Window.PressKey(KeyCode.Up);  // the top row's edge: back to the field
             session.PumpFrames(2);
@@ -262,6 +263,31 @@ public partial class ApertureAppHostTests
             Assert.Equal("e1", app.CursorItem?.Id);
             Assert.NotEqual(was, app.CursorIndex);
         }, dpad: true);
+    }
+
+    /// <summary>A remote's and a keyboard's stop key leaves the film, as Escape does; play/pause plays
+    /// and pauses with the focus anywhere in the player.</summary>
+    [Fact]
+    public void TheMediaKeys_StopLeavesTheFilm_AndPlayPausePauses()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(162) };
+        Host(library, (session, app) =>
+        {
+            app.Play(library.Item("m1")!, TimeSpan.Zero);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            PlayQuietly(session, backend, 2);
+            Assert.Equal("m1", app.PlayingItem?.Id);
+            Assert.True(app.Player!.IsPlaying);
+
+            session.Window.PressKey(KeyCode.MediaPlayPause);
+            session.PumpFrame();
+            Assert.False(app.Player.IsPlaying);
+
+            session.Window.PressKey(KeyCode.MediaStop);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.Null(app.PlayingItem);
+        }, () => backend, width: 960, height: 600);
     }
 
     [Fact]
