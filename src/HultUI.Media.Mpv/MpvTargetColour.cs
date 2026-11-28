@@ -65,18 +65,25 @@ internal sealed class MpvTargetColour
     /// Records what the target wants now. True when that differs from what mpv was last asked
     /// for: the caller must set the options, tagged with the new <see cref="Generation"/>.
     /// </summary>
-    public bool Update(bool wantsLinearLight, float peakNits, bool wideGamut = false)
+    public bool Update(bool wantsLinearLight, float peakNits, bool wideGamut = false, bool pq = false)
     {
         float peak = Math.Clamp(peakNits > 0f ? peakNits : AssumedPeakNits, MinPeakNits, MaxPeakNits);
         bool wide = wantsLinearLight && wideGamut;
-        if (wantsLinearLight == Linear && (!Linear || (peak == PeakNits && wide == WideGamut))) return false;
+        bool toPq = pq && !wantsLinearLight;
+        if (wantsLinearLight == Linear && toPq == Pq && (!Linear || (peak == PeakNits && wide == WideGamut))) return false;
 
         Linear = wantsLinearLight;
+        Pq = toPq;
         PeakNits = wantsLinearLight ? peak : 0f;
         WideGamut = wide;
         Generation++;
         return true;
     }
+
+    /// <summary>Whether mpv has been asked to write BT.2100 PQ (an Android TV's surface while an HDR
+    /// video is on screen). An encoded picture like the default's, so it carries no reference white;
+    /// never with <see cref="Linear"/>.</summary>
+    public bool Pq { get; private set; }
 
     /// <summary>Whether mpv has been asked to keep colours outside BT.709 as negative values
     /// (<c>gamut-mapping-mode=clip</c>) rather than map them inside; only ever with

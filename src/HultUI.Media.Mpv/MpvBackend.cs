@@ -17,7 +17,7 @@ namespace HultUI.Media.Mpv;
 /// thread, or as pixels into the sink's ring from a worker, whichever the surface
 /// asked for first.
 /// </summary>
-public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictureRangeSource
+public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictureRangeSource, IHdrMetadataSource
 {
     private const ulong ObservePause = 1, ObservePosition = 2, ObserveDuration = 3, ObserveEof = 4,
         ObservePausedForCache = 5, ObserveCacheState = 6;
@@ -187,6 +187,9 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
         _loaded = false;
         _eof = false;
         _pictureRange = (int)PictureRange.Unknown;
+        _hdrMetadata = null;
+        // The player forgets the rate on Open; the next file raises its own, the same or not.
+        _frameRate = _frameRateRaised = null;
         Raise(new BackendEvent.StateChanged(PlaybackState.Opening));
 
         string? target = source.Kind switch
@@ -459,7 +462,14 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
         _width = (int)(GetInt64(_mpv, "video-params/w") ?? 0);
         _height = (int)(GetInt64(_mpv, "video-params/h") ?? 0);
         _sampleAspect = GetDouble(_mpv, "video-params/par") is { } par && par > 0 ? par : 1;
+        // The container's stated rate (23.976 for most films), for a TV's display to match; none for
+        // a variable rate, or a stream that states none.
+        _frameRate = GetDouble(_mpv, "container-fps") is { } fps && fps > 0 ? fps : null;
     }
+
+    /// <summary>The video's frame rate as last raised (<see cref="BackendEvent.FrameRateChanged"/>).</summary>
+    private double? _frameRate;
+    private double? _frameRateRaised;
 
     // Written on the event thread (and by Open), read on the render thread.
     private volatile int _pictureRange = (int)PictureRange.Unknown;
@@ -482,6 +492,16 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
         string? gamma = GetString(_mpv, "video-out-params/gamma") ?? GetString(_mpv, "video-params/gamma");
         if (gamma is null && unknownWithoutVideo) return;
         var range = gamma is null ? PictureRange.Sdr : RangeOfTransfer(gamma);
+        HdrMetadata? metadata = null;
+        if (range == PictureRange.Hdr)
+        {
+            string? primaries = GetString(_mpv, "video-params/primaries");
+            metadata = MetadataOf(name => GetDouble(_mpv, "video-params/" + name), primaries);
+            if (StartupTrace.Enabled)
+                StartupTrace.Mark($"mpv HDR metadata: {metadata?.ToString() ?? "none"} (primaries {primaries}, " +
+                    $"max-luma {GetDouble(_mpv, "video-params/max-luma")}, max-cll {GetDouble(_mpv, "video-params/max-cll")})");
+        }
+        if (metadata != _hdrMetadata?.Value) _hdrMetadata = metadata is { } m ? new(m) : null;
         if ((int)range == _pictureRange) return;
         _pictureRange = (int)range;
         StartupTrace.Mark($"mpv picture: transfer {gamma ?? "(none)"}, {range}");
@@ -494,10 +514,63 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
     internal static PictureRange RangeOfTransfer(string gamma) =>
         gamma is "pq" or "hlg" ? PictureRange.Hdr : PictureRange.Sdr;
 
+    // Written on the event thread (and by Open), read on the render thread: boxed, so a reader sees
+    // one whole value.
+    private volatile System.Runtime.CompilerServices.StrongBox<HdrMetadata>? _hdrMetadata;
+
+    /// <inheritdoc />
+    HdrMetadata? IHdrMetadataSource.HdrMetadata => _hdrMetadata?.Value;
+
+    /// <summary>
+    /// An HDR video's static metadata from mpv's <c>video-params</c> (the decoder's, from the stream's
+    /// SEI or the container): the mastering display's primaries (<c>prim-red-x</c> ... <c>prim-white-y</c>)
+    /// and luminance (<c>max-luma</c>, <c>min-luma</c>), and the light levels (<c>max-cll</c>,
+    /// <c>max-fall</c>). mpv gives the primaries' coordinates only where they differ from the video's
+    /// named <paramref name="primaries"/>, so where it gives none, those named ones are the mastering
+    /// display's. Null when it states neither part.
+    /// </summary>
+    internal static HdrMetadata? MetadataOf(Func<string, double?> read, string? primaries = null)
+    {
+        float Read(string name) => read(name) is { } v && double.IsFinite(v) && v > 0 ? (float)v : 0f;
+        // 10,000 nits is PQ's ceiling, which libplacebo puts in max-luma when the video states no
+        // peak (a 4K HDR10 film through MediaCodec on a Shield: max-luma 10000, no light levels). No
+        // mastering display reaches it; passed on, the television would tone-map for one that does.
+        float peak = Read("max-luma");
+        if (peak >= PqPeakNits) peak = 0f;
+        var metadata = new HdrMetadata(
+            Read("prim-red-x"), Read("prim-red-y"), Read("prim-green-x"), Read("prim-green-y"),
+            Read("prim-blue-x"), Read("prim-blue-y"), Read("prim-white-x"), Read("prim-white-y"),
+            peak, peak > 0f ? Read("min-luma") : 0f, Read("max-cll"), Read("max-fall"));
+        if (metadata.MaxLuminance > 0f && metadata.RedX == 0f && NamedPrimaries(primaries) is { } named)
+            metadata = metadata with
+            {
+                RedX = named.Rx, RedY = named.Ry, GreenX = named.Gx, GreenY = named.Gy,
+                BlueX = named.Bx, BlueY = named.By, WhiteX = 0.3127f, WhiteY = 0.3290f,
+            };
+        return metadata.HasMasteringDisplay || metadata.HasLightLevels ? metadata : null;
+    }
+
+    private const float PqPeakNits = 10_000f;
+
+    /// <summary>The CIE 1931 xy of the primaries mpv names in <c>video-params/primaries</c>, all with
+    /// D65 white; null for one not listed.</summary>
+    private static (float Rx, float Ry, float Gx, float Gy, float Bx, float By)? NamedPrimaries(string? name) => name switch
+    {
+        "bt.2020" => (0.708f, 0.292f, 0.170f, 0.797f, 0.131f, 0.046f),
+        "display-p3" => (0.680f, 0.320f, 0.265f, 0.690f, 0.150f, 0.060f),
+        "bt.709" => (0.640f, 0.330f, 0.300f, 0.600f, 0.150f, 0.060f),
+        _ => null,
+    };
+
     private void RaiseGeometry()
     {
         if (_width > 0 && _height > 0)
             Raise(new BackendEvent.VideoGeometry(_width, _height, _sampleAspect));
+        if (_frameRate != _frameRateRaised)
+        {
+            _frameRateRaised = _frameRate;
+            Raise(new BackendEvent.FrameRateChanged(_frameRate));
+        }
     }
 
     /// <summary>
@@ -597,7 +670,7 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
         if (_render == 0) return false;
         _updateWaiting = false;
 
-        if (_colour.Update(target.WantsLinearLight, target.PeakNits, target.WideGamut)) ApplyTargetColour();
+        if (_colour.Update(target.WantsLinearLight, target.PeakNits, target.WideGamut, target.Pq)) ApplyTargetColour();
 
         // Nothing new, so the texture still holds the last frame — unless mpv has since
         // confirmed a change of target colour, in which case that frame was drawn for the old
@@ -698,11 +771,13 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
     internal static int DepthOf(uint internalFormat) => internalFormat switch
     {
         GlRgba16f or GlRgba32f => 16,
-        _ => 8,          // GL_RGBA8, and anything unrecognised: the safe assumption
+        GlRgb10A2 => 10, // an Android TV's PQ target (docs/design/TV-VIDEO.md §4)
+        _ => 8,         // GL_RGBA8, and anything unrecognised: the safe assumption
     };
 
     private const uint GlRgba16f = 0x881A;
     private const uint GlRgba32f = 0x8814;
+    private const uint GlRgb10A2 = 0x8059;
 
     private readonly MpvTargetColour _colour = new();
 
@@ -794,6 +869,14 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
             prim = "bt.709";
             trc = "linear";
             peak = _colour.PeakNits.ToString("0", System.Globalization.CultureInfo.InvariantCulture);
+        }
+        else if (_colour.Pq)
+        {
+            // BT.2100 PQ, for an Android TV's surface (docs/design/TV-VIDEO.md §4). The peak stays
+            // mpv's own, PQ's 10,000 nits for this target: an HDR10 film is written as it was
+            // mastered and the television, told its metadata, tone-maps it to its panel.
+            prim = "bt.2020";
+            trc = "pq";
         }
         // "clip" is not a clamp in mpv's GL renderer: it skips the step that pulls a colour
         // outside the target's gamut back inside by desaturating it toward grey, so BT.2020 and

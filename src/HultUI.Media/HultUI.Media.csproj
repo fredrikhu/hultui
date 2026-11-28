@@ -21,6 +21,9 @@
     <InternalsVisibleTo Include="HultUI.Media.Tests" />
     <!-- The perf suite's media rows count the player's rebuilds (VideoPlayer.Builds). -->
     <InternalsVisibleTo Include="HultUI.Samples.PerfSuite" />
+    <!-- The mpv backend raises the video's frame rate (BackendEvent.FrameRateChanged), an internal
+         event: matching a TV's display to a film (docs/design/TV-VIDEO.md §5). -->
+    <InternalsVisibleTo Include="HultUI.Media.Mpv" />
   </ItemGroup>
 
   <ItemGroup>

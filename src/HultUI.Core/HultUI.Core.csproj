@@ -32,6 +32,7 @@
     <!-- RendererSelection: the renderer choice lives here so Core.Tests can cover it, and
          the SDL3 platform is what acts on it. -->
     <InternalsVisibleTo Include="HultUI.Platform.SDL3" />
+    <InternalsVisibleTo Include="HultUI.Platform.SDL3.Tests" />
     <!-- The AT-SPI bridge reads a text's caret and selection from the version of it the tree
          carries (AccessibleTextVersion), without making the text, as the differ compares them,
          and a list's owner slot (AccessibleOwnerSlots), which its items' ids pack (VirtualItemId.ForSlot). -->

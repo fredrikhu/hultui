@@ -410,6 +410,15 @@ public sealed unsafe class EventTranslator
         // Android's Back, which SDL sends as a key while SDL_HINT_ANDROID_TRAP_BACK_BUTTON is
         // set (SDL3Window does on Android), and a keyboard's browser-back key.
         SDL_Scancode.SDL_SCANCODE_AC_BACK => KeyCode.Back,
+        // A TV remote's media keys (Android's KEYCODE_MEDIA_*) and a keyboard's.
+        SDL_Scancode.SDL_SCANCODE_MEDIA_PLAY_PAUSE => KeyCode.MediaPlayPause,
+        SDL_Scancode.SDL_SCANCODE_MEDIA_PLAY => KeyCode.MediaPlay,
+        SDL_Scancode.SDL_SCANCODE_MEDIA_PAUSE => KeyCode.MediaPause,
+        SDL_Scancode.SDL_SCANCODE_MEDIA_STOP => KeyCode.MediaStop,
+        SDL_Scancode.SDL_SCANCODE_MEDIA_NEXT_TRACK => KeyCode.MediaNext,
+        SDL_Scancode.SDL_SCANCODE_MEDIA_PREVIOUS_TRACK => KeyCode.MediaPrevious,
+        SDL_Scancode.SDL_SCANCODE_MEDIA_FAST_FORWARD => KeyCode.MediaFastForward,
+        SDL_Scancode.SDL_SCANCODE_MEDIA_REWIND => KeyCode.MediaRewind,
         _ => KeyCode.Unknown
     };
 }

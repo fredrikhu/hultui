@@ -53,6 +53,12 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     // press. The focus visual is gated on it: clicking a control focuses it too, and a ring
     // that lights up on every click reads as something being stuck rather than as an aid.
     private bool _focusFromKeyboard;
+    // D-pad focus (ArrowKeysMoveFocus): on, and where the focused element was in the window as the
+    // last frame left it, for the focus to stay there when the element leaves (KeepFocus).
+    private bool _arrowKeysMoveFocus;
+    private Rect _lastFocusBox;
+    private bool _hasLastFocusBox;
+    private bool _revealFocus;
     // Middle-button autoscroll, the way Windows does it: the press anchors an origin and
     // the pointer's distance from it becomes a speed, so the view keeps moving while the
     // button is held and nothing else has to happen. The view is captured on press rather
@@ -803,7 +809,10 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // The keyboard went away with a field still focused: the system put it away
         // (StartTextInputFor).
         if (keyboardChanged && keyboard <= 0 && _keyboardInset > 0 && FocusedElement is { TakesTypedText: true })
+        {
             _keyboardPutAway = true;
+            _textInputOpenFor = null;   // on a D-pad, OK opens it again
+        }
         _safeArea = now;
         _keyboardInset = keyboard;
         if (_root is not null)
@@ -1080,6 +1089,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         }
 
         _focusManager.FocusChanged += OnFocusChanged;
+        ArrowKeysMoveFocus = DefaultArrowKeysMoveFocus;
 
         // Platform accessibility bridge: inactive until an AT probes. On
         // Windows this wires an SDL message hook for WM_GETOBJECT; on Linux
@@ -1194,6 +1204,158 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     }
 
     /// <summary>
+    /// Whether the arrow keys move the focus, as a TV remote's D-pad does: an Up, Down, Left or Right
+    /// with no modifier that nothing used (neither <see cref="ElementEvent.Handled"/> nor
+    /// <see cref="ElementEvent.StopPropagation"/>) moves the focus to the nearest focusable element
+    /// that way, and scrolls it into view. A window that does this also keeps the focus: something
+    /// has it as soon as anything can take it, a focused element a rebuild replaces hands it to what
+    /// is nearest where it was, and the focus ring shows without a key first.
+    /// <para>On by default where a D-pad is how the device is navigated (an Android TV), off
+    /// elsewhere. Controls keep the arrows they use; on a D-pad a slider leaves Up and Down, and a
+    /// closed dropdown or date picker leaves them too, opening on Enter. docs/design/DPAD-FOCUS.md.</para>
+    /// </summary>
+    public bool ArrowKeysMoveFocus
+    {
+        get => _arrowKeysMoveFocus;
+        set
+        {
+            if (_arrowKeysMoveFocus == value) return;
+            _arrowKeysMoveFocus = value;
+            _focusManager.ArrowKeysMoveFocus = value;
+            _hasLastFocusBox = false;
+            if (value) _focusFromKeyboard = true;
+            _root?.MarkPaintDirty();
+        }
+    }
+
+    /// <summary>The platform's default for <see cref="ArrowKeysMoveFocus"/>, read as each window is
+    /// made: true on Android where the device is navigated by a D-pad and has no touch screen (a TV,
+    /// a set-top box). <c>HultUIActivity</c> sets it before the app runs.</summary>
+    internal static bool DefaultArrowKeysMoveFocus { get; set; }
+
+    /// <summary>
+    /// The platform's hook for <see cref="SetContentFrameRate"/>: the frame rate of the video a window
+    /// shows over most of itself, null when none does. On Android <c>HultUIActivity</c> sets it and
+    /// matches the display to the rate (a TV's mode, a phone's seamless rate); elsewhere nothing
+    /// listens. docs/design/TV-VIDEO.md §5.
+    /// </summary>
+    internal static Action<double?>? ContentFrameRateChanged { get; set; }
+
+    private object? _contentRateOwner;
+    private double? _contentRate;
+
+    /// <summary>The frame rate this window last asked the platform to match, for the tests.</summary>
+    internal double? ContentFrameRate => _contentRate;
+
+    /// <summary>
+    /// A video this window shows over most of itself plays at <paramref name="framesPerSecond"/>, or no
+    /// longer (null). The last video to say a rate is the one matched; a null from any other is
+    /// ignored, so a second, small player going away leaves the film's rate alone.
+    /// </summary>
+    internal void SetContentFrameRate(object owner, double? framesPerSecond)
+    {
+        if (framesPerSecond is null)
+        {
+            if (!ReferenceEquals(owner, _contentRateOwner)) return;
+            _contentRateOwner = null;
+        }
+        else _contentRateOwner = owner;
+        if (_contentRate == framesPerSecond) return;
+        _contentRate = framesPerSecond;
+        ContentFrameRateChanged?.Invoke(framesPerSecond);
+    }
+
+    /// <summary>A bare arrow nothing used, with <see cref="ArrowKeysMoveFocus"/> on: the focus to the
+    /// nearest element that way in the scope Tab walks, or to its first stop when nothing has it.</summary>
+    private void MoveFocusInDirection(FocusDirection direction)
+    {
+        if (FocusScope() is not { } scope) return;
+        var focused = _focusManager.FocusedElement;
+        var next = focused is not null && OverlayIndexOf(focused) != -2 && Encloses(scope, focused)
+            ? FocusTraversal.FindInDirection(scope, focused, direction)
+            : FocusTraversal.FindFirstReachable(scope);
+        if (next is null) return;
+        _focusManager.SetFocus(next, direction is FocusDirection.Down or FocusDirection.Right
+            ? FocusReason.Next : FocusReason.Previous);
+        _focusFromKeyboard = true;
+        RevealInScrollViews(next);
+    }
+
+    private static bool Encloses(Element outer, Element inner)
+    {
+        for (Element? e = inner; e is not null; e = e.Parent)
+            if (ReferenceEquals(e, outer)) return true;
+        return false;
+    }
+
+    /// <summary>The direction of a key down that is a bare arrow (CapsLock and NumLock aside), else null.</summary>
+    private static FocusDirection? ArrowDirection(InputEvent.KeyInput key)
+    {
+        if ((key.Modifiers & (KeyModifiers.Shift | KeyModifiers.Ctrl | KeyModifiers.Alt | KeyModifiers.Super)) != 0)
+            return null;
+        return key.KeyCode switch
+        {
+            KeyCode.Up => FocusDirection.Up,
+            KeyCode.Down => FocusDirection.Down,
+            KeyCode.Left => FocusDirection.Left,
+            KeyCode.Right => FocusDirection.Right,
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Scrolls <paramref name="element"/> into view in each scroll view it is in, innermost first, by
+    /// the least scroll: down and, where the content is wider than the view, across. Layout is
+    /// unscrolled, so the inner views' offsets, as the walk passes them, are taken off its place in
+    /// each outer view's content (as <see cref="RevealFocusAboveKeyboard"/> does).
+    /// </summary>
+    private static void RevealInScrollViews(Element element)
+    {
+        var box = element.Layout.AbsoluteBorderBox;
+        float innerX = 0, innerY = 0;
+        for (var parent = element.Parent; parent is not null; parent = parent.Parent)
+        {
+            if (parent is not ScrollViewElement view) continue;
+            var content = view.Layout.AbsoluteContentBox;
+            view.ScrollRangeIntoView(box.Y - innerY - content.Y, Math.Min(box.Height, content.Height));
+            if (view.ContentWidth > content.Width)
+                view.ScrollRangeIntoViewHorizontal(box.X - innerX - content.X, Math.Min(box.Width, content.Width));
+            innerX += view.ScrollOffsetX;
+            innerY += view.ScrollOffsetY;
+        }
+    }
+
+    /// <summary>
+    /// With <see cref="ArrowKeysMoveFocus"/> on, once a frame has laid out: notes where the focused
+    /// element is, or, with nothing focused in the window, gives the focus to what is nearest where the
+    /// last focused element was (a rebuild replaced it: a banner inserted above a button, a form
+    /// swapped for a code), or to the scope's first stop when nothing had it. Nothing is chosen while
+    /// nothing can take it (a page still loading): the next frame asks again.
+    /// </summary>
+    private void KeepFocus()
+    {
+        var focused = _focusManager.FocusedElement;
+        if (FocusScope() is not { } scope) return;
+        bool live = focused is not null && OverlayIndexOf(focused) != -2;
+        if (live && Encloses(scope, focused!))
+        {
+            _lastFocusBox = focused!.WindowBorderBox;
+            _hasLastFocusBox = true;
+            return;
+        }
+        // Behind a modal overlay that opened without taking the focus: into it, at its first stop.
+        // Otherwise the element that had it left: what is nearest where it was.
+        var next = !live && _hasLastFocusBox
+            ? FocusTraversal.FindNearest(scope, _lastFocusBox)
+            : FocusTraversal.FindFirstReachable(scope);
+        if (next is null) return;
+        _focusManager.SetFocus(next);
+        _lastFocusBox = next.WindowBorderBox;
+        _hasLastFocusBox = true;
+        RevealInScrollViews(next);
+    }
+
+    /// <summary>
     /// Gives focus to the first (or last) focusable element, for a host handing keyboard
     /// focus into an embedded tree. Returns false when nothing in the tree is focusable.
     /// </summary>
@@ -1252,7 +1414,12 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// for a field of the same kind showed nothing (Android 17 on the S25; the emulator's 15 tells
     /// SDL).</para>
     /// </summary>
-    private bool StartTextInputFor(Element? element)
+    /// <param name="element">What has the focus now, or null.</param>
+    /// <param name="start">False readies the field (its clipboard and input host) and stops any input
+    /// without asking for the keyboard: on a D-pad a field the focus reaches waits for OK
+    /// (<see cref="OpensKeyboardOnEnter"/>), as an Android TV's fields do. Asked at once, the TV's
+    /// keyboard came up over the page and took the D-pad.</param>
+    private bool StartTextInputFor(Element? element, bool start = true)
     {
         TextInputKind kind;
         bool multiline;
@@ -1287,18 +1454,44 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             _keyboardPutAway = false;
             return false;
         }
+        if (!start)
+        {
+            _keyboardPutAway = false;
+            _textInputOpenFor = null;
+            TextInputHost.StopTextInput();
+            return true;
+        }
         if (_keyboardPutAway)
         {
             _keyboardPutAway = false;
             TextInputHost.StopTextInput();
         }
         TextInputHost.StartTextInput(kind, multiline);
+        _textInputOpenFor = element;
         return true;
     }
 
     // The keyboard went away while a field had the focus (OnPlatformSafeAreaChanged): the next start
     // stops input first.
     private bool _keyboardPutAway;
+
+    // The field text input was last started for, until it is stopped or its keyboard put away: on a
+    // D-pad, OK on a focused field opens its keyboard while this is not that field, and is the field's
+    // own Enter (a submit) while it is.
+    private Element? _textInputOpenFor;
+
+    /// <summary>OK (Enter) on a D-pad, on a focused field whose keyboard is not open: it opens the
+    /// keyboard, and the field does not take it as its own Enter. docs/design/DPAD-FOCUS.md §3.</summary>
+    private bool OpensKeyboardOnEnter(InputEvent.KeyInput key)
+    {
+        if (!_arrowKeysMoveFocus || key.KeyCode is not (KeyCode.Enter or KeyCode.NumpadEnter)
+            || (key.Modifiers & (KeyModifiers.Shift | KeyModifiers.Ctrl | KeyModifiers.Alt | KeyModifiers.Super)) != 0)
+            return false;
+        if (_focusManager.FocusedElement is not { TakesTypedText: true } field
+            || ReferenceEquals(field, _textInputOpenFor) || !ReferenceEquals(KeyTarget(), field))
+            return false;
+        return StartTextInputFor(field);
+    }
 
     /// <summary>A field that already has the focus, pressed or clicked from an assistive tool: its
     /// keyboard is asked for again (<see cref="StartTextInputFor"/>).</summary>
@@ -1309,13 +1502,30 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
     private void OnFocusChanged(Element? element)
     {
+        // Where the focus is now, for KeepFocus should a rebuild take the element before the frame
+        // ends: a key moved it since the last frame noted it.
+        if (_arrowKeysMoveFocus && element is not null)
+        {
+            _lastFocusBox = element.WindowBorderBox;
+            _hasLastFocusBox = true;
+            // Scrolled into view after the next layout, however it took the focus: an app's own choice
+            // (a series page's first season) sat half under the screen's edge on a TV.
+            _revealFocus = true;
+        }
+
         // A selectable label copies through the window's clipboard too, however it took the focus:
         // Tab and a press handed it over, but Element.Focus() and a reader's focus request did not,
         // and Ctrl+C and the menu's Copy copied nothing. It takes no text input (the chain below).
         if (element is TextElement { Selectable: true } label)
             label.Clipboard = Clipboard;
 
-        if (!StartTextInputFor(element)) TextInputHost.StopTextInput();
+        // On a D-pad a field the keyboard's arrows reach waits for OK before its keyboard comes up; a
+        // press (a mouse on a TV, a finger) still asks at once.
+        if (!StartTextInputFor(element, start: !_arrowKeysMoveFocus || !_focusFromKeyboard))
+        {
+            _textInputOpenFor = null;
+            TextInputHost.StopTextInput();
+        }
 
         // Focus moved to another field while the keyboard is up (Next, a tap on a field under it):
         // the new one is scrolled above it after the next layout.
@@ -2564,6 +2774,18 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             RevealFocusAboveKeyboard();
         }
 
+        // A D-pad window keeps the focus somewhere (docs/design/DPAD-FOCUS.md §3), now that the boxes
+        // are this frame's and the builds' own focus choices have been made.
+        if (_arrowKeysMoveFocus)
+        {
+            KeepFocus();
+            if (_revealFocus)
+            {
+                _revealFocus = false;
+                if (FocusedElement is { } focused && OverlayIndexOf(focused) != -2) RevealInScrollViews(focused);
+            }
+        }
+
         // Content that scrolled under a resting pointer takes the hover in this frame, before the
         // accessibility phase and the drawing: one hit test a frame that some scroll view moved in.
         if (draws && _contentMovesFollowed != ScrollViewElement.ContentMoves && FollowScrollWithHover())
@@ -3601,6 +3823,10 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     break;
                 }
 
+                // OK on a D-pad, on a field whose keyboard is not open: the keyboard comes up, and the
+                // field does not take it as its Enter (which would submit the form).
+                if (key.IsDown && OpensKeyboardOnEnter(key)) break;
+
                 var target = KeyTarget();
                 // Ctrl/Cmd+C over a grouped label copies the whole cross-label selection
                 // (the label's own handler skips grouped copy, so there's no double).
@@ -3632,6 +3858,10 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     if (!down.StopPropagation && !down.Handled && _contextMenuElement is null
                         && IsContextMenuKey(down) && target is not null)
                         OpenContextMenu(target);
+                    // A D-pad's arrow that nothing used moves the focus (docs/design/DPAD-FOCUS.md).
+                    else if (_arrowKeysMoveFocus && !down.StopPropagation && !down.Handled
+                        && _contextMenuElement is null && ArrowDirection(key) is { } direction)
+                        MoveFocusInDirection(direction);
                 }
                 else
                 {

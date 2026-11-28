@@ -24,9 +24,10 @@ public class VideoPlayerTests
         public MediaPlayer Player { get; }
         public VideoPlayer VideoPlayer { get; }
 
-        public Fixture(bool open = true, float width = 640f)
+        public Fixture(bool open = true, float width = 640f, bool dpad = false)
         {
             Session = HeadlessSession.Create((int)width, 400);
+            Session.Window.Window.ArrowKeysMoveFocus = dpad;   // a TV remote's D-pad
             Player = new MediaPlayer(Backend);
             VideoPlayer = new VideoPlayer(Player);
             Session.Application.SetRoot(Box.New().Children(VideoPlayer.Mount().Width(width).Height(400f)));
@@ -110,6 +111,149 @@ public class VideoPlayerTests
         Assert.True(root.IsFocused);
     }
 
+    /// <summary>Enter on the focused picture does what a click on it does: a TV remote's OK is Enter,
+    /// and on a Shield it did nothing in the player.</summary>
+    [Fact]
+    public void EnterOnThePicture_TogglesPlayback()
+    {
+        using var f = new Fixture();
+        f.FocusPlayer();
+
+        f.Session.Window.PressKey(KeyCode.Enter);
+        Assert.True(f.Player.IsPlaying);
+        f.Session.Window.PressKey(KeyCode.Enter);
+        Assert.False(f.Player.IsPlaying);
+    }
+
+    /// <summary>A TV remote's play/pause, fast-forward and rewind, and a keyboard's play and pause.</summary>
+    [Fact]
+    public void TheMediaKeys_PlayPauseAndJump()
+    {
+        using var f = new Fixture();
+        f.FocusPlayer();
+        var w = f.Session.Window;
+
+        w.PressKey(KeyCode.MediaPlayPause);
+        Assert.True(f.Player.IsPlaying);
+        w.PressKey(KeyCode.MediaPlayPause);
+        Assert.False(f.Player.IsPlaying);
+        w.PressKey(KeyCode.MediaPlay);
+        Assert.True(f.Player.IsPlaying);
+        w.PressKey(KeyCode.MediaPlay);
+        Assert.True(f.Player.IsPlaying);           // play, not a toggle
+        w.PressKey(KeyCode.MediaPause);
+        Assert.False(f.Player.IsPlaying);
+
+        w.PressKey(KeyCode.MediaFastForward);
+        Assert.Equal(TimeSpan.FromSeconds(10), f.Player.Position);
+        w.PressKey(KeyCode.MediaRewind);
+        Assert.Equal(TimeSpan.Zero, f.Player.Position);
+    }
+
+    /// <summary>On a D-pad the bar's buttons could not be reached (the player took all four arrows):
+    /// Up or Down from the picture goes into the bar, the arrows walk it, Back comes back to the picture
+    /// without leaving, and the bar fading takes the focus back too.</summary>
+    [Fact]
+    public void OnADPad_UpOrDownGoesIntoTheBar_AndBackComesOut()
+    {
+        using var f = new Fixture(dpad: true);
+        f.FocusPlayer();
+        f.Player.Play();
+        f.Session.PumpFrame();
+        var w = f.Session.Window;
+        string? Focused() => w.Window.FocusedElement?.AutomationId;
+
+        w.PressKey(KeyCode.Down);
+        Assert.Equal("video-play", Focused());
+        Assert.Equal(1f, f.Player.Volume, 0.001f);   // not quieter
+
+        w.PressKey(KeyCode.Right);
+        Assert.Equal("video-jump-back", Focused());
+        Assert.Equal(TimeSpan.Zero, f.Player.Position);   // a move, not a seek
+
+        w.PressKey(KeyCode.Back);
+        Assert.Equal("video-player", Focused());
+        Assert.True(f.Player.IsPlaying);
+
+        // On the picture the arrows seek, as before.
+        w.PressKey(KeyCode.Right);
+        Assert.Equal(TimeSpan.FromSeconds(5), f.Player.Position);
+
+        // The bar fades with the focus in it: the picture has it again.
+        w.PressKey(KeyCode.Up);
+        Assert.Equal("video-play", Focused());
+        f.Elapse(f.VideoPlayer.AutoHideDelay.TotalSeconds + f.VideoPlayer.FadeDuration.TotalSeconds + 0.5);
+        Assert.Equal("video-player", Focused());
+    }
+
+    /// <summary>On a D-pad the bar is two rows at any width: in one row the scrubber sat between the
+    /// buttons and took Left and Right, so a Shield's remote walked into it and no further. The buttons
+    /// are a row of their own, and Up goes to the scrubber over them.</summary>
+    [Fact]
+    public void OnADPad_RightWalksEveryButton_AndUpReachesTheScrubber()
+    {
+        using var f = new Fixture(dpad: true, width: 960);
+        f.FocusPlayer();
+        f.Session.PumpFrame();
+        var w = f.Session.Window;
+        var walked = new List<string?>();
+        w.PressKey(KeyCode.Down);
+        f.Session.PumpFrame();
+        walked.Add(w.Window.FocusedElement?.AutomationId);
+        for (int i = 0; i < 6; i++)
+        {
+            w.PressKey(KeyCode.Right);
+            f.Session.PumpFrame();
+            if (w.Window.FocusedElement?.AutomationId is var id && id != walked[^1]) walked.Add(id);
+        }
+        Assert.Equal(["video-play", "video-jump-back", "video-jump-forward", "video-mute", "video-rate", "video-fullscreen"], walked);
+
+        w.PressKey(KeyCode.Up);
+        Assert.Equal("video-seek", w.Window.FocusedElement?.AutomationId);
+        var at = f.Player.Position;
+        w.PressKey(KeyCode.Right);   // the scrubber's: a seek
+        Assert.Equal("video-seek", w.Window.FocusedElement?.AutomationId);
+        Assert.NotEqual(at, f.Player.Position);
+        w.PressKey(KeyCode.Down);
+        Assert.StartsWith("video-", w.Window.FocusedElement?.AutomationId ?? "(nothing)");
+        Assert.NotEqual("video-seek", w.Window.FocusedElement?.AutomationId);
+    }
+
+    /// <summary>A film over the window hands the window its frame rate, for a TV's display to match
+    /// (docs/design/TV-VIDEO.md §5), and takes it back when it goes; a small video hands none.</summary>
+    [Fact]
+    public void AFilmOverTheWindow_HandsItsFrameRateToTheWindow_AndTakesItBack()
+    {
+        var backend = new FakeMediaBackend { FrameRate = 24000.0 / 1001 };
+        using var session = HeadlessSession.Create(640, 400);
+        var player = new MediaPlayer(backend);
+        var video = Video.New(player).Width(Dimension.Percent(100)).Height(Dimension.Percent(100));
+        var host = Box.New().Width(640f).Height(400f);
+        host.Children(video);
+        session.Application.SetRoot(host);
+        player.Open(Clip, autoPlay: true);
+        session.PumpFrames(3);
+        Assert.Equal(24000.0 / 1001, session.Window.Window.ContentFrameRate);
+
+        host.Children(Box.New());   // the player goes
+        session.PumpFrames(2);
+        Assert.Null(session.Window.Window.ContentFrameRate);
+        player.Dispose();
+    }
+
+    [Fact]
+    public void ASmallVideo_HandsNoFrameRate()
+    {
+        var backend = new FakeMediaBackend { FrameRate = 24000.0 / 1001 };
+        using var session = HeadlessSession.Create(640, 400);
+        var player = new MediaPlayer(backend);
+        session.Application.SetRoot(Box.New().Children(Video.New(player).Width(160f).Height(90f)));
+        player.Open(Clip, autoPlay: true);
+        session.PumpFrames(3);
+        Assert.Null(session.Window.Window.ContentFrameRate);
+        player.Dispose();
+    }
+
     [Fact]
     public void Keys_DoWhatTheDocsSay()
     {
@@ -171,7 +315,7 @@ public class VideoPlayerTests
 
         w.PressKey(KeyCode.F);
         Assert.True(fullscreen);
-        Assert.Equal("Space · k", VideoPlayer.Shortcuts.Keys("play"));
+        Assert.Equal("Space · k · Play/Pause", VideoPlayer.Shortcuts.Keys("play"));
     }
 
     [Fact]

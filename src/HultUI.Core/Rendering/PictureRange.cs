@@ -40,6 +40,11 @@ internal interface IPictureRangeSurface
     /// <summary>A GPU source with this picture was drawn in the frame now open. Render thread.</summary>
     void PictureDrawn(PictureRange range);
 
+    /// <summary>The HDR picture just drawn (<see cref="PictureDrawn"/> said
+    /// <see cref="PictureRange.Hdr"/>) states this metadata. A surface that hands the display its
+    /// own signal (an Android TV's) passes it on. Render thread.</summary>
+    void HdrMetadataDrawn(HdrMetadata metadata) { }
+
     /// <summary>
     /// True once after a frame whose pictures changed what the swapchain should be: the swapchain is
     /// rebuilt as the next frame begins, and that frame is owed though nothing in the tree changed.

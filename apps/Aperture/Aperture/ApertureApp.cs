@@ -128,6 +128,10 @@ public sealed partial class ApertureApp : Component, IDisposable
         Ui.DisplayScale = _window.DisplayScale;
         _artworkScale = ArtworkScaleFor(_window.DisplayScale);
         _window.Resized += OnWindowResize;
+        // On a D-pad the first page starts on its first card, as every page opened later does
+        // (Arrive): with no pointer, a window that opened on the title bar's account button made OK
+        // open the account menu (Window.ArrowKeysMoveFocus, docs/design/DPAD-FOCUS.md §5).
+        if (_window.ArrowKeysMoveFocus) Arrive(_history[_at]);
 
         // Global keys land on the host when nothing is focused.
         Mount().OnPassive<KeyDownEvent>(OnRootKeyDown);
@@ -141,6 +145,9 @@ public sealed partial class ApertureApp : Component, IDisposable
     /// of the same pixels, and a held Shift about 30 a second (plan 17 round 15).</summary>
     private void OnRootKeyDown(KeyDownEvent e)
     {
+        // A press the user made, before what it does (an Enter that opens a page counts as made
+        // before the page): KeyboardMovedSinceArrival.
+        _inputs++;
         HandleKeyDown(e);
         if (!KeyChord.IsModifierKey(e.Key)) Mount().MarkPaintDirty();
     }
@@ -188,6 +195,7 @@ public sealed partial class ApertureApp : Component, IDisposable
         FocusCursorCard();
         FocusPendingSearchField();
         FocusArrival();
+        FocusAfterPlay();
         LetGoOfLeftCursorCard();
         DropKeptPageIfStale();
         AskToPruneArtWaits();
@@ -426,6 +434,7 @@ public sealed partial class ApertureApp : Component, IDisposable
             active: IsLit(door),
             onClick: () => Navigate(new Route(ApertureView.Settings)))).FlexShrink(0));
         rail.AddChild(Box.New().Height(Halide.S2));
+        rail.On(_railKey ??= OnRailKey);
         return rail;
     }
 
@@ -469,6 +478,56 @@ public sealed partial class ApertureApp : Component, IDisposable
                 onClick: () => Navigate(new Route(ApertureView.Issues)),
                 badge: _railShown.News, badgeWord: "new");
         return Box.New();
+    }
+
+    private Action<KeyDownEvent>? _railKey;
+
+    /// <summary>
+    /// Gives the keyboard to the page's content where it was left: the cursor's card when it is on
+    /// screen. False when there is none (a page with no cards, a list still loading). For a D-pad's
+    /// Right from the rail, and its OK on the door of the page already open.
+    /// </summary>
+    private bool FocusPageContent()
+    {
+        if (_cursorCard.Current is not { IsHosted: true } card || !_window.IsInTree(card)) return false;
+        card.Focus();
+        RevealCursorCard(laidOut: true);
+        return true;
+    }
+
+    /// <summary>
+    /// On a D-pad (<see cref="Window.ArrowKeysMoveFocus"/>) Up and Down walk the rail's doors in its
+    /// order, as a TV app's side rail keeps the D-pad in it: the lower doors sit at the window's foot,
+    /// and the nearest thing below the last upper door was a shelf's menu button, which the window's
+    /// own rule picks. At either end the key is left to the window.
+    /// </summary>
+    private void OnRailKey(KeyDownEvent e)
+    {
+        if (!_window.ArrowKeysMoveFocus || e.Key is not (KeyCode.Up or KeyCode.Down or KeyCode.Right) || e.Handled
+            || (e.Modifiers & (KeyModifiers.Shift | KeyModifiers.Ctrl | KeyModifiers.Alt | KeyModifiers.Super)) != 0)
+            return;
+        // Right goes back to where the page was left, the cursor's card, as a TV app's side rail
+        // returns to the content: by the window's rule it went to whatever sat level with the door, a
+        // shelf's arrows from the top doors. A page with no cursor's card on screen leaves it to the rule.
+        if (e.Key == KeyCode.Right)
+        {
+            if (FocusPageContent()) e.StopPropagation = true;
+            return;
+        }
+        var doors = new List<Element>();
+        Doors(e.CurrentTarget, doors);
+        int at = doors.FindIndex(d => ReferenceEquals(d, _window.FocusedElement));
+        int next = at + (e.Key == KeyCode.Down ? 1 : -1);
+        if (at < 0 || next < 0 || next >= doors.Count) return;
+        doors[next].Focus();
+        e.StopPropagation = true;
+
+        static void Doors(Element e, List<Element> into)
+        {
+            if (e.IsFocusable && e.TabIndex >= 0 && e.AutomationId?.StartsWith("rail-", StringComparison.Ordinal) == true)
+                into.Add(e);
+            foreach (var child in e.Children) Doors(child, into);
+        }
     }
 
     private Element RailButton(string glyph, string label, string key, bool active, Action onClick, int badge = 0,
@@ -580,6 +639,17 @@ public sealed partial class ApertureApp : Component, IDisposable
                     StepChapter(-1);
                     e.Handled = true;
                     break;
+                // A remote's next and previous: through the queue while one runs, else the chapters.
+                case "player.next":
+                    if (QueueIsRunning && QueueNext is not null) PlayQueueAt(QueueIndex + 1);
+                    else StepChapter(1);
+                    e.Handled = true;
+                    break;
+                case "player.previous":
+                    if (QueueIsRunning && QueueIndex > 0) PlayQueueAt(QueueIndex - 1);
+                    else StepChapter(-1);
+                    e.Handled = true;
+                    break;
             }
             return;
         }
@@ -588,7 +658,8 @@ public sealed partial class ApertureApp : Component, IDisposable
         // The shelves take the arrows, Enter and Space — but only when the keyboard is not
         // in a text field, where they mean what they always mean, and only a key nothing else
         // took: Space on a button pressed the button and played the card under the cursor too.
-        if (!e.Handled && !e.TargetTakesText && e.Target is not TextInputElement && HandleCursorKey(e))
+        if (!e.Handled && !e.TargetTakesText && e.Target is not TextInputElement && CursorHasTheKeyboard()
+            && HandleCursorKey(e))
         {
             e.Handled = true;
             return;

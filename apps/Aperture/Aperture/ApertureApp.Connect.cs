@@ -6,7 +6,9 @@ using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
+using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Core.Styling;
 
 namespace Aperture;
@@ -210,7 +212,10 @@ public sealed partial class ApertureApp
                 : $"Signing in to {_address}…"));
         }
 
-        card.AddChild(Field("Server", "jellyfin.home", _address, v => { _address = v; }, "connect-address"));
+        // A web address and a user name: no capitals, no correction. An Android TV's keyboard
+        // capitalised the server ("Jellyfin.home").
+        card.AddChild(Field("Server", "jellyfin.home", _address, v => { _address = v; }, "connect-address",
+            kind: TextInputKind.Url));
 
         // While a code is on screen the password fields would be a second, contradictory
         // way in — the panel takes their place until the attempt is over.
@@ -226,7 +231,8 @@ public sealed partial class ApertureApp
             return page;
         }
 
-        card.AddChild(Field("Username", "", _username, v => { _username = v; }, "connect-username"));
+        card.AddChild(Field("Username", "", _username, v => { _username = v; }, "connect-username",
+            kind: TextInputKind.Username, into: _usernameField));
         card.AddChild(Field("Password", "", _password, v => { _password = v; }, "connect-password", masked: true));
 
         if (_connectFailure is { } failure)
@@ -255,10 +261,31 @@ public sealed partial class ApertureApp
         return page;
     }
 
-    private Element Field(string label, string placeholder, string value, Action<string> onChange,
-        string automationId, bool masked = false, Action? onSubmit = null)
+    /// <summary>The user name field, for Enter in the server field to go to while it is empty.</summary>
+    private readonly Ref<TextInputElement> _usernameField = new();
+
+    /// <summary>
+    /// Enter in a sign-in field: the form signs in once it has a server and a user name, and until
+    /// then the keyboard goes to the user name, the field still missing (the password may be empty).
+    /// An Android TV's keyboard has a Done on every field: on the server field it signed in with no
+    /// user name and said so, where it now goes on to the user name.
+    /// </summary>
+    private void SubmitOrNextField()
     {
-        onSubmit ??= StartSignIn;
+        if (!string.IsNullOrWhiteSpace(_address) && string.IsNullOrWhiteSpace(_username)
+            && _usernameField.Current is { } username && _window.IsInTree(username) && !username.IsFocused)
+        {
+            username.Focus();
+            return;
+        }
+        StartSignIn();
+    }
+
+    private Element Field(string label, string placeholder, string value, Action<string> onChange,
+        string automationId, bool masked = false, Action? onSubmit = null,
+        TextInputKind kind = TextInputKind.Text, Ref<TextInputElement>? into = null)
+    {
+        onSubmit ??= SubmitOrNextField;
         var column = Flex.Column(gap: 6).FlexShrink(0);
         column.AddChild(Text.New(label).FontSize(11.5f).TextColor(Halide.TextMuted));
 
@@ -269,8 +296,11 @@ public sealed partial class ApertureApp
             .TextColor(Halide.Text)
             .AutomationId(automationId);
         input.Masked = masked;
+        input.InputKind = kind;
         input.AccessibleName = label;
-        // Enter anywhere in the form submits it — the form is three fields and one verb.
+        if (into is not null) input.WithRef(into);
+        // Enter anywhere in the form submits it — the form is three fields and one verb — once it has
+        // what it needs (SubmitOrNextField).
         input.On<KeyDownEvent>(e =>
         {
             if (e.Key == KeyCode.Enter) { onSubmit(); e.Handled = true; }

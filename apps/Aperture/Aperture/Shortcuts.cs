@@ -23,8 +23,12 @@ internal static class Shortcuts
         var map = new ShortcutMap();
 
         const string player = "Player";
-        map.Add("player.stop", player, "Close the report, else stop", K(KeyCode.Escape));
-        map.Add("player.play", player, "Play or pause", K(KeyCode.Space), K(KeyCode.K));
+        // A remote's and a keyboard's media keys too: stop leaves the film, as Escape does; next and
+        // previous step the queue, or the chapters when there is no queue (VideoPlayer has the rest).
+        map.Add("player.stop", player, "Close the report, else stop", K(KeyCode.Escape), K(KeyCode.MediaStop));
+        map.Add("player.play", player, "Play or pause", K(KeyCode.Space), K(KeyCode.K), K(KeyCode.MediaPlayPause));
+        map.Add("player.next", player, "Next in the queue, else the next chapter", K(KeyCode.MediaNext));
+        map.Add("player.previous", player, "Previous in the queue, else the previous chapter", K(KeyCode.MediaPrevious));
         map.Add("player.fullscreen", player, "Full screen", K(KeyCode.F));
         map.Add("player.chapters", player, "Chapters", K(KeyCode.C));
         map.Add("player.queue", player, "Up next", K(KeyCode.Q));

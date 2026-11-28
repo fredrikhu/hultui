@@ -128,6 +128,8 @@ public sealed class FakeMediaBackend : IMediaBackend
     {
         Raise(new BackendEvent.DurationChanged(Duration));
         Raise(new BackendEvent.VideoGeometry(VideoWidth, VideoHeight, SampleAspect));
+        // The clip's stated rate, as mpv's container-fps (docs/design/TV-VIDEO.md §5).
+        Raise(new BackendEvent.FrameRateChanged(FrameRate > 0 ? FrameRate : null));
         SelectedAudio = AudioTracks.Count > 0 ? AudioTracks[0].Id : null;
         SelectedSubtitle = null;
         RaiseTracks();

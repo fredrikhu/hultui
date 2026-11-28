@@ -99,9 +99,11 @@ public partial class ApertureAppHostTests
     /// answers nothing, so no test ever reaches the network for artwork.</summary>
     private static void Host(FakeMediaLibrary library, Action<HeadlessSession, ApertureApp> body,
         Func<IMediaBackend>? backends = null, HttpMessageHandler? artwork = null,
-        int width = 1440, int height = 900, HeadlessOptions? options = null)
+        int width = 1440, int height = 900, HeadlessOptions? options = null, bool dpad = false)
     {
         using var session = HeadlessSession.Create(width, height, options: options);
+        // A TV's remote (ApertureAppHostTests.TV.cs): the arrows move the focus.
+        session.Window.Window.ArrowKeysMoveFocus = dpad;
         var settingsPath = Path.Combine(Path.GetTempPath(), "aperture-tests", Guid.NewGuid().ToString("N"), "settings.json");
         ApertureApp? app = null;
         try

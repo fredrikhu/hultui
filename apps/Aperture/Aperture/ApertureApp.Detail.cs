@@ -231,13 +231,21 @@ public sealed partial class ApertureApp
                 () => PlayQueue(queueable, QueueTitleFor(item), shuffle: true), "detail-shuffle", "shuffle"));
         }
 
+        // The verbs end here: the page's first takes the keyboard as it opens, and a toggle never does.
+        // A series with nothing left to watch has none, and it was Watched that took it, so Enter (OK
+        // on a TV remote) toggled what the page opened on. With no verb the first card takes it (a
+        // season, an episode), once the page knows it has none: a series' next episode and a season's
+        // episodes load after the page does.
+        int verbs = row.Children.Count;
+        bool verbsKnown = !ChildrenAreLoading && !(item.Kind == MediaKind.Series && _seriesNext.IsLoading);
+
         row.AddChild(ToggleButton(item.Played ? Icons.Watched : "check", item.Played ? "Watched" : "Mark watched",
             item.Played, () => ToggleWatched(item), "detail-watched"));
         row.AddChild(ToggleButton(item.IsFavorite ? Icons.FavoriteOn : Icons.Favorite,
             item.IsFavorite ? "In favourites" : "Add to favourites",
             item.IsFavorite, () => ToggleFavorite(item), "detail-favorite"));
         if (MissingSeasonsButton(item) is { } missing) row.AddChild(missing);
-        MarkArrivalFocus(row);
+        MarkArrivalFocus(row, verbs, verbsKnown);
         return row;
     }
 
@@ -279,8 +287,9 @@ public sealed partial class ApertureApp
     {
         var seasons = Children.Where(c => c.Kind == MediaKind.Season).ToList();
         if (seasons.Count > 0)
+            // With nothing to play, the first season takes the keyboard (MarkArrivalCard).
             return CardRow($"{seasons.Count} season{(seasons.Count == 1 ? "" : "s")}", seasons,
-                item => SeasonCard(item, series.Id), 130f, "row-seasons-" + series.Id);
+                item => MarkArrivalCard(SeasonCard(item, series.Id)), 130f, "row-seasons-" + series.Id);
 
         // A series whose episodes hang straight off it — a mini-series, or a library
         // whose folders were never split into seasons. Showing "no seasons" over a series
@@ -302,7 +311,7 @@ public sealed partial class ApertureApp
         var column = Flex.Column(gap: Halide.S3).AutomationId("episodes");
         column.AddChild(Ui.SectionHeading($"{episodes.Count} episode{(episodes.Count == 1 ? "" : "s")}"));
         foreach (var episode in episodes)
-            column.AddChild(EpisodeRow(episode));
+            column.AddChild(MarkArrivalCard(EpisodeRow(episode)));   // the first, with nothing to play
         return column;
     }
 

@@ -206,6 +206,14 @@ public readonly record struct KeyChord
         KeyCode.NumpadDivide => "Num /",
         KeyCode.NumpadEnter => "Num Enter",
         KeyCode.NumpadEquals => "Num =",
+        KeyCode.MediaPlayPause => "Play/Pause",
+        KeyCode.MediaPlay => "Media Play",
+        KeyCode.MediaPause => "Media Pause",
+        KeyCode.MediaStop => "Media Stop",
+        KeyCode.MediaNext => "Next Track",
+        KeyCode.MediaPrevious => "Previous Track",
+        KeyCode.MediaFastForward => "Fast Forward",
+        KeyCode.MediaRewind => "Rewind",
         _ when UsCharacter(key, shift: false) is not '\0' and var c => c.ToString(),
         _ => key.ToString(),
     };
@@ -230,6 +238,14 @@ public readonly record struct KeyChord
             case "del": return KeyCode.Delete;
             case "ins": return KeyCode.Insert;
             case "return" or "↵": return KeyCode.Enter;
+            case "play/pause": return KeyCode.MediaPlayPause;
+            case "media play": return KeyCode.MediaPlay;
+            case "media pause": return KeyCode.MediaPause;
+            case "media stop": return KeyCode.MediaStop;
+            case "next track": return KeyCode.MediaNext;
+            case "previous track": return KeyCode.MediaPrevious;
+            case "fast forward": return KeyCode.MediaFastForward;
+            case "rewind": return KeyCode.MediaRewind;
         }
         if (name.StartsWith("Num ", StringComparison.OrdinalIgnoreCase))
         {

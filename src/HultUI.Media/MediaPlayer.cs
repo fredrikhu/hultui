@@ -112,6 +112,12 @@ public sealed class MediaPlayer : IDisposable
     /// <summary>Why the state is <see cref="PlaybackState.Failed"/>; null otherwise.</summary>
     public string? Error => _error.Value;
 
+    /// <summary>The video's frame rate as its container states it, null until known or when it states
+    /// none. Read by <see cref="VideoElement"/>, which hands it to its window for a TV's display to
+    /// match (docs/design/TV-VIDEO.md §5). Plain, not reactive: the element reads it as frames
+    /// arrive. UI thread.</summary>
+    internal double? VideoFrameRate { get; private set; }
+
     public bool IsPlaying => State == PlaybackState.Playing;
     public bool HasMedia => State is not (PlaybackState.NoMedia or PlaybackState.Failed);
     public bool HasVideo => VideoSize.Width > 0 && VideoSize.Height > 0;
@@ -170,6 +176,7 @@ public sealed class MediaPlayer : IDisposable
             _position.Value = TimeSpan.Zero;
             _duration.Value = null;
             _videoSize.Value = Size.Zero;
+            VideoFrameRate = null;
             _audioTracks.Value = [];
             _subtitleTracks.Value = [];
             _selectedAudioTrack.Value = null;
@@ -314,6 +321,9 @@ public sealed class MediaPlayer : IDisposable
                     break;
                 case BackendEvent.VideoGeometry g:
                     _videoSize.Value = new Size((float)Math.Round(g.Width * g.SampleAspect), g.Height);
+                    break;
+                case BackendEvent.FrameRateChanged r:
+                    VideoFrameRate = r.FramesPerSecond;
                     break;
                 case BackendEvent.ChaptersChanged c:
                     _chapters.Value = c.Chapters;

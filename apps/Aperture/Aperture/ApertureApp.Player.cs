@@ -134,6 +134,9 @@ public sealed partial class ApertureApp
         if (countsAsDeliberate) _autoPlayedInARow = 0;
         if (!keepQueue) ClearQueue();
         DismissUpNext();
+        // What had the keyboard as the film starts (the page's Play, a card), for the film's end to
+        // hand it back to; not the next episode's start, which is the same sitting.
+        if (_playingItem is null) _focusBeforePlay.SetTarget(_window.FocusedElement);
         StopPlayback(report: true, keepSheet: true);
         _playingItem = item;
         _resumeTo = from;
@@ -258,7 +261,26 @@ public sealed partial class ApertureApp
         }
         // New seasons found while the film played are said now that it has stopped.
         if (!keepSheet) SayHeldSeasonNews();
+        if (!keepSheet) _pendingFocusAfterPlay = true;
         Rerender();
+    }
+
+    /// <summary>What had the keyboard when the film started, handed it back when the film stops
+    /// (<see cref="FocusAfterPlay"/>). Weak: a page left meanwhile holds its whole view.</summary>
+    private readonly WeakReference<Element?> _focusBeforePlay = new(null);
+    private bool _pendingFocusAfterPlay;
+
+    /// <summary>From OnAfterBuild, once the sheet is gone: the keyboard back where it was when the film
+    /// started, if that is still on screen. The picture had it and went with the sheet, and the window
+    /// gave it to what was nearest the middle of the screen: on a TV, a film's Favourite button, which
+    /// OK then toggled.</summary>
+    private void FocusAfterPlay()
+    {
+        if (!_pendingFocusAfterPlay || _playingItem is not null) return;
+        _pendingFocusAfterPlay = false;
+        if (_focusBeforePlay.TryGetTarget(out var before) && before is { IsFocusable: true } && _window.IsInTree(before))
+            before.Focus();
+        _focusBeforePlay.SetTarget(null);
     }
 
     /// <summary>
@@ -493,6 +515,10 @@ public sealed partial class ApertureApp
             {
                 StopPlayback(report: true);
                 e.Handled = true;
+                // Stopped here: on at the root, with nothing playing any more, the same Escape went
+                // Back as well, off the film's page (the desktop's Escape with the picture focused, and
+                // a TV remote's Back, which arrives as Escape when nothing takes it).
+                e.StopPropagation = true;
             }
         });
         return sheet;
@@ -508,7 +534,9 @@ public sealed partial class ApertureApp
         column.AddChild(Ui.Icon(Icons.Loading, 24f, Halide.Accent));
         column.AddChild(Text.New(_playingItem is { } item ? $"Opening {item.Name}…" : "Opening…")
             .FontSize(14f).TextColor(Halide.TextDim));
-        column.AddChild(Text.New($"{Shortcuts.Keys("player.stop")} stops").FontSize(11.5f).TextColor(Halide.TextFaint));
+        // The key that stops, said as the device has it: Esc on a keyboard, Back on a phone's or a
+        // TV's (Back stops the film where there is no Escape). The media keys bound to it go unsaid.
+        column.AddChild(Text.New(Ui.HasKeyboard ? "Esc stops" : "Back stops").FontSize(11.5f).TextColor(Halide.TextFaint));
         return column;
     }
 

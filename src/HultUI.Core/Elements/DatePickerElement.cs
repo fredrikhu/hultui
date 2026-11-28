@@ -269,8 +269,11 @@ public class DatePickerElement : Element
                 evt.StopPropagation = true;
                 return;
             }
-            // Down is a part's step while typing, so Alt+Down and F4 open it then, as on Windows.
-            if (evt.Key is KeyCode.Enter or KeyCode.Space or KeyCode.Down or KeyCode.F4)
+            // Down is a part's step while typing, so Alt+Down and F4 open it then, as on Windows. On a
+            // D-pad (ArrowKeysMoveFocus) Down passes it, as every arrow does, and Enter opens it
+            // (docs/design/DPAD-FOCUS.md §4).
+            if (evt.Key is KeyCode.Enter or KeyCode.Space or KeyCode.F4
+                || (evt.Key is KeyCode.Down && FocusManager is not { ArrowKeysMoveFocus: true }))
             {
                 OpenPopup();
                 evt.StopPropagation = true;

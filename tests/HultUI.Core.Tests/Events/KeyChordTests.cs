@@ -149,4 +149,23 @@ public sealed class KeyChordTests
         Assert.Equal(new KeyChord(KeyCode.F6, KeyModifiers.Shift), KeyChord.From(Press(KeyCode.F6, KeyModifiers.Shift)));
         Assert.Null(KeyChord.From(Press(KeyCode.CtrlLeft, KeyModifiers.Ctrl)));
     }
+
+    /// <summary>The media keys are written as their keys say, and read back: "Media Pause", not "Pause",
+    /// which is the Pause key's.</summary>
+    [Theory]
+    [InlineData(KeyCode.MediaPlayPause, "Play/Pause")]
+    [InlineData(KeyCode.MediaPlay, "Media Play")]
+    [InlineData(KeyCode.MediaPause, "Media Pause")]
+    [InlineData(KeyCode.MediaStop, "Media Stop")]
+    [InlineData(KeyCode.MediaNext, "Next Track")]
+    [InlineData(KeyCode.MediaPrevious, "Previous Track")]
+    [InlineData(KeyCode.MediaFastForward, "Fast Forward")]
+    [InlineData(KeyCode.MediaRewind, "Rewind")]
+    public void TheMediaKeys_AreWrittenByName_AndReadBack(KeyCode key, string written)
+    {
+        Assert.Equal(written, new KeyChord(key).ToString());
+        Assert.Equal(new KeyChord(key), KeyChord.Parse(written));
+        Assert.Equal(new KeyChord(key), KeyChord.Parse(key.ToString()));   // as KeyCode spells it
+        Assert.Equal(new KeyChord(KeyCode.Pause), KeyChord.Parse("Pause"));
+    }
 }

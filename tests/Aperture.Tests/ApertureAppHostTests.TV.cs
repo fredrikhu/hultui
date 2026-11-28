@@ -1,0 +1,370 @@
+using Aperture.Core;
+using Aperture.Core.Testing;
+using HultUI.Core.Elements;
+using HultUI.Core.Events;
+using HultUI.Core.Platform;
+using HultUI.Media.Testing;
+using HultUI.Headless;
+using Xunit;
+
+namespace Aperture.Tests;
+
+/// <summary>
+/// Aperture on a TV: a remote's D-pad, OK and Back, and no Tab (<c>Window.ArrowKeysMoveFocus</c>,
+/// docs/design/DPAD-FOCUS.md §5). On a Shield TV the cursor walked the posters, but the rail and the
+/// bar could not be reached, the arrows walked the posters wherever the focus was, and a fully watched
+/// series' page opened with the focus on Watched, so OK toggled it.
+/// </summary>
+public partial class ApertureAppHostTests
+{
+    private static string? FocusedId(HeadlessSession session) => session.Window.Window.FocusedElement?.AutomationId;
+
+    /// <summary>A series with nothing left to watch: its page has no Play.</summary>
+    private static FakeMediaLibrary WithAWatchedSeries()
+    {
+        var library = Library();
+        library.AddItem(new MediaItem { Id = "done", Name = "Finished Show", Kind = MediaKind.Series }, "shows");
+        library.AddSeason("done", 1, 4, watched: 4).AddSeason("done", 2, 4, watched: 4);
+        return library;
+    }
+
+    [Fact]
+    public void OnADPad_HomeStartsOnACard_AndLeftAtARowsStart_ReachesTheRail()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            session.PumpFrames(3);
+            Assert.True(app.CursorIndex >= 0, $"the cursor is nowhere; the focus is on {FocusedId(session)}");
+            int start = app.CursorIndex;
+
+            // Along the row first, which is still the cursor's.
+            session.Window.PressKey(KeyCode.Right);
+            session.PumpFrames(2);
+            Assert.Equal(start + 1, app.CursorIndex);
+            session.Window.PressKey(KeyCode.Left);
+            session.PumpFrames(2);
+            Assert.Equal(start, app.CursorIndex);
+
+            // At the row's first card the cursor lets go, and the focus goes to the rail.
+            var card = session.Window.Window.FocusedElement;
+            session.Window.PressKey(KeyCode.Left);
+            session.PumpFrames(2);
+            Assert.StartsWith("rail-", FocusedId(session) ?? "(nothing)");
+            Assert.Equal(start, app.CursorIndex);   // the cursor stays where it was
+
+            // On the rail, Down goes down the rail, not into the posters.
+            string? on = FocusedId(session);
+            var onBox = session.Window.Window.FocusedElement!.WindowBorderBox;
+            session.Window.PressKey(KeyCode.Down);
+            session.PumpFrames(2);
+            Assert.True(FocusedId(session)?.StartsWith("rail-", StringComparison.Ordinal) == true,
+                $"Down from {on} at {onBox} went to {FocusedId(session)} at {session.Window.Window.FocusedElement?.WindowBorderBox}");
+            Assert.NotEqual(on, FocusedId(session));
+            Assert.Equal(start, app.CursorIndex);
+
+            // And Right comes back to the card it left, from whichever door: not to what sits level with
+            // the door (a shelf's arrows, from the top doors).
+            session.Window.PressKey(KeyCode.Right);
+            session.PumpFrames(2);
+            Assert.Same(card, session.Window.Window.FocusedElement);
+            Assert.Equal(start, app.CursorIndex);
+        }, dpad: true);
+    }
+
+    /// <summary>On the Shield, OK on the door of the page already open left the keyboard on the door;
+    /// a door to another page hands it to that page.</summary>
+    [Fact]
+    public void OnADPad_TheOpenPagesDoor_HandsTheKeyboardToItsContent()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            session.PumpFrames(3);
+            var card = session.Window.Window.FocusedElement;
+            Assert.NotNull(card);
+
+            session.Window.FindByAutomationId("rail-home")!.Focus();
+            session.PumpFrame();
+            session.Window.PressKey(KeyCode.Enter);
+            session.PumpFrames(2);
+            Assert.Same(card, session.Window.Window.FocusedElement);
+        }, dpad: true);
+    }
+
+    /// <summary>On the Shield, nothing below the Search field could be reached: the results' cards were
+    /// made before the search registered them, so the first was no stop.</summary>
+    [Fact]
+    public void OnADPad_DownFromTheSearchField_ReachesTheResults()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Navigate(new Route(ApertureView.Search));
+            session.PumpFrames(2);
+            Assert.Equal("search-input", FocusedId(session));
+            session.Window.TypeText("So");
+            PumpUntilShown(session, "Solaris");
+            session.PumpFrames(2);
+
+            session.Window.PressKey(KeyCode.Down);
+            session.PumpFrames(2);
+            Assert.StartsWith("card-", FocusedId(session) ?? $"(nothing)");
+            Assert.Equal(0, app.CursorIndex);   // the first result, not the one under the field's middle
+
+            session.Window.PressKey(KeyCode.Up);  // the top row's edge: back to the field
+            session.PumpFrames(2);
+            Assert.Equal("search-input", FocusedId(session));
+        }, dpad: true);
+    }
+
+    [Fact]
+    public void OnADPad_UpOnTheTopShelf_LeavesTheCards()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            session.PumpFrames(3);
+            var card = session.Window.Window.FocusedElement;
+            Assert.NotNull(card);
+
+            session.Window.PressKey(KeyCode.Up);
+            session.PumpFrames(2);
+            Assert.NotSame(card, session.Window.Window.FocusedElement);
+            Assert.NotNull(session.Window.Window.FocusedElement);
+        }, dpad: true);
+    }
+
+    [Fact]
+    public void AWatchedSeriesPage_OpensOnItsFirstSeason_NotOnWatched()
+    {
+        // Not only on a TV: Enter on a page with no Play toggled Watched on the desktop as well.
+        foreach (bool dpad in new[] { true, false })
+            Host(WithAWatchedSeries(), (session, app) =>
+            {
+                PumpUntilShown(session, "Films");
+                app.Navigate(new Route(ApertureView.Detail, "done", "Finished Show"));
+                PumpUntilShown(session, "Season 2");
+                session.PumpFrames(3);
+                Assert.NotEqual("detail-watched", FocusedId(session));
+                var focused = session.Window.Window.FocusedElement;
+                Assert.Contains("Season 1", focused?.AccessibleName ?? $"(the focus is on {FocusedId(session)})");
+
+                // OK opens the season the focus is on; it toggles nothing.
+                session.Window.PressKey(KeyCode.Enter);
+                session.PumpFrames(3);
+                Assert.Equal(ApertureView.Detail, app.Current.View);
+                Assert.NotEqual("done", app.Current.Id);
+            }, dpad: dpad);
+    }
+
+    /// <summary>The series opened from its card with OK, a press and a release: the card leaves with the
+    /// page, the window puts the focus near where it was while the series loads (on the Shield, the
+    /// rail's Search), and the first season takes it from there when it comes. Counted as a user's move,
+    /// the release kept it on Search.</summary>
+    [Fact]
+    public void AWatchedSeriesOpenedWithOK_EndsOnItsFirstSeason()
+    {
+        // Nothing else on Home: the cursor starts on the series' card.
+        var library = new FakeMediaLibrary().AddLibrary("shows", "Series", LibraryKind.TvShows);
+        library.AddItem(new MediaItem { Id = "done", Name = "Finished Show", Kind = MediaKind.Series }, "shows");
+        library.AddSeason("done", 1, 4, watched: 4).AddSeason("done", 2, 4, watched: 4);
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Finished Show");
+            session.PumpFrames(3);
+            Assert.Equal("done", app.CursorItem?.Id);
+
+            session.Window.PressKey(KeyCode.Enter);
+            PumpUntilShown(session, "Season 2");
+            session.PumpFrames(3);
+            var focused = session.Window.Window.FocusedElement;
+            Assert.Contains("Season 1", focused?.AccessibleName ?? $"(the focus is on {FocusedId(session)})");
+        }, dpad: true);
+    }
+
+    /// <summary>On the desktop too: Tab from the Search field went past the results, whose first card
+    /// was made before the search registered them and so was no stop.</summary>
+    [Fact]
+    public void TabFromTheSearchField_ReachesTheFirstResult()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Navigate(new Route(ApertureView.Search));
+            session.PumpFrames(2);
+            session.Window.TypeText("So");
+            PumpUntilShown(session, "Solaris");
+            session.PumpFrames(2);
+            Assert.Equal("search-input", FocusedId(session));
+
+            session.Window.PressKey(KeyCode.Tab);
+            Assert.StartsWith("card-", FocusedId(session) ?? "(nothing)");
+        });
+    }
+
+    /// <summary>The sign-in form on a TV's keyboard: the server is a web address and the user name a user
+    /// name (the Leanback keyboard capitalised "Jellyfin.home"), and Enter (the keyboard's Done) in the
+    /// server field goes on to the user name while it is empty, where it signed in and said "Enter your
+    /// username".</summary>
+    [Fact]
+    public void TheSignInFields_AskForTheirKeyboards_AndEnterGoesOnToTheMissingField()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.SignOut(keepAccount: false);
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+
+            var address = (TextInputElement)session.Window.FindByAutomationId("connect-address")!.Element;
+            var username = (TextInputElement)session.Window.FindByAutomationId("connect-username")!.Element;
+            Assert.Equal(TextInputKind.Url, address.InputKind);
+            Assert.Equal(TextInputKind.Username, username.InputKind);
+
+            session.Window.FindByAutomationId("connect-address")!.Click();
+            session.Window.TypeText("jellyfin.example");
+            session.PumpFrame();
+            session.Window.PressKey(KeyCode.Enter);
+            session.PumpFrames(2);
+            Assert.Equal("connect-username", FocusedId(session));
+            Assert.False(Shows(session, "Enter your username"), session.Window.DumpAccessibilityTree());
+        });
+    }
+
+    /// <summary>A film watched goes to the front of Continue watching. The cursor, kept at its place,
+    /// came back from the player on the title that moved into that place, which OK would have opened
+    /// (a Shield TV); it follows what it was on.</summary>
+    [Fact]
+    public void ARowReorderedUnderTheCursor_KeepsItOnItsTitle()
+    {
+        var library = Library();
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            session.PumpFrames(3);
+            for (int i = 0; i < 4 && app.CursorItem?.Id != "e1"; i++)
+            {
+                session.Window.PressKey(KeyCode.Right);
+                session.PumpFrames(2);
+            }
+            Assert.Equal("e1", app.CursorItem?.Id);
+            int was = app.CursorIndex;
+
+            // Away to its page and back, the row reordered meanwhile, as watching it does.
+            app.Navigate(new Route(ApertureView.Detail, "m1", "Stalker"));
+            PumpUntilShown(session, "Stalker");
+            library.ResumeIds.Remove("e1");
+            library.ResumeIds.Insert(0, "e1");
+            app.Refresh();
+            app.GoBack();
+            PumpUntilShown(session, "Continue watching");
+            session.PumpFrames(3);
+
+            Assert.Equal("e1", app.CursorItem?.Id);
+            Assert.NotEqual(was, app.CursorIndex);
+        }, dpad: true);
+    }
+
+    /// <summary>A remote's and a keyboard's stop key leaves the film, as Escape does; play/pause plays
+    /// and pauses with the focus anywhere in the player.</summary>
+    [Fact]
+    public void TheMediaKeys_StopLeavesTheFilm_AndPlayPausePauses()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(162) };
+        Host(library, (session, app) =>
+        {
+            app.Play(library.Item("m1")!, TimeSpan.Zero);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            PlayQuietly(session, backend, 2);
+            session.PumpFrame();   // the backend's last queued frame, before the film stops
+            Assert.Equal("m1", app.PlayingItem?.Id);
+            Assert.True(app.Player!.IsPlaying);
+
+            session.Window.PressKey(KeyCode.MediaPlayPause);
+            session.PumpFrame();
+            Assert.False(app.Player.IsPlaying);
+
+            session.Window.PressKey(KeyCode.MediaStop);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.Null(app.PlayingItem);
+        }, () => backend, width: 960, height: 600);
+    }
+
+    /// <summary>The player's bar walked with a remote stays in the player: on a Shield, Right from the
+    /// jump-forward button went to a cast card of the film's page under the player, and Back from there
+    /// left the film. Back from the bar comes back to the picture, the film still on.</summary>
+    [Fact]
+    public void OnADPad_ThePlayersBar_StaysInThePlayer()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(162) };
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Navigate(new Route(ApertureView.Detail, "m1", "Stalker"));
+            PumpUntilShown(session, "Alexander Kaidanovsky");
+            app.Play(library.Item("m1")!, TimeSpan.Zero);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            PlayQuietly(session, backend, 1);
+
+            session.Window.PressKey(KeyCode.Down);
+            session.PumpFrame();
+            Assert.Equal("video-play", FocusedId(session));
+            for (int i = 0; i < 8; i++)
+            {
+                session.Window.PressKey(KeyCode.Right);
+                session.PumpFrame();
+                Assert.StartsWith("video-", FocusedId(session) ?? "(nothing)");
+            }
+            session.Window.PressKey(KeyCode.Back);
+            session.PumpFrame();
+            Assert.Equal("video-player", FocusedId(session));
+            Assert.Equal("m1", app.PlayingItem?.Id);
+        }, () => backend, width: 960, height: 540, dpad: true);
+    }
+
+    /// <summary>Escape (a TV remote's Back) with the picture focused stops the film and stays on its page.
+    /// The sheet stopped the film, and the same key went on to the root, which with nothing playing any
+    /// more took it as Back and left the film's page too (seen on a Shield; the desktop's Escape did it).</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void EscapeOnThePicture_StopsTheFilm_AndStaysOnItsPage(bool dpad)
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(162) };
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Navigate(new Route(ApertureView.Detail, "m1", "Stalker"));
+            PumpUntilShown(session, "Alexander Kaidanovsky");
+            app.Play(library.Item("m1")!, TimeSpan.Zero);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            PlayQuietly(session, backend, 1);
+            session.PumpFrame();   // the backend's last queued frame, before the film stops
+            session.Window.FindByAutomationId("video-player")!.Focus();
+
+            session.Window.PressKey(dpad ? KeyCode.Back : KeyCode.Escape);
+            for (int i = 0; i < 3; i++) session.PumpFrame();
+            Assert.Null(app.PlayingItem);
+            Assert.Equal((ApertureView.Detail, "m1"), (app.Current.View, app.Current.Id));
+            // And the keyboard is back on Play, where the film started from: the window gave it to what
+            // was nearest the middle of the screen, on the Shield the Favourite button.
+            Assert.Equal("detail-play", FocusedId(session));
+        }, () => backend, width: 960, height: 540, dpad: dpad);
+    }
+
+    [Fact]
+    public void AFilmPage_StillOpensOnPlay_OnADPad()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Navigate(new Route(ApertureView.Detail, "m1", "Stalker"));
+            PumpUntilShown(session, "Alexander Kaidanovsky");
+            session.PumpFrames(3);
+            Assert.Equal("detail-play", FocusedId(session));
+        }, dpad: true);
+    }
+}

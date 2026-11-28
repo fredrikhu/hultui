@@ -24,6 +24,11 @@ public abstract record BackendEvent
     /// </summary>
     public sealed record VideoGeometry(int Width, int Height, double SampleAspect = 1.0) : BackendEvent;
 
+    /// <summary>The video's frame rate as the container states it, null when it states none (a
+    /// variable rate, a stream without one). For matching the display to a film on a TV
+    /// (docs/design/TV-VIDEO.md §5): internal, the backends of this repository raise it.</summary>
+    internal sealed record FrameRateChanged(double? FramesPerSecond) : BackendEvent;
+
     /// <summary>The selectable tracks, and which of each kind is active (null: none).</summary>
     public sealed record TracksChanged(
         IReadOnlyList<MediaTrack> Audio, IReadOnlyList<MediaTrack> Subtitles,

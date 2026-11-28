@@ -206,6 +206,9 @@ public class SliderElement : Element, IRangeValueElement
     private void HandleKeyDown(KeyDownEvent e)
     {
         if (!_focused) return;
+        // On a D-pad (ArrowKeysMoveFocus) Up and Down leave the slider, which is horizontal, as
+        // Android's SeekBar does: the focus moves on. docs/design/DPAD-FOCUS.md §4.
+        if (e.Key is KeyCode.Up or KeyCode.Down && FocusManager is { ArrowKeysMoveFocus: true }) return;
         _follow?.Flush();
         switch (e.Key)
         {
@@ -213,7 +216,11 @@ public class SliderElement : Element, IRangeValueElement
             case KeyCode.Right or KeyCode.Up: ApplyUserValue(_value + _step); break;
             case KeyCode.Home: ApplyUserValue(_min); break;
             case KeyCode.End: ApplyUserValue(_max); break;
+            default: return;
         }
+        // Used: nothing else acts on it, and on a D-pad the focus stays (it used to be left unmarked,
+        // so the player's own check for a slider target was what kept its seek off it).
+        e.Handled = true;
     }
 
     public static SliderElement New(double value = 0, double min = 0, double max = 100, [OriginFile] string? file = null, [OriginLine] int line = 0) =>

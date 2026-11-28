@@ -28,6 +28,10 @@ public sealed partial class ApertureApp
         public string CursorKey = "";
         public int CursorIndex = -1;
 
+        /// <summary>What the cursor was on when the page was left: on the way back the cursor follows
+        /// it should the list have reordered meanwhile (a film watched to the front of its row).</summary>
+        public object? CursorEntry;
+
         /// <summary>How far a library's grid was scrolled when the page was left, or -1: another
         /// page, or a grid not on screen then (still loading). The wheel's scroll counts as the
         /// keys' does: a page opened with a click is returned to where it was clicked.</summary>
@@ -60,7 +64,13 @@ public sealed partial class ApertureApp
     /// repeats.</summary>
     internal void Navigate(Route route)
     {
-        if (Current == route) return;
+        // The page already open: nothing to open. On a D-pad its door on the rail hands the keyboard
+        // to the page's content, as a door to another page does by opening it; it stayed on the door.
+        if (Current == route)
+        {
+            if (_window.ArrowKeysMoveFocus) FocusPageContent();
+            return;
+        }
         Leave();
         if (_at < _history.Count - 1) _history.RemoveRange(_at + 1, _history.Count - _at - 1);
         var visit = new Visit(route);
@@ -166,6 +176,7 @@ public sealed partial class ApertureApp
         var visit = _history[_at];
         visit.CursorKey = _cursorKey;
         visit.CursorIndex = _cursorKey.Length > 0 ? _cursorIndex : -1;
+        visit.CursorEntry = _cursorKey.Length > 0 ? CursorEntry : null;
         visit.GridScrollY = visit.Route.View == ApertureView.Library && _gridList.Current is { IsHosted: true } grid
             ? grid.ScrollOffsetY : -1;
         KeepPage(visit);
@@ -191,6 +202,7 @@ public sealed partial class ApertureApp
     {
         _cursorKey = visit.CursorKey;
         _cursorIndex = visit.CursorIndex;
+        _arrivedUnder = visit.CursorEntry;
         _cursorToEnd = false;
         _gridArrivalScrollY = visit.GridScrollY;
         // The ref still holds a card of the page left; the build sets it again.
@@ -204,13 +216,25 @@ public sealed partial class ApertureApp
         if (visit.Route.View == ApertureView.Search && _cursorIndex < 0) _pendingSearchFocus = true;
         _pendingFirstCard = _cursorIndex < 0 && !_pendingArrivalFocus && visit.Route.View != ApertureView.Search;
         _firstCardFocus = false;
+        _cursorFromArrival = false;
         _arrivalFocusHeld.SetTarget(_pendingArrivalFocus || _pendingFirstCard ? _window.FocusedElement : null);
+        _arrivalInputs = _inputs;
     }
 
+    /// <summary>Key and pointer presses that reached the app's root, and how many there had been when
+    /// the page was opened. Only presses: a key's release (the remote's OK lifted after it opened the
+    /// page) moves nothing, and counted, it kept the focus where the window had put it while the page
+    /// loaded (a Shield TV: the rail's Search, not the series' first season).</summary>
+    private int _inputs, _arrivalInputs;
+
     /// <summary>Whether the keyboard went somewhere since the page was opened: an element other than
-    /// the one that had it then, still in the window. It stays there.</summary>
+    /// the one that had it then, still in the window. It stays there. On a D-pad
+    /// (<see cref="Window.ArrowKeysMoveFocus"/>) only where the user moved it: the window gives the
+    /// focus to something while the page is still loading, and the page's verb or first card takes
+    /// it from that when they come.</summary>
     private bool KeyboardMovedSinceArrival()
     {
+        if (_window.ArrowKeysMoveFocus && _inputs == _arrivalInputs) return false;
         _arrivalFocusHeld.TryGetTarget(out var before);
         return _window.FocusedElement is { } held && !ReferenceEquals(held, before) && _window.IsInTree(held);
     }
@@ -232,15 +256,37 @@ public sealed partial class ApertureApp
     private readonly WeakReference<Element?> _arrivalFocusHeld = new(null);
 
     /// <summary>Called by a page that leads with verbs, on its row of them: the first that takes
-    /// the keyboard is the one handed it on arrival.</summary>
-    private void MarkArrivalFocus(BoxElement row)
+    /// the keyboard is the one handed it on arrival. Only the first <paramref name="verbs"/> of the
+    /// row's children are verbs (the rest are toggles); with none among them, once
+    /// <paramref name="known"/> says the page knows it has none, the page's first card takes it
+    /// instead (<see cref="MarkArrivalCard"/>): a season, an episode.</summary>
+    private void MarkArrivalFocus(BoxElement row, int verbs = int.MaxValue, bool known = true)
     {
-        foreach (var child in row.Children)
-            if (child is BoxElement { IsFocusable: true } first)
+        _arrivalToFirstCard = false;
+        var children = row.Children;
+        for (int i = 0; i < Math.Min(verbs, children.Count); i++)
+            if (children[i] is BoxElement { IsFocusable: true } first)
             {
                 first.WithRef(_arrivalFocus);
                 return;
             }
+        _arrivalToFirstCard = known && _pendingArrivalFocus;
+    }
+
+    /// <summary>A page whose verbs are known to be none: its first card is handed the keyboard on
+    /// arrival in their place (<see cref="MarkArrivalCard"/>).</summary>
+    private bool _arrivalToFirstCard;
+
+    /// <summary>Called with each card a page builds after its verbs (a series' seasons, a season's
+    /// episodes, in order): with no verb to take the keyboard, the first is handed it.</summary>
+    private T MarkArrivalCard<T>(T card) where T : Element
+    {
+        if (_arrivalToFirstCard && card is BoxElement { IsFocusable: true } box)
+        {
+            _arrivalToFirstCard = false;
+            box.WithRef(_arrivalFocus);
+        }
+        return card;
     }
 
     /// <summary>From OnAfterBuild: the page's first verb, once it is on screen. A page still
@@ -274,6 +320,7 @@ public sealed partial class ApertureApp
     /// </summary>
     private void OnRootPointerDown(PointerDownEvent e)
     {
+        _inputs++;   // KeyboardMovedSinceArrival
         if (e.Button is not (PointerEvent.BackButton or PointerEvent.ForwardButton)) return;
         if (_stage != ApertureStage.Browsing || _playingItem is not null) return;
         if (e.Button == PointerEvent.BackButton ? GoBack() : GoForward())

@@ -51,7 +51,8 @@ public sealed class VideoPlayer : Component
     /// Whether the player is narrower than its one-row bar (<see cref="NarrowWidth"/>): a phone held
     /// upright, 360 to 412 DIP. The bar is then two rows, the scrubber across the whole width over the
     /// buttons, and has no volume slider (a phone has its volume keys); in one row at 412 DIP the
-    /// buttons lay over the time and the scrubber had no room (seen on the emulator).
+    /// buttons lay over the time and the scrubber had no room (seen on the emulator). On a D-pad too
+    /// (a TV, whose remote has the volume keys), so the remote can walk the buttons.
     /// </summary>
     private readonly Signal<bool> _narrow = new(false);
 
@@ -86,6 +87,8 @@ public sealed class VideoPlayer : Component
     private readonly Ref<TextElement> _elapsed = new();
     /// <summary>The transport bar, whose opacity a fade writes in place.</summary>
     private readonly Ref<BoxElement> _bar = new();
+    /// <summary>The bar's play/pause button, where a D-pad's Up or Down from the picture goes.</summary>
+    private readonly Ref<BoxElement> _playButton = new();
     private TweenHandle _hideTimer;
     private TweenHandle _fade;
     private Effect? _playingWatch;
@@ -119,11 +122,16 @@ public sealed class VideoPlayer : Component
         static KeyChord K(KeyCode key) => new(key);
         var map = new ShortcutMap();
         const string group = "Player";
-        map.Add("play", group, "Play or pause", K(KeyCode.Space), K(KeyCode.K));
+        // The media keys: a TV remote's play/pause, fast-forward and rewind, a keyboard's play and
+        // pause (docs/design/TV-VIDEO.md §2). Stop, next and previous are the app's to bind: what
+        // they mean (leave the film, the next in a queue) is not the player's to know.
+        map.Add("play", group, "Play or pause", K(KeyCode.Space), K(KeyCode.K), K(KeyCode.MediaPlayPause));
+        map.Add("playOnly", group, "Play", K(KeyCode.MediaPlay));
+        map.Add("pauseOnly", group, "Pause", K(KeyCode.MediaPause));
         map.Add("back", group, "Back a little", K(KeyCode.Left));
         map.Add("forward", group, "Forward a little", K(KeyCode.Right));
-        map.Add("jumpBack", group, "Jump back", K(KeyCode.J));
-        map.Add("jumpForward", group, "Jump forward", K(KeyCode.L));
+        map.Add("jumpBack", group, "Jump back", K(KeyCode.J), K(KeyCode.MediaRewind));
+        map.Add("jumpForward", group, "Jump forward", K(KeyCode.L), K(KeyCode.MediaFastForward));
         map.Add("louder", group, "Louder", K(KeyCode.Up));
         map.Add("quieter", group, "Quieter", K(KeyCode.Down));
         map.Add("mute", group, "Mute", K(KeyCode.M));
@@ -269,6 +277,9 @@ public sealed class VideoPlayer : Component
     private void FadeOut()
     {
         if (!Player.IsPlaying) return;
+        // On a D-pad a control of the bar that has the focus gives it back to the picture as the bar
+        // goes: no one is left on a button no one can see, and OK plays and pauses again.
+        if (DPad && FocusInBar()) _root.Current?.Focus();
         _fade.Cancel();
         _fade = Animate.Value(_barOpacity, 0f, SetBarOpacity)
             .Duration((float)FadeDuration.TotalSeconds)
@@ -401,10 +412,15 @@ public sealed class VideoPlayer : Component
         root.Role = AccessibilityRole.Group;
         root.On<PointerMoveEvent>(_ => Reveal());
         // Narrow (a phone held upright): the bar in two rows, from the width the player was laid
-        // out at. A change of it rebuilds the player once.
+        // out at. A change of it rebuilds the player once. On a D-pad too, at any width: in one row
+        // the scrubber sat between the buttons and took Left and Right, so the remote could not walk
+        // past it to the volume, the speed or the subtitles (a Shield TV). In two rows Up and Down go
+        // between the scrubber and the buttons.
         root.OnLayoutChanged(e =>
         {
-            if (e.SizeChanged && (e.Box.Width < NarrowWidth) != _narrow.Value) _narrow.Value = e.Box.Width < NarrowWidth;
+            if (!e.SizeChanged) return;
+            bool twoRows = e.Box.Width < NarrowWidth || DPad;
+            if (twoRows != _narrow.Value) _narrow.Value = twoRows;
         });
         root.WithRef(_root);
 
@@ -664,7 +680,7 @@ public sealed class VideoPlayer : Component
 
         items.Add(IconButton(theme, playing ? "Pause" : "Play", "video-play",
             playing ? PauseGlyph(theme.Foreground) : Phosphor.Draw("play", 16f, theme.Foreground),
-            () => player.TogglePlay()));
+            () => player.TogglePlay()).WithRef(_playButton));
 
         string jump = $"{JumpStep.TotalSeconds:0} s";
         items.Add(IconButton(theme, $"Back {jump}", "video-jump-back", ChevronsGlyph(theme.Foreground, back: true),
@@ -774,18 +790,89 @@ public sealed class VideoPlayer : Component
 
     // ──── Keys ────
 
+    /// <summary>Whether the window's arrows move the focus, as a TV remote's D-pad
+    /// (<c>Window.ArrowKeysMoveFocus</c>).</summary>
+    private bool DPad => _root.Current?.FocusManager is { ArrowKeysMoveFocus: true };
+
+    /// <summary>Whether a control of the bar has the focus.</summary>
+    private bool FocusInBar()
+    {
+        if (_bar.Current is not { } bar || bar.FocusManager?.FocusedElement is not { } focused) return false;
+        for (Element? e = focused; e is not null; e = e.Parent)
+            if (ReferenceEquals(e, bar)) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// On a D-pad (docs/design/TV-VIDEO.md §2b, the user's choice): from the picture, Up or Down shows
+    /// the bar and puts the focus on its play button, where they changed the volume and no button
+    /// could be reached; in the bar, the arrows walk its controls (the window's rule; a slider keeps
+    /// Left and Right), and Back gives the focus back to the picture before it would leave the film.
+    /// True when the key was taken.
+    /// </summary>
+    private bool OnDPadKey(KeyDownEvent e)
+    {
+        if ((e.Modifiers & (KeyModifiers.Shift | KeyModifiers.Ctrl | KeyModifiers.Alt | KeyModifiers.Super)) != 0) return false;
+        if (ReferenceEquals(e.Target, _root.Current))
+        {
+            if (e.Key is not (KeyCode.Up or KeyCode.Down) || _playButton.Current is not { } play) return false;
+            Show();
+            play.Focus();
+            ScheduleHide();
+            return true;
+        }
+        if (!FocusInBar()) return false;
+        if (e.Key is KeyCode.Up or KeyCode.Down or KeyCode.Left or KeyCode.Right)
+        {
+            Reveal();   // the bar stays while it is walked; the window moves the focus
+            return false;
+        }
+        if (e.Key == KeyCode.Back && _root.Current is { } picture)
+        {
+            picture.Focus();
+            Reveal();
+            return true;
+        }
+        return false;
+    }
+
     private void OnKey(KeyDownEvent e)
     {
         if (e.Handled) return;
+        if (DPad)
+        {
+            if (OnDPadKey(e))
+            {
+                e.Handled = true;
+                e.StopPropagation = true;
+                return;
+            }
+            // The bar's arrows are the window's to move the focus with, not the player's to seek with.
+            if (FocusInBar() && e.Key is KeyCode.Up or KeyCode.Down or KeyCode.Left or KeyCode.Right) return;
+        }
         // A focused slider owns its own arrows; the player only gets what it lets through.
         if (e.Target is SliderElement && e.Key is KeyCode.Left or KeyCode.Right or KeyCode.Up or KeyCode.Down
                 or KeyCode.Home or KeyCode.End)
             return;
 
         var player = Player;
+        // Enter on the picture itself is its click: play or pause, the controls shown. A TV remote's
+        // OK is Enter, and with the picture focused, as it is when the player opens, it did nothing
+        // (a Shield TV). A button of the bar that has the focus keeps Enter for itself.
+        if (e.Key is KeyCode.Enter or KeyCode.NumpadEnter && ReferenceEquals(e.Target, _root.Current)
+            && (e.Modifiers & (KeyModifiers.Shift | KeyModifiers.Ctrl | KeyModifiers.Alt | KeyModifiers.Super)) == 0)
+        {
+            player.TogglePlay();
+            e.Handled = true;
+            e.StopPropagation = true;
+            Reveal();
+            return;
+        }
         switch (Shortcuts.Find(e)?.Id)
         {
             case "play": player.TogglePlay(); break;
+            case "playOnly": player.Play(); break;
+            case "pauseOnly": player.Pause(); break;
             case "back": player.SeekBy(-SeekStep); break;
             case "forward": player.SeekBy(SeekStep); break;
             case "jumpBack": player.SeekBy(-JumpStep); break;
@@ -845,6 +932,8 @@ public sealed class VideoPlayer : Component
     {
         button.Role = AccessibilityRole.Button;
         button.IsFocusable = true;
+        // The ring while the keyboard has it: Tab, and a TV remote's D-pad walking the bar.
+        button.ShowsFocusVisual = true;
         button.OnPointerEnter(e => { ((BoxElement)e.CurrentTarget).Background(theme.ButtonHover); e.CurrentTarget.MarkPaintDirty(); });
         button.OnPointerLeave(e => { ((BoxElement)e.CurrentTarget).Background(new Color(0, 0, 0, 0)); e.CurrentTarget.MarkPaintDirty(); });
         if (action is null) return;

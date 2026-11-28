@@ -78,7 +78,12 @@ public sealed partial class ApertureApp
     {
         _cursorListSet = true;
         _cursorShelves.Clear();   // a view of shelves adds them after (AddCursorShelf)
+        // What the cursor was on: in this list as last registered, or, on a page just returned to (whose
+        // list is not the one registered last), as the visit kept it.
+        object? under = _cursorKey != key ? null : _cursorItemsKey == key ? CursorEntry : _arrivedUnder;
+        _arrivedUnder = null;
         _cursorItems = items;
+        _cursorItemsKey = key;
         _cursorPerRow = Math.Max(1, perRow);
         _cursorTotal = Math.Max(total, items.Count);
         if (_cursorKey == key)
@@ -90,13 +95,30 @@ public sealed partial class ApertureApp
                 _cursorIndex = items.Count - 1;
                 if (items.Count >= _cursorTotal) _cursorToEnd = false;
             }
-            // The list can shrink under the cursor as pages load or a filter changes. An empty
-            // one is still loading (a library opened again, its place kept from the last visit)
-            // or filtered to nothing: the place is kept for the cards to come.
-            else if (_cursorIndex >= items.Count && items.Count > 0) _cursorIndex = items.Count - 1;
+            else
+            {
+                // The list can shrink under the cursor as pages load or a filter changes. An empty
+                // one is still loading (a library opened again, its place kept from the last visit)
+                // or filtered to nothing: the place is kept for the cards to come.
+                if (_cursorIndex >= items.Count && items.Count > 0) _cursorIndex = items.Count - 1;
+                // The list reordered under the cursor: it follows what it was on. A film just watched
+                // goes to the front of Continue watching, and the cursor, kept at its place, came back
+                // from the player on the title that moved into it, which OK would have opened (a Shield
+                // TV). Not on the way to the end above, which moves it on with each page on purpose.
+                if (under is not null && _cursorIndex >= 0 && _cursorIndex < items.Count
+                    && !SameEntry(items[_cursorIndex], under) && NearestIndexOf(items, under, _cursorIndex) is int moved)
+                {
+                    _cursorIndex = moved;
+                    _pendingCursorFocus = true;
+                }
+            }
         }
         else
         {
+            // A list that changed under a cursor the arrival put on its first card, which no key has
+            // moved since: the new list starts there too. Home's list is named for its rows and
+            // grows as they load, and at start the cursor went back to nowhere with the second row.
+            if (_cursorFromArrival && _cursorIndex >= 0) _pendingFirstCard = true;
             _cursorKey = key;
             _cursorIndex = -1;
             _cursorToEnd = false;
@@ -112,8 +134,42 @@ public sealed partial class ApertureApp
                 _cursorIndex = Math.Clamp(firstCard, 0, items.Count - 1);
                 _pendingCursorFocus = true;
                 _firstCardFocus = true;
+                _cursorFromArrival = true;
             }
         }
+    }
+
+    /// <summary>The cursor is where the arrival put it, on the page's first card, and no key has
+    /// moved it since (<see cref="SetCursorList"/>).</summary>
+    private bool _cursorFromArrival;
+
+    /// <summary>The key <see cref="_cursorItems"/> was registered under; on a page just returned to,
+    /// <see cref="_cursorKey"/> is the page's while the items are still the last page's.</summary>
+    private string _cursorItemsKey = "";
+
+    /// <summary>What the cursor was on when the page returned to was left (<see cref="Arrive"/>).</summary>
+    private object? _arrivedUnder;
+
+    /// <summary>Whether two entries of a walk are the same title: a library item by its id, a title
+    /// the request server knows by its kind and TMDB id, anything else as equal. An item's other fields
+    /// (its resume point, its tick) change as it is watched.</summary>
+    private static bool SameEntry(object a, object b) => (a, b) switch
+    {
+        (MediaItem x, MediaItem y) => x.Id == y.Id,
+        (DiscoverItem x, DiscoverItem y) => x.Key == y.Key,
+        _ => Equals(a, b),
+    };
+
+    /// <summary>The place of <paramref name="entry"/> in <paramref name="items"/> nearest
+    /// <paramref name="near"/> (Home shows a title on two shelves at times), or null.</summary>
+    private static int? NearestIndexOf(IReadOnlyList<object> items, object entry, int near)
+    {
+        for (int d = 1; d < items.Count; d++)
+        {
+            if (near - d >= 0 && SameEntry(items[near - d], entry)) return near - d;
+            if (near + d < items.Count && SameEntry(items[near + d], entry)) return near + d;
+        }
+        return null;
     }
 
     /// <summary>Set on arriving at a page with no cursor (<see cref="Arrive"/>): the next list the
@@ -222,17 +278,39 @@ public sealed partial class ApertureApp
     {
         var mark = MarkOf(index);
         card.IsFocusable = true;
-        card.TabIndex = mark == CardMark.None ? -1 : 0;
+        // On a D-pad (Window.ArrowKeysMoveFocus) every card is a stop the window's arrows can reach, and
+        // the keyboard reaching one puts the cursor on it (OnWalkCardFocused). With only the cursor's card
+        // a stop, the window's moves from anything that is not a card (the rail, a shelf's arrows) went
+        // past whole shelves to the one card, or to the arrows, which there is no Tab to skip.
+        bool dpad = _window.ArrowKeysMoveFocus;
+        card.TabIndex = mark == CardMark.None && !dpad ? -1 : 0;
         if (mark == CardMark.Cursor)
         {
             card.WithRef(_cursorCard);
             _cursorCardIndex = index;
         }
-        else if (mark == CardMark.Stop)
+        else if (mark == CardMark.Stop && !dpad)
         {
             card.On(_firstCardFocused ??= OnFirstCardFocused);
         }
+        if (dpad) card.On<FocusEvent>(e => OnWalkCardFocused(e, index));
         return card;
+    }
+
+    /// <summary>On a D-pad: a card of the walk took the keyboard (the window's arrows, its own choice),
+    /// and the cursor goes to it, ringed, as a cursor key would have put it there. Kept cards carry the
+    /// place they were made for (HomeCardState), so the place is the card's.</summary>
+    private void OnWalkCardFocused(FocusEvent e, int index)
+    {
+        if (e.CurrentTarget is not BoxElement card || index >= _cursorItems.Count) return;
+        if (_cursorIndex == index && ReferenceEquals(_cursorCard.Current, card)) return;
+        if (_cursorCard.Current is { } old && !ReferenceEquals(old, card)) old.Outline = default;
+        _cursorIndex = index;
+        _cursorToEnd = false;
+        _cursorFromArrival = false;
+        card.Outline = CursorRing;
+        _cursorCard.Current = card;
+        _cursorCardIndex = index;
     }
 
     private Action<FocusEvent>? _firstCardFocused;
@@ -241,7 +319,9 @@ public sealed partial class ApertureApp
     /// ringed, so the keys that follow act on the card that has the keyboard.</summary>
     private void OnFirstCardFocused(FocusEvent e)
     {
-        if (e.Reason is not (FocusReason.Next or FocusReason.Previous)) return;
+        // On a D-pad the window's own choice too (Window.ArrowKeysMoveFocus keeps the focus somewhere):
+        // the card that has the keyboard is the cursor's.
+        if (e.Reason is not (FocusReason.Next or FocusReason.Previous) && !_window.ArrowKeysMoveFocus) return;
         if (_cursorIndex >= 0 || _cursorItems.Count == 0 || e.CurrentTarget is not BoxElement card) return;
         _cursorIndex = 0;
         _cursorToEnd = false;
@@ -260,6 +340,7 @@ public sealed partial class ApertureApp
     {
         if (_cursorItems.Count == 0) return false;
         _cursorToEnd = false;
+        _cursorFromArrival = false;
         int next = _cursorIndex < 0
             ? (delta > 0 ? 0 : _cursorItems.Count - 1)
             : Math.Clamp(_cursorIndex + delta, 0, _cursorItems.Count - 1);
@@ -275,6 +356,7 @@ public sealed partial class ApertureApp
     {
         if (_cursorItems.Count == 0) return false;
         _cursorToEnd = false;
+        _cursorFromArrival = false;
         int was = _cursorIndex;
         _cursorIndex = Math.Clamp(index, 0, _cursorItems.Count - 1);
         _pendingCursorFocus = true;
@@ -289,6 +371,7 @@ public sealed partial class ApertureApp
     private bool MoveCursorToEnd()
     {
         if (_cursorItems.Count == 0) return false;
+        _cursorFromArrival = false;
         int was = _cursorIndex;
         _cursorIndex = _cursorItems.Count - 1;
         _cursorToEnd = _cursorTotal > _cursorItems.Count;   // before the build, which asks for the rest
@@ -359,7 +442,7 @@ public sealed partial class ApertureApp
         if (left is BoxElement l)
         {
             l.Outline = default;
-            l.TabIndex = -1;
+            l.TabIndex = _window.ArrowKeysMoveFocus ? 0 : -1;   // on a D-pad every card is a stop (TrackCursor)
         }
         if (reached is BoxElement r)
         {
@@ -386,6 +469,11 @@ public sealed partial class ApertureApp
         // Bare keys only (Shift+F10 aside): Alt+← is Back, and Ctrl or Alt with an arrow walked
         // the cards as if it were not held.
         if ((e.Modifiers & (KeyModifiers.Ctrl | KeyModifiers.Alt | KeyModifiers.Super)) != 0) return false;
+
+        // On a D-pad (Window.ArrowKeysMoveFocus) the cursor lets go at its row's ends and at the top and
+        // bottom, and the window moves the focus on: Left to the rail, Up to the bar. A row does not
+        // run on into the next one there. docs/design/DPAD-FOCUS.md §5.
+        if (_window.ArrowKeysMoveFocus && AtCursorEdge(e.Key)) return false;
 
         switch (e.Key)
         {
@@ -420,6 +508,50 @@ public sealed partial class ApertureApp
         }
         return false;
     }
+
+    /// <summary>
+    /// Whether an arrow would take the cursor past the edge of what it walks: Left at a row's first
+    /// card (a shelf's, a grid's first column, any card of a one-across list), Right at a row's last,
+    /// Up on the top shelf or row, Down on the bottom one (of the whole list, not only what has
+    /// loaded). Never while the cursor is nowhere: the first press starts it.
+    /// </summary>
+    private bool AtCursorEdge(KeyCode key)
+    {
+        if (_cursorIndex < 0 || key is not (KeyCode.Left or KeyCode.Right or KeyCode.Up or KeyCode.Down)) return false;
+        if (_cursorShelves.Count > 0)
+        {
+            int shelf = -1;
+            for (int i = 0; i < _cursorShelves.Count; i++)
+            {
+                var s = _cursorShelves[i];
+                if (_cursorIndex >= s.Start && _cursorIndex < s.Start + s.Count) { shelf = i; break; }
+            }
+            if (shelf < 0) return false;
+            var here = _cursorShelves[shelf];
+            return key switch
+            {
+                KeyCode.Left => _cursorIndex == here.Start,
+                KeyCode.Right => _cursorIndex == here.Start + here.Count - 1,
+                KeyCode.Up => shelf == 0,
+                _ => shelf == _cursorShelves.Count - 1,
+            };
+        }
+        int column = _cursorIndex % _cursorPerRow, row = _cursorIndex / _cursorPerRow;
+        return key switch
+        {
+            KeyCode.Left => column == 0,
+            KeyCode.Right => column == _cursorPerRow - 1 || _cursorIndex == _cursorTotal - 1,
+            KeyCode.Up => row == 0,
+            _ => row == (_cursorTotal - 1) / _cursorPerRow,
+        };
+    }
+
+    /// <summary>Whether the cursor's keys are the cursor's: always, except on a D-pad
+    /// (<see cref="Window.ArrowKeysMoveFocus"/>), where only while the focus is on the cursor's card or
+    /// nowhere. With the rail focused, Down went into the posters rather than down the rail.</summary>
+    private bool CursorHasTheKeyboard() =>
+        !_window.ArrowKeysMoveFocus || _window.FocusedElement is not { } focused
+        || ReferenceEquals(focused, _cursorCard.Current) || !_window.IsInTree(focused);
 
     /// <summary>Opens the cursor card's menu over the card itself, so it appears where
     /// the ring is rather than under the pointer, which may be somewhere else entirely.</summary>
