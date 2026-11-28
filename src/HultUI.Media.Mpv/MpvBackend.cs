@@ -712,7 +712,8 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
     internal static int DepthOf(uint internalFormat) => internalFormat switch
     {
         GlRgba16f or GlRgba32f => 16,
-        _ => 8,          // GL_RGBA8, and anything unrecognised: the safe assumption
+        0x8059 => 10,    // GL_RGB10_A2 (SPIKE, TV-VIDEO.md §4)
+        _ => 8,         // GL_RGBA8, and anything unrecognised: the safe assumption
     };
 
     private const uint GlRgba16f = 0x881A;
@@ -763,6 +764,14 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
 
     private void ApplyExtraOptions()
     {
+        // SPIKE (docs/design/TV-VIDEO.md §4): the window's surface is BT.2020 PQ, and the target lent
+        // for the film is 10-bit in the same space. No target-peak: PQ's own 10,000 nits, so HDR10
+        // passes through untouched and the television tone-maps it.
+        if (OperatingSystem.IsAndroid() && Environment.GetEnvironmentVariable("HULTUI_ANDROID_HDR") == "pq")
+        {
+            mpv_set_option_string(_mpv, "target-prim", "bt.2020");
+            mpv_set_option_string(_mpv, "target-trc", "pq");
+        }
         if (Environment.GetEnvironmentVariable("HULTUI_MPV_OPTIONS") is not { Length: > 0 } extra) return;
         foreach (var pair in extra.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {

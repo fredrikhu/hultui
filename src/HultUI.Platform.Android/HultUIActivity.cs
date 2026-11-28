@@ -91,6 +91,7 @@ public abstract class HultUIActivity : SDLActivity
         // adjust-resize neither resizes nor pans; it only reports the inset.
         Window?.SetSoftInputMode(SoftInput.AdjustResize);
         FollowPeakRefreshRate();
+        if (System.Environment.GetEnvironmentVariable("HULTUI_ANDROID_SURFACE") == "panel") DrawAtPanelSize();
         // Focus moved to another kind of field with the keyboard up (docs/design/SOFT-KEYBOARD.md
         // §8): SDL sends Java no new type while its keyboard shows. SDL's own show task stores
         // it, and the keyboard reads it when its input restarts, which is posted after the task.
@@ -134,6 +135,27 @@ public abstract class HultUIActivity : SDLActivity
 
     private float _peakRate;
     private FrameRateVote? _frameRateVote;
+
+    /// <summary>
+    /// SPIKE (docs/design/TV-VIDEO.md §3), <c>HULTUI_ANDROID_SURFACE=panel</c>: SDL's surface at the
+    /// panel's resolution where the UI runs below it (a Shield: 3840×2160 under a 1920×1080 UI). The
+    /// compositor maps the 1080p UI onto the 4K panel, so a buffer of the panel's size reaches it pixel
+    /// for pixel. HultUI's scale grows by the same factor, so the layout keeps its DIP size.
+    /// </summary>
+    private void DrawAtPanelSize()
+    {
+        var display = OperatingSystem.IsAndroidVersionAtLeast(30) ? Display : WindowManager?.DefaultDisplay;
+        if (display?.GetMode() is not { } mode || FindSurfaceView(Window?.DecorView) is not { Holder: { } holder }) return;
+        var metrics = new global::Android.Util.DisplayMetrics();
+#pragma warning disable CA1422 // the real size of the UI's display, which the override sets
+        display.GetRealMetrics(metrics);
+#pragma warning restore CA1422
+        if (metrics.WidthPixels <= 0 || mode.PhysicalWidth <= metrics.WidthPixels) return;
+        float scale = (float)mode.PhysicalWidth / metrics.WidthPixels;
+        global::HultUI.Platform.SDL3.SDL3Window.PlatformSurfaceScale = scale;
+        holder.SetFixedSize(mode.PhysicalWidth, mode.PhysicalHeight);
+        Log.Info(Tag, $"surface at the panel's {mode.PhysicalWidth}x{mode.PhysicalHeight}, UI {metrics.WidthPixels}x{metrics.HeightPixels}: scale x{scale}");
+    }
 
     /// <summary>
     /// Matches the display to a film's frame rate while it plays, and lets it go after

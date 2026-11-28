@@ -151,6 +151,31 @@ public sealed class PerformanceCounters
         _presentPeak.Add(PresentTimeMs, now);
         _overlayPeak.Add(OverlayTimeMs, now);
         _otherPeak.Add(OtherTimeMs, now);
+        if (SpikeLog) LogSpike(now);
+    }
+
+    // SPIKE (docs/design/TV-VIDEO.md §3): HULTUI_SPIKE_FRAMES=1 writes each 5 s's frame times to stderr.
+    private static readonly bool SpikeLog = Environment.GetEnvironmentVariable("HULTUI_SPIKE_FRAMES") == "1";
+    private long _spikeStart;
+    private int _spikeFrames;
+    private double _spikeSum, _spikeMax, _spikeGpuSum, _spikeGpuMax;
+
+    private void LogSpike(long now)
+    {
+        if (_spikeStart == 0) _spikeStart = now;
+        _spikeFrames++;
+        _spikeSum += FrameTimeMs;
+        _spikeMax = Math.Max(_spikeMax, FrameTimeMs);
+        double gpu = FlushTimeMs + PresentTimeMs;
+        _spikeGpuSum += gpu;
+        _spikeGpuMax = Math.Max(_spikeGpuMax, gpu);
+        double secs = (now - _spikeStart) / (double)Stopwatch.Frequency;
+        if (secs < 5) return;
+        Console.Error.WriteLine(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+            $"[spike] frames {_spikeFrames} in {secs:0.0} s; frame mean {_spikeSum / _spikeFrames:0.0} ms max {_spikeMax:0.0}; flush+present mean {_spikeGpuSum / _spikeFrames:0.0} max {_spikeGpuMax:0.0}"));
+        _spikeStart = now;
+        _spikeFrames = 0;
+        _spikeSum = _spikeMax = _spikeGpuSum = _spikeGpuMax = 0;
     }
 
     public void BeginStyle() => _styleTimer.Restart();

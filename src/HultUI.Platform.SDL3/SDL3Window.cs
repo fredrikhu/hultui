@@ -239,6 +239,11 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// </summary>
     internal static float? PlatformRefreshRate { get; set; }
 
+    /// <summary>SPIKE (docs/design/TV-VIDEO.md §3): how many surface pixels the platform gives one of
+    /// its own window pixels. An Android TV drawing at the panel's 4K behind a 1080p UI sets 2, so the
+    /// layout keeps the UI's DIP size.</summary>
+    internal static float PlatformSurfaceScale { get; set; } = 1f;
+
     /// <inheritdoc />
     /// <remarks>SDL's video driver: one per process, so it is read once (the element asks on
     /// every layout, and the binding allocates a string per call).</remarks>
@@ -264,7 +269,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             float clamped = Math.Clamp(value, MinUserScale, MaxUserScale);
             if (Math.Abs(clamped - _userScale) < 0.0001f) return;
             _userScale = clamped;
-            DisplayScale = _osDisplayScale * _userScale;
+            DisplayScale = _osDisplayScale * _userScale * PlatformSurfaceScale;
             EventTranslator.InputScale = InputScale;
             ActiveSurface?.Resize(PixelWidth, PixelHeight, DisplayScale);
             // The pixel size did not change, but the layout viewport did: the app relayouts
@@ -445,6 +450,8 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_GREEN_SIZE, 8);
         SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_BLUE_SIZE, 8);
         SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_ALPHA_SIZE, 8);
+        if (OperatingSystem.IsAndroid() && Environment.GetEnvironmentVariable("HULTUI_ANDROID_HDR") == "pq")
+            AskForPqSurface();
 
         // Create the window hidden. Its GL back buffer is uninitialized until we
         // render and swap the first frame; if the window were visible before then
@@ -808,6 +815,74 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // text pipeline when there is one (null → the surface builds its own).
         _surface = new SkiaGLRenderSurface(GetGLProcAddress, text);
         StartupTrace.Mark("skia surface");
+    }
+
+    // ──── SPIKE: HDR10 output on Android (docs/design/TV-VIDEO.md §4), HULTUI_ANDROID_HDR=pq ────
+
+    /// <summary>SPIKE: a 10-bit EGL config, and SDL's window surface made in BT.2020 PQ
+    /// (<c>EGL_EXT_gl_colorspace_bt2020_pq</c>), which tags the Android surface's dataspace so the
+    /// compositor sees an HDR layer. Skia is told to draw in that space.</summary>
+    private static void AskForPqSurface()
+    {
+        // A Shield's Tegra has no 10-bit EGL config: its deep ones are all RGBA16F (float), so the
+        // PQ-encoded values go into half floats.
+        SpikeEgl.ListDeepConfigs();
+        SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_RED_SIZE, 16);
+        SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_GREEN_SIZE, 16);
+        SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_BLUE_SIZE, 16);
+        SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_ALPHA_SIZE, 16);
+        SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_FLOATBUFFERS, 1);
+        SpikeEgl.SDL_EGL_SetAttributeCallbacks(0, &PqSurfaceAttributes, 0, 0);
+        SkiaGLRenderSurface.PqOutput = true;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
+    private static int* PqSurfaceAttributes(nint userdata, nint display, nint config)
+    {
+        const int EGL_GL_COLORSPACE_KHR = 0x309D, EGL_GL_COLORSPACE_BT2020_PQ_EXT = 0x3340, EGL_NONE = 0x3038;
+        // SDL frees the list with SDL_free.
+        var list = (int*)SpikeEgl.SDL_malloc(3 * sizeof(int));
+        list[0] = EGL_GL_COLORSPACE_KHR;
+        list[1] = EGL_GL_COLORSPACE_BT2020_PQ_EXT;
+        list[2] = EGL_NONE;
+        return list;
+    }
+
+    private static class SpikeEgl
+    {
+        [DllImport("SDL3", CallingConvention = CallingConvention.Cdecl)]
+        public static extern void SDL_EGL_SetAttributeCallbacks(nint platform, delegate* unmanaged[Cdecl]<nint, nint, nint, int*> surface, nint context, nint userdata);
+
+        [DllImport("SDL3", CallingConvention = CallingConvention.Cdecl)]
+        public static extern void* SDL_malloc(nuint size);
+
+        [DllImport("libEGL.so")] private static extern nint eglGetDisplay(nint id);
+        [DllImport("libEGL.so")] private static extern int eglInitialize(nint dpy, int* major, int* minor);
+        [DllImport("libEGL.so")] private static extern int eglGetConfigs(nint dpy, nint* configs, int size, int* count);
+        [DllImport("libEGL.so")] private static extern int eglGetConfigAttrib(nint dpy, nint config, int attribute, int* value);
+
+        /// <summary>Every EGL config with more than 8 bits of red, to stderr.</summary>
+        public static void ListDeepConfigs()
+        {
+            nint dpy = eglGetDisplay(0);
+            int major = 0, minor = 0, count = 0;
+            int init = eglInitialize(dpy, &major, &minor);
+            int got = eglGetConfigs(dpy, null, 0, &count);
+            Console.Error.WriteLine($"[spike] egl display 0x{dpy:x} init {init} ({major}.{minor}) configs {got}/{count}");
+            if (init == 0 || got == 0) return;
+            var configs = new nint[count];
+            fixed (nint* p = configs) eglGetConfigs(dpy, p, count, &count);
+            int Attr(nint c, int a) { int v = -1; eglGetConfigAttrib(dpy, c, a, &v); return v; }
+            Console.Error.WriteLine($"[spike] {count} EGL configs");
+            foreach (var c in configs)
+            {
+                int r = Attr(c, 0x3024);
+                if (r <= 8) continue;
+                Console.Error.WriteLine($"[spike] config r{r} g{Attr(c, 0x3023)} b{Attr(c, 0x3022)} a{Attr(c, 0x3021)} "
+                    + $"depth{Attr(c, 0x3025)} stencil{Attr(c, 0x3026)} renderable=0x{Attr(c, 0x3040):x} surface=0x{Attr(c, 0x3033):x} "
+                    + $"visual=0x{Attr(c, 0x302E):x} component=0x{Attr(c, 0x3339):x} samples{Attr(c, 0x3031)}");
+            }
+        }
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
@@ -2646,7 +2721,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         PixelHeight = ph;
         PixelDensity = density;
         _osDisplayScale = displayScale;
-        DisplayScale = displayScale * _userScale;
+        DisplayScale = displayScale * _userScale * PlatformSurfaceScale;
         EventTranslator.InputScale = InputScale;
 
         if (scaleOnlyChange)
