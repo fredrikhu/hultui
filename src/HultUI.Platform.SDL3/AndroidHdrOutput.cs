@@ -29,6 +29,12 @@ internal sealed unsafe class AndroidHdrOutput(SDL_Window* window) : IGlHdrOutput
     private nint _taggedWindow;
 
     /// <inheritdoc />
+    /// <remarks>Known after the first swap: whether the window's layout is the one
+    /// <see cref="SetDataspace"/> can reach past the NDK's check through. Until then the frame stays
+    /// sRGB, which the first frame is anyway.</remarks>
+    public bool CanShowPq { get; private set; }
+
+    /// <inheritdoc />
     public void SetPq(bool pq, HdrMetadata? metadata)
     {
         _pq = pq;
@@ -46,8 +52,12 @@ internal sealed unsafe class AndroidHdrOutput(SDL_Window* window) : IGlHdrOutput
         if (native == 0 || (!_pending && native == _taggedWindow)) return;
         _pending = false;
         _taggedWindow = native;
+        if (!CanShowPq && HasKnownLayout(native))
+            CanShowPq = true;
+        else if (!CanShowPq)
+            Console.Error.WriteLine("[HultUI] HDR10 output: the window is not one this can tag PQ; HDR video stays SDR.");
 
-        int tagged = ANativeWindow_setBuffersDataSpace(native, _pq ? DataspaceBt2020Pq : DataspaceSrgb);
+        int tagged = SetDataspace(native, _pq ? DataspaceBt2020Pq : DataspaceSrgb);
         int metadata = 0, refused = 0;
         if (_pq && _metadata is { } m && SDL_EGL_GetCurrentDisplay() is var display && display != 0
             && SDL_EGL_GetWindowSurface(window) is var surface && surface != 0)
@@ -102,6 +112,35 @@ internal sealed unsafe class AndroidHdrOutput(SDL_Window* window) : IGlHdrOutput
 
     /// <summary><c>ADATASPACE_SRGB</c> and <c>ADATASPACE_BT2020_PQ</c> (android/data_space.h).</summary>
     internal const int DataspaceSrgb = 142671872, DataspaceBt2020Pq = 163971072;
+
+    /// <summary>
+    /// Tags the window's buffers. Through the NDK where it allows it; where it does not, through the
+    /// window's own <c>perform</c> entry, as Android's EGL tags a surface it makes (both end in
+    /// <c>native_window_set_buffers_data_space</c>). The NDK's wrapper first asks SurfaceFlinger
+    /// whether the display takes HDR, and on a Shield (Android 11) an app is told no (EINVAL), though
+    /// the display lists HDR10 and SurfaceFlinger takes a PQ layer from EGL and switches the
+    /// television for it.
+    /// </summary>
+    private static int SetDataspace(nint window, int dataspace)
+    {
+        int result = ANativeWindow_setBuffersDataSpace(window, dataspace);
+        if (result == 0 || !HasKnownLayout(window)) return result;
+        var perform = *(delegate* unmanaged<nint, int, int, int>*)((byte*)window + PerformOffset);
+        return perform(window, NativeWindowSetBuffersDataspace, dataspace);
+    }
+
+    // ANativeWindow as system/window.h lays it out: the struct every vendor's EGL driver is built
+    // against, so fixed across Android versions. Checked by its magic ('_wnd') and its size, which
+    // the struct keeps in its version field, before anything in it is called.
+    private const int NativeWindowMagic = 0x5f776e64;
+    // NATIVE_WINDOW_SET_BUFFERS_DATASPACE. 18 is SET_SIDEBAND_STREAM: called with it on a Shield, the
+    // window took the dataspace for a native handle and faulted in Parcel::writeNativeHandle.
+    private const int NativeWindowSetBuffersDataspace = 19;
+    private static readonly int NativeWindowSize = IntPtr.Size == 8 ? 192 : 108;
+    private static readonly int PerformOffset = IntPtr.Size == 8 ? 152 : 88;
+
+    private static bool HasKnownLayout(nint window) =>
+        *(int*)window == NativeWindowMagic && *((int*)window + 1) == NativeWindowSize;
 
     [DllImport("android")]
     private static extern int ANativeWindow_setBuffersDataSpace(nint window, int dataSpace);

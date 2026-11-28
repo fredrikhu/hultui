@@ -492,12 +492,16 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
         string? gamma = GetString(_mpv, "video-out-params/gamma") ?? GetString(_mpv, "video-params/gamma");
         if (gamma is null && unknownWithoutVideo) return;
         var range = gamma is null ? PictureRange.Sdr : RangeOfTransfer(gamma);
-        var metadata = range == PictureRange.Hdr ? MetadataOf(name => GetDouble(_mpv, "video-params/" + name)) : null;
-        if (metadata != _hdrMetadata?.Value)
+        HdrMetadata? metadata = null;
+        if (range == PictureRange.Hdr)
         {
-            _hdrMetadata = metadata is { } m ? new(m) : null;
-            StartupTrace.Mark($"mpv HDR metadata: {metadata?.ToString() ?? "none"}");
+            string? primaries = GetString(_mpv, "video-params/primaries");
+            metadata = MetadataOf(name => GetDouble(_mpv, "video-params/" + name), primaries);
+            if (StartupTrace.Enabled)
+                StartupTrace.Mark($"mpv HDR metadata: {metadata?.ToString() ?? "none"} (primaries {primaries}, " +
+                    $"max-luma {GetDouble(_mpv, "video-params/max-luma")}, max-cll {GetDouble(_mpv, "video-params/max-cll")})");
         }
+        if (metadata != _hdrMetadata?.Value) _hdrMetadata = metadata is { } m ? new(m) : null;
         if ((int)range == _pictureRange) return;
         _pictureRange = (int)range;
         StartupTrace.Mark($"mpv picture: transfer {gamma ?? "(none)"}, {range}");
@@ -521,17 +525,42 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
     /// An HDR video's static metadata from mpv's <c>video-params</c> (the decoder's, from the stream's
     /// SEI or the container): the mastering display's primaries (<c>prim-red-x</c> ... <c>prim-white-y</c>)
     /// and luminance (<c>max-luma</c>, <c>min-luma</c>), and the light levels (<c>max-cll</c>,
-    /// <c>max-fall</c>). Null when it states neither part.
+    /// <c>max-fall</c>). mpv gives the primaries' coordinates only where they differ from the video's
+    /// named <paramref name="primaries"/>, so where it gives none, those named ones are the mastering
+    /// display's. Null when it states neither part.
     /// </summary>
-    internal static HdrMetadata? MetadataOf(Func<string, double?> read)
+    internal static HdrMetadata? MetadataOf(Func<string, double?> read, string? primaries = null)
     {
         float Read(string name) => read(name) is { } v && double.IsFinite(v) && v > 0 ? (float)v : 0f;
+        // 10,000 nits is PQ's ceiling, which libplacebo puts in max-luma when the video states no
+        // peak (a 4K HDR10 film through MediaCodec on a Shield: max-luma 10000, no light levels). No
+        // mastering display reaches it; passed on, the television would tone-map for one that does.
+        float peak = Read("max-luma");
+        if (peak >= PqPeakNits) peak = 0f;
         var metadata = new HdrMetadata(
             Read("prim-red-x"), Read("prim-red-y"), Read("prim-green-x"), Read("prim-green-y"),
             Read("prim-blue-x"), Read("prim-blue-y"), Read("prim-white-x"), Read("prim-white-y"),
-            Read("max-luma"), Read("min-luma"), Read("max-cll"), Read("max-fall"));
+            peak, peak > 0f ? Read("min-luma") : 0f, Read("max-cll"), Read("max-fall"));
+        if (metadata.MaxLuminance > 0f && metadata.RedX == 0f && NamedPrimaries(primaries) is { } named)
+            metadata = metadata with
+            {
+                RedX = named.Rx, RedY = named.Ry, GreenX = named.Gx, GreenY = named.Gy,
+                BlueX = named.Bx, BlueY = named.By, WhiteX = 0.3127f, WhiteY = 0.3290f,
+            };
         return metadata.HasMasteringDisplay || metadata.HasLightLevels ? metadata : null;
     }
+
+    private const float PqPeakNits = 10_000f;
+
+    /// <summary>The CIE 1931 xy of the primaries mpv names in <c>video-params/primaries</c>, all with
+    /// D65 white; null for one not listed.</summary>
+    private static (float Rx, float Ry, float Gx, float Gy, float Bx, float By)? NamedPrimaries(string? name) => name switch
+    {
+        "bt.2020" => (0.708f, 0.292f, 0.170f, 0.797f, 0.131f, 0.046f),
+        "display-p3" => (0.680f, 0.320f, 0.265f, 0.690f, 0.150f, 0.060f),
+        "bt.709" => (0.640f, 0.330f, 0.300f, 0.600f, 0.150f, 0.060f),
+        _ => null,
+    };
 
     private void RaiseGeometry()
     {

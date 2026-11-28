@@ -1,7 +1,7 @@
 # Video on a TV: the remote's media keys, 4K, HDR and the frame rate — design note
 
-**Status (2026-11-28): media keys, the player's bar, the frame rate, 4K and HDR10 built; HDR10's
-switch mid-session still to be checked on the Shield (§4).** Plan 20 phase 5, the Android TV
+**Status (2026-11-28): media keys, the player's bar, the frame rate, 4K and HDR10 built and checked
+on the Shield; the user's look at HDR10 on the television left (§4).** Plan 20 phase 5, the Android TV
 build, after D-pad focus (`DPAD-FOCUS.md`). From the user's Shield TV (2019 Pro, Android 11, Tegra
 X1+, a 4K HDR10 television).
 
@@ -108,11 +108,20 @@ metadata passed on. Nothing public; `HULTUI_VIDEO_HDR=0` turns it off.
 - **The window.** On a TV whose display lists HDR10 (`HultUIActivity.ShowHdrVideoAsHdr10`, from
   Android 9), `SDL3Window.PlatformHdrOutput` asks EGL for a half-float framebuffer, in EGL's default
   colour space; without one, 8-bit and SDR, as before. Half float for the whole session, since the
-  format is fixed when EGL makes the surface: EGL 70 MB on Home where 8-bit took 37 MB. `AndroidHdrOutput` tags the buffers
-  (`ANativeWindow_setBuffersDataSpace`) sRGB, or BT.2020 PQ, after each swap that follows a change, so
+  format is fixed when EGL makes the surface: EGL 70 MB on Home where 8-bit took 37 MB.
+  `AndroidHdrOutput` tags the buffers sRGB, or BT.2020 PQ, after each swap that follows a change, so
   the frame drawn in the old space leaves with the old tag. EGL sets a dataspace only as it makes the
   surface, so a tag set after it stays, and a new window (Android gives one after the app comes back)
   is tagged again. The GL driver writes PQ and sRGB values alike.
+- **The tag goes past the NDK.** `ANativeWindow_setBuffersDataSpace` took sRGB and refused BT2020_PQ
+  with EINVAL on the Shield: the NDK's wrapper first asks SurfaceFlinger whether the display takes
+  HDR, and an app is told no, though the display lists HDR10 and SurfaceFlinger switches the
+  television for a PQ layer from EGL. So where the NDK refuses, the tag goes through the window's own
+  `perform` entry, as Android's EGL sets it (`native_window_set_buffers_data_space`). That is
+  `ANativeWindow` as `system/window.h` lays it out, the struct every vendor's EGL driver is built
+  against: checked by its magic and size first, and without the match HDR video stays SDR. The
+  operation is `NATIVE_WINDOW_SET_BUFFERS_DATASPACE`, 19; 18 is `SET_SIDEBAND_STREAM`, which, called by
+  mistake on the Shield, faulted in `Parcel::writeNativeHandle`.
 - **The surface follows the pictures** with the Vulkan surface's rule (`HdrPictureFollower`): the
   frame is drawn in sRGB (`RgbaF16`, sRGB-encoded) until a frame draws an HDR picture. After that frame
   the next one is drawn in PQ, the window tags PQ, and that frame is owed (`IPictureRangeSurface`, as on
@@ -128,15 +137,25 @@ metadata passed on. Nothing public; `HULTUI_VIDEO_HDR=0` turns it off.
   `max-cll`, `max-fall`; `MpvBackend.MetadataOf`) reach the surface through `IHdrMetadataSource` and
   `IPictureRangeSurface.HdrMetadataDrawn`, with each draw of an HDR picture. The window sets them as
   EGL surface attributes (SMPTE ST 2086, CTA-861.3, in units of 1/50,000), which Android's EGL hands
-  the buffers at the next swap. A film that states none sends none.
-- **Tests:** `MpvTargetColourTests` (PQ asked once each way, frames stay encoded, metadata read),
+  the buffers at the next swap. A film that states none sends none. PQ's ceiling, 10,000 nits, is
+  no stated peak: libplacebo puts it in `max-luma` when the video gives none, which is what *2001*
+  through the Shield's MediaCodec decoder reports (no light levels either; the hardware decoder's
+  frames carry no mastering SEI). So on the Shield that film sends no metadata, and the television
+  uses its defaults.
+- **Tests:** `MpvTargetColourTests` (PQ asked once each way, frames stay encoded, metadata read, the
+  named primaries standing in, PQ's ceiling no peak),
   `GpuFrameSinkTests` (metadata reaches the surface only with an HDR picture; a PQ target reaches the
   producer), `AndroidHdrOutputTests` (the EGL attributes and their scale). The switch itself needs the
   Shield.
-- **Not yet checked on the Shield** (it was asleep, its owner away): the mid-session switch, whether
-  the television takes the metadata (the log line `[HultUI] HDR10 output: …` says what EGL accepted),
-  and what the television shows: a screenshot is SurfaceFlinger's SDR conversion of the PQ buffer,
-  which looks dim, so the UI at 203 nits and the film's highlights need the user's eyes.
+- **Checked on the Shield** (the log line `[HultUI] HDR10 output: …` says each tag):
+  - Home: half-float buffers tagged sRGB, the display in SRGB, the UI as in 8-bit.
+  - *2001* (HDR10): the buffers tagged PQ, the layer BT2020_PQ, the display in BT2100_PQ at 4K
+    23.976 Hz, HDMI Rec.2020 12-bit 4:2:2; mpv confirmed bt.2020/pq. Frames on time between the
+    stalls Wi-Fi causes.
+  - Back: tagged sRGB, the display SRGB at 59.94 Hz, the page whole. A second round trip the same.
+  - Bleach (SDR): the display stays SRGB at 23.976 Hz; 23.98 fps, none late.
+- **Not checked:** what the television shows. A screenshot is SurfaceFlinger's SDR conversion of the
+  PQ buffer, so the film's highlights need the user's eyes.
 
 ## 5. The frame rate (built, 2026-11-28; no public API)
 
@@ -158,5 +177,5 @@ metadata passed on. Nothing public; `HULTUI_VIDEO_HDR=0` turns it off.
 
 ## 6. Order
 
-Media keys, the player's bar, the frame rate, 4K and HDR10: all built. Left: HDR10's switch checked
-on the Shield, and the user's look at the television.
+Media keys, the player's bar, the frame rate, 4K and HDR10: all built and checked on the Shield.
+Left: the user's look at the television in HDR10.

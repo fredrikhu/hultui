@@ -187,4 +187,36 @@ public class MpvTargetColourTests
         Assert.Null(MpvBackend.MetadataOf(_ => null));
         Assert.Null(MpvBackend.MetadataOf(_ => double.NaN));
     }
+
+    /// <summary>mpv gives the mastering primaries' coordinates only where they differ from the
+    /// video's named primaries: without them, a stated peak takes the named ones, D65 white.</summary>
+    [Fact]
+    public void WithoutPrimaryCoordinates_TheNamedPrimariesAreTheMasteringDisplays()
+    {
+        var metadata = MpvBackend.MetadataOf(name => name is "max-luma" ? 4000 : null, "bt.2020");
+
+        Assert.True(metadata!.Value.HasMasteringDisplay);
+        Assert.Equal(0.708f, metadata.Value.RedX);
+        Assert.Equal(0.046f, metadata.Value.BlueY);
+        Assert.Equal(0.3127f, metadata.Value.WhiteX);
+        Assert.Equal(4000f, metadata.Value.MaxLuminance);
+
+        // A peak alone, with primaries this cannot place, is no mastering display.
+        Assert.Null(MpvBackend.MetadataOf(name => name is "max-luma" ? 4000 : null, "unknown"));
+    }
+
+    /// <summary>
+    /// libplacebo puts PQ's ceiling, 10,000 nits, in <c>max-luma</c> when a video states no peak (a
+    /// 4K HDR10 film through MediaCodec on a Shield). That is no metadata, and a television told it
+    /// would tone-map for a 10,000-nit master.
+    /// </summary>
+    [Fact]
+    public void PqsCeiling_IsNoStatedPeak()
+    {
+        Assert.Null(MpvBackend.MetadataOf(name => name switch { "max-luma" => 10000, "min-luma" => 0.005, _ => null }, "bt.2020"));
+
+        var levels = MpvBackend.MetadataOf(name => name switch { "max-luma" => 10000, "max-cll" => 900, _ => null }, "bt.2020");
+        Assert.False(levels!.Value.HasMasteringDisplay);
+        Assert.Equal(900f, levels.Value.MaxContentLightLevel);
+    }
 }

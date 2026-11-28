@@ -239,7 +239,7 @@ public sealed class SkiaGLRenderSurface : IRenderSurface, ISkiaExternalSurface, 
     /// </summary>
     private void FollowPictures(IGlHdrOutput output)
     {
-        bool changed = _pictures.EndFrame(SkiaVulkanRenderSurface.HdrVideoEnabled);
+        bool changed = _pictures.EndFrame(SkiaVulkanRenderSurface.HdrVideoEnabled && output.CanShowPq);
         var metadata = _pictures.Shown ? _frameMetadata ?? _shownMetadata : null;
         if (!changed && metadata == _shownMetadata) return;
         _shownMetadata = metadata;
@@ -358,6 +358,10 @@ public sealed class SkiaGLRenderSurface : IRenderSurface, ISkiaExternalSurface, 
 /// </summary>
 internal interface IGlHdrOutput
 {
+    /// <summary>Whether the window can tag its buffers PQ. Until it can, the frame stays sRGB and an
+    /// HDR video is tone-mapped as on any SDR surface.</summary>
+    bool CanShowPq { get; }
+
     /// <summary>
     /// From the next frame presented, the window's buffers carry BT.2100 PQ with this metadata (null:
     /// none stated, so the display assumes its own), or, with <paramref name="pq"/> false, sRGB.
