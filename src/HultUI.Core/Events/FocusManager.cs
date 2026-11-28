@@ -10,6 +10,11 @@ public sealed class FocusManager
     /// underline theirs then. UI thread; the window sets it.</summary>
     internal bool MnemonicCues { get; set; }
 
+    /// <summary>The window's <c>ArrowKeysMoveFocus</c>, for the controls that leave the arrows they
+    /// would not use on a D-pad (a slider's Up and Down, a closed dropdown's Down) to the focus.
+    /// docs/design/DPAD-FOCUS.md §4. UI thread; the window sets it.</summary>
+    internal bool ArrowKeysMoveFocus { get; set; }
+
     /// <summary>Whether the last frame drew a label that marks a mnemonic, underlined or not:
     /// only then does a change of <see cref="MnemonicCues"/> need a frame. The window clears it as
     /// each frame starts, and such a label sets it as it draws (<see cref="Mnemonics.ShowsCue"/>).

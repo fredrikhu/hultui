@@ -98,6 +98,26 @@ newline, where it typed one before the app's handler sent the text with it.
 
 ---
 
+## The D-pad: `Window.ArrowKeysMoveFocus`
+
+On a TV remote there is no Tab. With `Window.ArrowKeysMoveFocus` on, a bare arrow that nothing
+used (neither `Handled` nor `StopPropagation`) moves the focus to the nearest focusable element
+that way, by Android's `FocusFinder` rule over `WindowBorderBox`, within the scope Tab walks, and
+scrolls it into view. It is on by default where a D-pad navigates (an Android TV: no touch screen,
+D-pad navigation) and off elsewhere. A window with it on also:
+- focuses its scope's first stop when nothing has the focus, and keeps it near where it was when a
+  rebuild takes the focused element away
+- shows the focus ring without a key first
+- opens a field's keyboard on OK (Enter), not as the focus reaches it, and does not pass that OK
+  to the field as its Enter
+
+A control keeps the arrows it uses by marking them, as every framework control does. On a D-pad a
+slider leaves Up and Down, a closed dropdown or date picker leaves Down (Enter opens it), and a
+virtual list with keyboard scrolling leaves the arrows of a focused row inside it to the focus.
+Design and the rule's details: `docs/design/DPAD-FOCUS.md`.
+
+---
+
 ## What a key event says
 
 `KeyDownEvent.Key` is a **position**: the key where that letter sits on a US keyboard,

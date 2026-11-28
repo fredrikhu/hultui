@@ -71,6 +71,12 @@ public abstract class HultUIActivity : SDLActivity
         // later hand it to anyone through JNI_GetCreatedJavaVMs; Android 10 and 11 keep that in
         // libraries an app cannot load, and without the VM the video decoded through a copy.
         AppContext.SetData(JavaVmSlot, (long)Java.Interop.JniEnvironment.Runtime.InvocationPointer);
+        // A device navigated by a D-pad with no touch screen (a TV, a set-top box): its windows' arrows
+        // move the focus (Window.ArrowKeysMoveFocus, docs/design/DPAD-FOCUS.md). Before the app runs,
+        // which makes its windows on SDL's thread once the surface exists.
+        if (Resources?.Configuration is { } config)
+            HultUI.Window.DefaultArrowKeysMoveFocus = config.Navigation == global::Android.Content.Res.Navigation.Dpad
+                && config.Touchscreen == global::Android.Content.Res.TouchScreenType.Notouch;
         base.OnCreate(savedInstanceState);
         // Android 8+ draws a translucent highlight over a focused view that is not in touch
         // mode. SDLSurface keeps the focus, so after text typed as key events and Back the whole

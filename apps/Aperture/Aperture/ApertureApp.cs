@@ -128,6 +128,12 @@ public sealed partial class ApertureApp : Component, IDisposable
         Ui.DisplayScale = _window.DisplayScale;
         _artworkScale = ArtworkScaleFor(_window.DisplayScale);
         _window.Resized += OnWindowResize;
+        // Which focus moves the user made since a page opened (KeyboardMovedSinceArrival).
+        _window.InputActivity += CountInput;
+        // On a D-pad the first page starts on its first card, as every page opened later does
+        // (Arrive): with no pointer, a window that opened on the title bar's account button made OK
+        // open the account menu (Window.ArrowKeysMoveFocus, docs/design/DPAD-FOCUS.md §5).
+        if (_window.ArrowKeysMoveFocus) Arrive(_history[_at]);
 
         // Global keys land on the host when nothing is focused.
         Mount().OnPassive<KeyDownEvent>(OnRootKeyDown);
@@ -426,6 +432,7 @@ public sealed partial class ApertureApp : Component, IDisposable
             active: IsLit(door),
             onClick: () => Navigate(new Route(ApertureView.Settings)))).FlexShrink(0));
         rail.AddChild(Box.New().Height(Halide.S2));
+        rail.On(_railKey ??= OnRailKey);
         return rail;
     }
 
@@ -469,6 +476,35 @@ public sealed partial class ApertureApp : Component, IDisposable
                 onClick: () => Navigate(new Route(ApertureView.Issues)),
                 badge: _railShown.News, badgeWord: "new");
         return Box.New();
+    }
+
+    private Action<KeyDownEvent>? _railKey;
+
+    /// <summary>
+    /// On a D-pad (<see cref="Window.ArrowKeysMoveFocus"/>) Up and Down walk the rail's doors in its
+    /// order, as a TV app's side rail keeps the D-pad in it: the lower doors sit at the window's foot,
+    /// and the nearest thing below the last upper door was a shelf's menu button, which the window's
+    /// own rule picks. At either end the key is left to the window.
+    /// </summary>
+    private void OnRailKey(KeyDownEvent e)
+    {
+        if (!_window.ArrowKeysMoveFocus || e.Key is not (KeyCode.Up or KeyCode.Down) || e.Handled
+            || (e.Modifiers & (KeyModifiers.Shift | KeyModifiers.Ctrl | KeyModifiers.Alt | KeyModifiers.Super)) != 0)
+            return;
+        var doors = new List<Element>();
+        Doors(e.CurrentTarget, doors);
+        int at = doors.FindIndex(d => ReferenceEquals(d, _window.FocusedElement));
+        int next = at + (e.Key == KeyCode.Down ? 1 : -1);
+        if (at < 0 || next < 0 || next >= doors.Count) return;
+        doors[next].Focus();
+        e.StopPropagation = true;
+
+        static void Doors(Element e, List<Element> into)
+        {
+            if (e.IsFocusable && e.TabIndex >= 0 && e.AutomationId?.StartsWith("rail-", StringComparison.Ordinal) == true)
+                into.Add(e);
+            foreach (var child in e.Children) Doors(child, into);
+        }
     }
 
     private Element RailButton(string glyph, string label, string key, bool active, Action onClick, int badge = 0,
@@ -588,7 +624,8 @@ public sealed partial class ApertureApp : Component, IDisposable
         // The shelves take the arrows, Enter and Space — but only when the keyboard is not
         // in a text field, where they mean what they always mean, and only a key nothing else
         // took: Space on a button pressed the button and played the card under the cursor too.
-        if (!e.Handled && !e.TargetTakesText && e.Target is not TextInputElement && HandleCursorKey(e))
+        if (!e.Handled && !e.TargetTakesText && e.Target is not TextInputElement && CursorHasTheKeyboard()
+            && HandleCursorKey(e))
         {
             e.Handled = true;
             return;

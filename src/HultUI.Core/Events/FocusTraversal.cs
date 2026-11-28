@@ -1,6 +1,10 @@
 using HultUI.Core.Elements;
+using HultUI.Core.Primitives;
 
 namespace HultUI.Core.Events;
+
+/// <summary>A D-pad press: which way the focus moves (docs/design/DPAD-FOCUS.md).</summary>
+internal enum FocusDirection : byte { Up, Down, Left, Right }
 
 /// <summary>
 /// Collects focusable elements and provides next/previous navigation for Tab/Shift+Tab.
@@ -62,6 +66,144 @@ internal static class FocusTraversal
             return focusable[previous];
         }
         finally { ReturnList(scratch); }
+    }
+
+    /// <summary>
+    /// The focusable element a D-pad press in <paramref name="direction"/> goes to from
+    /// <paramref name="current"/>: Android's <c>FocusFinder</c> rule over where each is in the window
+    /// (<see cref="Element.WindowBorderBox"/>, scroll applied). Null when nothing lies that way.
+    /// Candidates are Tab's (focusable, <see cref="Element.TabIndex"/> 0 or more), with a box, and
+    /// neither inside <paramref name="current"/> nor around it. docs/design/DPAD-FOCUS.md §2.
+    /// </summary>
+    public static Element? FindInDirection(Element root, Element current, FocusDirection direction)
+    {
+        var scratch = RentList();
+        try
+        {
+            CollectRecursive(root, scratch);
+            var from = current.WindowBorderBox;
+            Element? best = null;
+            Rect bestBox = default;
+            for (int i = 0; i < scratch.Count; i++)
+            {
+                var candidate = scratch[i];
+                if (ReferenceEquals(candidate, current) || Encloses(candidate, current) || Encloses(current, candidate))
+                    continue;
+                var box = candidate.WindowBorderBox;
+                if (box.Width <= 0 || box.Height <= 0 || !IsToward(direction, from, box)) continue;
+                if (best is null || IsBetter(direction, from, box, bestBox))
+                {
+                    best = candidate;
+                    bestBox = box;
+                }
+            }
+            return best;
+        }
+        finally { ReturnList(scratch); }
+    }
+
+    /// <summary>
+    /// The focusable element nearest <paramref name="where"/> (centre to centre), for the focus to go
+    /// to when the element that had it at that place left the tree. Null when nothing is focusable.
+    /// </summary>
+    public static Element? FindNearest(Element root, Rect where)
+    {
+        var scratch = RentList();
+        try
+        {
+            CollectRecursive(root, scratch);
+            Element? best = null;
+            float bestDistance = float.MaxValue;
+            float cx = where.X + where.Width / 2f, cy = where.Y + where.Height / 2f;
+            for (int i = 0; i < scratch.Count; i++)
+            {
+                var box = scratch[i].WindowBorderBox;
+                if (box.Width <= 0 || box.Height <= 0) continue;
+                float dx = box.X + box.Width / 2f - cx, dy = box.Y + box.Height / 2f - cy;
+                float distance = dx * dx + dy * dy;
+                if (distance < bestDistance)
+                {
+                    best = scratch[i];
+                    bestDistance = distance;
+                }
+            }
+            return best;
+        }
+        finally { ReturnList(scratch); }
+    }
+
+    private static bool Encloses(Element outer, Element inner)
+    {
+        for (var e = inner.Parent; e is not null; e = e.Parent)
+            if (ReferenceEquals(e, outer)) return true;
+        return false;
+    }
+
+    // The rest is Android's FocusFinder (frameworks/base, core/java/android/view/FocusFinder.java),
+    // as every TV app's D-pad moves.
+
+    /// <summary>Whether <paramref name="to"/> lies in <paramref name="direction"/> from
+    /// <paramref name="from"/>: its far edge past the source's, and not starting behind it.</summary>
+    private static bool IsToward(FocusDirection direction, Rect from, Rect to) => direction switch
+    {
+        FocusDirection.Left => (from.Right > to.Right || from.X >= to.Right) && from.X > to.X,
+        FocusDirection.Right => (from.X < to.X || from.Right <= to.X) && from.Right < to.Right,
+        FocusDirection.Up => (from.Bottom > to.Bottom || from.Y >= to.Bottom) && from.Y > to.Y,
+        _ => (from.Y < to.Y || from.Bottom <= to.Y) && from.Bottom < to.Bottom,
+    };
+
+    /// <summary>Whether <paramref name="to"/> overlaps the source across the direction: in the
+    /// band the source would sweep moving that way.</summary>
+    private static bool InBeam(FocusDirection direction, Rect from, Rect to) =>
+        direction is FocusDirection.Left or FocusDirection.Right
+            ? to.Bottom > from.Y && to.Y < from.Bottom
+            : to.Right > from.X && to.X < from.Right;
+
+    /// <summary>The gap from the source's leading edge to the near edge of <paramref name="to"/>.</summary>
+    private static float MajorDistance(FocusDirection direction, Rect from, Rect to) => Math.Max(0f, direction switch
+    {
+        FocusDirection.Left => from.X - to.Right,
+        FocusDirection.Right => to.X - from.Right,
+        FocusDirection.Up => from.Y - to.Bottom,
+        _ => to.Y - from.Bottom,
+    });
+
+    /// <summary>The gap from the source's leading edge to the far edge of <paramref name="to"/>.</summary>
+    private static float MajorDistanceToFarEdge(FocusDirection direction, Rect from, Rect to) => Math.Max(1f, direction switch
+    {
+        FocusDirection.Left => from.X - to.X,
+        FocusDirection.Right => to.Right - from.Right,
+        FocusDirection.Up => from.Y - to.Y,
+        _ => to.Bottom - from.Bottom,
+    });
+
+    /// <summary>How far the centres are apart across the direction.</summary>
+    private static float MinorDistance(FocusDirection direction, Rect from, Rect to) =>
+        direction is FocusDirection.Left or FocusDirection.Right
+            ? Math.Abs(from.Y + from.Height / 2f - (to.Y + to.Height / 2f))
+            : Math.Abs(from.X + from.Width / 2f - (to.X + to.Width / 2f));
+
+    /// <summary>Whether <paramref name="a"/> is a better move than <paramref name="b"/>; both lie in
+    /// the direction. One in the beam wins (across always; along, unless the other is nearer than its
+    /// far edge), then the weighted distance: 13 times the gap squared plus the offset squared.</summary>
+    private static bool IsBetter(FocusDirection direction, Rect from, Rect a, Rect b)
+    {
+        if (BeamBeats(direction, from, a, b)) return true;
+        if (BeamBeats(direction, from, b, a)) return false;
+        return Weighted(direction, from, a) < Weighted(direction, from, b);
+    }
+
+    private static bool BeamBeats(FocusDirection direction, Rect from, Rect a, Rect b)
+    {
+        if (!InBeam(direction, from, a) || InBeam(direction, from, b)) return false;
+        if (direction is FocusDirection.Left or FocusDirection.Right) return true;
+        return MajorDistance(direction, from, a) < MajorDistanceToFarEdge(direction, from, b);
+    }
+
+    private static float Weighted(FocusDirection direction, Rect from, Rect to)
+    {
+        float major = MajorDistance(direction, from, to), minor = MinorDistance(direction, from, to);
+        return 13f * major * major + minor * minor;
     }
 
     // Every Tab walks the whole tree into a list. Grown from empty each time, that list was

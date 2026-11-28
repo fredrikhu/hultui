@@ -204,13 +204,25 @@ public sealed partial class ApertureApp
         if (visit.Route.View == ApertureView.Search && _cursorIndex < 0) _pendingSearchFocus = true;
         _pendingFirstCard = _cursorIndex < 0 && !_pendingArrivalFocus && visit.Route.View != ApertureView.Search;
         _firstCardFocus = false;
+        _cursorFromArrival = false;
         _arrivalFocusHeld.SetTarget(_pendingArrivalFocus || _pendingFirstCard ? _window.FocusedElement : null);
+        _arrivalInputs = _inputs;
     }
 
+    /// <summary>Inputs the window has routed (keys, text, presses, the wheel), and how many there had
+    /// been when the page was opened.</summary>
+    private int _inputs, _arrivalInputs;
+
+    private void CountInput() => _inputs++;
+
     /// <summary>Whether the keyboard went somewhere since the page was opened: an element other than
-    /// the one that had it then, still in the window. It stays there.</summary>
+    /// the one that had it then, still in the window. It stays there. On a D-pad
+    /// (<see cref="Window.ArrowKeysMoveFocus"/>) only where the user moved it: the window gives the
+    /// focus to something while the page is still loading, and the page's verb or first card takes
+    /// it from that when they come.</summary>
     private bool KeyboardMovedSinceArrival()
     {
+        if (_window.ArrowKeysMoveFocus && _inputs == _arrivalInputs) return false;
         _arrivalFocusHeld.TryGetTarget(out var before);
         return _window.FocusedElement is { } held && !ReferenceEquals(held, before) && _window.IsInTree(held);
     }
@@ -232,15 +244,37 @@ public sealed partial class ApertureApp
     private readonly WeakReference<Element?> _arrivalFocusHeld = new(null);
 
     /// <summary>Called by a page that leads with verbs, on its row of them: the first that takes
-    /// the keyboard is the one handed it on arrival.</summary>
-    private void MarkArrivalFocus(BoxElement row)
+    /// the keyboard is the one handed it on arrival. Only the first <paramref name="verbs"/> of the
+    /// row's children are verbs (the rest are toggles); with none among them, once
+    /// <paramref name="known"/> says the page knows it has none, the page's first card takes it
+    /// instead (<see cref="MarkArrivalCard"/>): a season, an episode.</summary>
+    private void MarkArrivalFocus(BoxElement row, int verbs = int.MaxValue, bool known = true)
     {
-        foreach (var child in row.Children)
-            if (child is BoxElement { IsFocusable: true } first)
+        _arrivalToFirstCard = false;
+        var children = row.Children;
+        for (int i = 0; i < Math.Min(verbs, children.Count); i++)
+            if (children[i] is BoxElement { IsFocusable: true } first)
             {
                 first.WithRef(_arrivalFocus);
                 return;
             }
+        _arrivalToFirstCard = known && _pendingArrivalFocus;
+    }
+
+    /// <summary>A page whose verbs are known to be none: its first card is handed the keyboard on
+    /// arrival in their place (<see cref="MarkArrivalCard"/>).</summary>
+    private bool _arrivalToFirstCard;
+
+    /// <summary>Called with each card a page builds after its verbs (a series' seasons, a season's
+    /// episodes, in order): with no verb to take the keyboard, the first is handed it.</summary>
+    private T MarkArrivalCard<T>(T card) where T : Element
+    {
+        if (_arrivalToFirstCard && card is BoxElement { IsFocusable: true } box)
+        {
+            _arrivalToFirstCard = false;
+            box.WithRef(_arrivalFocus);
+        }
+        return card;
     }
 
     /// <summary>From OnAfterBuild: the page's first verb, once it is on screen. A page still

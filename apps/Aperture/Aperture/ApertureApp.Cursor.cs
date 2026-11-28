@@ -97,6 +97,10 @@ public sealed partial class ApertureApp
         }
         else
         {
+            // A list that changed under a cursor the arrival put on its first card, which no key has
+            // moved since: the new list starts there too. Home's list is named for its rows and
+            // grows as they load, and at start the cursor went back to nowhere with the second row.
+            if (_cursorFromArrival && _cursorIndex >= 0) _pendingFirstCard = true;
             _cursorKey = key;
             _cursorIndex = -1;
             _cursorToEnd = false;
@@ -112,9 +116,14 @@ public sealed partial class ApertureApp
                 _cursorIndex = Math.Clamp(firstCard, 0, items.Count - 1);
                 _pendingCursorFocus = true;
                 _firstCardFocus = true;
+                _cursorFromArrival = true;
             }
         }
     }
+
+    /// <summary>The cursor is where the arrival put it, on the page's first card, and no key has
+    /// moved it since (<see cref="SetCursorList"/>).</summary>
+    private bool _cursorFromArrival;
 
     /// <summary>Set on arriving at a page with no cursor (<see cref="Arrive"/>): the next list the
     /// page registers starts the cursor on its first card on screen.</summary>
@@ -241,7 +250,9 @@ public sealed partial class ApertureApp
     /// ringed, so the keys that follow act on the card that has the keyboard.</summary>
     private void OnFirstCardFocused(FocusEvent e)
     {
-        if (e.Reason is not (FocusReason.Next or FocusReason.Previous)) return;
+        // On a D-pad the window's own choice too (Window.ArrowKeysMoveFocus keeps the focus somewhere):
+        // the card that has the keyboard is the cursor's.
+        if (e.Reason is not (FocusReason.Next or FocusReason.Previous) && !_window.ArrowKeysMoveFocus) return;
         if (_cursorIndex >= 0 || _cursorItems.Count == 0 || e.CurrentTarget is not BoxElement card) return;
         _cursorIndex = 0;
         _cursorToEnd = false;
@@ -260,6 +271,7 @@ public sealed partial class ApertureApp
     {
         if (_cursorItems.Count == 0) return false;
         _cursorToEnd = false;
+        _cursorFromArrival = false;
         int next = _cursorIndex < 0
             ? (delta > 0 ? 0 : _cursorItems.Count - 1)
             : Math.Clamp(_cursorIndex + delta, 0, _cursorItems.Count - 1);
@@ -275,6 +287,7 @@ public sealed partial class ApertureApp
     {
         if (_cursorItems.Count == 0) return false;
         _cursorToEnd = false;
+        _cursorFromArrival = false;
         int was = _cursorIndex;
         _cursorIndex = Math.Clamp(index, 0, _cursorItems.Count - 1);
         _pendingCursorFocus = true;
@@ -289,6 +302,7 @@ public sealed partial class ApertureApp
     private bool MoveCursorToEnd()
     {
         if (_cursorItems.Count == 0) return false;
+        _cursorFromArrival = false;
         int was = _cursorIndex;
         _cursorIndex = _cursorItems.Count - 1;
         _cursorToEnd = _cursorTotal > _cursorItems.Count;   // before the build, which asks for the rest
@@ -387,6 +401,11 @@ public sealed partial class ApertureApp
         // the cards as if it were not held.
         if ((e.Modifiers & (KeyModifiers.Ctrl | KeyModifiers.Alt | KeyModifiers.Super)) != 0) return false;
 
+        // On a D-pad (Window.ArrowKeysMoveFocus) the cursor lets go at its row's ends and at the top and
+        // bottom, and the window moves the focus on: Left to the rail, Up to the bar. A row does not
+        // run on into the next one there. docs/design/DPAD-FOCUS.md §5.
+        if (_window.ArrowKeysMoveFocus && AtCursorEdge(e.Key)) return false;
+
         switch (e.Key)
         {
             case KeyCode.Right: return MoveCursor(1);
@@ -420,6 +439,50 @@ public sealed partial class ApertureApp
         }
         return false;
     }
+
+    /// <summary>
+    /// Whether an arrow would take the cursor past the edge of what it walks: Left at a row's first
+    /// card (a shelf's, a grid's first column, any card of a one-across list), Right at a row's last,
+    /// Up on the top shelf or row, Down on the bottom one (of the whole list, not only what has
+    /// loaded). Never while the cursor is nowhere: the first press starts it.
+    /// </summary>
+    private bool AtCursorEdge(KeyCode key)
+    {
+        if (_cursorIndex < 0 || key is not (KeyCode.Left or KeyCode.Right or KeyCode.Up or KeyCode.Down)) return false;
+        if (_cursorShelves.Count > 0)
+        {
+            int shelf = -1;
+            for (int i = 0; i < _cursorShelves.Count; i++)
+            {
+                var s = _cursorShelves[i];
+                if (_cursorIndex >= s.Start && _cursorIndex < s.Start + s.Count) { shelf = i; break; }
+            }
+            if (shelf < 0) return false;
+            var here = _cursorShelves[shelf];
+            return key switch
+            {
+                KeyCode.Left => _cursorIndex == here.Start,
+                KeyCode.Right => _cursorIndex == here.Start + here.Count - 1,
+                KeyCode.Up => shelf == 0,
+                _ => shelf == _cursorShelves.Count - 1,
+            };
+        }
+        int column = _cursorIndex % _cursorPerRow, row = _cursorIndex / _cursorPerRow;
+        return key switch
+        {
+            KeyCode.Left => column == 0,
+            KeyCode.Right => column == _cursorPerRow - 1 || _cursorIndex == _cursorTotal - 1,
+            KeyCode.Up => row == 0,
+            _ => row == (_cursorTotal - 1) / _cursorPerRow,
+        };
+    }
+
+    /// <summary>Whether the cursor's keys are the cursor's: always, except on a D-pad
+    /// (<see cref="Window.ArrowKeysMoveFocus"/>), where only while the focus is on the cursor's card or
+    /// nowhere. With the rail focused, Down went into the posters rather than down the rail.</summary>
+    private bool CursorHasTheKeyboard() =>
+        !_window.ArrowKeysMoveFocus || _window.FocusedElement is not { } focused
+        || ReferenceEquals(focused, _cursorCard.Current) || !_window.IsInTree(focused);
 
     /// <summary>Opens the cursor card's menu over the card itself, so it appears where
     /// the ring is rather than under the pointer, which may be somewhere else entirely.</summary>

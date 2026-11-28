@@ -608,6 +608,11 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     {
         if (!KeyboardScrollEnabled) return;
         if ((e.Modifiers & ChordModifiers) != 0) return;   // someone else's shortcut
+        // On a D-pad (ArrowKeysMoveFocus) an arrow pressed on a focused row inside is the focus's: it
+        // moves to the next row, which the window scrolls into view. docs/design/DPAD-FOCUS.md §4.
+        if (e.Key is KeyCode.Up or KeyCode.Down or KeyCode.Left or KeyCode.Right
+            && !ReferenceEquals(e.Target, this) && FocusManager is { ArrowKeysMoveFocus: true })
+            return;
 
         float beforeX = _scrollOffsetX, beforeY = _scrollOffsetY;
         if (_flow == ListFlow.Columns)

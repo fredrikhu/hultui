@@ -293,14 +293,24 @@ public class DropdownElement : Element
     {
         if (!_focused) return;
 
+        // On a D-pad (ArrowKeysMoveFocus) Down passes a closed dropdown, as every arrow does, and Enter
+        // opens it; an open list keeps all four, so a stray Left or Right does not leave it mid-choice.
+        // docs/design/DPAD-FOCUS.md §4.
+        bool dpad = FocusManager is { ArrowKeysMoveFocus: true };
         if (!_open)
         {
-            bool opens = evt.Key is KeyCode.Enter or KeyCode.Space or KeyCode.Down;
+            bool opens = evt.Key is KeyCode.Enter or KeyCode.Space || (evt.Key is KeyCode.Down && !dpad);
             if (opens)
             {
                 OpenPopup();
                 evt.StopPropagation = true;
             }
+            return;
+        }
+
+        if (dpad && evt.Key is KeyCode.Left or KeyCode.Right)
+        {
+            evt.StopPropagation = true;
             return;
         }
 
