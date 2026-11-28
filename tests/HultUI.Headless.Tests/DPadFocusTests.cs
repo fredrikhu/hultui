@@ -104,6 +104,33 @@ public class DPadFocusTests
         Assert.Same(bar, Focused(session));
     }
 
+    /// <summary>On a Shield, Down from the rail's last door went to a card below the bottom of Home's
+    /// scrolled page, and the next OK opened it. From outside a scroll view, its hidden part is not
+    /// there; from inside, Down walks on into it (DownPastTheBottom_ScrollsTheNextButtonIntoView).</summary>
+    [Fact]
+    public void FromOutsideAScrollView_ItsHiddenPartIsNotThere()
+    {
+        var rail = Flex.Column(gap: 8);
+        var top = Key("Top");
+        var last = Key("Last");
+        rail.AddChild(top);
+        rail.AddChild(last);
+        var column = Flex.Column(gap: 8).Padding(new Thickness(8));
+        var rows = Enumerable.Range(0, 20).Select(i => Key("Row " + i)).ToArray();
+        foreach (var k in rows) column.AddChild(k);
+        var scroll = ScrollView.Vertical().Height(Dimension.Px(200)).FlexGrow(1);
+        scroll.AddChild(column);
+        var root = Flex.Row(gap: 16).AlignItems(AlignItems.FlexEnd).Padding(new Thickness(10));
+        root.AddChild(rail);
+        root.AddChild(scroll);
+        using var session = DPad(root, 400, 240);
+        session.Window.Window.SetFocus(last);
+
+        session.Window.PressKey(KeyCode.Down);
+        Assert.Same(last, Focused(session));      // nothing shown below the last door
+        Assert.Equal(0, scroll.ScrollOffsetY);
+    }
+
     [Fact]
     public void WithTheSwitchOff_ArrowsMoveNothing()
     {

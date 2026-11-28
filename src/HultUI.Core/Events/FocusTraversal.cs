@@ -91,6 +91,7 @@ internal static class FocusTraversal
                     continue;
                 var box = candidate.WindowBorderBox;
                 if (box.Width <= 0 || box.Height <= 0 || !IsToward(direction, from, box)) continue;
+                if (HiddenFrom(candidate, box, current)) continue;
                 if (best is null || IsBetter(direction, from, box, bestBox))
                 {
                     best = candidate;
@@ -130,6 +131,24 @@ internal static class FocusTraversal
             return best;
         }
         finally { ReturnList(scratch); }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="candidate"/> lies outside the viewport of a scroll view the focus is not
+    /// in. Moving inside a list walks on into its hidden part, which then scrolls in; from outside it,
+    /// the hidden part is not there: on a Shield, Down from the rail's last door went to a card below the
+    /// bottom of Home's scrolled page.
+    /// </summary>
+    private static bool HiddenFrom(Element candidate, Rect box, Element current)
+    {
+        for (var e = candidate.Parent; e is not null; e = e.Parent)
+        {
+            if (e is not ScrollViewElement view || Encloses(view, current)) continue;
+            var shown = view.WindowContentBox;
+            if (box.Right <= shown.X || box.X >= shown.Right || box.Bottom <= shown.Y || box.Y >= shown.Bottom)
+                return true;
+        }
+        return false;
     }
 
     private static bool Encloses(Element outer, Element inner)

@@ -29,8 +29,10 @@ Down, Left or Right with no modifiers that came back with neither `Handled` nor
 `StopPropagation` moves the focus to the nearest focusable element in that direction.
 - **Candidates:** focusable, `TabIndex >= 0` (a roving list shows one stop, as for Tab), in the
   same `FocusScope()` (a modal dialog keeps the D-pad inside it, a focused popover is its own
-  scope), with a non-empty box. Off-screen ones in a scroll view count: Down past the last
-  visible row reaches the next.
+  scope), with a non-empty box. Off-screen ones in a scroll view count only from inside that scroll
+  view: Down past the last visible row reaches the next, but from outside, the hidden part is not
+  there (on the Shield, Down from the rail's last door went to a card below the bottom of Home's
+  scrolled page, and the next OK opened it).
 - **Geometry:** `Element.WindowBorderBox` (scroll and sticky applied, overlay origin added),
   never layout boxes, which are unscrolled.
 - **Which one:** Android's `FocusFinder` rule. A candidate must lie in the direction (its far
