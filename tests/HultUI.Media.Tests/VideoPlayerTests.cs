@@ -110,6 +110,20 @@ public class VideoPlayerTests
         Assert.True(root.IsFocused);
     }
 
+    /// <summary>Enter on the focused picture does what a click on it does: a TV remote's OK is Enter,
+    /// and on a Shield it did nothing in the player.</summary>
+    [Fact]
+    public void EnterOnThePicture_TogglesPlayback()
+    {
+        using var f = new Fixture();
+        f.FocusPlayer();
+
+        f.Session.Window.PressKey(KeyCode.Enter);
+        Assert.True(f.Player.IsPlaying);
+        f.Session.Window.PressKey(KeyCode.Enter);
+        Assert.False(f.Player.IsPlaying);
+    }
+
     [Fact]
     public void Keys_DoWhatTheDocsSay()
     {

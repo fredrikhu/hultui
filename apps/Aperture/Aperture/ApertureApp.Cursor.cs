@@ -78,7 +78,12 @@ public sealed partial class ApertureApp
     {
         _cursorListSet = true;
         _cursorShelves.Clear();   // a view of shelves adds them after (AddCursorShelf)
+        // What the cursor was on: in this list as last registered, or, on a page just returned to (whose
+        // list is not the one registered last), as the visit kept it.
+        object? under = _cursorKey != key ? null : _cursorItemsKey == key ? CursorEntry : _arrivedUnder;
+        _arrivedUnder = null;
         _cursorItems = items;
+        _cursorItemsKey = key;
         _cursorPerRow = Math.Max(1, perRow);
         _cursorTotal = Math.Max(total, items.Count);
         if (_cursorKey == key)
@@ -90,10 +95,23 @@ public sealed partial class ApertureApp
                 _cursorIndex = items.Count - 1;
                 if (items.Count >= _cursorTotal) _cursorToEnd = false;
             }
-            // The list can shrink under the cursor as pages load or a filter changes. An empty
-            // one is still loading (a library opened again, its place kept from the last visit)
-            // or filtered to nothing: the place is kept for the cards to come.
-            else if (_cursorIndex >= items.Count && items.Count > 0) _cursorIndex = items.Count - 1;
+            else
+            {
+                // The list can shrink under the cursor as pages load or a filter changes. An empty
+                // one is still loading (a library opened again, its place kept from the last visit)
+                // or filtered to nothing: the place is kept for the cards to come.
+                if (_cursorIndex >= items.Count && items.Count > 0) _cursorIndex = items.Count - 1;
+                // The list reordered under the cursor: it follows what it was on. A film just watched
+                // goes to the front of Continue watching, and the cursor, kept at its place, came back
+                // from the player on the title that moved into it, which OK would have opened (a Shield
+                // TV). Not on the way to the end above, which moves it on with each page on purpose.
+                if (under is not null && _cursorIndex >= 0 && _cursorIndex < items.Count
+                    && !SameEntry(items[_cursorIndex], under) && NearestIndexOf(items, under, _cursorIndex) is int moved)
+                {
+                    _cursorIndex = moved;
+                    _pendingCursorFocus = true;
+                }
+            }
         }
         else
         {
@@ -124,6 +142,35 @@ public sealed partial class ApertureApp
     /// <summary>The cursor is where the arrival put it, on the page's first card, and no key has
     /// moved it since (<see cref="SetCursorList"/>).</summary>
     private bool _cursorFromArrival;
+
+    /// <summary>The key <see cref="_cursorItems"/> was registered under; on a page just returned to,
+    /// <see cref="_cursorKey"/> is the page's while the items are still the last page's.</summary>
+    private string _cursorItemsKey = "";
+
+    /// <summary>What the cursor was on when the page returned to was left (<see cref="Arrive"/>).</summary>
+    private object? _arrivedUnder;
+
+    /// <summary>Whether two entries of a walk are the same title: a library item by its id, a title
+    /// the request server knows by its kind and TMDB id, anything else as equal. An item's other fields
+    /// (its resume point, its tick) change as it is watched.</summary>
+    private static bool SameEntry(object a, object b) => (a, b) switch
+    {
+        (MediaItem x, MediaItem y) => x.Id == y.Id,
+        (DiscoverItem x, DiscoverItem y) => x.Key == y.Key,
+        _ => Equals(a, b),
+    };
+
+    /// <summary>The place of <paramref name="entry"/> in <paramref name="items"/> nearest
+    /// <paramref name="near"/> (Home shows a title on two shelves at times), or null.</summary>
+    private static int? NearestIndexOf(IReadOnlyList<object> items, object entry, int near)
+    {
+        for (int d = 1; d < items.Count; d++)
+        {
+            if (near - d >= 0 && SameEntry(items[near - d], entry)) return near - d;
+            if (near + d < items.Count && SameEntry(items[near + d], entry)) return near + d;
+        }
+        return null;
+    }
 
     /// <summary>Set on arriving at a page with no cursor (<see cref="Arrive"/>): the next list the
     /// page registers starts the cursor on its first card on screen.</summary>

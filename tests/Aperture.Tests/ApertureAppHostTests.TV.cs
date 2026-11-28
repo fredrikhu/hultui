@@ -230,6 +230,40 @@ public partial class ApertureAppHostTests
         });
     }
 
+    /// <summary>A film watched goes to the front of Continue watching. The cursor, kept at its place,
+    /// came back from the player on the title that moved into that place, which OK would have opened
+    /// (a Shield TV); it follows what it was on.</summary>
+    [Fact]
+    public void ARowReorderedUnderTheCursor_KeepsItOnItsTitle()
+    {
+        var library = Library();
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            session.PumpFrames(3);
+            for (int i = 0; i < 4 && app.CursorItem?.Id != "e1"; i++)
+            {
+                session.Window.PressKey(KeyCode.Right);
+                session.PumpFrames(2);
+            }
+            Assert.Equal("e1", app.CursorItem?.Id);
+            int was = app.CursorIndex;
+
+            // Away to its page and back, the row reordered meanwhile, as watching it does.
+            app.Navigate(new Route(ApertureView.Detail, "m1", "Stalker"));
+            PumpUntilShown(session, "Stalker");
+            library.ResumeIds.Remove("e1");
+            library.ResumeIds.Insert(0, "e1");
+            app.Refresh();
+            app.GoBack();
+            PumpUntilShown(session, "Continue watching");
+            session.PumpFrames(3);
+
+            Assert.Equal("e1", app.CursorItem?.Id);
+            Assert.NotEqual(was, app.CursorIndex);
+        }, dpad: true);
+    }
+
     [Fact]
     public void AFilmPage_StillOpensOnPlay_OnADPad()
     {

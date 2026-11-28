@@ -29,6 +29,14 @@ Aperture on the desktop get them too). `VideoPlayer.Shortcuts` binds them: play/
 jumps (fast-forward and rewind as the jump keys, a hold repeating), next and previous as the queue's.
 **Question for the user:** these eight members, and those names.
 
+## 2b. The player's controls on a D-pad (to decide)
+
+OK on the picture plays and pauses now (as a click), and Left and Right seek, Up and Down change the
+volume, Back leaves. The bar's own buttons (subtitles, audio, speed, chapters) cannot be reached: the
+player takes all four arrows. A TV player usually lets Up or Down move into its bar while it shows,
+the arrows then walking the buttons, and Back hide the bar before it leaves. **Question for the user:**
+that, or leave Up and Down as the volume (a TV's own volume is the remote's volume keys).
+
 ## 3. 4K: a surface the size of the panel (to design)
 
 Two ways, both on `HultUIActivity`'s SDL surface:

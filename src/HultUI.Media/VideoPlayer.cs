@@ -783,6 +783,18 @@ public sealed class VideoPlayer : Component
             return;
 
         var player = Player;
+        // Enter on the picture itself is its click: play or pause, the controls shown. A TV remote's
+        // OK is Enter, and with the picture focused, as it is when the player opens, it did nothing
+        // (a Shield TV). A button of the bar that has the focus keeps Enter for itself.
+        if (e.Key is KeyCode.Enter or KeyCode.NumpadEnter && ReferenceEquals(e.Target, _root.Current)
+            && (e.Modifiers & (KeyModifiers.Shift | KeyModifiers.Ctrl | KeyModifiers.Alt | KeyModifiers.Super)) == 0)
+        {
+            player.TogglePlay();
+            e.Handled = true;
+            e.StopPropagation = true;
+            Reveal();
+            return;
+        }
         switch (Shortcuts.Find(e)?.Id)
         {
             case "play": player.TogglePlay(); break;

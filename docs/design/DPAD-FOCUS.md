@@ -133,6 +133,12 @@ media keys), not this one.
   window's rule saw only that card among a shelf's: from anything that was not a card it skipped
   whole shelves to it, which the user saw as Up "registering twice". On a D-pad every card is a stop,
   and a card taking the keyboard puts the cursor on it (`OnWalkCardFocused`).
+- **The cursor follows its title when its list reorders.** A film watched goes to the front of
+  Continue watching; the cursor, kept at its place, came back from the player on the title that
+  moved into it, which OK would have opened. A page left keeps what the cursor was on, and the list
+  it comes back to finds it again (on the desktop too).
+- **OK in the player** (Enter on the focused picture) plays and pauses, as a click on it does; it
+  did nothing (`VideoPlayer`).
 - **Search registers its results before making their cards.** A card asks the list what it is to the
   keyboard; made against the last list, the first result was no stop, so neither Tab (desktop too) nor
   the D-pad could reach the results from the field.

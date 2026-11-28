@@ -28,6 +28,10 @@ public sealed partial class ApertureApp
         public string CursorKey = "";
         public int CursorIndex = -1;
 
+        /// <summary>What the cursor was on when the page was left: on the way back the cursor follows
+        /// it should the list have reordered meanwhile (a film watched to the front of its row).</summary>
+        public object? CursorEntry;
+
         /// <summary>How far a library's grid was scrolled when the page was left, or -1: another
         /// page, or a grid not on screen then (still loading). The wheel's scroll counts as the
         /// keys' does: a page opened with a click is returned to where it was clicked.</summary>
@@ -172,6 +176,7 @@ public sealed partial class ApertureApp
         var visit = _history[_at];
         visit.CursorKey = _cursorKey;
         visit.CursorIndex = _cursorKey.Length > 0 ? _cursorIndex : -1;
+        visit.CursorEntry = _cursorKey.Length > 0 ? CursorEntry : null;
         visit.GridScrollY = visit.Route.View == ApertureView.Library && _gridList.Current is { IsHosted: true } grid
             ? grid.ScrollOffsetY : -1;
         KeepPage(visit);
@@ -197,6 +202,7 @@ public sealed partial class ApertureApp
     {
         _cursorKey = visit.CursorKey;
         _cursorIndex = visit.CursorIndex;
+        _arrivedUnder = visit.CursorEntry;
         _cursorToEnd = false;
         _gridArrivalScrollY = visit.GridScrollY;
         // The ref still holds a card of the page left; the build sets it again.
