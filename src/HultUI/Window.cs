@@ -58,6 +58,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     private bool _arrowKeysMoveFocus;
     private Rect _lastFocusBox;
     private bool _hasLastFocusBox;
+    private bool _revealFocus;
     // Middle-button autoscroll, the way Windows does it: the press anchors an origin and
     // the pointer's distance from it becomes a speed, so the view keeps moving while the
     // button is held and nothing else has to happen. The view is captured on press rather
@@ -1475,6 +1476,9 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         {
             _lastFocusBox = element.WindowBorderBox;
             _hasLastFocusBox = true;
+            // Scrolled into view after the next layout, however it took the focus: an app's own choice
+            // (a series page's first season) sat half under the screen's edge on a TV.
+            _revealFocus = true;
         }
 
         // A selectable label copies through the window's clipboard too, however it took the focus:
@@ -2740,7 +2744,15 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
         // A D-pad window keeps the focus somewhere (docs/design/DPAD-FOCUS.md §3), now that the boxes
         // are this frame's and the builds' own focus choices have been made.
-        if (_arrowKeysMoveFocus) KeepFocus();
+        if (_arrowKeysMoveFocus)
+        {
+            KeepFocus();
+            if (_revealFocus)
+            {
+                _revealFocus = false;
+                if (FocusedElement is { } focused && OverlayIndexOf(focused) != -2) RevealInScrollViews(focused);
+            }
+        }
 
         // Content that scrolled under a resting pointer takes the hover in this frame, before the
         // accessibility phase and the drawing: one hit test a frame that some scroll view moved in.

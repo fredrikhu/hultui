@@ -124,6 +124,35 @@ public class DPadFocusTests
         Assert.Same(field, Focused(session));
     }
 
+    /// <summary>An empty Search field on the Shield kept the D-pad: Left moved its caret nowhere and
+    /// was marked as used, so the rail beside it could not be reached.</summary>
+    [Fact]
+    public void ATextInput_LetsLeftGoAtItsStart_AndRightAtItsEnd()
+    {
+        var left = Key("Rail");
+        var field = TextInput.New("ab").Width(Dimension.Px(200));
+        var right = Key("Go");
+        var root = Flex.Row(gap: 16).Padding(new Thickness(20));
+        root.AddChild(left);
+        root.AddChild(field);
+        root.AddChild(right);
+        using var session = DPad(root);
+        session.Window.Window.SetFocus(field);
+
+        session.Window.PressKey(KeyCode.End);
+        session.Window.PressKey(KeyCode.Left);    // a caret move: the field's
+        Assert.Same(field, Focused(session));
+        session.Window.PressKey(KeyCode.Right);   // back to the end: still the field's
+        Assert.Same(field, Focused(session));
+        session.Window.PressKey(KeyCode.Right);   // at the end: the way out
+        Assert.Same(right, Focused(session));
+
+        session.Window.Window.SetFocus(field);
+        session.Window.PressKey(KeyCode.Home);
+        session.Window.PressKey(KeyCode.Left);
+        Assert.Same(left, Focused(session));
+    }
+
     [Fact]
     public void AFieldTheDPadReaches_WaitsForOK_BeforeItsKeyboard_AndOKIsNotItsEnter()
     {
@@ -187,6 +216,26 @@ public class DPadFocusTests
         var view = scroll.WindowContentBox;
         Assert.True(box.Y >= view.Y && box.Bottom <= view.Bottom,
             $"row 10 at {box.Y}–{box.Bottom}, the view {view.Y}–{view.Bottom}, scrolled {scroll.ScrollOffsetY}");
+    }
+
+    /// <summary>An app's own focus choice is scrolled in too: a series page's first season sat half under
+    /// the Shield's screen edge, with the ring on it.</summary>
+    [Fact]
+    public void AFocusTheAppGives_IsScrolledIntoView()
+    {
+        var column = Flex.Column(gap: 8).Padding(new Thickness(8));
+        var keys = Enumerable.Range(0, 20).Select(i => Key("Row " + i)).ToArray();
+        foreach (var k in keys) column.AddChild(k);
+        var scroll = ScrollView.Vertical().Height(Dimension.Px(200));
+        scroll.AddChild(column);
+        using var session = DPad(scroll, 300, 300);
+
+        keys[12].Focus();
+        session.PumpFrame();
+        var box = keys[12].WindowBorderBox;
+        var view = scroll.WindowContentBox;
+        Assert.True(box.Y >= view.Y && box.Bottom <= view.Bottom,
+            $"row 12 at {box.Y}–{box.Bottom}, the view {view.Y}–{view.Bottom}, scrolled {scroll.ScrollOffsetY}");
     }
 
     [Fact]

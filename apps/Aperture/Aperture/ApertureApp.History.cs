@@ -209,11 +209,11 @@ public sealed partial class ApertureApp
         _arrivalInputs = _inputs;
     }
 
-    /// <summary>Inputs the window has routed (keys, text, presses, the wheel), and how many there had
-    /// been when the page was opened.</summary>
+    /// <summary>Key and pointer presses that reached the app's root, and how many there had been when
+    /// the page was opened. Only presses: a key's release (the remote's OK lifted after it opened the
+    /// page) moves nothing, and counted, it kept the focus where the window had put it while the page
+    /// loaded (a Shield TV: the rail's Search, not the series' first season).</summary>
     private int _inputs, _arrivalInputs;
-
-    private void CountInput() => _inputs++;
 
     /// <summary>Whether the keyboard went somewhere since the page was opened: an element other than
     /// the one that had it then, still in the window. It stays there. On a D-pad
@@ -308,6 +308,7 @@ public sealed partial class ApertureApp
     /// </summary>
     private void OnRootPointerDown(PointerDownEvent e)
     {
+        _inputs++;   // KeyboardMovedSinceArrival
         if (e.Button is not (PointerEvent.BackButton or PointerEvent.ForwardButton)) return;
         if (_stage != ApertureStage.Browsing || _playingItem is not null) return;
         if (e.Button == PointerEvent.BackButton ? GoBack() : GoForward())

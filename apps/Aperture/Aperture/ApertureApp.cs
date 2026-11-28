@@ -128,8 +128,6 @@ public sealed partial class ApertureApp : Component, IDisposable
         Ui.DisplayScale = _window.DisplayScale;
         _artworkScale = ArtworkScaleFor(_window.DisplayScale);
         _window.Resized += OnWindowResize;
-        // Which focus moves the user made since a page opened (KeyboardMovedSinceArrival).
-        _window.InputActivity += CountInput;
         // On a D-pad the first page starts on its first card, as every page opened later does
         // (Arrive): with no pointer, a window that opened on the title bar's account button made OK
         // open the account menu (Window.ArrowKeysMoveFocus, docs/design/DPAD-FOCUS.md §5).
@@ -147,6 +145,9 @@ public sealed partial class ApertureApp : Component, IDisposable
     /// of the same pixels, and a held Shift about 30 a second (plan 17 round 15).</summary>
     private void OnRootKeyDown(KeyDownEvent e)
     {
+        // A press the user made, before what it does (an Enter that opens a page counts as made
+        // before the page): KeyboardMovedSinceArrival.
+        _inputs++;
         HandleKeyDown(e);
         if (!KeyChord.IsModifierKey(e.Key)) Mount().MarkPaintDirty();
     }

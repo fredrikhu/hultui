@@ -429,6 +429,13 @@ public partial class TextInputElement : BoxElement, ITouchTextEditing
             return;
         }
 
+        // On a D-pad (ArrowKeysMoveFocus) a bare Left at the start and Right at the end leave the field,
+        // as an Android TV's fields do: with no Tab, the field's edge is the way out of it, and an empty
+        // Search field on a Shield kept the D-pad from the rail. docs/design/DPAD-FOCUS.md §4.
+        if (FocusManager is { ArrowKeysMoveFocus: true } && !shift && !ctrl && !HasSelection
+            && ((evt.Key == KeyCode.Left && _cursorPos == 0) || (evt.Key == KeyCode.Right && _cursorPos == _text.Length)))
+            return;
+
         switch (evt.Key)
         {
             case KeyCode.Left:

@@ -106,6 +106,31 @@ public partial class ApertureAppHostTests
             }, dpad: dpad);
     }
 
+    /// <summary>The series opened from its card with OK, a press and a release: the card leaves with the
+    /// page, the window puts the focus near where it was while the series loads (on the Shield, the
+    /// rail's Search), and the first season takes it from there when it comes. Counted as a user's move,
+    /// the release kept it on Search.</summary>
+    [Fact]
+    public void AWatchedSeriesOpenedWithOK_EndsOnItsFirstSeason()
+    {
+        // Nothing else on Home: the cursor starts on the series' card.
+        var library = new FakeMediaLibrary().AddLibrary("shows", "Series", LibraryKind.TvShows);
+        library.AddItem(new MediaItem { Id = "done", Name = "Finished Show", Kind = MediaKind.Series }, "shows");
+        library.AddSeason("done", 1, 4, watched: 4).AddSeason("done", 2, 4, watched: 4);
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Finished Show");
+            session.PumpFrames(3);
+            Assert.Equal("done", app.CursorItem?.Id);
+
+            session.Window.PressKey(KeyCode.Enter);
+            PumpUntilShown(session, "Season 2");
+            session.PumpFrames(3);
+            var focused = session.Window.Window.FocusedElement;
+            Assert.Contains("Season 1", focused?.AccessibleName ?? $"(the focus is on {FocusedId(session)})");
+        }, dpad: true);
+    }
+
     [Fact]
     public void AFilmPage_StillOpensOnPlay_OnADPad()
     {
