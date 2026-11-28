@@ -134,6 +134,9 @@ public sealed partial class ApertureApp
         if (countsAsDeliberate) _autoPlayedInARow = 0;
         if (!keepQueue) ClearQueue();
         DismissUpNext();
+        // What had the keyboard as the film starts (the page's Play, a card), for the film's end to
+        // hand it back to; not the next episode's start, which is the same sitting.
+        if (_playingItem is null) _focusBeforePlay.SetTarget(_window.FocusedElement);
         StopPlayback(report: true, keepSheet: true);
         _playingItem = item;
         _resumeTo = from;
@@ -258,7 +261,26 @@ public sealed partial class ApertureApp
         }
         // New seasons found while the film played are said now that it has stopped.
         if (!keepSheet) SayHeldSeasonNews();
+        if (!keepSheet) _pendingFocusAfterPlay = true;
         Rerender();
+    }
+
+    /// <summary>What had the keyboard when the film started, handed it back when the film stops
+    /// (<see cref="FocusAfterPlay"/>). Weak: a page left meanwhile holds its whole view.</summary>
+    private readonly WeakReference<Element?> _focusBeforePlay = new(null);
+    private bool _pendingFocusAfterPlay;
+
+    /// <summary>From OnAfterBuild, once the sheet is gone: the keyboard back where it was when the film
+    /// started, if that is still on screen. The picture had it and went with the sheet, and the window
+    /// gave it to what was nearest the middle of the screen: on a TV, a film's Favourite button, which
+    /// OK then toggled.</summary>
+    private void FocusAfterPlay()
+    {
+        if (!_pendingFocusAfterPlay || _playingItem is not null) return;
+        _pendingFocusAfterPlay = false;
+        if (_focusBeforePlay.TryGetTarget(out var before) && before is { IsFocusable: true } && _window.IsInTree(before))
+            before.Focus();
+        _focusBeforePlay.SetTarget(null);
     }
 
     /// <summary>

@@ -349,6 +349,9 @@ public partial class ApertureAppHostTests
             for (int i = 0; i < 3; i++) session.PumpFrame();
             Assert.Null(app.PlayingItem);
             Assert.Equal((ApertureView.Detail, "m1"), (app.Current.View, app.Current.Id));
+            // And the keyboard is back on Play, where the film started from: the window gave it to what
+            // was nearest the middle of the screen, on the Shield the Favourite button.
+            Assert.Equal("detail-play", FocusedId(session));
         }, () => backend, width: 960, height: 540, dpad: dpad);
     }
 

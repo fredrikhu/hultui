@@ -195,6 +195,7 @@ public sealed partial class ApertureApp : Component, IDisposable
         FocusCursorCard();
         FocusPendingSearchField();
         FocusArrival();
+        FocusAfterPlay();
         LetGoOfLeftCursorCard();
         DropKeptPageIfStale();
         AskToPruneArtWaits();
