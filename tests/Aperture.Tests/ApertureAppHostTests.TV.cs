@@ -1,6 +1,8 @@
 using Aperture.Core;
 using Aperture.Core.Testing;
+using HultUI.Core.Elements;
 using HultUI.Core.Events;
+using HultUI.Core.Platform;
 using HultUI.Headless;
 using Xunit;
 
@@ -197,6 +199,34 @@ public partial class ApertureAppHostTests
 
             session.Window.PressKey(KeyCode.Tab);
             Assert.StartsWith("card-", FocusedId(session) ?? "(nothing)");
+        });
+    }
+
+    /// <summary>The sign-in form on a TV's keyboard: the server is a web address and the user name a user
+    /// name (the Leanback keyboard capitalised "Jellyfin.home"), and Enter (the keyboard's Done) in the
+    /// server field goes on to the user name while it is empty, where it signed in and said "Enter your
+    /// username".</summary>
+    [Fact]
+    public void TheSignInFields_AskForTheirKeyboards_AndEnterGoesOnToTheMissingField()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.SignOut(keepAccount: false);
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+
+            var address = (TextInputElement)session.Window.FindByAutomationId("connect-address")!.Element;
+            var username = (TextInputElement)session.Window.FindByAutomationId("connect-username")!.Element;
+            Assert.Equal(TextInputKind.Url, address.InputKind);
+            Assert.Equal(TextInputKind.Username, username.InputKind);
+
+            session.Window.FindByAutomationId("connect-address")!.Click();
+            session.Window.TypeText("jellyfin.example");
+            session.PumpFrame();
+            session.Window.PressKey(KeyCode.Enter);
+            session.PumpFrames(2);
+            Assert.Equal("connect-username", FocusedId(session));
+            Assert.False(Shows(session, "Enter your username"), session.Window.DumpAccessibilityTree());
         });
     }
 

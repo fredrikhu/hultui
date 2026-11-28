@@ -140,9 +140,14 @@ media keys), not this one.
   since it opened, rather than handing it to its verb or first card (`KeyboardMovedSinceArrival`).
   On a D-pad that is only a move after an input: the window's own choice while the page loads is
   replaced by the page's.
-- **Not yet:** the server field asking for a URL keyboard (the Leanback keyboard capitalised
-  "Jellyfin.home"), and the keyboard's Done on the server field submitting the form with the user
-  name still empty. Both small, both after the Shield check.
+- **The sign-in form on a TV's keyboard.** The server field asks for a web address's keyboard and
+  the user name a user name's (the Leanback keyboard capitalised "Jellyfin.home"), and Enter (the
+  keyboard's Done) goes on to the user name while it is empty, where it signed in and said "Enter
+  your username" (on the desktop too).
+- **On the TV's home screen.** A Leanback launcher entry, a 320×180 banner (the icon and the
+  wordmark, `Resources/drawable-xhdpi/banner.png`), and touch and Leanback both not required, so one
+  APK installs on phones, tablets and TVs. The Shield lists Aperture under Installed Apps.
+- **Not here:** the remote's media keys, 4K, HDR and the frame rate: `TV-VIDEO.md`.
 
 ## 6. Open questions for the user
 
