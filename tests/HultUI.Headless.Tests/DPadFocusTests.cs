@@ -131,6 +131,29 @@ public class DPadFocusTests
         Assert.Equal(0, scroll.ScrollOffsetY);
     }
 
+    /// <summary>What is marked hidden from readers (a page under a player's sheet) is no part of what a
+    /// D-pad reaches: on a Shield, Right along the player's bar went to a cast card under the player.</summary>
+    [Fact]
+    public void ACoveredSubtree_IsNotThere()
+    {
+        var under = Key("Under");
+        var page = Flex.Row().Padding(new Thickness(0, 0, 0, 200));
+        page.AddChild(under);
+        page.AccessibilityHidden = true;
+        var play = Key("Play");
+        var sheet = Flex.Row(gap: 16).Padding(new Thickness(20));
+        sheet.AddChild(play);
+        var root = Flex.Column(gap: 0);
+        root.AddChild(sheet);
+        root.AddChild(page);
+        using var session = DPad(root);
+        Assert.Same(play, Focused(session));      // the window's own choice skips it too
+
+        session.Window.PressKey(KeyCode.Right);
+        session.Window.PressKey(KeyCode.Down);
+        Assert.Same(play, Focused(session));
+    }
+
     [Fact]
     public void WithTheSwitchOff_ArrowsMoveNothing()
     {

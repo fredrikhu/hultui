@@ -80,7 +80,7 @@ internal static class FocusTraversal
         var scratch = RentList();
         try
         {
-            CollectRecursive(root, scratch);
+            CollectReachable(root, scratch);
             var from = current.WindowBorderBox;
             Element? best = null;
             Rect bestBox = default;
@@ -112,7 +112,7 @@ internal static class FocusTraversal
         var scratch = RentList();
         try
         {
-            CollectRecursive(root, scratch);
+            CollectReachable(root, scratch);
             Element? best = null;
             float bestDistance = float.MaxValue;
             float cx = where.X + where.Width / 2f, cy = where.Y + where.Height / 2f;
@@ -149,6 +149,42 @@ internal static class FocusTraversal
                 return true;
         }
         return false;
+    }
+
+    /// <summary>The scope's first stop the D-pad can reach (<see cref="CollectReachable"/>), for the
+    /// window's own choice of focus; null when there is none.</summary>
+    public static Element? FindFirstReachable(Element root)
+    {
+        var scratch = RentList();
+        try
+        {
+            CollectReachable(root, scratch);
+            if (scratch.Count == 0) return null;
+            // Tab's order: a positive TabIndex first, in order, then document order.
+            Element? best = null;
+            foreach (var e in scratch)
+                if (best is null || Order(e) < Order(best)) best = e;
+            return best;
+        }
+        finally { ReturnList(scratch); }
+
+        static int Order(Element e) => e.TabIndex == 0 ? int.MaxValue : e.TabIndex;
+    }
+
+    /// <summary>
+    /// Tab's stops, less those in a subtree marked <see cref="Element.AccessibilityHidden"/>: what is
+    /// covered (a page under a player's sheet) is no part of what a reader meets, nor of what a D-pad
+    /// reaches. On a Shield, Right along the player's bar went to a cast card of the film's page under
+    /// the player, and Back from there left the film.
+    /// </summary>
+    private static void CollectReachable(Element element, List<Element> result)
+    {
+        if (element.AccessibilityHidden) return;
+        if (element.IsFocusable && element.TabIndex >= 0)
+            result.Add(element);
+        var children = element.Children;
+        for (int i = 0; i < children.Count; i++)
+            CollectReachable(children[i], result);
     }
 
     private static bool Encloses(Element outer, Element inner)

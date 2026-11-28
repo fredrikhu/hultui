@@ -186,6 +186,39 @@ public class VideoPlayerTests
         Assert.Equal("video-player", Focused());
     }
 
+    /// <summary>On a D-pad the bar is two rows at any width: in one row the scrubber sat between the
+    /// buttons and took Left and Right, so a Shield's remote walked into it and no further. The buttons
+    /// are a row of their own, and Up goes to the scrubber over them.</summary>
+    [Fact]
+    public void OnADPad_RightWalksEveryButton_AndUpReachesTheScrubber()
+    {
+        using var f = new Fixture(dpad: true, width: 960);
+        f.FocusPlayer();
+        f.Session.PumpFrame();
+        var w = f.Session.Window;
+        var walked = new List<string?>();
+        w.PressKey(KeyCode.Down);
+        f.Session.PumpFrame();
+        walked.Add(w.Window.FocusedElement?.AutomationId);
+        for (int i = 0; i < 6; i++)
+        {
+            w.PressKey(KeyCode.Right);
+            f.Session.PumpFrame();
+            if (w.Window.FocusedElement?.AutomationId is var id && id != walked[^1]) walked.Add(id);
+        }
+        Assert.Equal(["video-play", "video-jump-back", "video-jump-forward", "video-mute", "video-rate", "video-fullscreen"], walked);
+
+        w.PressKey(KeyCode.Up);
+        Assert.Equal("video-seek", w.Window.FocusedElement?.AutomationId);
+        var at = f.Player.Position;
+        w.PressKey(KeyCode.Right);   // the scrubber's: a seek
+        Assert.Equal("video-seek", w.Window.FocusedElement?.AutomationId);
+        Assert.NotEqual(at, f.Player.Position);
+        w.PressKey(KeyCode.Down);
+        Assert.StartsWith("video-", w.Window.FocusedElement?.AutomationId ?? "(nothing)");
+        Assert.NotEqual("video-seek", w.Window.FocusedElement?.AutomationId);
+    }
+
     [Fact]
     public void Keys_DoWhatTheDocsSay()
     {

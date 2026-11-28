@@ -1241,7 +1241,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         var focused = _focusManager.FocusedElement;
         var next = focused is not null && OverlayIndexOf(focused) != -2 && Encloses(scope, focused)
             ? FocusTraversal.FindInDirection(scope, focused, direction)
-            : FocusTraversal.FindNext(scope, null);
+            : FocusTraversal.FindFirstReachable(scope);
         if (next is null) return;
         _focusManager.SetFocus(next, direction is FocusDirection.Down or FocusDirection.Right
             ? FocusReason.Next : FocusReason.Previous);
@@ -1315,7 +1315,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // Otherwise the element that had it left: what is nearest where it was.
         var next = !live && _hasLastFocusBox
             ? FocusTraversal.FindNearest(scope, _lastFocusBox)
-            : FocusTraversal.FindNext(scope, null);
+            : FocusTraversal.FindFirstReachable(scope);
         if (next is null) return;
         _focusManager.SetFocus(next);
         _lastFocusBox = next.WindowBorderBox;

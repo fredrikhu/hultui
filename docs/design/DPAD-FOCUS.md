@@ -32,7 +32,10 @@ Down, Left or Right with no modifiers that came back with neither `Handled` nor
   scope), with a non-empty box. Off-screen ones in a scroll view count only from inside that scroll
   view: Down past the last visible row reaches the next, but from outside, the hidden part is not
   there (on the Shield, Down from the rail's last door went to a card below the bottom of Home's
-  scrolled page, and the next OK opened it).
+  scrolled page, and the next OK opened it). Nothing in a subtree marked `AccessibilityHidden` counts
+  either, for the D-pad nor for the window's own choice: what is covered (a page under a player's
+  sheet) is no part of what a reader meets, nor of what a remote reaches (on the Shield, Right along
+  the player's bar went to a cast card of the film's page under the player).
 - **Geometry:** `Element.WindowBorderBox` (scroll and sticky applied, overlay origin added),
   never layout boxes, which are unscrolled.
 - **Which one:** Android's `FocusFinder` rule. A candidate must lie in the direction (its far

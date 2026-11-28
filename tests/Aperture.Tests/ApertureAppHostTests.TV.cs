@@ -290,6 +290,39 @@ public partial class ApertureAppHostTests
         }, () => backend, width: 960, height: 600);
     }
 
+    /// <summary>The player's bar walked with a remote stays in the player: on a Shield, Right from the
+    /// jump-forward button went to a cast card of the film's page under the player, and Back from there
+    /// left the film. Back from the bar comes back to the picture, the film still on.</summary>
+    [Fact]
+    public void OnADPad_ThePlayersBar_StaysInThePlayer()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(162) };
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Navigate(new Route(ApertureView.Detail, "m1", "Stalker"));
+            PumpUntilShown(session, "Alexander Kaidanovsky");
+            app.Play(library.Item("m1")!, TimeSpan.Zero);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            PlayQuietly(session, backend, 1);
+
+            session.Window.PressKey(KeyCode.Down);
+            session.PumpFrame();
+            Assert.Equal("video-play", FocusedId(session));
+            for (int i = 0; i < 8; i++)
+            {
+                session.Window.PressKey(KeyCode.Right);
+                session.PumpFrame();
+                Assert.StartsWith("video-", FocusedId(session) ?? "(nothing)");
+            }
+            session.Window.PressKey(KeyCode.Back);
+            session.PumpFrame();
+            Assert.Equal("video-player", FocusedId(session));
+            Assert.Equal("m1", app.PlayingItem?.Id);
+        }, () => backend, width: 960, height: 540, dpad: true);
+    }
+
     [Fact]
     public void AFilmPage_StillOpensOnPlay_OnADPad()
     {

@@ -51,7 +51,8 @@ public sealed class VideoPlayer : Component
     /// Whether the player is narrower than its one-row bar (<see cref="NarrowWidth"/>): a phone held
     /// upright, 360 to 412 DIP. The bar is then two rows, the scrubber across the whole width over the
     /// buttons, and has no volume slider (a phone has its volume keys); in one row at 412 DIP the
-    /// buttons lay over the time and the scrubber had no room (seen on the emulator).
+    /// buttons lay over the time and the scrubber had no room (seen on the emulator). On a D-pad too
+    /// (a TV, whose remote has the volume keys), so the remote can walk the buttons.
     /// </summary>
     private readonly Signal<bool> _narrow = new(false);
 
@@ -411,10 +412,15 @@ public sealed class VideoPlayer : Component
         root.Role = AccessibilityRole.Group;
         root.On<PointerMoveEvent>(_ => Reveal());
         // Narrow (a phone held upright): the bar in two rows, from the width the player was laid
-        // out at. A change of it rebuilds the player once.
+        // out at. A change of it rebuilds the player once. On a D-pad too, at any width: in one row
+        // the scrubber sat between the buttons and took Left and Right, so the remote could not walk
+        // past it to the volume, the speed or the subtitles (a Shield TV). In two rows Up and Down go
+        // between the scrubber and the buttons.
         root.OnLayoutChanged(e =>
         {
-            if (e.SizeChanged && (e.Box.Width < NarrowWidth) != _narrow.Value) _narrow.Value = e.Box.Width < NarrowWidth;
+            if (!e.SizeChanged) return;
+            bool twoRows = e.Box.Width < NarrowWidth || DPad;
+            if (twoRows != _narrow.Value) _narrow.Value = twoRows;
         });
         root.WithRef(_root);
 

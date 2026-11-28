@@ -111,6 +111,10 @@ D-pad navigation) and off elsewhere. A window with it on also:
 - opens a field's keyboard on OK (Enter), not as the focus reaches it, and does not pass that OK
   to the field as its Enter
 
+What the D-pad reaches is what a reader reaches: nothing in a subtree marked
+`AccessibilityHidden` (a page under a sheet), and nothing scrolled out of a scroll view the focus
+is not in.
+
 A control keeps the arrows it uses by marking them, as every framework control does. On a D-pad a
 slider leaves Up and Down, a closed dropdown or date picker leaves Down (Enter opens it), and a
 virtual list with keyboard scrolling leaves the arrows of a focused row inside it to the focus.

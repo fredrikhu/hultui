@@ -38,7 +38,9 @@ picture shows the bar and puts the focus on its play button (where they changed 
 button could be reached); in the bar the arrows walk its controls by the window's rule (a slider keeps
 Left and Right), and Back gives the focus back to the picture before it would leave the film. The bar
 fading with the focus in it gives the focus back to the picture too. The bar's buttons show the focus
-ring (with Tab on the desktop as well).
+ring (with Tab on the desktop as well). On a D-pad the bar is two rows at any width, the scrubber over
+the buttons: in one row the scrubber sat between them and took Left and Right, so the remote could not
+get past it to the volume, the speed or the subtitles.
 
 ## 3. 4K: a surface the size of the panel (to design)
 
