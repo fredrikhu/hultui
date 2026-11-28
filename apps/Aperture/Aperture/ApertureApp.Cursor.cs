@@ -231,17 +231,39 @@ public sealed partial class ApertureApp
     {
         var mark = MarkOf(index);
         card.IsFocusable = true;
-        card.TabIndex = mark == CardMark.None ? -1 : 0;
+        // On a D-pad (Window.ArrowKeysMoveFocus) every card is a stop the window's arrows can reach, and
+        // the keyboard reaching one puts the cursor on it (OnWalkCardFocused). With only the cursor's card
+        // a stop, the window's moves from anything that is not a card (the rail, a shelf's arrows) went
+        // past whole shelves to the one card, or to the arrows, which there is no Tab to skip.
+        bool dpad = _window.ArrowKeysMoveFocus;
+        card.TabIndex = mark == CardMark.None && !dpad ? -1 : 0;
         if (mark == CardMark.Cursor)
         {
             card.WithRef(_cursorCard);
             _cursorCardIndex = index;
         }
-        else if (mark == CardMark.Stop)
+        else if (mark == CardMark.Stop && !dpad)
         {
             card.On(_firstCardFocused ??= OnFirstCardFocused);
         }
+        if (dpad) card.On<FocusEvent>(e => OnWalkCardFocused(e, index));
         return card;
+    }
+
+    /// <summary>On a D-pad: a card of the walk took the keyboard (the window's arrows, its own choice),
+    /// and the cursor goes to it, ringed, as a cursor key would have put it there. Kept cards carry the
+    /// place they were made for (HomeCardState), so the place is the card's.</summary>
+    private void OnWalkCardFocused(FocusEvent e, int index)
+    {
+        if (e.CurrentTarget is not BoxElement card || index >= _cursorItems.Count) return;
+        if (_cursorIndex == index && ReferenceEquals(_cursorCard.Current, card)) return;
+        if (_cursorCard.Current is { } old && !ReferenceEquals(old, card)) old.Outline = default;
+        _cursorIndex = index;
+        _cursorToEnd = false;
+        _cursorFromArrival = false;
+        card.Outline = CursorRing;
+        _cursorCard.Current = card;
+        _cursorCardIndex = index;
     }
 
     private Action<FocusEvent>? _firstCardFocused;
@@ -373,7 +395,7 @@ public sealed partial class ApertureApp
         if (left is BoxElement l)
         {
             l.Outline = default;
-            l.TabIndex = -1;
+            l.TabIndex = _window.ArrowKeysMoveFocus ? 0 : -1;   // on a D-pad every card is a stop (TrackCursor)
         }
         if (reached is BoxElement r)
         {

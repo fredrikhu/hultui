@@ -65,6 +65,16 @@ public sealed partial class ApertureApp
         var library = SearchResults;
         IReadOnlyList<DiscoverItem> elsewhere = _requestServer is null ? [] : RequestSearchResults;
 
+        // The field keeps the keyboard while you type; the arrows walk the results only
+        // once one has been reached, which is why the cursor starts unset. One walk, both
+        // sections, in the order drawn. Before the cards are made: a card asks the list what it is
+        // to the keyboard (MarkOf), and made first, against the last list, the first result was no
+        // stop, so neither Tab nor a TV's D-pad could reach the results from the field.
+        var walk = new List<object>(library.Count + elsewhere.Count);
+        walk.AddRange(library);
+        walk.AddRange(elsewhere);
+        SetCursorList($"search:{term}:{library.Count}:{elsewhere.Count}", walk, VisibleCards(140f));
+
         var scroll = ScrollView.Vertical().FlexGrow(1);
         var sections = Flex.Column(gap: Halide.S5);
 
@@ -98,14 +108,6 @@ public sealed partial class ApertureApp
             }
             sections.AddChild(section);
         }
-
-        // The field keeps the keyboard while you type; the arrows walk the results only
-        // once one has been reached, which is why the cursor starts unset. One walk, both
-        // sections, in the order drawn.
-        var walk = new List<object>(library.Count + elsewhere.Count);
-        walk.AddRange(library);
-        walk.AddRange(elsewhere);
-        SetCursorList($"search:{term}:{library.Count}:{elsewhere.Count}", walk, VisibleCards(140f));
 
         scroll.AddChild(sections);
         column.AddChild(scroll);

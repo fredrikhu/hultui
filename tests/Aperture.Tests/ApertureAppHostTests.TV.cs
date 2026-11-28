@@ -44,6 +44,7 @@ public partial class ApertureAppHostTests
             Assert.Equal(start, app.CursorIndex);
 
             // At the row's first card the cursor lets go, and the focus goes to the rail.
+            var card = session.Window.Window.FocusedElement;
             session.Window.PressKey(KeyCode.Left);
             session.PumpFrames(2);
             Assert.StartsWith("rail-", FocusedId(session) ?? "(nothing)");
@@ -59,10 +60,58 @@ public partial class ApertureAppHostTests
             Assert.NotEqual(on, FocusedId(session));
             Assert.Equal(start, app.CursorIndex);
 
-            // And Right comes back to the cards.
+            // And Right comes back to the card it left, from whichever door: not to what sits level with
+            // the door (a shelf's arrows, from the top doors).
             session.Window.PressKey(KeyCode.Right);
             session.PumpFrames(2);
-            Assert.DoesNotContain("rail-", FocusedId(session) ?? "");
+            Assert.Same(card, session.Window.Window.FocusedElement);
+            Assert.Equal(start, app.CursorIndex);
+        }, dpad: true);
+    }
+
+    /// <summary>On the Shield, OK on the door of the page already open left the keyboard on the door;
+    /// a door to another page hands it to that page.</summary>
+    [Fact]
+    public void OnADPad_TheOpenPagesDoor_HandsTheKeyboardToItsContent()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            session.PumpFrames(3);
+            var card = session.Window.Window.FocusedElement;
+            Assert.NotNull(card);
+
+            session.Window.FindByAutomationId("rail-home")!.Focus();
+            session.PumpFrame();
+            session.Window.PressKey(KeyCode.Enter);
+            session.PumpFrames(2);
+            Assert.Same(card, session.Window.Window.FocusedElement);
+        }, dpad: true);
+    }
+
+    /// <summary>On the Shield, nothing below the Search field could be reached: the results' cards were
+    /// made before the search registered them, so the first was no stop.</summary>
+    [Fact]
+    public void OnADPad_DownFromTheSearchField_ReachesTheResults()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Navigate(new Route(ApertureView.Search));
+            session.PumpFrames(2);
+            Assert.Equal("search-input", FocusedId(session));
+            session.Window.TypeText("So");
+            PumpUntilShown(session, "Solaris");
+            session.PumpFrames(2);
+
+            session.Window.PressKey(KeyCode.Down);
+            session.PumpFrames(2);
+            Assert.StartsWith("card-", FocusedId(session) ?? $"(nothing)");
+            Assert.True(app.CursorIndex >= 0, "the cursor did not follow the focus onto the result");
+
+            session.Window.PressKey(KeyCode.Up);  // the top row's edge: back to the field
+            session.PumpFrames(2);
+            Assert.Equal("search-input", FocusedId(session));
         }, dpad: true);
     }
 
@@ -129,6 +178,26 @@ public partial class ApertureAppHostTests
             var focused = session.Window.Window.FocusedElement;
             Assert.Contains("Season 1", focused?.AccessibleName ?? $"(the focus is on {FocusedId(session)})");
         }, dpad: true);
+    }
+
+    /// <summary>On the desktop too: Tab from the Search field went past the results, whose first card
+    /// was made before the search registered them and so was no stop.</summary>
+    [Fact]
+    public void TabFromTheSearchField_ReachesTheFirstResult()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Navigate(new Route(ApertureView.Search));
+            session.PumpFrames(2);
+            session.Window.TypeText("So");
+            PumpUntilShown(session, "Solaris");
+            session.PumpFrames(2);
+            Assert.Equal("search-input", FocusedId(session));
+
+            session.Window.PressKey(KeyCode.Tab);
+            Assert.StartsWith("card-", FocusedId(session) ?? "(nothing)");
+        });
     }
 
     [Fact]

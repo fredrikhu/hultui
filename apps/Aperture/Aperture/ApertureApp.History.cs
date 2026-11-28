@@ -60,7 +60,13 @@ public sealed partial class ApertureApp
     /// repeats.</summary>
     internal void Navigate(Route route)
     {
-        if (Current == route) return;
+        // The page already open: nothing to open. On a D-pad its door on the rail hands the keyboard
+        // to the page's content, as a door to another page does by opening it; it stayed on the door.
+        if (Current == route)
+        {
+            if (_window.ArrowKeysMoveFocus) FocusPageContent();
+            return;
+        }
         Leave();
         if (_at < _history.Count - 1) _history.RemoveRange(_at + 1, _history.Count - _at - 1);
         var visit = new Visit(route);

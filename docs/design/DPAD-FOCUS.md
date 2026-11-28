@@ -34,7 +34,9 @@ Down, Left or Right with no modifiers that came back with neither `Handled` nor
 - **Geometry:** `Element.WindowBorderBox` (scroll and sticky applied, overlay origin added),
   never layout boxes, which are unscrolled.
 - **Which one:** Android's `FocusFinder` rule. A candidate must lie in the direction (its far
-  edge past the current box's near edge). One overlapping the current box across the other axis
+  edge past the current box's near edge, and, as the web's spatial navigation has it, its centre
+  past the current box's leading edge: by Android's test alone Up from a top-row poster on the
+  Shield took the rail's door beside it, a few pixels higher). One overlapping the current box across the other axis
   (in its "beam") beats one that does not; then the smallest `13·major² + minor²`, where major is
   the gap along the direction and minor the offset of the centres across it. Ties keep document
   order.
@@ -121,7 +123,17 @@ media keys), not this one.
   the arrival placed and no key moved (Home's rows loading one by one) starts on its first card
   again, where it went back to nowhere.
 - **The rail keeps Up and Down.** They walk its doors in order; at either end the window's rule
-  takes the key.
+  takes the key. **Right goes back to where the page was left** (the cursor's card), as a TV app's
+  side rail returns to its content; by the rule it went to what sat level with the door, a shelf's
+  arrows from the top doors, which the user found odd. OK on the door of the page already open hands
+  the keyboard to its content too (it stayed on the door).
+- **Every card is a stop on a D-pad.** The walk shows Tab one stop (the cursor's card), and the
+  window's rule saw only that card among a shelf's: from anything that was not a card it skipped
+  whole shelves to it, which the user saw as Up "registering twice". On a D-pad every card is a stop,
+  and a card taking the keyboard puts the cursor on it (`OnWalkCardFocused`).
+- **Search registers its results before making their cards.** A card asks the list what it is to the
+  keyboard; made against the last list, the first result was no stop, so neither Tab (desktop too) nor
+  the D-pad could reach the results from the field.
 - **Focus moves count only when the user made them.** A page keeps the focus wherever it went
   since it opened, rather than handing it to its verb or first card (`KeyboardMovedSinceArrival`).
   On a D-pad that is only a move after an input: the window's own choice while the page loads is

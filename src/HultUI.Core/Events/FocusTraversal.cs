@@ -143,13 +143,20 @@ internal static class FocusTraversal
     // as every TV app's D-pad moves.
 
     /// <summary>Whether <paramref name="to"/> lies in <paramref name="direction"/> from
-    /// <paramref name="from"/>: its far edge past the source's, and not starting behind it.</summary>
+    /// <paramref name="from"/>: Android's test (its far edge past the source's, and not starting
+    /// behind it), and its centre past the source's leading edge, as the web's spatial navigation has
+    /// it. Android's alone took what is mostly beside the source: on a Shield, Up from a top-row
+    /// poster went to the rail's second door, beside the poster and a few pixels higher.</summary>
     private static bool IsToward(FocusDirection direction, Rect from, Rect to) => direction switch
     {
-        FocusDirection.Left => (from.Right > to.Right || from.X >= to.Right) && from.X > to.X,
-        FocusDirection.Right => (from.X < to.X || from.Right <= to.X) && from.Right < to.Right,
-        FocusDirection.Up => (from.Bottom > to.Bottom || from.Y >= to.Bottom) && from.Y > to.Y,
-        _ => (from.Y < to.Y || from.Bottom <= to.Y) && from.Bottom < to.Bottom,
+        FocusDirection.Left => (from.Right > to.Right || from.X >= to.Right) && from.X > to.X
+            && to.X + to.Width / 2f < from.X,
+        FocusDirection.Right => (from.X < to.X || from.Right <= to.X) && from.Right < to.Right
+            && to.X + to.Width / 2f > from.Right,
+        FocusDirection.Up => (from.Bottom > to.Bottom || from.Y >= to.Bottom) && from.Y > to.Y
+            && to.Y + to.Height / 2f < from.Y,
+        _ => (from.Y < to.Y || from.Bottom <= to.Y) && from.Bottom < to.Bottom
+            && to.Y + to.Height / 2f > from.Bottom,
     };
 
     /// <summary>Whether <paramref name="to"/> overlaps the source across the direction: in the

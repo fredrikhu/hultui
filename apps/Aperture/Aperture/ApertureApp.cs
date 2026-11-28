@@ -482,6 +482,19 @@ public sealed partial class ApertureApp : Component, IDisposable
     private Action<KeyDownEvent>? _railKey;
 
     /// <summary>
+    /// Gives the keyboard to the page's content where it was left: the cursor's card when it is on
+    /// screen. False when there is none (a page with no cards, a list still loading). For a D-pad's
+    /// Right from the rail, and its OK on the door of the page already open.
+    /// </summary>
+    private bool FocusPageContent()
+    {
+        if (_cursorCard.Current is not { IsHosted: true } card || !_window.IsInTree(card)) return false;
+        card.Focus();
+        RevealCursorCard(laidOut: true);
+        return true;
+    }
+
+    /// <summary>
     /// On a D-pad (<see cref="Window.ArrowKeysMoveFocus"/>) Up and Down walk the rail's doors in its
     /// order, as a TV app's side rail keeps the D-pad in it: the lower doors sit at the window's foot,
     /// and the nearest thing below the last upper door was a shelf's menu button, which the window's
@@ -489,9 +502,17 @@ public sealed partial class ApertureApp : Component, IDisposable
     /// </summary>
     private void OnRailKey(KeyDownEvent e)
     {
-        if (!_window.ArrowKeysMoveFocus || e.Key is not (KeyCode.Up or KeyCode.Down) || e.Handled
+        if (!_window.ArrowKeysMoveFocus || e.Key is not (KeyCode.Up or KeyCode.Down or KeyCode.Right) || e.Handled
             || (e.Modifiers & (KeyModifiers.Shift | KeyModifiers.Ctrl | KeyModifiers.Alt | KeyModifiers.Super)) != 0)
             return;
+        // Right goes back to where the page was left, the cursor's card, as a TV app's side rail
+        // returns to the content: by the window's rule it went to whatever sat level with the door, a
+        // shelf's arrows from the top doors. A page with no cursor's card on screen leaves it to the rule.
+        if (e.Key == KeyCode.Right)
+        {
+            if (FocusPageContent()) e.StopPropagation = true;
+            return;
+        }
         var doors = new List<Element>();
         Doors(e.CurrentTarget, doors);
         int at = doors.FindIndex(d => ReferenceEquals(d, _window.FocusedElement));

@@ -1,6 +1,7 @@
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
+using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using Xunit;
 using TextB = HultUI.Core.Builders.Text;
@@ -65,19 +66,42 @@ public class DPadFocusTests
         Assert.Same(keys[4], Focused(session));   // E
         session.Window.PressKey(KeyCode.Left);
         Assert.Same(keys[3], Focused(session));   // D
-        // Nothing left of D in its row: A, up and to the left, is the only thing that way (Android's rule).
+        // Nothing left of D in its row. A, in the row above, starts further left but its centre (60) is
+        // not past D's left edge (52): it is above D, not left of it, and Left moves nothing.
         session.Window.PressKey(KeyCode.Left);
-        Assert.Same(keys[0], Focused(session));
-        session.Window.PressKey(KeyCode.Left);
-        Assert.Same(keys[0], Focused(session));   // nothing at all: no wrap
+        Assert.Same(keys[3], Focused(session));   // no wrap, no diagonal
         session.Window.PressKey(KeyCode.Down);
-        session.Window.PressKey(KeyCode.Down);
-        Assert.Same(keys[6], Focused(session));   // A → D → G
+        Assert.Same(keys[6], Focused(session));   // D → G
         session.Window.PressKey(KeyCode.Right);
         session.Window.PressKey(KeyCode.Right);
         Assert.Same(keys[8], Focused(session));   // I
         session.Window.PressKey(KeyCode.Up);
         Assert.Same(keys[5], Focused(session));   // F (244–324) is in I's beam (212–292), E is not
+    }
+
+    /// <summary>A button mostly beside the focused one is not above it, however little higher it starts:
+    /// on a Shield, Up from a top-row poster went to the rail's door beside it.</summary>
+    [Fact]
+    public void UpDoesNotTake_WhatIsMostlyBeside()
+    {
+        var beside = Key("Beside").Height(Dimension.Px(70));
+        var poster = Button.New("Poster").Width(Dimension.Px(160)).Height(Dimension.Px(240));
+        var bar = Key("Bar");
+        var row = Flex.Row(gap: 40).AlignItems(AlignItems.FlexStart);
+        var rail = Flex.Column().Padding(new Thickness(0));
+        rail.AddChild(beside);
+        var content = Flex.Column(gap: 0).Padding(new Thickness(10, 0, 0, 0));   // 10 lower than the rail
+        content.AddChild(poster);
+        row.AddChild(rail);
+        row.AddChild(content);
+        var root = Flex.Column(gap: 30).Padding(new Thickness(20));
+        root.AddChild(bar);
+        root.AddChild(row);
+        using var session = DPad(root);
+        session.Window.Window.SetFocus(poster);
+
+        session.Window.PressKey(KeyCode.Up);
+        Assert.Same(bar, Focused(session));
     }
 
     [Fact]
