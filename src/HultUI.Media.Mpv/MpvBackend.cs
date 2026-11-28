@@ -187,6 +187,8 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
         _loaded = false;
         _eof = false;
         _pictureRange = (int)PictureRange.Unknown;
+        // The player forgets the rate on Open; the next file raises its own, the same or not.
+        _frameRate = _frameRateRaised = null;
         Raise(new BackendEvent.StateChanged(PlaybackState.Opening));
 
         string? target = source.Kind switch
@@ -459,7 +461,14 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
         _width = (int)(GetInt64(_mpv, "video-params/w") ?? 0);
         _height = (int)(GetInt64(_mpv, "video-params/h") ?? 0);
         _sampleAspect = GetDouble(_mpv, "video-params/par") is { } par && par > 0 ? par : 1;
+        // The container's stated rate (23.976 for most films), for a TV's display to match; none for
+        // a variable rate, or a stream that states none.
+        _frameRate = GetDouble(_mpv, "container-fps") is { } fps && fps > 0 ? fps : null;
     }
+
+    /// <summary>The video's frame rate as last raised (<see cref="BackendEvent.FrameRateChanged"/>).</summary>
+    private double? _frameRate;
+    private double? _frameRateRaised;
 
     // Written on the event thread (and by Open), read on the render thread.
     private volatile int _pictureRange = (int)PictureRange.Unknown;
@@ -498,6 +507,11 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer, IPictu
     {
         if (_width > 0 && _height > 0)
             Raise(new BackendEvent.VideoGeometry(_width, _height, _sampleAspect));
+        if (_frameRate != _frameRateRaised)
+        {
+            _frameRateRaised = _frameRate;
+            Raise(new BackendEvent.FrameRateChanged(_frameRate));
+        }
     }
 
     /// <summary>

@@ -219,6 +219,41 @@ public class VideoPlayerTests
         Assert.NotEqual("video-seek", w.Window.FocusedElement?.AutomationId);
     }
 
+    /// <summary>A film over the window hands the window its frame rate, for a TV's display to match
+    /// (docs/design/TV-VIDEO.md §5), and takes it back when it goes; a small video hands none.</summary>
+    [Fact]
+    public void AFilmOverTheWindow_HandsItsFrameRateToTheWindow_AndTakesItBack()
+    {
+        var backend = new FakeMediaBackend { FrameRate = 24000.0 / 1001 };
+        using var session = HeadlessSession.Create(640, 400);
+        var player = new MediaPlayer(backend);
+        var video = Video.New(player).Width(Dimension.Percent(100)).Height(Dimension.Percent(100));
+        var host = Box.New().Width(640f).Height(400f);
+        host.Children(video);
+        session.Application.SetRoot(host);
+        player.Open(Clip, autoPlay: true);
+        session.PumpFrames(3);
+        Assert.Equal(24000.0 / 1001, session.Window.Window.ContentFrameRate);
+
+        host.Children(Box.New());   // the player goes
+        session.PumpFrames(2);
+        Assert.Null(session.Window.Window.ContentFrameRate);
+        player.Dispose();
+    }
+
+    [Fact]
+    public void ASmallVideo_HandsNoFrameRate()
+    {
+        var backend = new FakeMediaBackend { FrameRate = 24000.0 / 1001 };
+        using var session = HeadlessSession.Create(640, 400);
+        var player = new MediaPlayer(backend);
+        session.Application.SetRoot(Box.New().Children(Video.New(player).Width(160f).Height(90f)));
+        player.Open(Clip, autoPlay: true);
+        session.PumpFrames(3);
+        Assert.Null(session.Window.Window.ContentFrameRate);
+        player.Dispose();
+    }
+
     [Fact]
     public void Keys_DoWhatTheDocsSay()
     {

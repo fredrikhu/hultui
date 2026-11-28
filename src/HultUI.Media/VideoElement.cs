@@ -83,6 +83,7 @@ public class VideoElement : ImageElement
         if (!_listening) return;
         _player!.FrameArrived -= OnFrameArrived;
         _listening = false;
+        TellFrameRate(null);
     }
 
     private void OnFrameArrived()
@@ -96,6 +97,34 @@ public class VideoElement : ImageElement
             MarkLayoutDirty();
         }
         MarkPaintDirty();
+        TellFrameRate(CoversItsWindow() ? _player?.VideoFrameRate : null);
+    }
+
+    /// <summary>The window told of this video's frame rate, and the rate told.</summary>
+    private Window? _toldWindow;
+    private double? _toldRate;
+
+    /// <summary>
+    /// Hands the window the frame rate of the video it shows over most of itself, for a TV's display
+    /// to match (docs/design/TV-VIDEO.md §5), and null when this video goes or stops covering it: a
+    /// thumbnail or a trailer in a corner switches no display.
+    /// </summary>
+    private void TellFrameRate(double? rate)
+    {
+        if (rate == _toldRate) return;
+        var window = rate is null ? _toldWindow : OverlayHost as Window;
+        _toldRate = rate;
+        _toldWindow = rate is null ? null : window;
+        window?.SetContentFrameRate(this, rate);
+    }
+
+    /// <summary>Whether this video takes at least half of its window: the film, not a preview.</summary>
+    private bool CoversItsWindow()
+    {
+        if (OverlayHost is not Window window) return false;
+        var box = WindowBorderBox;
+        float area = window.LayoutWidth * window.LayoutHeight;
+        return area > 0 && box.Width * box.Height >= area / 2f;
     }
 
     /// <summary>
@@ -128,6 +157,9 @@ public class VideoElement : ImageElement
     public override void Render(IRenderContext ctx)
     {
         StartListening();
+        // Laid out by now: a frame that arrived before the first layout found no box to measure the
+        // window by, and a paused film sends no more.
+        if (_listening) TellFrameRate(CoversItsWindow() ? _player?.VideoFrameRate : null);
         if (Source is null) return;
         ctx.DrawImage(Source, Layout.AbsoluteContentBox, Fit);
     }

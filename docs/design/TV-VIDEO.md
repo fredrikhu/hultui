@@ -61,14 +61,25 @@ metadata through `EGL_EXT_surface_SMPTE2086_metadata`, mpv told the target (`tar
 does the same in scRGB, `docs/design/HDR.md`). Android switches the television to HDR when an HDR layer
 is on screen. Only while an HDR film plays, as on the desktop.
 
-## 5. The frame rate (to design)
+## 5. The frame rate (built, 2026-11-28; no public API)
 
-Android 11: `Surface.setFrameRate(23.976f, FRAME_RATE_COMPATIBILITY_FIXED_SOURCE)` on the SDL surface
-while a film plays, which the Shield honours when its "match content frame rate" setting is on, or
-`WindowManager.LayoutParams.preferredDisplayModeId` for a mode outright (the Shield's own setting is
-the user's choice). HultUI already votes a frame rate from API 30 (`HultUIActivity`).
+- **The rate.** mpv's `container-fps`, read with the video's geometry and raised as an internal
+  `BackendEvent.FrameRateChanged` (HultUI.Media shares its internals with HultUI.Media.Mpv), kept as
+  the internal `MediaPlayer.VideoFrameRate`; null for a variable rate or none stated.
+- **The film, not a preview.** A `VideoElement` that covers at least half of its window hands the
+  rate to the window (`Window.SetContentFrameRate`, internal) as frames arrive and as it draws, and
+  null when it unmounts or stops covering it; a smaller one hands none.
+- **The display.** The window passes it to an internal hook, `Window.ContentFrameRateChanged`, which
+  `HultUIActivity` sets:
+  - Everywhere from Android 11: the surface's frame-rate vote becomes the film's rate as a fixed
+    source (in place of the display's peak), so a phone moves to a multiple seamlessly.
+  - On a D-pad device (a TV): `WindowManager.LayoutParams.preferredDisplayModeId` set to the mode at
+    the panel's current resolution whose rate is the highest whole multiple of the film's
+    (`DisplayRefresh.ForVideo`, 0.05 % tolerance: 23.976 is not 24), and back to 0 (the system's own)
+    when the film goes. Android 11 switches modes for this where a vote would not (an HDMI
+    resynchronisation: a second or two of black as the film starts and as it stops).
 
 ## 6. Order
 
-Media keys first (small, needs the API answer), then the frame rate (small, no API), then 4K and HDR
-together, measured on the Shield.
+Media keys (built), the player's bar (built), the frame rate (built), then 4K and HDR together,
+measured on the Shield.

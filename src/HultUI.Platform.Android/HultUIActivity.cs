@@ -124,9 +124,51 @@ public abstract class HultUIActivity : SDLActivity
                 peak = Math.Max(peak, mode.RefreshRate);
         if (peak <= 0f) return;
         global::HultUI.Platform.SDL3.SDL3Window.PlatformRefreshRate = peak;
+        _peakRate = peak;
         if (FindSurfaceView(Window?.DecorView) is { } surfaceView)
-            surfaceView.Holder?.AddCallback(new FrameRateVote(peak));
+            surfaceView.Holder?.AddCallback(_frameRateVote = new FrameRateVote(peak));
         Log.Info(Tag, $"display peak refresh rate {peak} Hz (SDL saw {display.RefreshRate} Hz)");
+        // A film over most of a window: the display matched to its frame rate while it plays.
+        global::HultUI.Window.ContentFrameRateChanged = fps => RunOnUiThread(() => MatchFrameRate(fps));
+    }
+
+    private float _peakRate;
+    private FrameRateVote? _frameRateVote;
+
+    /// <summary>
+    /// Matches the display to a film's frame rate while it plays, and lets it go after
+    /// (docs/design/TV-VIDEO.md §5). Everywhere from Android 11, a vote for the film's rate as a fixed
+    /// source in place of the peak: a phone picks a rate it is a multiple of where it can do so
+    /// seamlessly (120 Hz for 24 fps). On a TV (no touch screen, a D-pad), the display mode outright:
+    /// the panel's resolution at the highest refresh rate that is a whole multiple of the film's, which
+    /// Android 11 switches to (an HDMI resynchronisation, a second or two of black) where a vote would
+    /// not. A Shield ran its 4K panel at 59.94 Hz throughout, and a 23.976 fps film juddered 3:2.
+    /// </summary>
+    private void MatchFrameRate(double? fps)
+    {
+        if (_frameRateVote is { } vote)
+        {
+            vote.Rate = fps is { } f ? (float)f : _peakRate;
+            vote.FixedSource = fps is not null;
+            vote.Revote();
+        }
+        if (!global::HultUI.Window.DefaultArrowKeysMoveFocus || Window is not { } window) return;
+        var display = OperatingSystem.IsAndroidVersionAtLeast(30) ? Display : WindowManager?.DefaultDisplay;
+        if (display is null || window.Attributes is not { } attributes) return;
+        int modeId = 0;   // none: the system's own
+        if (fps is { } rate && display.GetMode() is { } current)
+        {
+            var modes = (display.GetSupportedModes() ?? [])
+                .Where(m => m.PhysicalWidth == current.PhysicalWidth && m.PhysicalHeight == current.PhysicalHeight)
+                .ToList();
+            float? best = global::HultUI.DisplayRefresh.ForVideo(modes.Select(m => m.RefreshRate), rate);
+            if (best is { } fits) modeId = modes.First(m => m.RefreshRate == fits).ModeId;
+            Log.Info(Tag, $"film at {rate:0.###} fps: display mode {modeId} ({best?.ToString("0.###") ?? "none fits"} Hz at {current.PhysicalWidth}x{current.PhysicalHeight})");
+        }
+        else Log.Info(Tag, "film gone: the display's own mode");
+        if (attributes.PreferredDisplayModeId == modeId) return;
+        attributes.PreferredDisplayModeId = modeId;
+        window.Attributes = attributes;
     }
 
     private static SurfaceView? FindSurfaceView(View? view)
@@ -138,18 +180,29 @@ public abstract class HultUIActivity : SDLActivity
         return null;
     }
 
-    /// <summary>Votes for the display's peak rate each time SDL's surface is made or changes.</summary>
+    /// <summary>Votes for the display's peak rate each time SDL's surface is made or changes, or for a
+    /// film's rate as a fixed source while one plays (<see cref="MatchFrameRate"/>).</summary>
     private sealed class FrameRateVote(float rate) : Java.Lang.Object, ISurfaceHolderCallback
     {
-        public void SurfaceCreated(ISurfaceHolder holder) => Vote(holder);
-        public void SurfaceChanged(ISurfaceHolder holder, global::Android.Graphics.Format format, int width, int height) => Vote(holder);
-        public void SurfaceDestroyed(ISurfaceHolder holder) { }
+        public float Rate = rate;
+        public bool FixedSource;
+        private ISurfaceHolder? _holder;
+
+        public void SurfaceCreated(ISurfaceHolder holder) => Vote(_holder = holder);
+        public void SurfaceChanged(ISurfaceHolder holder, global::Android.Graphics.Format format, int width, int height) => Vote(_holder = holder);
+        public void SurfaceDestroyed(ISurfaceHolder holder) => _holder = null;
+
+        /// <summary>Votes again, for a rate that changed while the surface lives.</summary>
+        public void Revote()
+        {
+            if (_holder is { } holder) Vote(holder);
+        }
 
         private void Vote(ISurfaceHolder holder)
         {
             // From Android 11; before it, the display keeps the rate it runs at.
             if (OperatingSystem.IsAndroidVersionAtLeast(30) && holder.Surface is { IsValid: true } surface)
-                surface.SetFrameRate(rate, (int)SurfaceFrameRateCompatibility.Default);
+                surface.SetFrameRate(Rate, (int)(FixedSource ? SurfaceFrameRateCompatibility.FixedSource : SurfaceFrameRateCompatibility.Default));
         }
     }
 

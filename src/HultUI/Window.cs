@@ -1233,6 +1233,38 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// a set-top box). <c>HultUIActivity</c> sets it before the app runs.</summary>
     internal static bool DefaultArrowKeysMoveFocus { get; set; }
 
+    /// <summary>
+    /// The platform's hook for <see cref="SetContentFrameRate"/>: the frame rate of the video a window
+    /// shows over most of itself, null when none does. On Android <c>HultUIActivity</c> sets it and
+    /// matches the display to the rate (a TV's mode, a phone's seamless rate); elsewhere nothing
+    /// listens. docs/design/TV-VIDEO.md §5.
+    /// </summary>
+    internal static Action<double?>? ContentFrameRateChanged { get; set; }
+
+    private object? _contentRateOwner;
+    private double? _contentRate;
+
+    /// <summary>The frame rate this window last asked the platform to match, for the tests.</summary>
+    internal double? ContentFrameRate => _contentRate;
+
+    /// <summary>
+    /// A video this window shows over most of itself plays at <paramref name="framesPerSecond"/>, or no
+    /// longer (null). The last video to say a rate is the one matched; a null from any other is
+    /// ignored, so a second, small player going away leaves the film's rate alone.
+    /// </summary>
+    internal void SetContentFrameRate(object owner, double? framesPerSecond)
+    {
+        if (framesPerSecond is null)
+        {
+            if (!ReferenceEquals(owner, _contentRateOwner)) return;
+            _contentRateOwner = null;
+        }
+        else _contentRateOwner = owner;
+        if (_contentRate == framesPerSecond) return;
+        _contentRate = framesPerSecond;
+        ContentFrameRateChanged?.Invoke(framesPerSecond);
+    }
+
     /// <summary>A bare arrow nothing used, with <see cref="ArrowKeysMoveFocus"/> on: the focus to the
     /// nearest element that way in the scope Tab walks, or to its first stop when nothing has it.</summary>
     private void MoveFocusInDirection(FocusDirection direction)
