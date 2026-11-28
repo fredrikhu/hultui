@@ -1,7 +1,7 @@
 # Video on a TV: the remote's media keys, 4K, HDR and the frame rate — design note
 
-**Status (2026-11-28): media keys, the player's bar and the frame rate built; 4K and HDR10 shown
-to work in an env-gated spike (§3, §4), two decisions open.** Plan 20 phase 5, the Android TV
+**Status (2026-11-28): media keys, the player's bar, the frame rate, 4K and HDR10 built; HDR10's
+switch mid-session still to be checked on the Shield (§4).** Plan 20 phase 5, the Android TV
 build, after D-pad focus (`DPAD-FOCUS.md`). From the user's Shield TV (2019 Pro, Android 11, Tegra
 X1+, a 4K HDR10 television).
 
@@ -43,10 +43,10 @@ ring (with Tab on the desktop as well). On a D-pad the bar is two rows at any wi
 the buttons: in one row the scrubber sat between them and took Left and Right, so the remote could not
 get past it to the volume, the speed or the subtitles.
 
-## 3. 4K: a surface the size of the panel (spike, 2026-11-28: works)
+## 3. 4K: a surface the size of the panel (built, 2026-11-28; the user's choice: always on a TV)
 
-A spike behind environment variables answers the open questions; nothing in it is public.
-`HULTUI_ANDROID_SURFACE=panel` (`HultUIActivity.DrawAtPanelSize`):
+On a TV (a D-pad and no touch screen), `HultUIActivity.DrawAtPanelSize`; nothing public. A spike
+measured it first, the numbers below.
 - **The panel gets every pixel.** The Shield's display is 3840×2160 under a 1920×1080 `wm size`
   override, and the compositor projects the UI's 1080p onto the panel. `SurfaceHolder.setFixedSize`
   at the panel's size (`Display.Mode`; `DisplayMetrics` report the UI's 1080p) gives a buffer the
@@ -54,8 +54,8 @@ A spike behind environment variables answers the open questions; nothing in it i
 - **The layout keeps its size.** SDL reports a 3840×2160 window at density 2, which would lay out at
   1920×1080 DIP; an internal `SDL3Window.PlatformSurfaceScale` of 2 multiplies the display scale (4 in
   all), so the layout stays 960×540 DIP, drawn at 4K.
-- **Cost, measured with an env-gated frame log** (`HULTUI_SPIKE_FRAMES=1`, frame time and flush +
-  present each 5 s):
+- **Cost, measured in the spike** (a frame log since removed: frame time, and flush + present, each
+  5 s):
   - A focus move on Home: 12–15 ms a frame at 1080p, 14–15 ms at 4K, mostly waiting in present.
   - A page's first frame (images arriving): up to 120 ms at 4K.
   - Bleach (1080p, scaled by mpv into a 4K target): 23.98 fps delivered, every frame 41.7 ms after the
@@ -63,19 +63,24 @@ A spike behind environment variables answers the open questions; nothing in it i
   - *2001* (4K HDR10 HEVC, decoded by `OMX.Nvidia.h265.decode`): about 10 ms a frame. It stalls only
     to buffer: the stream outruns the Shield's 86 Mbps Wi-Fi at any surface size.
   - Memory on Home: EGL 16 MB at 1080p, 37 MB at 4K; app PSS 419 MB and 488 MB.
-- **Not checked:** a mouse. SDL's Android mouse events arrive in view pixels, half the surface's; touch is
-  normalised and lands right.
+- **What Android hands over in view pixels.** SDL passes on the view's own coordinates for the mouse,
+  normalises a finger by the surface's size, and HultUI.Platform.Android reads the insets and the
+  keyboard's height from the view system; SDL hands the keyboard's caret rectangle back to it. All of
+  them are half the surface's pixels, so they go through `SDL3Window.ViewScale` (layout units per view
+  pixel: `InputScale` × `PlatformSurfaceScale`), not `InputScale`. Not checked with a mouse on the
+  Shield.
 
-**Proposal:** the whole surface at the panel's size on a TV, always. The cost is within the noise of
-a 1080p frame, and there is no resize mid-session.
+The cost is within the noise of a 1080p frame, and there is no resize mid-session.
 
-## 4. HDR10 (spike, 2026-11-28: works; two decisions open)
+## 4. HDR10 (built, 2026-11-28; the user's choice: only while an HDR video shows, with its metadata)
 
-`HULTUI_ANDROID_HDR=pq`:
+### What the spike found
+
+A spike made the whole surface PQ for the session (the EGL surface made in
+`EGL_GL_COLORSPACE_BT2020_PQ_EXT` through `SDL_EGL_SetAttributeCallbacks`):
 - **No 10-bit surface on a Tegra X1.** Its EGL lists 56 configs; the deep ones are all RGBA16F (float),
-  none RGB10_A2, so asking for 10/10/10/2 left HultUI on the software renderer. The surface is FP16
-  (`SDL_GL_FLOATBUFFERS`) holding PQ-encoded values, made in BT.2020 PQ through
-  `SDL_EGL_SetAttributeCallbacks` (`EGL_GL_COLORSPACE_KHR` = `EGL_GL_COLORSPACE_BT2020_PQ_EXT`).
+  none RGB10_A2, so asking for 10/10/10/2 left HultUI on the software renderer. The surface is half
+  float (`SDL_GL_FLOATBUFFERS`), holding PQ-encoded values.
 - **Android switches the television.** SurfaceFlinger sees the layer's dataspace as BT2020_PQ and moves
   the display's colour mode from SRGB to BT2100_PQ; during a 23.976 Hz film HDMI runs Rec.2020 12-bit
   4:2:2. Back to SRGB when the app goes.
@@ -94,19 +99,44 @@ a 1080p frame, and there is no resize mid-session.
   into the fault, so the UI thread spun at 100 % in the kernel with the picture frozen; twice, about
   55 s into *2001*. One wrapper per lent target: four minutes clean. Found by `simpleperf` (no root
   needed for a debuggable app): half the samples in `__kernel_rt_sigreturn` under coreclr's handler.
-- **Not done:** the film's mastering metadata. The layer carries none (`hdr metadata types=0`), so the
-  television assumes its defaults. `EGL_EXT_surface_SMPTE2086_metadata` and CTA-861.3 surface
-  attributes take it, from mpv's video parameters.
-- **Not checked:** what the television shows. A screenshot is SurfaceFlinger's SDR conversion of the
-  PQ buffer, which looks dim; the UI at 203 nits and the film's highlights need the user's eyes.
+- **The layer carried no metadata** (`hdr metadata types=0`), so the television assumed its defaults.
 
-**Open decisions (the user's):**
-1. **HDR for the whole app or only during HDR films.** The whole app is one surface, no switch: the
-   television stays in HDR inside the app, the UI at 203 nits, and EGL memory doubles. Only during
-   films (as on the desktop) needs a switch mid-session: the FP16 surface kept and its buffers'
-   dataspace changed (`ANativeWindow_setBuffersDataSpace`, untested), or the EGL surface made again. The
-   HDMI resynchronisation would fall together with the frame-rate switch at the film's start.
-2. **Whether to pass the mastering metadata** (above), which only matters with HDR.
+### As built
+
+The user chose HDR10 only while an HDR video is on screen, as on the desktop, with the film's
+metadata passed on. Nothing public; `HULTUI_VIDEO_HDR=0` turns it off.
+- **The window.** On a TV whose display lists HDR10 (`HultUIActivity.ShowHdrVideoAsHdr10`, from
+  Android 9), `SDL3Window.PlatformHdrOutput` asks EGL for a half-float framebuffer, in EGL's default
+  colour space; without one, 8-bit and SDR, as before. Half float for the whole session, since the
+  format is fixed when EGL makes the surface: EGL 70 MB on Home where 8-bit took 37 MB. `AndroidHdrOutput` tags the buffers
+  (`ANativeWindow_setBuffersDataSpace`) sRGB, or BT.2020 PQ, after each swap that follows a change, so
+  the frame drawn in the old space leaves with the old tag. EGL sets a dataspace only as it makes the
+  surface, so a tag set after it stays, and a new window (Android gives one after the app comes back)
+  is tagged again. The GL driver writes PQ and sRGB values alike.
+- **The surface follows the pictures** with the Vulkan surface's rule (`HdrPictureFollower`): the
+  frame is drawn in sRGB (`RgbaF16`, sRGB-encoded) until a frame draws an HDR picture. After that frame
+  the next one is drawn in PQ, the window tags PQ, and that frame is owed (`IPictureRangeSurface`, as on
+  Vulkan). A frame whose video is still loading keeps what was shown; a frame without an HDR picture
+  goes back to sRGB. An HDR picture anywhere counts, as on the desktop: a TV's only video is the
+  player over the window, and the HDMI switch falls together with the frame-rate switch (§5).
+- **The film in PQ.** While the frame is PQ, the surface lends each video a 10-bit RGB10_A2 target of
+  its own marked `GpuFrameTarget.Pq` (internal); mpv is told `target-prim=bt.2020`, `target-trc=pq`
+  through the same confirmed, asynchronous path as linear light (`MpvTargetColour.Pq`), and the frame
+  wraps the target tagged PQ. Back in sRGB the targets are deleted and the video draws into its own
+  8-bit texture again.
+- **The metadata.** mpv's `video-params` (`prim-red-x` … `prim-white-y`, `max-luma`, `min-luma`,
+  `max-cll`, `max-fall`; `MpvBackend.MetadataOf`) reach the surface through `IHdrMetadataSource` and
+  `IPictureRangeSurface.HdrMetadataDrawn`, with each draw of an HDR picture. The window sets them as
+  EGL surface attributes (SMPTE ST 2086, CTA-861.3, in units of 1/50,000), which Android's EGL hands
+  the buffers at the next swap. A film that states none sends none.
+- **Tests:** `MpvTargetColourTests` (PQ asked once each way, frames stay encoded, metadata read),
+  `GpuFrameSinkTests` (metadata reaches the surface only with an HDR picture; a PQ target reaches the
+  producer), `AndroidHdrOutputTests` (the EGL attributes and their scale). The switch itself needs the
+  Shield.
+- **Not yet checked on the Shield** (it was asleep, its owner away): the mid-session switch, whether
+  the television takes the metadata (the log line `[HultUI] HDR10 output: …` says what EGL accepted),
+  and what the television shows: a screenshot is SurfaceFlinger's SDR conversion of the PQ buffer,
+  which looks dim, so the UI at 203 nits and the film's highlights need the user's eyes.
 
 ## 5. The frame rate (built, 2026-11-28; no public API)
 
@@ -128,7 +158,5 @@ a 1080p frame, and there is no resize mid-session.
 
 ## 6. Order
 
-Media keys (built), the player's bar (built), the frame rate (built), then 4K and HDR together,
-measured on the Shield (spike done; §3 and §4). Next: the user's two decisions in §4, then the spike
-made real (the environment variables replaced by the TV default and the HDR choice), the metadata,
-and tests.
+Media keys, the player's bar, the frame rate, 4K and HDR10: all built. Left: HDR10's switch checked
+on the Shield, and the user's look at the television.

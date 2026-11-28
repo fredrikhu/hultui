@@ -109,7 +109,16 @@ public interface IExternalGLSurface : IRenderSurface
 /// meaningful with <paramref name="WantsLinearLight"/>.</para></param>
 public readonly record struct GpuFrameTarget(
     uint Framebuffer, uint TextureId, uint InternalFormat,
-    bool WantsLinearLight = false, float PeakNits = 0f, bool WideGamut = false);
+    bool WantsLinearLight = false, float PeakNits = 0f, bool WideGamut = false)
+{
+    /// <summary>
+    /// The renderer composites this target as BT.2100 PQ (BT.2020 primaries, the PQ transfer): the
+    /// producer writes an HDR10 picture as it is, untouched for the display to tone-map, and an SDR
+    /// one at BT.2408's 203 nits. An Android TV's GL surface while an HDR video is on screen
+    /// (docs/design/TV-VIDEO.md §4). Never with <see cref="WantsLinearLight"/>.
+    /// </summary>
+    internal bool Pq { get; init; }
+}
 
 /// <summary>
 /// A GL texture the renderer composites, as an <see cref="IGpuImageSource"/> describes

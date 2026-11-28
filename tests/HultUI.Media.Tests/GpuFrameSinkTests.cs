@@ -412,11 +412,48 @@ public class GpuFrameSinkTests
         Assert.Equal([PictureRange.Unknown, PictureRange.Hdr, PictureRange.Sdr], surface.Pictures);
     }
 
+    /// <summary>
+    /// An Android TV's surface hands the television an HDR film's metadata with the picture
+    /// (docs/design/TV-VIDEO.md §4), so it hears it on each draw of an HDR picture, and never of an
+    /// SDR one, whatever the renderer still holds from the last file.
+    /// </summary>
+    [Fact]
+    public void AnHdrPicturesMetadata_ReachesTheSurface_AnSdrOnesDoesNot()
+    {
+        var metadata = new HdrMetadata(0.708f, 0.292f, 0.17f, 0.797f, 0.131f, 0.046f, 0.3127f, 0.329f, 1000f, 0.005f, 1532f, 312f);
+        var ranged = new RangedRenderer(new CountingRenderer()) { Range = PictureRange.Hdr, Metadata = metadata };
+        var video = new GpuFrameSink(new PixelFrameSink(), ranged);
+        var surface = new LendingSurface(framebuffer: 7, texture: 9, internalFormat: 0x8059);
+
+        Assert.True(video.TryRenderFrame(surface, out _));
+        ranged.Range = PictureRange.Sdr;
+        Assert.True(video.TryRenderFrame(surface, out _));
+
+        Assert.Equal([metadata], surface.Metadata);
+    }
+
+    /// <summary>A surface drawing in PQ lends a target that says so, and the producer is told.</summary>
+    [Fact]
+    public void APqTarget_ReachesTheProducer()
+    {
+        var renderer = new CountingRenderer();
+        var sink = new GpuFrameSink(new PixelFrameSink(), renderer);
+        var surface = new LendingSurface(framebuffer: 7, texture: 9, internalFormat: 0x8059, pq: true);
+
+        Assert.True(sink.TryRenderFrame(surface, out var frame));
+
+        Assert.True(renderer.LastPq);
+        Assert.False(renderer.LastWantedLinear);
+        Assert.Equal(0f, frame.ReferenceWhiteNits);
+    }
+
     /// <summary>A renderer that says what its picture is (<see cref="Range"/>), counting through another.</summary>
-    private sealed class RangedRenderer(CountingRenderer inner) : IGpuFrameRenderer, IPictureRangeSource
+    private sealed class RangedRenderer(CountingRenderer inner) : IGpuFrameRenderer, IPictureRangeSource, IHdrMetadataSource
     {
         public PictureRange Range { get; set; }
         PictureRange IPictureRangeSource.PictureRange => Range;
+        public HdrMetadata? Metadata { get; set; }
+        HdrMetadata? IHdrMetadataSource.HdrMetadata => Metadata;
         public void OnModeDecided(GpuSinkMode mode) => inner.OnModeDecided(mode);
         public void PrepareGL(Func<string, nint> getProcAddress) => inner.PrepareGL(getProcAddress);
         public bool TryGetFrameSize(out int width, out int height) => inner.TryGetFrameSize(out width, out height);
@@ -435,12 +472,16 @@ public class GpuFrameSinkTests
         public void PictureDrawn(PictureRange range) => Pictures.Add(range);
         public bool TakeOwedFrame() => false;
 
+        /// <summary>The metadata each HDR draw stated, in order.</summary>
+        public List<HdrMetadata> Metadata { get; } = [];
+        public void HdrMetadataDrawn(HdrMetadata metadata) => Metadata.Add(metadata);
+
         private readonly uint _framebuffer, _texture, _internalFormat;
-        private readonly bool _lends, _linear, _record;
+        private readonly bool _lends, _linear, _record, _pq;
         private readonly float _peakNits;
 
         public LendingSurface(uint framebuffer, uint texture, uint internalFormat, bool lends = true,
-            bool linear = false, float peakNits = 0f, bool record = true)
+            bool linear = false, float peakNits = 0f, bool record = true, bool pq = false)
         {
             _framebuffer = framebuffer;
             _texture = texture;
@@ -449,6 +490,7 @@ public class GpuFrameSinkTests
             _linear = linear;
             _peakNits = peakNits;
             _record = record;
+            _pq = pq;
         }
 
         public Func<string, nint> GetProcAddress => _ => 0;
@@ -468,7 +510,7 @@ public class GpuFrameSinkTests
         public bool TryAcquireFrameTarget(object owner, int width, int height, out GpuFrameTarget target)
         {
             if (_record) Owners.Add(owner);
-            target = new GpuFrameTarget(_framebuffer, _texture, _internalFormat, _linear, _peakNits);
+            target = new GpuFrameTarget(_framebuffer, _texture, _internalFormat, _linear, _peakNits) { Pq = _pq };
             return _lends;
         }
 
@@ -511,6 +553,7 @@ public class GpuFrameSinkTests
         public uint LastFramebuffer { get; private set; }
         public bool LastWantedLinear { get; private set; }
         public float LastPeakNits { get; private set; }
+        public bool LastPq { get; private set; }
         public float ReferenceWhiteNits => LastWantedLinear ? 203f : 0f;
         /// <summary>What <see cref="Render"/> answers: whether it had a new frame to draw.</summary>
         public bool HasNewFrame { get; set; } = true;
@@ -521,6 +564,7 @@ public class GpuFrameSinkTests
             LastInternalFormat = target.InternalFormat;
             LastWantedLinear = target.WantsLinearLight;
             LastPeakNits = target.PeakNits;
+            LastPq = target.Pq;
             return HasNewFrame;
         }
         public int Releases { get; private set; }

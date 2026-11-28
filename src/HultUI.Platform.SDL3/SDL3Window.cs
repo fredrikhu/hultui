@@ -239,10 +239,20 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// </summary>
     internal static float? PlatformRefreshRate { get; set; }
 
-    /// <summary>SPIKE (docs/design/TV-VIDEO.md §3): how many surface pixels the platform gives one of
-    /// its own window pixels. An Android TV drawing at the panel's 4K behind a 1080p UI sets 2, so the
-    /// layout keeps the UI's DIP size.</summary>
+    /// <summary>
+    /// How many surface pixels there are to one of the platform's view pixels: 2 on an Android TV
+    /// that draws at its panel's 4K under a 1080p UI (HultUI.Platform.Android, docs/design/TV-VIDEO.md
+    /// §3), 1 everywhere else. The display scale grows by it, so the layout keeps its DIP size. What
+    /// the platform hands over in its view pixels (the mouse, a finger, the insets, the keyboard's
+    /// caret rectangle) goes through <see cref="ViewScale"/>, not <see cref="InputScale"/>.
+    /// </summary>
     internal static float PlatformSurfaceScale { get; set; } = 1f;
+
+    /// <summary>Layout units per platform view pixel: <see cref="InputScale"/> on a surface the size
+    /// of its view, more where the surface is drawn larger (<see cref="PlatformSurfaceScale"/>). On
+    /// Android SDL passes on the view's own coordinates for the mouse, and normalises a finger by the
+    /// surface's size.</summary>
+    private float ViewScale => InputScale * PlatformSurfaceScale;
 
     /// <inheritdoc />
     /// <remarks>SDL's video driver: one per process, so it is read once (the element asks on
@@ -270,7 +280,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             if (Math.Abs(clamped - _userScale) < 0.0001f) return;
             _userScale = clamped;
             DisplayScale = _osDisplayScale * _userScale * PlatformSurfaceScale;
-            EventTranslator.InputScale = InputScale;
+            EventTranslator.InputScale = ViewScale;
             ActiveSurface?.Resize(PixelWidth, PixelHeight, DisplayScale);
             // The pixel size did not change, but the layout viewport did: the app relayouts
             // on the same path a real resize takes.
@@ -450,8 +460,10 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_GREEN_SIZE, 8);
         SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_BLUE_SIZE, 8);
         SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_ALPHA_SIZE, 8);
-        if (OperatingSystem.IsAndroid() && Environment.GetEnvironmentVariable("HULTUI_ANDROID_HDR") == "pq")
-            AskForPqSurface();
+        // An Android TV that takes HDR10: a half-float framebuffer, which its buffers are tagged sRGB
+        // or PQ in as an HDR video comes and goes (AndroidHdrOutput, docs/design/TV-VIDEO.md §4).
+        _askedHalfFloat = OperatingSystem.IsAndroid() && PlatformHdrOutput && SkiaVulkanRenderSurface.HdrVideoEnabled;
+        if (_askedHalfFloat) AskForHalfFloat(true);
 
         // Create the window hidden. Its GL back buffer is uninitialized until we
         // render and swap the first frame; if the window were visible before then
@@ -511,6 +523,15 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             flags = (flags & ~SDL_WindowFlags.SDL_WINDOW_VULKAN) | SDL_WindowFlags.SDL_WINDOW_OPENGL;
             _window = CreateNativeWindow(titleBytes, width, height, flags);
             StartupTrace.Mark("SDL_CreateWindow (fell back to GL)");
+        }
+
+        // No half-float EGL config (Android makes the EGL surface with the window): 8-bit, SDR only.
+        if (_window == null && _askedHalfFloat)
+        {
+            Console.Error.WriteLine($"[HultUI] No half-float surface ({GetError()}); HDR10 output is off.");
+            _askedHalfFloat = false;
+            AskForHalfFloat(false);
+            _window = CreateNativeWindow(titleBytes, width, height, flags);
         }
 
         // No OpenGL driver SDL can load. Like Vulkan above, only when the environment did not
@@ -785,6 +806,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         {
             _surface?.Dispose();
             _surface = null;
+            _hdrOutput = null;
             if (_glContext != null) SDL_GL_DestroyContext(_glContext);
             _glContext = null;
             _nvidiaGL = false;
@@ -815,74 +837,36 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // text pipeline when there is one (null → the surface builds its own).
         _surface = new SkiaGLRenderSurface(GetGLProcAddress, text);
         StartupTrace.Mark("skia surface");
-    }
 
-    // ──── SPIKE: HDR10 output on Android (docs/design/TV-VIDEO.md §4), HULTUI_ANDROID_HDR=pq ────
-
-    /// <summary>SPIKE: a 10-bit EGL config, and SDL's window surface made in BT.2020 PQ
-    /// (<c>EGL_EXT_gl_colorspace_bt2020_pq</c>), which tags the Android surface's dataspace so the
-    /// compositor sees an HDR layer. Skia is told to draw in that space.</summary>
-    private static void AskForPqSurface()
-    {
-        // A Shield's Tegra has no 10-bit EGL config: its deep ones are all RGBA16F (float), so the
-        // PQ-encoded values go into half floats.
-        SpikeEgl.ListDeepConfigs();
-        SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_RED_SIZE, 16);
-        SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_GREEN_SIZE, 16);
-        SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_BLUE_SIZE, 16);
-        SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_ALPHA_SIZE, 16);
-        SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_FLOATBUFFERS, 1);
-        SpikeEgl.SDL_EGL_SetAttributeCallbacks(0, &PqSurfaceAttributes, 0, 0);
-        SkiaGLRenderSurface.PqOutput = true;
-    }
-
-    [UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
-    private static int* PqSurfaceAttributes(nint userdata, nint display, nint config)
-    {
-        const int EGL_GL_COLORSPACE_KHR = 0x309D, EGL_GL_COLORSPACE_BT2020_PQ_EXT = 0x3340, EGL_NONE = 0x3038;
-        // SDL frees the list with SDL_free.
-        var list = (int*)SpikeEgl.SDL_malloc(3 * sizeof(int));
-        list[0] = EGL_GL_COLORSPACE_KHR;
-        list[1] = EGL_GL_COLORSPACE_BT2020_PQ_EXT;
-        list[2] = EGL_NONE;
-        return list;
-    }
-
-    private static class SpikeEgl
-    {
-        [DllImport("SDL3", CallingConvention = CallingConvention.Cdecl)]
-        public static extern void SDL_EGL_SetAttributeCallbacks(nint platform, delegate* unmanaged[Cdecl]<nint, nint, nint, int*> surface, nint context, nint userdata);
-
-        [DllImport("SDL3", CallingConvention = CallingConvention.Cdecl)]
-        public static extern void* SDL_malloc(nuint size);
-
-        [DllImport("libEGL.so")] private static extern nint eglGetDisplay(nint id);
-        [DllImport("libEGL.so")] private static extern int eglInitialize(nint dpy, int* major, int* minor);
-        [DllImport("libEGL.so")] private static extern int eglGetConfigs(nint dpy, nint* configs, int size, int* count);
-        [DllImport("libEGL.so")] private static extern int eglGetConfigAttrib(nint dpy, nint config, int attribute, int* value);
-
-        /// <summary>Every EGL config with more than 8 bits of red, to stderr.</summary>
-        public static void ListDeepConfigs()
+        int red = 0;
+        if (_askedHalfFloat && SDL_GL_GetAttribute(SDL_GLAttr.SDL_GL_RED_SIZE, &red) && red >= 16)
         {
-            nint dpy = eglGetDisplay(0);
-            int major = 0, minor = 0, count = 0;
-            int init = eglInitialize(dpy, &major, &minor);
-            int got = eglGetConfigs(dpy, null, 0, &count);
-            Console.Error.WriteLine($"[spike] egl display 0x{dpy:x} init {init} ({major}.{minor}) configs {got}/{count}");
-            if (init == 0 || got == 0) return;
-            var configs = new nint[count];
-            fixed (nint* p = configs) eglGetConfigs(dpy, p, count, &count);
-            int Attr(nint c, int a) { int v = -1; eglGetConfigAttrib(dpy, c, a, &v); return v; }
-            Console.Error.WriteLine($"[spike] {count} EGL configs");
-            foreach (var c in configs)
-            {
-                int r = Attr(c, 0x3024);
-                if (r <= 8) continue;
-                Console.Error.WriteLine($"[spike] config r{r} g{Attr(c, 0x3023)} b{Attr(c, 0x3022)} a{Attr(c, 0x3021)} "
-                    + $"depth{Attr(c, 0x3025)} stencil{Attr(c, 0x3026)} renderable=0x{Attr(c, 0x3040):x} surface=0x{Attr(c, 0x3033):x} "
-                    + $"visual=0x{Attr(c, 0x302E):x} component=0x{Attr(c, 0x3339):x} samples{Attr(c, 0x3031)}");
-            }
+            _hdrOutput = new AndroidHdrOutput(_window);
+            _surface.HdrOutput = _hdrOutput;
         }
+    }
+
+    // ──── HDR10 on an Android TV (docs/design/TV-VIDEO.md §4) ────
+
+    /// <summary>Set by HultUI.Platform.Android before the first window: the device is a TV
+    /// (navigated by a D-pad) whose display takes HDR10, so its windows get a half-float framebuffer
+    /// and show HDR video as HDR10 (<see cref="AndroidHdrOutput"/>). <c>HULTUI_VIDEO_HDR=0</c> turns
+    /// it off.</summary>
+    internal static bool PlatformHdrOutput { get; set; }
+
+    private bool _askedHalfFloat;
+    private AndroidHdrOutput? _hdrOutput;
+
+    /// <summary>RGBA 16-bit float colour (a Tegra X1's only deep EGL config: it has no 10-bit one),
+    /// or back to RGBA 8.</summary>
+    private static void AskForHalfFloat(bool halfFloat)
+    {
+        int bits = halfFloat ? 16 : 8;
+        SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_RED_SIZE, bits);
+        SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_GREEN_SIZE, bits);
+        SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_BLUE_SIZE, bits);
+        SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_ALPHA_SIZE, bits);
+        SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_FLOATBUFFERS, halfFloat ? 1 : 0);
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
@@ -1091,7 +1075,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // content: 30 DIP of a 411 DIP phone lost on each side (measured on the emulator).
         if (ContentInsets is { } px)
         {
-            float k = InputScale;
+            float k = ViewScale;
             return new Thickness(px.Top * k, px.Right * k, px.Bottom * k, px.Left * k);
         }
         SDL_Rect r;
@@ -1109,7 +1093,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// <summary>The soft keyboard's height over the window's bottom edge, in layout units, from
     /// Android's <c>ime()</c> inset (docs/design/SOFT-KEYBOARD.md §3); 0 anywhere else.</summary>
     private float ReadKeyboardInset() =>
-        _window != null && ContentInsets is { Keyboard: > 0 } px ? px.Keyboard * InputScale : 0f;
+        _window != null && ContentInsets is { Keyboard: > 0 } px ? px.Keyboard * ViewScale : 0f;
 
     /// <summary>Insets in window pixels, top, right, bottom, left, and the soft keyboard's height
     /// over the bottom edge.</summary>
@@ -1879,6 +1863,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             return;
         }
         SDL_GL_SwapWindow(_window);
+        _hdrOutput?.AfterSwap();
     }
 
     private bool _softwarePresentFailed;
@@ -2624,8 +2609,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
     public void SetTextInputArea(Rect caretRect, int cursorOffset)
     {
-        // caretRect is in layout units; SDL wants window coordinates.
-        float toWindow = 1f / InputScale;
+        // caretRect is in layout units; SDL wants window coordinates, which on Android it hands to
+        // the view system as its own (ViewScale).
+        float toWindow = 1f / ViewScale;
         var rect = new SDL_Rect
         {
             x = (int)(caretRect.X * toWindow),
@@ -2722,7 +2708,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         PixelDensity = density;
         _osDisplayScale = displayScale;
         DisplayScale = displayScale * _userScale * PlatformSurfaceScale;
-        EventTranslator.InputScale = InputScale;
+        EventTranslator.InputScale = ViewScale;
 
         if (scaleOnlyChange)
         {

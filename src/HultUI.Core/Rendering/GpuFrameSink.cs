@@ -123,7 +123,12 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
         // A surface whose swapchain follows its pictures hears what this one is on every draw,
         // before there is anything to draw: a video still loading says it does not know yet.
         if (surface is IPictureRangeSurface pictures)
-            pictures.PictureDrawn(_renderer is IPictureRangeSource source ? source.PictureRange : PictureRange.Sdr);
+        {
+            var range = _renderer is IPictureRangeSource source ? source.PictureRange : PictureRange.Sdr;
+            pictures.PictureDrawn(range);
+            if (range == PictureRange.Hdr && _renderer is IHdrMetadataSource { HdrMetadata: { } metadata })
+                pictures.HdrMetadataDrawn(metadata);
+        }
         if (_mode == GpuSinkMode.Undecided)
         {
             Decide(GpuSinkMode.Gpu);

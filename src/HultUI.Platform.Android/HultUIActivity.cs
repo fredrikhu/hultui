@@ -91,7 +91,13 @@ public abstract class HultUIActivity : SDLActivity
         // adjust-resize neither resizes nor pans; it only reports the inset.
         Window?.SetSoftInputMode(SoftInput.AdjustResize);
         FollowPeakRefreshRate();
-        if (System.Environment.GetEnvironmentVariable("HULTUI_ANDROID_SURFACE") == "panel") DrawAtPanelSize();
+        // A TV (docs/design/TV-VIDEO.md §3, §4): drawn at its panel's resolution, and in HDR10 while an
+        // HDR video is on screen where the display takes it.
+        if (HultUI.Window.DefaultArrowKeysMoveFocus)
+        {
+            DrawAtPanelSize();
+            ShowHdrVideoAsHdr10();
+        }
         // Focus moved to another kind of field with the keyboard up (docs/design/SOFT-KEYBOARD.md
         // §8): SDL sends Java no new type while its keyboard shows. SDL's own show task stores
         // it, and the keyboard reads it when its input restarts, which is posted after the task.
@@ -137,10 +143,11 @@ public abstract class HultUIActivity : SDLActivity
     private FrameRateVote? _frameRateVote;
 
     /// <summary>
-    /// SPIKE (docs/design/TV-VIDEO.md §3), <c>HULTUI_ANDROID_SURFACE=panel</c>: SDL's surface at the
-    /// panel's resolution where the UI runs below it (a Shield: 3840×2160 under a 1920×1080 UI). The
-    /// compositor maps the 1080p UI onto the 4K panel, so a buffer of the panel's size reaches it pixel
-    /// for pixel. HultUI's scale grows by the same factor, so the layout keeps its DIP size.
+    /// SDL's surface at the panel's resolution where a TV's UI runs below it (docs/design/TV-VIDEO.md
+    /// §3; a Shield: 3840×2160 under a 1920×1080 UI). The compositor maps the 1080p UI onto the 4K
+    /// panel, so a buffer of the panel's size reaches it pixel for pixel: text and the film at the
+    /// panel's own resolution. HultUI's scale grows by the same factor, so the layout keeps its DIP
+    /// size; measured, a frame costs what it did at 1080p.
     /// </summary>
     private void DrawAtPanelSize()
     {
@@ -155,6 +162,22 @@ public abstract class HultUIActivity : SDLActivity
         global::HultUI.Platform.SDL3.SDL3Window.PlatformSurfaceScale = scale;
         holder.SetFixedSize(mode.PhysicalWidth, mode.PhysicalHeight);
         Log.Info(Tag, $"surface at the panel's {mode.PhysicalWidth}x{mode.PhysicalHeight}, UI {metrics.WidthPixels}x{metrics.HeightPixels}: scale x{scale}");
+    }
+
+    /// <summary>
+    /// A TV whose display takes HDR10: its windows get a half-float framebuffer and show an HDR video
+    /// as HDR10, the display switched to it while the video is on screen (docs/design/TV-VIDEO.md §4).
+    /// From Android 9, which tags a window's buffers.
+    /// </summary>
+    private void ShowHdrVideoAsHdr10()
+    {
+        if (!OperatingSystem.IsAndroidVersionAtLeast(28)) return;
+        var display = OperatingSystem.IsAndroidVersionAtLeast(30) ? Display : WindowManager?.DefaultDisplay;
+#pragma warning disable CA1422 // obsolete from Android 14, where Display.Mode says it; the Shield runs 11
+        if (display?.GetHdrCapabilities()?.GetSupportedHdrTypes() is not { } types || !types.Contains(HdrType.Hdr10)) return;
+#pragma warning restore CA1422
+        global::HultUI.Platform.SDL3.SDL3Window.PlatformHdrOutput = true;
+        Log.Info(Tag, "HDR10 display: HDR video shown as HDR10");
     }
 
     /// <summary>

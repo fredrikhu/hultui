@@ -116,6 +116,75 @@ public class MpvTargetColourTests
     [InlineData(0x8058u, 8)]    // GL_RGBA8
     [InlineData(0x881Au, 16)]   // GL_RGBA16F
     [InlineData(0x8814u, 16)]   // GL_RGBA32F: 32 is undefined behaviour in mpv's dither
+    [InlineData(0x8059u, 10)]   // GL_RGB10_A2: an Android TV's PQ target
     public void TheDepth_MpvIsTold_NeverExceeds16(uint internalFormat, int depth) =>
         Assert.Equal(depth, MpvBackend.DepthOf(internalFormat));
+
+    /// <summary>
+    /// An Android TV's surface asks for PQ while an HDR video is on screen, and for the ordinary
+    /// encoded picture after (docs/design/TV-VIDEO.md §4): one change each way, and a PQ frame is
+    /// encoded, so it carries no reference white for the renderer to place.
+    /// </summary>
+    [Fact]
+    public void APqTarget_IsAskedForOnce_EachWay_AndItsFramesStayEncoded()
+    {
+        var colour = new MpvTargetColour();
+        Assert.False(colour.Update(wantsLinearLight: false, peakNits: 0f));
+
+        Assert.True(colour.Update(wantsLinearLight: false, peakNits: 0f, pq: true));
+        Assert.True(colour.Pq);
+        Assert.False(colour.Linear);
+        Assert.False(colour.Update(wantsLinearLight: false, peakNits: 0f, pq: true));
+        colour.Applied(colour.Generation, linear: false);
+        colour.FrameDrawn();
+        Assert.Equal(0f, colour.ReferenceWhiteNits);
+
+        Assert.True(colour.Update(wantsLinearLight: false, peakNits: 0f));
+        Assert.False(colour.Pq);
+    }
+
+    /// <summary>PQ and linear light are two different targets; a surface asking for both gets
+    /// linear light, which the Vulkan path means.</summary>
+    [Fact]
+    public void LinearLight_WinsOverPq()
+    {
+        var colour = new MpvTargetColour();
+        Assert.True(colour.Update(wantsLinearLight: true, peakNits: 455f, pq: true));
+        Assert.True(colour.Linear);
+        Assert.False(colour.Pq);
+    }
+
+    /// <summary>
+    /// The film's metadata as mpv reports it in <c>video-params</c>: the mastering display (BT.2020
+    /// primaries, D65, 1000 nits down to 0.005) and the light levels. A stream that states neither
+    /// has none, and the television assumes its own.
+    /// </summary>
+    [Fact]
+    public void TheMetadata_IsReadFromVideoParams()
+    {
+        var hdr10 = new Dictionary<string, double>
+        {
+            ["prim-red-x"] = 0.708, ["prim-red-y"] = 0.292, ["prim-green-x"] = 0.17, ["prim-green-y"] = 0.797,
+            ["prim-blue-x"] = 0.131, ["prim-blue-y"] = 0.046, ["prim-white-x"] = 0.3127, ["prim-white-y"] = 0.329,
+            ["max-luma"] = 1000, ["min-luma"] = 0.005, ["max-cll"] = 1532, ["max-fall"] = 312,
+        };
+        var metadata = MpvBackend.MetadataOf(name => hdr10.TryGetValue(name, out var v) ? v : null);
+
+        Assert.NotNull(metadata);
+        Assert.True(metadata.Value.HasMasteringDisplay);
+        Assert.True(metadata.Value.HasLightLevels);
+        Assert.Equal(0.708f, metadata.Value.RedX);
+        Assert.Equal(0.3127f, metadata.Value.WhiteX);
+        Assert.Equal(1000f, metadata.Value.MaxLuminance);
+        Assert.Equal(0.005f, metadata.Value.MinLuminance);
+        Assert.Equal(1532f, metadata.Value.MaxContentLightLevel);
+        Assert.Equal(312f, metadata.Value.MaxFrameAverageLightLevel);
+
+        var levelsOnly = MpvBackend.MetadataOf(name => name is "max-cll" ? 800 : null);
+        Assert.False(levelsOnly!.Value.HasMasteringDisplay);
+        Assert.True(levelsOnly.Value.HasLightLevels);
+
+        Assert.Null(MpvBackend.MetadataOf(_ => null));
+        Assert.Null(MpvBackend.MetadataOf(_ => double.NaN));
+    }
 }

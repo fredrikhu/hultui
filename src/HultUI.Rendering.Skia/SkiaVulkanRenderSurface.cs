@@ -902,7 +902,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     /// swapchain. Off, no picture counts as HDR, so the swapchain stays 8-bit
     /// (<see cref="HdrPictureFollower"/>).</para>
     /// </summary>
-    private static readonly bool HdrVideoEnabled =
+    internal static readonly bool HdrVideoEnabled =
         Environment.GetEnvironmentVariable("HULTUI_VIDEO_HDR") != "0";
 
     /// <summary>
