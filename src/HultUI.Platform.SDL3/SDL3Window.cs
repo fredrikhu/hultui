@@ -416,8 +416,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // Set OpenGL attributes for SkiaSharp compatibility
         // Android has EGL and GL ES only. Asked for a desktop core profile, SDL looks for desktop
         // GL and window creation fails ("Could not initialize OpenGL / GLES library"), and the
-        // window falls back to the software renderer (spikes/AndroidHello). GL ES 3.0, which every
-        // Android 12 device has: the render target is GL_RGBA8, which ES 2.0 lacks.
+        // window falls back to the software renderer (spikes/AndroidHello). GL ES 3.0, which the
+        // devices of HultUI's minimum (Android 10) have: the render target is GL_RGBA8, which ES 2.0
+        // lacks.
         // SkiaGLRenderSurface builds Skia's GLES interface to match.
         if (OperatingSystem.IsAndroid())
         {

@@ -50,6 +50,10 @@ public abstract class HultUIActivity : SDLActivity
 
     private const string Tag = "HultUI";
 
+    /// <summary>The <c>AppContext</c> data the Java VM's pointer goes in, as a long. HultUI.Media.Mpv
+    /// reads the same name; neither assembly references the other.</summary>
+    internal const string JavaVmSlot = "HultUI.Android.JavaVM";
+
     /// <summary>
     /// Builds and runs the app: make the <c>HultUI.Application</c>, set its root, and
     /// <c>Run()</c> it. Called on SDL's thread once the surface exists; returning ends the
@@ -62,6 +66,11 @@ public abstract class HultUIActivity : SDLActivity
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
+        // The process's Java VM, for native code that needs it and cannot ask for it: FFmpeg's
+        // MediaCodec decoders inside libmpv (HultUI.Media.Mpv's Mpv.GiveJavaVm). Android 12 and
+        // later hand it to anyone through JNI_GetCreatedJavaVMs; Android 10 and 11 keep that in
+        // libraries an app cannot load, and without the VM the video decoded through a copy.
+        AppContext.SetData(JavaVmSlot, (long)Java.Interop.JniEnvironment.Runtime.InvocationPointer);
         base.OnCreate(savedInstanceState);
         // Android 8+ draws a translucent highlight over a focused view that is not in touch
         // mode. SDLSurface keeps the focus, so after text typed as key events and Back the whole
@@ -99,7 +108,9 @@ public abstract class HultUIActivity : SDLActivity
     /// </summary>
     private void FollowPeakRefreshRate()
     {
-        if (Display is not { } display) return;
+        // The activity's display from Android 11; before it, the window manager's.
+        var display = OperatingSystem.IsAndroidVersionAtLeast(30) ? Display : WindowManager?.DefaultDisplay;
+        if (display is null) return;
         var current = display.GetMode();
         float peak = 0f;
         foreach (var mode in display.GetSupportedModes() ?? [])
@@ -130,7 +141,8 @@ public abstract class HultUIActivity : SDLActivity
 
         private void Vote(ISurfaceHolder holder)
         {
-            if (holder.Surface is { IsValid: true } surface)
+            // From Android 11; before it, the display keeps the rate it runs at.
+            if (OperatingSystem.IsAndroidVersionAtLeast(30) && holder.Surface is { IsValid: true } surface)
                 surface.SetFrameRate(rate, (int)SurfaceFrameRateCompatibility.Default);
         }
     }
@@ -148,11 +160,37 @@ public abstract class HultUIActivity : SDLActivity
     {
         public WindowInsets OnApplyWindowInsets(View view, WindowInsets insets)
         {
+            global::HultUI.Platform.SDL3.SDL3Window.SetContentInsets(OperatingSystem.IsAndroidVersionAtLeast(30)
+                ? Typed(insets)
+                : Legacy(insets));
+            return view.OnApplyWindowInsets(insets) ?? insets;
+        }
+
+        [System.Runtime.Versioning.SupportedOSPlatform("android30.0")]
+        private static global::HultUI.Platform.SDL3.SDL3Window.PixelInsets Typed(WindowInsets insets)
+        {
             var bars = insets.GetInsets(WindowInsets.Type.SystemBars() | WindowInsets.Type.DisplayCutout());
             int keyboard = insets.IsVisible(WindowInsets.Type.Ime()) ? insets.GetInsets(WindowInsets.Type.Ime()).Bottom : 0;
-            global::HultUI.Platform.SDL3.SDL3Window.SetContentInsets(
-                new global::HultUI.Platform.SDL3.SDL3Window.PixelInsets(bars.Top, bars.Right, bars.Bottom, bars.Left, keyboard));
-            return view.OnApplyWindowInsets(insets) ?? insets;
+            return new(bars.Top, bars.Right, bars.Bottom, bars.Left, keyboard);
+        }
+
+        /// <summary>
+        /// Before Android 11 there are no typed insets: the system window's, which an app that is
+        /// not drawn under the bars gets as 0 (Android lays the window out between them), and the
+        /// cutout's. The keyboard has no inset of its own: under adjust-resize Android makes the
+        /// window shorter for it, and HultUI lays out in what is left, so it is 0 here and a
+        /// window drawn under the keyboard would see it in the bottom inset.
+        /// </summary>
+        private static global::HultUI.Platform.SDL3.SDL3Window.PixelInsets Legacy(WindowInsets insets)
+        {
+            var cutout = insets.DisplayCutout;
+#pragma warning disable CA1422 // obsolete from Android 11, which takes the typed path above
+            int top = Math.Max(insets.SystemWindowInsetTop, cutout?.SafeInsetTop ?? 0);
+            int right = Math.Max(insets.SystemWindowInsetRight, cutout?.SafeInsetRight ?? 0);
+            int bottom = Math.Max(insets.SystemWindowInsetBottom, cutout?.SafeInsetBottom ?? 0);
+            int left = Math.Max(insets.SystemWindowInsetLeft, cutout?.SafeInsetLeft ?? 0);
+#pragma warning restore CA1422
+            return new(top, right, bottom, left, 0);
         }
     }
 
@@ -163,8 +201,28 @@ public abstract class HultUIActivity : SDLActivity
     {
         var bg = theme.Background;
         bool light = 0.2126 * bg.R + 0.7152 * bg.G + 0.0722 * bg.B > 140;
-        const int Mask = (int)(WindowInsetsControllerAppearance.LightStatusBars | WindowInsetsControllerAppearance.LightNavigationBars);
-        RunOnUiThread(() => Window?.InsetsController?.SetSystemBarsAppearance(light ? Mask : 0, Mask));
+        RunOnUiThread(() =>
+        {
+            if (OperatingSystem.IsAndroidVersionAtLeast(30))
+            {
+                const int Mask = (int)(WindowInsetsControllerAppearance.LightStatusBars | WindowInsetsControllerAppearance.LightNavigationBars);
+                Window?.InsetsController?.SetSystemBarsAppearance(light ? Mask : 0, Mask);
+                return;
+            }
+            // Before Android 11: the decor view's system UI flags (light status bar from 6, light
+            // navigation bar from 8), and the bars in the app's background. The window is laid out
+            // between them, not under them, and Android's own white navigation bar sat under a dark
+            // app (a Galaxy Tab S4, Android 10).
+            if (Window is not { DecorView: { } decor } window) return;
+            var barColor = new global::Android.Graphics.Color(bg.R, bg.G, bg.B);
+            window.SetStatusBarColor(barColor);
+            window.SetNavigationBarColor(barColor);
+#pragma warning disable CA1422 // obsolete from Android 11, which takes the path above
+            const SystemUiFlags Light = SystemUiFlags.LightStatusBar | SystemUiFlags.LightNavigationBar;
+            var flags = (SystemUiFlags)(int)decor.SystemUiVisibility;
+            decor.SystemUiVisibility = (StatusBarVisibility)(int)(light ? flags | Light : flags & ~Light);
+#pragma warning restore CA1422
+        });
     }
 
     /// <summary>SDL's entry: the platform's services, then the app.</summary>

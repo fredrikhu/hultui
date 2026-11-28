@@ -40,9 +40,10 @@ internal static class IcuLibrary
 
     private static Loaded Load()
     {
-        // 0. Android: the NDK's public ICU, libicu.so (API 31 and later, HultUI's minimum there),
-        //    whose names are unversioned and stable. libicuuc.so below loads on Android too, but it
-        //    is the platform's private library, which an app may not count on. Measured on API 35:
+        // 0. Android: the NDK's public ICU, libicu.so (API 31 and later; HultUI's minimum there is
+        //    API 29, which has none), whose names are unversioned and stable. libicuuc.so below
+        //    loads on Android too, but it is the platform's private library, which an app may not
+        //    count on; where neither loads, LineBreaker breaks lines its own way. Measured on API 35:
         //    libicu.so exports ubrk_open both unversioned and as ubrk_open_75 (spikes/AndroidHello).
         if (OperatingSystem.IsAndroid() && NativeLibrary.TryLoad("libicu.so", out var ndk))
             return new Loaded(ndk, "");

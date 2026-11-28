@@ -1,9 +1,15 @@
 # Android
 
-HultUI runs on Android 12 (API 31) and later. This is in progress (plan 20): touch scrolling,
-gestures, touch text editing and a screen reader bridge are still to come. What is here works
-on the emulator; the design notes in `docs/design/` (`APP-LIFECYCLE.md`,
-`ANDROID-PLATFORM.md`) have the reasons and the measurements.
+HultUI runs on Android 10 (API 29) and later. This is in progress (plan 20): touch, the soft
+keyboard, touch text editing and TalkBack work; Android TV and distribution are still to come.
+It is checked on the emulator, a Galaxy S25 (Android 16) and a Galaxy Tab S4 (Android 10); the
+design notes in `docs/design/` (`APP-LIFECYCLE.md`, `ANDROID-PLATFORM.md`) have the reasons and
+the measurements.
+
+Below Android 12 some things are older: the system bars are coloured with the old window flags,
+the insets come from the old fields, a window's frame rate is not asked for, TalkBack gets no
+state descriptions ("On", "Checked": they start at Android 11), and the NDK has no public ICU,
+so lines break through the platform's own ICU or the text pipeline's fallback.
 
 ## An app
 
