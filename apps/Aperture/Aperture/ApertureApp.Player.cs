@@ -493,6 +493,10 @@ public sealed partial class ApertureApp
             {
                 StopPlayback(report: true);
                 e.Handled = true;
+                // Stopped here: on at the root, with nothing playing any more, the same Escape went
+                // Back as well, off the film's page (the desktop's Escape with the picture focused, and
+                // a TV remote's Back, which arrives as Escape when nothing takes it).
+                e.StopPropagation = true;
             }
         });
         return sheet;

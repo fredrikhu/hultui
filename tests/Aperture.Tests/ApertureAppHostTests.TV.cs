@@ -277,6 +277,7 @@ public partial class ApertureAppHostTests
             app.Play(library.Item("m1")!, TimeSpan.Zero);
             for (int i = 0; i < 4; i++) session.PumpFrame();
             PlayQuietly(session, backend, 2);
+            session.PumpFrame();   // the backend's last queued frame, before the film stops
             Assert.Equal("m1", app.PlayingItem?.Id);
             Assert.True(app.Player!.IsPlaying);
 
@@ -321,6 +322,34 @@ public partial class ApertureAppHostTests
             Assert.Equal("video-player", FocusedId(session));
             Assert.Equal("m1", app.PlayingItem?.Id);
         }, () => backend, width: 960, height: 540, dpad: true);
+    }
+
+    /// <summary>Escape (a TV remote's Back) with the picture focused stops the film and stays on its page.
+    /// The sheet stopped the film, and the same key went on to the root, which with nothing playing any
+    /// more took it as Back and left the film's page too (seen on a Shield; the desktop's Escape did it).</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void EscapeOnThePicture_StopsTheFilm_AndStaysOnItsPage(bool dpad)
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(162) };
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Navigate(new Route(ApertureView.Detail, "m1", "Stalker"));
+            PumpUntilShown(session, "Alexander Kaidanovsky");
+            app.Play(library.Item("m1")!, TimeSpan.Zero);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            PlayQuietly(session, backend, 1);
+            session.PumpFrame();   // the backend's last queued frame, before the film stops
+            session.Window.FindByAutomationId("video-player")!.Focus();
+
+            session.Window.PressKey(dpad ? KeyCode.Back : KeyCode.Escape);
+            for (int i = 0; i < 3; i++) session.PumpFrame();
+            Assert.Null(app.PlayingItem);
+            Assert.Equal((ApertureView.Detail, "m1"), (app.Current.View, app.Current.Id));
+        }, () => backend, width: 960, height: 540, dpad: dpad);
     }
 
     [Fact]
